@@ -8,3 +8,6 @@ build/
 
 # ⚠️ idl/generated/ **不在**忽略之列 —— DR-TS2 裁定生成产物入库,
 #    客户端因此连 protoc 都不需要。
+
+# CMake 构建目录
+cmake-build-*/
