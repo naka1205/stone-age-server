@@ -100,7 +100,7 @@ switch(trans){ case 0:1e6; case 1:2e6; case 2:5e6; case 3:1e7; case 4:5e7; defau
 
 ```
 CHAR_setInt(裸写)      58   ← 60.4%  ┐
-->data[](结构体裸写)    2   ←  2.1%  ├ 合�� 60 / 96 = 62.5% 绕过 API
+->data[](结构体裸写)    2   ←  2.1%  ├ 合计 60 / 96 = 62.5% 绕过 API
 CHAR_DelGold           24   ← 25.0%  ┘
 CHAR_AddGold           12   ← 12.5%
 ```
