@@ -107,16 +107,19 @@ tick(dt):
 
 ## 4. 目录结构
 
+> ✅ = 已落地(2026-08-31 阶段 1.0)  ⬜ = 待建
+
 ```
 stone-age-server/
-├── docs/                       00 总架构 · 01 本文 · 后续功能模块详情
-├── cmake/                      工具链 · 依赖查找 · 编译选项
-├── idl/                        ★ 协议唯一真源(schema + 生成脚本)
-│   └── generated/              两端共用的生成产物(不入库或入库均可,择一并固定)
-├── shared/                     ★★ 与客户端共享的源码,只依赖标准库
-│   ├── rules/                  L3 规则层(纯函数 + 注入式随机源)
-│   └── model/                  L2 领域模型(和类型 + 句柄 + 常量表)
-├── src/
+├── docs/                       ✅ 00 总架构 · 01 本文 · 后续功能模块详情
+├── cmake/                      ✅ 编译选项(SgWarnings.cmake)
+├── idl/                        ✅ ★ 协议唯一真源(schema + codegen + tests)
+│   └── generated/              ✅ 两端共用的生成产物 —— **入库**(DR-TS2 已择一并固定)
+├── shared/                     ✅ ★★ 与客户端共享的源码,只依赖标准库
+│   ├── rules/                  ✅ L3 契约(constants / random / config / combatant / battle)
+│   │                              ⬜ 实现属阶段 1.1
+│   └── model/                  ✅ handle.h(M10)  ⬜ 实体族属阶段 1.2
+├── src/                        ⬜ 阶段 2
 │   ├── platform/               L0:日志 · 指标 · 配置 · 时钟 · 随机源实现
 │   ├── net/                    L0:ITransport(TCP)· 缓冲 · 编解码接入
 │   ├── storage/                L0:MySQL 访问 · 工作单元 · 迁移
@@ -126,14 +129,37 @@ stone-age-server/
 │   ├── session_storage/        模块
 │   ├── social/                 模块
 │   └── main.cpp                ★ 单一入口,按配置装载模块
-├── tests/                      ★ 重点在 shared/rules
-├── deploy/                     Dockerfile · compose(测试单容器)· 生产编排
-└── tools/                      数据导入 · schema 迁移 · 离线校验
+├── tests/                      ✅ 契约冒烟 + IDL 冒烟 + 两条脚本检查(ctest 四项)
+├── tools/                      ✅ check_shared_purity.py  ⬜ 数据导入 / schema 迁移
+└── deploy/                     ⬜ Dockerfile · compose(测试单容器)· 生产编排
 ```
 
-★ **`shared/` 是 D2 的物理体现** —— 该目录被客户端仓以 submodule 或 CMake `FetchContent` 方式引用,
-**两端编译同一份源码**。因此它只能依赖标准库:不得出现 socket、MySQL、日志、
+★ **`shared/` 是 D2 的物理体现** —— 该目录被客户端仓以 CMake `FetchContent` + 锁定 tag 方式引用
+(DR-TS3),**两端编译同一份源码**。因此它只能依赖标准库:不得出现 socket、MySQL、日志、
 以及任何 `#include` 服务端头文件的代码。
+
+### 4.1 ★ 这条约束现在是可执行的检查,不是口头纪律
+
+`tools/check_shared_purity.py`(2026-08-31,`ctest` 必跑项)扫描 `shared/` 的每条 `#include`,
+命中即失败:
+
+| 禁止 | 后果 |
+|---|---|
+| `transport/**` | `02` §9:`shared/` 依赖信封/握手/错误面 ⇒「只依赖标准库」破裂 |
+| socket / MySQL / Redis / 日志 / asio | 属 L0,客户端侧无法满足 ⇒ D2 当场失效 |
+| ★ `<chrono>` / `<ctime>` | L3 读时钟即破坏**可回放性**(`05` §1.5) |
+| ★★ `<random>` | 随机源必须经注入的 `IRandom`(`07` §11.3 判据 ④);且 `std::uniform_int_distribution` 的取数方式**不由标准规定**,跨标准库实现序列不同 ⇒ 黄金用例集会整批失败 |
+| I/O / 并发原语 | L3 是纯函数(判据 ③) |
+
+⚠️ **为什么用脚本而不是 CMake 的 include 路径隔离**:IDL 生成物的 `#include` 一律从
+`generated/cpp` 根算起(如 `"domain/common.sg.h"`)⇒ 只要把该目录加进 include path,
+`domain/` 与 `transport/` 就**同时可见**,无法只暴露其一。CMake 也管不住 `#include <sys/socket.h>`。
+
+### 4.2 ⚠️ `shared/` 的编译标准是 C++17,不是 C++20
+
+D1 裁定服务端 C++20,但 **GameStudio 是 C++17**(`00` §1.2)。
+⇒ `shared/` 目标显式锁在 C++17,**让双端不兼容在服务端构建时就暴露**,
+而不是等到客户端集成那天才发现某个 C++20 特性用不了。
 
 ---
 
