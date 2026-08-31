@@ -1,0 +1,30 @@
+// transport/envelope.proto —— 信封与帧
+//
+// 归属:schema/transport/ ⇒ 只有 src/net 依赖,shared/ 不得引用(02-protocol.md §9)。
+//
+// 分层(02 §2):
+//   应用层  IDL 生成的 message
+//   信封层  EnvelopeHeader { msg_id, corr_id } + body
+//   帧层    [u32 length][payload]        ★ 长度前缀,不按分隔符切帧
+//   传输层  ITransport:TCP(现)/ WS(D4);TLS 在此层,不在协议层
+//
+// ⚠️ 原实现按 '\n' 切行(GetOneLine),与「负载里可能有换行」直接冲突,靠转义硬撑。
+//    新实现不按分隔符切帧。
+
+syntax = "proto3";
+
+package sg.transport;
+
+import "sg_options.proto";
+
+// 信封头。★ 不含版本号 —— 协议版本不匹配在握手阶段直接拒绝,
+// 不做「按版本走不同解析路径」(那是旧实现 bNewServer 双协议分支的老路,02 §2.1)。
+//
+// body 不作为字段出现:它是「紧跟在信封头之后的、由 msg_id 决定类型的字节」,
+// 长度由帧层的 u32 length 给出。把 body 建模成 bytes 会引入无上限变长字段。
+message EnvelopeHeader {
+  option (sg.transport_only) = true;
+
+  uint32 msg_id  = 1;  // 见 idl/generated/cpp/ids.h
+  uint64 corr_id = 2;  // 请求-响应关联;Notify 为 0(02 §2.1)
+}

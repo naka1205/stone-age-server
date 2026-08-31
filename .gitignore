@@ -1,0 +1,10 @@
+# Python 字节码(codegen 是构建期工具,不入库其缓存)
+__pycache__/
+*.pyc
+
+# 构建产物
+build/
+/tmp/
+
+# ⚠️ idl/generated/ **不在**忽略之列 —— DR-TS2 裁定生成产物入库,
+#    客户端因此连 protoc 都不需要。

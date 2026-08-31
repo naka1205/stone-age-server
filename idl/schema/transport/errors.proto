@@ -1,0 +1,41 @@
+// transport/errors.proto —— 错误面
+//
+// 02-protocol.md §7.2:error_code 是业务码,与 status 正交。
+//
+// ⚠️ 原实现的失败处置多半是「发一句聊天提示就完事」——
+//    17 §5.4 的仓库存盘失败只发 "道具仓库资料存档失败!",不回滚不重试。
+//    ★ 新实现的每个错误码必须绑定一个明确的调用方动作:重试 / 补偿 / 放弃并告知玩家。
+//    该绑定登记在 docs/02-protocol.md,不在本文件。
+
+syntax = "proto3";
+
+package sg.transport;
+
+import "sg_options.proto";
+
+enum Status {
+  option (sg.width) = 8;
+
+  STATUS_OK                  = 0;
+  STATUS_INVALID_ARGUMENT    = 1;
+  STATUS_NOT_FOUND           = 2;
+  STATUS_CONFLICT            = 3;
+  STATUS_PERMISSION_DENIED   = 4;
+  STATUS_RESOURCE_EXHAUSTED  = 5;
+  STATUS_FAILED_PRECONDITION = 6;
+  STATUS_ABORTED             = 7;
+  STATUS_DEADLINE_EXCEEDED   = 8;
+  STATUS_UNAVAILABLE         = 9;
+  STATUS_INTERNAL            = 10;
+}
+
+// 调用方对错误的处置类别。★ 每个业务错误码必须映射到其中之一,
+// 不允许出现「只提示、不处置」的错误(02 §7.2)。
+enum Disposition {
+  option (sg.width) = 8;
+
+  DISPOSITION_UNSPECIFIED = 0;  // ★ 非法:未绑定处置的错误码不得上线
+  DISPOSITION_RETRY       = 1;  // 可重试(幂等或带 request_id 去重)
+  DISPOSITION_COMPENSATE  = 2;  // 走补偿(Saga 的反向步骤)
+  DISPOSITION_ABORT       = 3;  // 放弃并告知玩家
+}

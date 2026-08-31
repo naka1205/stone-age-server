@@ -1,0 +1,248 @@
+// domain/window.proto —— 服务端驱动 UI 的窗口协议
+//
+// 归属:schema/domain/。窗口是玩法内容(NPC 交互)的载体,不是传输机制。
+//
+// ★ 为什么保留「服务端驱动 UI」这个思想(01 §6.3 已裁定):
+//   10 §5.5 实测 **350 个真实 WN_send 调用点**,其中 MESSAGE 一种占 191(54.6%),
+//   前 3 种占 66.6% ⇒ 绝大多数 NPC 交互就是「发一段文字 + 一组选项」。
+//   做成结构化窗口描述,一次投入覆盖三分之二的交互面。
+//
+// ★ 但**载体全换**。原版负载是 "\n" 分隔的 token 串,首 token 是消息行数,
+//   其后每个 token 是一个选项、**按位置 1-based 编号**。四处改变见下方各字段注释。
+//
+// ⚠️ 原始负载语法不是猜的:10 §5.4 发现完整定义以注释形式保留在
+//    `SSRC80/lssproto_serv.c:2363`(8.5 已删除)。
+
+syntax = "proto3";
+
+package sg.domain;
+
+import "sg_options.proto";
+import "domain/common.proto";
+
+// ── 窗口类型 ──────────────────────────────────────────────────────
+//
+// ★★ 02-protocol.md §1.1:**必须显式赋值每一个窗口类型号**。
+//    这不是风格问题,是旧实现两端漂移的根因 —— 10 §0.2 实测:
+//      · 窗口类型枚举**两端成员值不同**的有 3 个
+//        (_10_MEMONTUM / _FM_MEMONTUM / _MANOR_SCHEDULE,服务端比客户端大 1)
+//      · 成因是枚举成员受 #ifdef 影响,而两端宏集不同 —— 被关掉的成员不占号。
+//    ⇒ 私服一分叉,「枚举顺序即窗口号」这个隐式约定必然破裂。
+//    本枚举的每个值都写死数字,且**不复用旧号空间**。
+//
+// 口径(10 §5.5 更正后):两端并集 52 种 · **有服务端调用点 29 种 ← 这才是要实现的**
+//   · 两端齐备 28 种 · 其余 24 种「注册了但没投产」。
+// ⇒ DR-PR4:20 种未投产的**不做**;将来要用走新 WindowKind,**不复活旧号**。
+// ⇒ DR-PR5:拍卖 5 种 + 黑市**不做**(8.0 未接线,CHAR_AUCGOLD 有 0 个写点)。
+//
+// ⚠️ 另有 **48 处 windowtype 是运行期变量**(NPC 通用窗口分发),不可静态归类。
+//    10 §13 待补 2 已登记(1 天,需常量传播确定取值域)—— 那批取值确定后,
+//    要么落进本枚举的既有成员,要么在此追加新成员,**不得走「数字直传」的后门**。
+enum WindowKind {
+  option (sg.width) = 16;
+
+  WINDOW_KIND_INVALID = 0;
+
+  // ── P0:占 66.6% 调用点 ────────────────────────────────────────
+  WINDOW_KIND_MESSAGE            = 1;   // 原 MESSAGE(191 调用点)
+  WINDOW_KIND_LINE_INPUT         = 2;   // 原 MESSAGEANDLINEINPUT(17)
+  WINDOW_KIND_SELECT             = 3;   // 原 SELECT(25)
+
+  // ── P1:商店族(负载最复杂)+ 登录 ─────────────────────────────
+  WINDOW_KIND_SHOP_MENU          = 10;  // 原 ITEMSHOPMENU(1)
+  WINDOW_KIND_ITEM_SHOP          = 11;  // 原 ITEMSHOPMAIN(2)
+  WINDOW_KIND_DEPOT_SHOP         = 12;  // 原 POOLITEMSHOPMAIN(4)公共仓库
+  WINDOW_KIND_PET_SKILL_SHOP     = 13;  // 原 PETSKILLSHOP(5)
+  WINDOW_KIND_PET_SKILL_SHOW     = 14;  // 原 PETSKILLSHOW(1)
+  WINDOW_KIND_PROFESSION_SHOP    = 15;  // 原 PROFESSIONSHOP(1)⚠️ 客户端无此成员,须新建
+  WINDOW_KIND_LOGIN_NOTICE       = 16;  // 原 LOGINMESSAGE(2)
+
+  // ── P2:家族族 ────────────────────────────────────────────────
+  WINDOW_KIND_FAMILY_CREATE      = 20;  // 原 FAMILYADD(1)
+  WINDOW_KIND_FAMILY_MENU        = 21;  // 原 FM SELECT(3)
+  WINDOW_KIND_FAMILY_BOARD       = 22;  // 原 FM DENGON(3)留言板
+  WINDOW_KIND_FAMILY_DETAIL      = 23;  // 原 FAMILYDETAIL(1)
+  WINDOW_KIND_FAMILY_DUEL_POINT  = 24;  // 原 FM DP(8)
+  WINDOW_KIND_LEADER_SELECT      = 25;  // 原 LEADERSELECT(1)
+  WINDOW_KIND_LEADER_SELECT_ANSWER = 26;// 原 LEADERSELECTA(1)
+
+  // ── P3:庄园 / PK 预约族 ──────────────────────────────────────
+  WINDOW_KIND_MANOR_POINT_LIST   = 30;  // 原 FM POINTLIST(2)
+  WINDOW_KIND_MANOR_MOMENTUM_10  = 31;  // 原 FM 10_MEMONTUM(1)★ 两端差 1 的三个之一
+  WINDOW_KIND_MANOR_MOMENTUM_FM  = 32;  // 原 FM FM_MEMONTUM(1)★ 同上
+  WINDOW_KIND_MANOR_SCHEDULE     = 33;  // 原 FM MANOR_SCHEDULE(1)★ 同上
+  WINDOW_KIND_PK_SCHEDULE_LIST   = 34;  // 原 PKSCHEDULELIST(6)
+  WINDOW_KIND_PK_SELECT_FAMILY   = 35;  // 原 PKSCHEDULESELECTFAMILY(4)
+  WINDOW_KIND_PK_SCHEDULE_DETAIL = 36;  // 原 PKSCHEDULEDETAIL(6)
+
+  // ── 其它有调用点的 ───────────────────────────────────────────
+  WINDOW_KIND_RIDE_PET_LIST      = 40;  // 原 SHOWRIDEPET(1)
+  WINDOW_KIND_ANGEL_MESSAGE      = 41;  // 原 ANGELMESSAGE(3)⚠️ 仅服务端有,客户端须新建
+}
+
+// 按钮位掩码。★ 位号沿用原版 —— 10 §5.4 实测**两端 100% 一致**,
+// 是少数不需要改的地方。按位或组合。
+enum ButtonFlag {
+  option (sg.width) = 8;
+
+  BUTTON_FLAG_NONE   = 0;
+  BUTTON_FLAG_OK     = 1;   // 1<<0
+  BUTTON_FLAG_CANCEL = 2;   // 1<<1
+  BUTTON_FLAG_YES    = 4;   // 1<<2
+  BUTTON_FLAG_NO     = 8;   // 1<<3
+  BUTTON_FLAG_PREV   = 16;  // 1<<4  ★ 分页
+  BUTTON_FLAG_NEXT   = 32;  // 1<<5  ★ 分页
+}
+
+// ── 容量界 ────────────────────────────────────────────────────────
+//
+// ⚠️ 原版没有条目数概念(lssproto_WN_send 只有一个 65500 B 的整包缓冲),
+//    所以本组上限是**新定的容量界**,不是从原版推导的。
+//
+// ★ 但**字节宽度有实测支撑**:全扫 csa8.0 的 3,600 个 NPC 数据文件
+//   (131,336 行非空非注释行)的行长分布 ——
+//       p50 = 12 · p95 = 76 · **p99 = 164** · 超过 255 字节的仅 269 行(0.2%)
+//   而窗口的单行文案 / 单个选项文本**比整行更短**(整行还含 DSL 指令与参数)。
+//   ⇒ 255 字节对文案与选项都是安全界,不是拍出来的数。
+//
+// ★ 超限的正确处置是**分页,不是截断** —— 而分页不是新发明:
+//   ButtonFlag 的 PREV/NEXT(位 4/5)在原版就是干这个的。
+//   ⚠️ 这条不是可选项:05-battle.md §10.4 记录了原版在另一处
+//      (状态串 strncat 第三参用错)因「截断而非分页」留下的隐患。
+
+// ── 窗口体 ────────────────────────────────────────────────────────
+
+// 纯文本消息(原 MESSAGE / WIDEMESSAGE)。
+message MessageBody {
+  repeated string lines = 1 [(sg.max_count) = 16, (sg.max_len) = 255];
+  // ★ 改变 2:原版把「消息行数」写在负载第一个 token —— 那是分隔符复用。
+  //   repeated 自带计数,该 token 消失。
+
+  // 宽变体(原 WIDEMESSAGE 是独立窗口类型号)。归约为标志,不占新 Kind:
+  // 它只影响排版宽度,不影响语义与回执。
+  bool wide = 2;
+}
+
+// 单行输入(原 MESSAGEANDLINEINPUT / WIDEMESSAGEANDLINEINPUT)。
+message LineInputBody {
+  repeated string lines = 1 [(sg.max_count) = 16, (sg.max_len) = 255];
+  uint32 max_len = 2;
+  bool   wide    = 3;
+}
+
+// 一个选项。
+message Choice {
+  // ★★ 改变 1:原版的选项编号 = **它在 data 串里的位置**(1-based)。
+  //   09 §3.7 实测:NPC 脚本的条件分支与文案是**位置耦合**的 ——
+  //   重排分支就错位。DR-PR1 / DR-NQ2 裁定:改**显式 id**。
+  uint32 choice_id = 1;
+  string text      = 2 [(sg.max_len) = 255];
+  bool   enabled   = 3;  // ★ 置灰而非隐藏(DR-CP7 同源:不做假交互)
+}
+
+// 选择框(原 SELECT)。
+message SelectBody {
+  repeated string lines   = 1 [(sg.max_count) = 16, (sg.max_len) = 255];
+  repeated Choice choices = 2 [(sg.max_count) = 32];
+}
+
+// 商店窗口的店级信息。
+//
+// ⚠️ DR-PR2 裁定:商店型窗口的 header / entries **拆分**。
+//    原版把两者拼在同一个 data 串里逐项排列。
+//
+// ⚠️★ **本组字段尚未定稿** —— 10 §13 待补 1 / 02 §10 欠债 2(1–2 天):
+//    原始规格给出了字段序,但**字段名是乱码残缺**,须结合客户端
+//    initServerWindowType2/3/6/7 逐字段确认。
+//    下列字段来自 10 §5.4 已能读出的部分,**顺序与齐全性待该欠债结清后复核**。
+message ShopHeader {
+  bool   can_buy         = 1;  // 能否购买旗标
+  bool   reuse_previous  = 2;  // 是否沿用前次数据(原版的增量下发机制)
+  string shop_name       = 3 [(sg.max_len) = 63];
+  string message         = 4 [(sg.max_len) = 255];
+  string shop_message    = 5 [(sg.max_len) = 255];
+  string count_message   = 6 [(sg.max_len) = 255];  // 询问个数
+  string level_low_message   = 7 [(sg.max_len) = 255];  // 等级不足
+  string confirm_message     = 8 [(sg.max_len) = 255];  // 确认
+  string item_full_message   = 9 [(sg.max_len) = 255];  // 道具栏满
+}
+
+// 商店的一个条目。⚠️ 同上,待欠债 2 结清后复核。
+message ShopEntry {
+  uint32 entry_id   = 1;  // ★ 显式 id,同 Choice 的理由:不用位置编号
+  uint32 item_id    = 2;
+  uint32 image_id   = 3;
+  uint32 level      = 4;  // 需求等级
+  int32  price      = 5;
+  bool   purchasable = 6;
+}
+
+message ShopBody {
+  ShopHeader header = 1;
+  repeated ShopEntry entries = 2 [(sg.max_count) = 32];
+}
+
+// 尚未展开负载的窗口类型的通用体。
+//
+// ⚠️★ 这**不是**「数字直传」的后门:kind 仍在 WindowKind 里显式登记,
+//    只是 body 的结构化定义延后。每补一种,就从这里挪到自己的 body 变体。
+//    ⇒ 首批(1.4 demo)只需要 Message / LineInput / Select 三种真正结构化。
+message RawListBody {
+  repeated string rows = 1 [(sg.max_count) = 32, (sg.max_len) = 255];
+}
+
+// ── 窗口开启(下行)──────────────────────────────────────────────
+
+message WindowOpen {
+  option (sg.msg_id) = 0x0601;
+
+  // ★ 取代原版 seqno。DR-PR3:窗口会话状态放**服务端**,
+  //   window_id 只需**一次会话内唯一**,不建全局编号空间。
+  //   ⚠️ 依据 10 §5.7:char.h 里有 144 个 CHAR_WINDOWTYPE_* 常量,
+  //      而全库只有 32 个被 seqno 实际判定 ⇒ 其余 112 个是废弃或 NPC 自用。
+  //      ⇒ 不做全局常量族,改为每个 NPC 交互一个显式会话状态机(07-npc-quest §5)。
+  uint32 window_id = 1;
+
+  WindowKind kind    = 2;
+  uint32     buttons = 3;  // ButtonFlag 的位或
+
+  // ★ 改变 3:原版系统触发用 objindex = -1 —— 与「无效实体」混淆。
+  //   改为显式的 EntitySource 枚举(domain/common.proto)。
+  EntityRef source = 4;
+
+  oneof body {
+    MessageBody   message    = 5;
+    LineInputBody line_input = 6;
+    SelectBody    select     = 7;
+    ShopBody      shop       = 8;
+    RawListBody   raw_list   = 9;
+  }
+}
+
+// ── 窗口回执(上行)──────────────────────────────────────────────
+
+message WindowReply {
+  option (sg.msg_id) = 0x0602;
+
+  uint32    window_id = 1;  // 原样带回
+  EntityRef source    = 2;  // 原样带回
+  uint32    button    = 3;  // 按下的按钮(单个 ButtonFlag 值)
+
+  oneof result {
+    uint32 choice_id = 4;  // SELECT:★ 回传显式 id,不是位置序号
+    string text      = 5 [(sg.max_len) = 255];  // LINE_INPUT
+                           // ⚠️ 这是**物理上限**;每个窗口自己的
+                           //   LineInputBody.max_len 是业务上限,服务端须二次校验。
+    uint32 entry_id  = 6;  // 商店族:同样是显式 id
+  }
+
+  // ★★ 这里**没有** x / y 字段,是有意的。
+  //   10 §5.7 实测 lssproto_WN_recv 有两条与窗口无关的强校验,都必须保留语义:
+  //     ① 交易态锁:CHAR_WORKTRADEMODE != FREE 直接 return
+  //        ⇒ DR-PR9 保留 —— 交易中不响应任何窗口。在服务端侧实现,不需要协议字段。
+  //     ② 坐标一致性:原版比对**客户端自报的 x,y** 与服务端记录
+  //        (原注释写 "avoid the warp at will")。
+  //        ⇒ DR-PR8 裁定:保留语义但**改服务端权威范围判定** ——
+  //          校验「玩家是否仍在该 NPC 的交互范围内」,用服务端自己的坐标。
+  //        ★ 这比照抄更强:客户端根本不需要上报坐标,也就无从伪造。
+}

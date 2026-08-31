@@ -1,0 +1,441 @@
+// domain/battle_events.proto —— 战斗事件流(取代原版 33 个字符串子命令)
+//
+// 归属:schema/domain/ ⇒ ★★ shared/rules 的**输出类型**(02-protocol.md §9)。
+//   shared/rules 可依赖本文件,但不得依赖 schema/transport/ 的任何类型 ——
+//   否则 01 §4「shared/ 只依赖标准库」就破了。本文件因此只 import domain/。
+//
+// L3 契约(05-battle.md §1.5):
+//     resolve_turn(BattleSnapshot, Commands, IRandom&) -> BattleEvents
+//   ★ BattleEvents 是**返回值,不是副作用** —— 这正是 0.1 四步改造第②③步的目标形态。
+//   ★ 事件流 + 注入式随机源 = 可回放 ⇒ 同种子 + 同输入必须逐位相同,
+//     这是 00 §0 中 ③ 层「不可自证」唯一的补偿手段(黄金用例集)。
+//
+// ──────────────────────────────────────────────────────────────────────
+// ★ 33 个旧子命令的去向(07 §8.2 全表,零遗漏)
+//
+//   独立顶层消息(原版本就直接 send,不进串缓冲):
+//     BA → BattleTurnBegin   BC → BattleSnapshot
+//     BP → BattleSelfInfo    BU → BattleLeave
+//
+//   攻击类(原版带 FF 变长目标列表)→ Hit + 其后 target_count 个 Damage:
+//     BH 近战 · BB 远程 · B+ 职业技能 · BJ 咒术 · Bd 剧毒致死 · Bh 嗜血 · Bp MP 伤害
+//
+//   其余 → BattleEvent 的各变体:
+//     BD→Damage  BM→StatusChange  BK→TextBox   BE→Escape   BQ→Quit
+//     BL→SetHp   B$→Summon        BS→CaptureSelect  BT→CaptureAct
+//     BO→Boomerang  BI→Enter      BF→FadeOut   BN→SwitchEquip
+//     BR→Reverse    BV→Transform  BX→Nix       BY→Synchronous
+//     B!→CallCompanions  B#→Steal
+//     Ba→Boundary   Bb→PetBattleModel  Bf→FireHunt   ← ★★ 见下方「门控落差」
+// ──────────────────────────────────────────────────────────────────────
+
+syntax = "proto3";
+
+package sg.domain;
+
+import "sg_options.proto";
+import "domain/battle_status.proto";
+
+// ── 容量界 ────────────────────────────────────────────────────────────
+//
+// 依据 05-battle.md §2.4(8.0 实测,_MULTIPLAYER_ 为关):
+//     BATTLE_ENTRY_MAX = 10 · SIDE_OFFSET = 10 · 就绪位图宽度 = 20
+// ⇒ 全场槽位 = 2 side × 10 = 20,槽号 0..9 为己方、10..19 为敌方。
+//
+// ⚠️ 本组上限**不是从原版推导的**(原版是 4096 B 的串缓冲,没有条目数概念),
+//    是新定的容量界。★ 超限一律**分包下发,不得截断** ——
+//    05 §10.4 实测原版 szBadStatusString 的 strncat 第三参用错、等价于无上界 strcat,
+//    余量仅 56 字节且无第二道防线。**新实现不重复这个错误。**
+
+// ── 伤害标志位(原 BCF_* × ATT_*)────────────────────────────────────
+//
+// 07 §8.3 实测:服务端 29 位 / 客户端 31 位,**位号 100% 一致、0 处不同**。
+// 本枚举是双端唯一真源,命名取服务端语义。
+//
+// ⚠️★ 命名不对称但位号一致的几对,是移植时最易错的地方(07 §8.3):
+//     BCF_KAISHIN  ⇄ ATT_SATISFACTORY (bit2,暴击:日语「会心」vs 英语)
+//     BCF_GBREAK   ⇄ ATT_G_CRASH      (bit8)
+//     BCF_GUARDIAN ⇄ ATT_VICARIOUS    (bit9)
+//     BCF_VANISH   ⇄ ATT_BALLIA       (bit12)
+//     BCF_TOOTH    ⇄ ATT_TOOEH        (bit15,★ 客户端拼写错误)
+//     BCF_NO_DAMAGE⇄ ATT_NOMISS       (bit26,★★ 语义相反的命名压在同一位)
+//   ⇒ 以本枚举为准。bit26 的真实语义是**双重攻击**(SSRC80 注释),不是「不会 miss」。
+enum DamageFlag {
+  option (sg.width) = 32;
+
+  DAMAGE_FLAG_NONE        = 0;
+  DAMAGE_FLAG_DEATH       = 1;          // 1<<0
+  DAMAGE_FLAG_NORMAL      = 2;          // 1<<1
+  DAMAGE_FLAG_CRITICAL    = 4;          // 1<<2   BCF_KAISHIN
+  DAMAGE_FLAG_GUARD       = 8;          // 1<<3
+  DAMAGE_FLAG_COUNTER     = 16;         // 1<<4
+  DAMAGE_FLAG_DODGE       = 32;         // 1<<5
+  DAMAGE_FLAG_ULTIMATE_1  = 64;         // 1<<6
+  DAMAGE_FLAG_ULTIMATE_2  = 128;        // 1<<7
+  DAMAGE_FLAG_GBREAK      = 256;        // 1<<8   破防
+  DAMAGE_FLAG_GUARDIAN    = 512;        // 1<<9   忠犬
+  DAMAGE_FLAG_REFLECT     = 1024;       // 1<<10
+  DAMAGE_FLAG_ABSORB      = 2048;       // 1<<11
+  DAMAGE_FLAG_VANISH      = 4096;       // 1<<12
+  DAMAGE_FLAG_CRUSH       = 8192;       // 1<<13
+  DAMAGE_FLAG_FALL        = 16384;      // 1<<14  落马术
+  DAMAGE_FLAG_TOOTH       = 32768;      // 1<<15  啮齿
+  DAMAGE_FLAG_ATT_DOUBLE  = 65536;      // 1<<16  属性强化
+  DAMAGE_FLAG_ROAR        = 131072;     // 1<<17  宠技:大吼
+  // bit18 服务端未定义;客户端有 ATT_ATTSELFEXPLODE ⇒ 保留占位,不复用
+  DAMAGE_FLAG_DEFMAGICATT = 524288;     // 1<<19
+  DAMAGE_FLAG_SUPERWALL   = 1048576;    // 1<<20
+  DAMAGE_FLAG_MODIFY      = 2097152;    // 1<<21
+  DAMAGE_FLAG_F_SKILLACT  = 4194304;    // 1<<22  击中前秀图
+  DAMAGE_FLAG_B_SKILLACT  = 8388608;    // 1<<23  击中后秀图
+  DAMAGE_FLAG_B_ARRANGE   = 16777216;   // 1<<24  格挡秀图
+  // bit25 两端均未定义 ⇒ 保留
+  DAMAGE_FLAG_DOUBLE_ATTACK = 67108864; // 1<<26  ★★ 原 BCF_NO_DAMAGE / ATT_NOMISS
+  DAMAGE_FLAG_ACUPUNCTURE = 134217728;  // 1<<27
+  DAMAGE_FLAG_ANTINTER    = 268435456;  // 1<<28
+  DAMAGE_FLAG_EXPLODE     = 536870912;  // 1<<29
+  // bit30 服务端未定义;客户端有 ATT_ATTACKBACK ⇒ 保留占位,不复用
+}
+
+// 角色快照标志位(原 BC_FLG_* × BC_*)。07 §8.3:31 位,双端位号 100% 一致。
+//
+// ⚠️★ bit2 是最危险的一处:服务端叫 BC_FLG_PLAYER(「是玩家」),
+//    客户端叫 BC_PET_OK(「宠物可用」)—— **名字和语义都不同,但共用同一位**。
+//    本枚举取服务端语义。
+enum CombatantFlag {
+  option (sg.width) = 32;
+
+  COMBATANT_FLAG_NONE       = 0;
+  COMBATANT_FLAG_NEW        = 1;          // 1<<0  本回合入场 / 救援入场
+  COMBATANT_FLAG_DEAD       = 2;          // 1<<1
+  COMBATANT_FLAG_PLAYER     = 4;          // 1<<2  ★★ 客户端旧名 BC_PET_OK,语义不同
+  COMBATANT_FLAG_POISON     = 8;          // 1<<3
+  COMBATANT_FLAG_PARALYSIS  = 16;         // 1<<4
+  COMBATANT_FLAG_SLEEP      = 32;         // 1<<5
+  COMBATANT_FLAG_STONE      = 64;         // 1<<6
+  COMBATANT_FLAG_DRUNK      = 128;        // 1<<7
+  COMBATANT_FLAG_CONFUSION  = 256;        // 1<<8
+  COMBATANT_FLAG_HIDE       = 512;        // 1<<9
+  COMBATANT_FLAG_REVERSE    = 1024;       // 1<<10
+  COMBATANT_FLAG_WEAKEN     = 2048;       // 1<<11 虚弱
+  COMBATANT_FLAG_DEEPPOISON = 4096;       // 1<<12 剧毒
+  COMBATANT_FLAG_BARRIER    = 8192;       // 1<<13 魔障
+  COMBATANT_FLAG_NOCAST     = 16384;      // 1<<14 沉默
+  COMBATANT_FLAG_SARS       = 32768;      // 1<<15 毒煞
+  COMBATANT_FLAG_DIZZY      = 65536;      // 1<<16 晕眩
+  COMBATANT_FLAG_ENTWINE    = 131072;     // 1<<17 树根缠绕
+  COMBATANT_FLAG_DRAGNET    = 262144;     // 1<<18 天罗地网
+  COMBATANT_FLAG_ICECRACK   = 524288;     // 1<<19 冰爆术
+  COMBATANT_FLAG_OBLIVION   = 1048576;    // 1<<20 遗忘
+  COMBATANT_FLAG_ICEARROW   = 2097152;    // 1<<21 冰箭
+  COMBATANT_FLAG_BLOODWORMS = 4194304;    // 1<<22 嗜血蛊
+  COMBATANT_FLAG_SIGN       = 8388608;    // 1<<23 一针见血
+  COMBATANT_FLAG_INSTIGATE  = 16777216;   // 1<<24 挑拨
+  COMBATANT_FLAG_F_ENCLOSE  = 33554432;   // 1<<25 火附体
+  COMBATANT_FLAG_I_ENCLOSE  = 67108864;   // 1<<26 冰附体
+  COMBATANT_FLAG_T_ENCLOSE  = 134217728;  // 1<<27 雷附体
+  COMBATANT_FLAG_WATER      = 268435456;  // 1<<28 水附体
+  COMBATANT_FLAG_FEAR       = 536870912;  // 1<<29 恐惧
+  COMBATANT_FLAG_CHANGE     = 1073741824; // 1<<30 雷尔变身
+}
+
+// 我方菜单标志(原 BP_FLG_* × BATTLE_BP_*)。07 §8.3:6 位,双端 100% 一致。
+enum MenuFlag {
+  option (sg.width) = 8;
+
+  MENU_FLAG_NONE             = 0;
+  MENU_FLAG_JOIN             = 1;   // 1<<0 观战加入
+  MENU_FLAG_PLAYER_MENU_OFF  = 2;   // 1<<1
+  MENU_FLAG_BOOMERANG        = 4;   // 1<<2
+  MENU_FLAG_PET_MENU_OFF     = 8;   // 1<<3
+  MENU_FLAG_ENEMY_SURPRISAL  = 16;  // 1<<4 敌方先制
+  MENU_FLAG_PLAYER_SURPRISAL = 32;  // 1<<5 我方先制
+}
+
+// 骑乘显示状态。原版 rideflg 用 0/1/-1/-2/-3 五个值混编「有无骑宠」与「落马原因」,
+// 其中负值是「client 用来判断显示落马的文字」(battle_command.c 原注释)。
+// ⇒ 拆成显式枚举,不用魔数。
+enum RideState {
+  option (sg.width) = 8;
+
+  RIDE_STATE_NONE        = 0;  // 无骑宠
+  RIDE_STATE_RIDING      = 1;  // 骑乘中(pet_* 字段有效)
+  RIDE_STATE_FELL        = 2;  // 落马           ← 原 -1
+  RIDE_STATE_FELL_FOX    = 3;  // 落马(狐狸变身)← 原 -2
+  RIDE_STATE_FELL_PIG    = 4;  // 落马(变成乌力)← 原 -3
+}
+
+// ── 全场快照(原 BC)────────────────────────────────────────────────
+
+// 单个战斗单位的快照。字段构成取自 8.0 展开视图
+// `battle_command.c:BATTLE_MakeCharaString` 的 13 个 sprintf 参数,逐个对应。
+message CombatantState {
+  uint32 slot        = 1;   // 原 pEntry[i].bid;0..9 己方 / 10..19 敌方
+  string name        = 2 [(sg.max_len) = 127];  // 原 STRING128 槽宽
+  string title       = 3 [(sg.max_len) = 127];  // 称号(富文本样式串,DR-PR6)
+  uint32 image_id    = 4;   // CHAR_BASEIMAGENUMBER
+  uint32 level       = 5;
+  int32  hp          = 6;   // ⚠️ 原版下发前做 max(hp, 0) —— 保留该钳位
+  int32  max_hp      = 7;
+  uint32 flags       = 8;   // CombatantFlag 的位或
+  RideState ride     = 9;
+
+  // 骑宠信息。ride == RIDING 时有效,否则全零。
+  string pet_name    = 10 [(sg.max_len) = 127];
+  uint32 pet_level   = 11;
+  int32  pet_hp      = 12;
+  int32  pet_max_hp  = 13;
+}
+
+// 全场角色状态快照。★ 独立顶层消息 —— 原版 BC 就是单独 send 的,
+// 不进 szAllBattleString。放进事件流会让 BattleEvent 的 union 膨胀到 8 KB。
+message BattleSnapshot {
+  option (sg.msg_id) = 0x0201;
+
+  uint64 battle_id = 1;
+  uint32 field_attribute = 2;  // 原 BattleArray[].field_att,战场属性(影响相克)
+  repeated CombatantState combatants = 3 [(sg.max_count) = 20];
+}
+
+// ── 回合开始(原 BA)────────────────────────────────────────────────
+
+// ⚠️ 07 §5.2 实测:原版**每收到一条玩家指令就下发一次 BA**(全场就绪位图 + 回合号),
+//    而不是等一回合结束 ⇒ 指令阶段报文量 = 玩家数²。
+// ⇒ 新实现按节拍聚合:就绪位变更攒批下发(与 01 §3.2 的 ca_flush_interval 同源)。
+message BattleTurnBegin {
+  option (sg.msg_id) = 0x0202;
+
+  uint64 battle_id = 1;
+  uint32 turn      = 2;
+  uint32 ready_mask = 3;  // 20 位就绪位图(2 side × 10 entry),位号 = slot
+}
+
+// ── 我方私有信息(原 BP)────────────────────────────────────────────
+
+message BattleSelfInfo {
+  option (sg.msg_id) = 0x0203;
+
+  uint64 battle_id = 1;
+  uint32 slot      = 2;   // 我的位次;原版观战者固定发 20
+  uint32 menu_flags = 3;  // MenuFlag 的位或
+  int32  mp        = 4;
+
+  // ★ DR-BT5 新增:不可行动时下发原因 → 客户端菜单置灰(DR-CP7),
+  //   而不是「能点但必然作废」的假交互(DR-CP6)。
+  CannotActReason cannot_act = 5;
+}
+
+// ── 强制离场(原 BU)────────────────────────────────────────────────
+
+message BattleLeave {
+  option (sg.msg_id) = 0x0204;
+
+  uint64 battle_id = 1;
+  uint32 reason    = 2;  // 0 = 观战结束 · 1 = 超时(BATTLE_TIME_LIMIT = 3600 s)
+}
+
+// ── 事件流 ────────────────────────────────────────────────────────
+
+// 攻击种类。原版用 7 个不同子命令表达,归约为一个枚举 + Hit。
+enum AttackKind {
+  option (sg.width) = 8;
+
+  ATTACK_KIND_INVALID     = 0;
+  ATTACK_KIND_MELEE       = 1;  // 原 BH
+  ATTACK_KIND_RANGED      = 2;  // 原 BB(w0 弓 / w1 斧 / w2 碎 / w3)
+  ATTACK_KIND_PROF_SKILL  = 3;  // 原 B+
+  ATTACK_KIND_SPELL       = 4;  // 原 BJ 咒术
+  ATTACK_KIND_DEEP_POISON = 5;  // 原 Bd 剧毒致死
+  ATTACK_KIND_BLOOD_DRAIN = 6;  // 原 Bh 嗜血(伤害转 HP)
+  ATTACK_KIND_MP_DAMAGE   = 7;  // 原 Bp MP 伤害
+}
+
+// 攻击动作。
+//
+// ★ 变长目标列表的处置:原版靠 `FF|` 终止符 + 不定个数的 r/f/d/p 片段。
+//   新形状**不用 repeated**,而是 Hit 声明 target_count,其后紧跟同样数量的
+//   Damage 事件。两条理由:
+//     ① proto3 的 oneof 不允许 repeated 字段;
+//     ② ★ POD + union 下,把 repeated(20) 塞进 oneof 会让**每个** BattleEvent
+//        都按最大变体对齐 ⇒ 256 事件的缓冲从 ~6 KB 膨胀到 ~87 KB。
+//   ⇒ 扁平化后 union 只有几十字节,且「顺序即演出顺序」的语义反而更直白。
+message Hit {
+  uint32 attacker     = 1;  // slot
+  AttackKind kind     = 2;
+  uint32 skill_id     = 3;  // ★ 显式技能 ID(02 §6.3):原版 12 个上行字母驱动
+                            //   148 个内部指令码,具体技能靠「参数里的数组下标」决定。
+                            //   kind = MELEE 时为 0。
+  uint32 variant      = 4;  // RANGED 的武器种类(原 w 标签);其余种类为 0
+  uint32 target_count = 5;  // ★ 其后紧跟这么多个 Damage 事件
+}
+
+// 伤害 / HP 变化(原 BD,58 个字面量,最高频子命令)。
+message Damage {
+  uint32 target       = 1;  // slot
+  int32  hp_delta     = 2;  // 负数为受伤
+  int32  pet_hp_delta = 3;  // 骑宠分摊后的宠物侧
+                            // ⚠️ DR-BT2 已修正分摊式:分子改 myDef、无损分摊
+                            //    ⇒ hp_delta + pet_hp_delta 恒等于总伤,不再多出 +1/+2。
+  int32  mp_delta     = 4;  // 原 m 标签;Bp(MP 伤害)与 Bh(嗜血)用
+  uint32 flags        = 5;  // DamageFlag 的位或
+  BattleStatus status_applied = 6;  // 附带状态;无则 BATTLE_ST_NONE
+}
+
+// 状态异常变更(原 BM)。
+message StatusChange {
+  uint32 target       = 1;
+  BattleStatus status = 2;
+  bool   applied      = 3;  // true = 施加 · false = 解除
+                            // ⚠️ 05 §4.1 全局互斥:目标身上已有任意状态时,
+                            //    普攻与宠技的新状态一律施加失败(职业技能例外)。
+}
+
+// HP 直接设定(原 BL,复活 / 治疗)。与 Damage 的区别是**绝对值**而非增量。
+message SetHp {
+  uint32 target = 1;
+  int32  hp     = 2;
+}
+
+// 文案框(原 BK,卸装备 / 偷窃提示)。
+//
+// ★ DR-CP5 裁定:原版直接下发中文串,新实现**改消息 ID + 参数**。
+//   ⇒ 本消息不含任何自然语言文本,文案表在客户端。
+//
+// ★★ 连名字也不传:要插入的角色名,客户端已从 BattleSnapshot 拿到全场 20 人;
+//    道具名从道具表查。⇒ 参数一律是 ID,不是文本。
+//    这不只是「更纯粹」——实测:曾经的 name_arg(FixedStr<127>) 一个字段
+//    就把 BattleEvent 的 union 从 24 字节撑到 160 字节,
+//    使每回合事件缓冲从 ~8 KB 变成 ~41 KB(5.1×)。参数 ID 化后这笔开销归零。
+message TextBox {
+  uint32 message_id = 1;
+  // 参数按 message_id 对应的文案模板解释;
+  // 承载 slot(查快照得名字)/ item_id(查道具表)/ 数量 等。
+  repeated int32 args = 2 [(sg.max_count) = 4];
+}
+
+message Escape       { uint32 actor = 1; bool succeeded = 2; bool vanish = 3; }  // BE(et = 突然消失)
+message Quit         { uint32 actor = 1; }                                      // BQ 退场
+message Enter        { uint32 actor = 1; }                                      // BI 入场
+message FadeOut      { uint32 actor = 1; }                                      // BF
+message SwitchEquip  { uint32 actor = 1; }                                      // BN 换装
+message Reverse      { uint32 actor = 1; }                                      // BR 属性反转
+message Transform    { uint32 actor = 1; uint32 image_id = 2; }                  // BV 变身
+message Nix          { uint32 actor = 1; }                                       // BX 消除
+message Synchronous  { uint32 target = 1; }                                      // BY 同步
+message Boomerang    { uint32 actor = 1; }                                       // BO 回力标
+message Summon       { uint32 actor = 1; uint32 image_id = 2; }                   // B$ 召唤
+message CaptureAct   { uint32 actor = 1; uint32 target = 2; uint32 flags = 3; }   // BT 捕获动作
+message CallCompanions { uint32 actor = 1; int32 amount = 2; uint32 flags = 3; }  // B! 招同伴
+message Steal        { uint32 actor = 1; int32 amount = 2; uint32 flags = 3; }    // B# 偷窃
+
+// 捕获选择框(原 BS)。
+message CaptureSelect {
+  uint32 slot     = 1;
+  uint32 flags    = 2;
+  uint32 level    = 3;
+  int32  hp       = 4;
+  int32  max_hp   = 5;
+}
+
+// ── ★★ 三个「服务端发、客户端不解析」的子命令 ──────────────────────
+//
+// 07 §8.4 实测的双端门控落差:服务端宏开、客户端宏关,
+// 而客户端 `oft.cpp:5014` 起的 switch **没有 default**
+// ⇒ 该段被**静默跳过** ⇒ 这三类技能在 8.0 客户端上没有表现动画,
+//   但服务端的数值结算已经发生。
+//
+// ★ 02 §6.2 改变 4:「schema 单一真源 ⇒ 不可能落差」—— 本组三个变体
+//   在 IDL 里存在,两端就都会生成处理分支,这个 bug 类从结构上被消灭。
+// ★ 配套 DR-CP4:未知事件类型一律**告警 + 跳过,不静默**。
+//
+// ⚠️ 置信度【8.5 源码推定】:客户端 3 个 PE 已 strip,落差是「按现有材料推出的」,
+//    不是「已验证的」。实现期须重新确认(07 §8.4 原文)。
+
+message Boundary       { uint32 actor = 1; uint32 element = 2; }  // Ba 四属结界
+message PetBattleModel { uint32 actor = 1; }                      // Bb 宠技战斗模组
+message FireHunt       { uint32 actor = 1; }                      // Bf 火线猎杀
+
+// ── 事件包络 ──────────────────────────────────────────────────────
+
+message BattleEvent {
+  oneof body {
+    Hit            hit             = 1;
+    Damage         damage          = 2;
+    StatusChange   status_change   = 3;
+    SetHp          set_hp          = 4;
+    TextBox        text_box        = 5;
+    Escape         escape          = 6;
+    Quit           quit            = 7;
+    Enter          enter           = 8;
+    FadeOut        fade_out        = 9;
+    SwitchEquip    switch_equip    = 10;
+    Reverse        reverse         = 11;
+    Transform      transform       = 12;
+    Nix            nix             = 13;
+    Synchronous    synchronous     = 14;
+    Boomerang      boomerang       = 15;
+    Summon         summon          = 16;
+    CaptureAct     capture_act     = 17;
+    CaptureSelect  capture_select  = 18;
+    CallCompanions call_companions = 19;
+    Steal          steal           = 20;
+    Boundary       boundary        = 21;
+    PetBattleModel pet_battle_model = 22;
+    FireHunt       fire_hunt       = 23;
+  }
+}
+
+// 一个回合的演出事件流。★ events 的顺序**就是**演出顺序。
+message BattleEvents {
+  option (sg.msg_id) = 0x0205;
+
+  uint64 battle_id = 1;
+  uint32 turn      = 2;
+  repeated BattleEvent events = 3 [(sg.max_count) = 256];
+}
+
+// ── 上行指令 ──────────────────────────────────────────────────────
+//
+// 07 §5.2 实测:客户端上行只有 **12 个字母**,却要驱动 **148 个内部指令码** ——
+// 具体技能由**参数里的数组下标**决定,不在指令字母里。
+// ⇒ ★ 新协议必须显式技能 ID,不沿用「一个字母 + 下标选技能」。
+//
+// ⚠️ 不迁移的旧指令:`@`(纯回 MP,MP += 30 上限 100)—— DR-BT9 裁定。
+//    它是无战斗动作的白给,且 DR-BT3 已定「战斗指令不耗 MP」⇒ 两者自洽。
+// ⚠️★ DR-BT3 的连带禁令:名义 MP 成本(逃跑 20 / 捕获 20 / 换宠 10 / 宠技 10 /
+//    普攻 5 / 防御 2)在原版是**死数据**(BATTLE_MpDown 被 #if 1 短路成空函数),
+//    **不得写进代码** —— 写进去会让后人误以为生效。
+
+message Attack    { uint32 target = 1; }
+message Guard     {}
+message EscapeCmd {}
+message Capture   { uint32 target = 1; }
+message PetIn     { uint32 pet_slot = 1; }
+message PetOut    {}
+message UseItem   { uint32 item_slot = 1; uint32 target = 2; }
+message PetSkill  { uint32 skill_id = 1; uint32 target = 2; }
+message ProfSkill { uint32 skill_id = 1; uint32 target = 2; }
+message SpellCmd  { uint32 spell_id = 1; uint32 target = 2; }
+message WaitCmd   {}
+
+message BattleCommand {
+  option (sg.msg_id) = 0x0210;
+
+  uint64 battle_id = 1;
+  // ★ 带回合号,防止迟到指令作用到新回合。
+  uint32 turn      = 2;
+
+  oneof command {
+    Attack    attack     = 3;
+    Guard     guard      = 4;
+    EscapeCmd escape     = 5;
+    Capture   capture    = 6;
+    PetIn     pet_in     = 7;
+    PetOut    pet_out    = 8;
+    UseItem   use_item   = 9;
+    PetSkill  pet_skill  = 10;
+    ProfSkill prof_skill = 11;
+    SpellCmd  spell      = 12;
+    WaitCmd   wait       = 13;
+  }
+}

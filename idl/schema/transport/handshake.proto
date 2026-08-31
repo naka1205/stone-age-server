@@ -1,0 +1,63 @@
+// transport/handshake.proto —— 握手 / 会话 / 心跳(号段 0x0001–0x00FF)
+//
+// 02-protocol.md §2.1:协议版本不匹配在**握手阶段直接拒绝**,不做版本分支。
+// DR-LG6:不复刻 PersonalKey / 整包 TEA,改标准 TLS ⇒ 本层不含任何自定义加密字段。
+
+syntax = "proto3";
+
+package sg.transport;
+
+import "sg_options.proto";
+
+message HandshakeRequest {
+  option (sg.msg_id) = 0x0001;
+  option (sg.transport_only) = true;
+
+  // ★ 单一整数,不做「主版本兼容、次版本忽略」的分支。不等即拒。
+  uint32 protocol_version = 1;
+  string client_build     = 2 [(sg.max_len) = 63];
+}
+
+message HandshakeAccepted {
+  option (sg.msg_id) = 0x0002;
+  option (sg.transport_only) = true;
+
+  uint64 session_id = 1;
+  // 服务端心跳间隔(毫秒)。客户端据此定时发 Ping;不做客户端侧硬编码。
+  uint32 heartbeat_interval_ms = 2;
+}
+
+enum RejectReason {
+  option (sg.width) = 8;
+
+  REJECT_UNSPECIFIED       = 0;
+  REJECT_VERSION_MISMATCH  = 1;
+  REJECT_SERVER_FULL       = 2;
+  REJECT_MAINTENANCE       = 3;
+  REJECT_BANNED            = 4;
+}
+
+message HandshakeRejected {
+  option (sg.msg_id) = 0x0003;
+  option (sg.transport_only) = true;
+
+  RejectReason reason = 1;
+  // ★ 不放中文文案 —— DR-CP5 已裁定「改消息 ID + 参数」。
+  //   这里只给服务端要求的协议版本,便于客户端提示「请更新到 vN」。
+  uint32 required_protocol_version = 2;
+}
+
+message Ping {
+  option (sg.msg_id) = 0x0004;
+  option (sg.transport_only) = true;
+
+  uint64 client_time_ms = 1;
+}
+
+message Pong {
+  option (sg.msg_id) = 0x0005;
+  option (sg.transport_only) = true;
+
+  uint64 client_time_ms = 1;  // 原样回带,客户端据此算 RTT
+  uint64 server_time_ms = 2;
+}

@@ -1,0 +1,40 @@
+// sg_options.proto —— 自定义 option 定义
+//
+// 依据:11-decision-register.md §1.1 DR-TS1 边界 ②③
+//   ③ msg_id 不是 protobuf 的概念 ⇒ 用自定义 option 显式标注,codegen 校验唯一性
+//   ② 生成产物必须是 POD ⇒ 变长字段必须给出显式定长上限
+//
+// ⚠️ 本文件只在构建期被 protoc 解析,运行时不链接 libprotobuf。
+
+syntax = "proto3";
+
+package sg;
+
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.MessageOptions {
+  // ★ 协议号。显式赋值,不依赖声明顺序(02-protocol.md §1.1 落地规则 1)。
+  //   只有「可独立上/下行的顶层消息」才标注;内嵌结构体不标注。
+  uint32 msg_id = 50001;
+
+  // 标记该消息属传输层(schema/transport/),shared/ 不得依赖(02 §9)。
+  // 由 codegen 校验:domain/ 下的消息不得引用 transport_only 消息。
+  bool transport_only = 50002;
+
+  // 已废弃的编号占位:标注后仍占用 msg_id,但不生成编解码
+  // (02 §1.1 落地规则 3:编号一经发布不得复用)。
+  bool deprecated_id = 50003;
+}
+
+extend google.protobuf.FieldOptions {
+  // string 字段的最大字节数(不含结尾 NUL;生成的 FixedStr 会多留 1 字节)。
+  uint32 max_len = 50011;
+
+  // repeated 字段的最大元素个数。
+  uint32 max_count = 50012;
+}
+
+extend google.protobuf.EnumOptions {
+  // 该枚举的底层宽度(8/16/32),默认 32。用于压缩 POD 体积。
+  uint32 width = 50021;
+}

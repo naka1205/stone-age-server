@@ -1,0 +1,113 @@
+// domain/battle_status.proto —— 战斗状态异常枚举(44 种)
+//
+// 归属:schema/domain/ ⇒ shared/rules 可依赖(02-protocol.md §9)。
+//
+// ★★ 本文件是 DR-BT4 裁定的落地物,不是普通枚举定义。
+//
+// 05-battle.md §4.5 实测:原版有三张表描述同一组状态,长度各不相同 ——
+//     RegTbl(抵抗槽)      31   应为 44
+//     aszStatus(简称)     32   应为 44   ★ 无防护,是真实的读越界指针
+//     aszStatusFull(全称)  31   应为 44
+// 「若是设计,三张表会一致停在同一处。停在三个不同位置 ⇒ 是各自遗漏。」
+// ⇒ DR-BT4 裁定**修正**:三张表全部补齐到 44、同源生成。
+//
+// ★ 05 §4.5 的硬要求原文:「状态名表必须与状态枚举同源生成,不能手写两份。」
+//   本枚举就是那个「同源」的源。抵抗表 / 简称表 / 全称表一律由它派生,
+//   ⇒ 补齐是零成本的自然结果,照抄反而需要刻意构造一张短表。
+//
+// ⚠️ 取值与 SSRC80 `battle_event.h` 的 `BATTLE_ST_*` 枚举**逐位对齐**,
+//    不得重排 —— 数值表(petskill / profession skill)按下标引用它。
+
+syntax = "proto3";
+
+package sg.domain;
+
+import "sg_options.proto";
+
+// 44 种战斗状态。0 = 正常。
+//
+// ⚠️ 这不是位掩码,是**单槽状态机的槽值**。05-battle.md §4.1 实测:
+//    「目标身上只要有任意一种状态异常,新状态一律施加失败」
+//    ⇒ 状态系统是「单槽 + 43 个候选」,不是「多个可并存的独立计时器」。
+//    ★ 新实现若按「每种状态一个独立字段、可并存」设计,行为会与原版完全不同。
+//    唯一例外:职业技能可给已有状态的目标叠加(05 §4.1)。
+enum BattleStatus {
+  option (sg.width) = 8;
+
+  BATTLE_ST_NONE        = 0;   // 正常
+  BATTLE_ST_POISON      = 1;   // 毒
+  BATTLE_ST_PARALYSIS   = 2;   // 麻痹      ★ CanMoveCheck 8 项之一
+  BATTLE_ST_SLEEP       = 3;   // 睡眠      ★ CanMoveCheck 8 项之一
+  BATTLE_ST_STONE       = 4;   // 石化      ★ CanMoveCheck 8 项之一
+  BATTLE_ST_DRUNK       = 5;   // 醉
+  BATTLE_ST_CONFUSION   = 6;   // 混乱
+  BATTLE_ST_WEAKEN      = 7;   // 虚弱      ⚠️ 中此状态时全部状态回合数冻结(05 §4.3)
+  BATTLE_ST_DEEPPOISON  = 8;   // 剧毒
+  BATTLE_ST_BARRIER     = 9;   // 魔障      ⚠️ 永不自然解除(05 §4.2);DR-BT5 相关
+  BATTLE_ST_NOCAST      = 10;  // 沉默
+  BATTLE_ST_SARS        = 11;  // 毒煞
+  BATTLE_ST_DIZZY       = 12;  // 晕眩      ★ CanMoveCheck 8 项之一
+  BATTLE_ST_ENTWINE     = 13;  // 树根缠绕
+  BATTLE_ST_DRAGNET     = 14;  // 天罗地网  ★ CanMoveCheck 8 项之一
+  BATTLE_ST_ICECRACK    = 15;  // 冰爆术 1  ← 有抵抗槽
+  BATTLE_ST_OBLIVION    = 16;  // 遗忘
+  BATTLE_ST_ICEARROW    = 17;  // 冰箭
+  BATTLE_ST_BLOODWORMS  = 18;  // 嗜血蛊
+  BATTLE_ST_SIGN        = 19;  // 一针见血
+  BATTLE_ST_INSTIGATE   = 20;  // 挑拨
+  BATTLE_ST_F_ENCLOSE   = 21;  // 火附体
+  BATTLE_ST_I_ENCLOSE   = 22;  // 冰附体
+  BATTLE_ST_T_ENCLOSE   = 23;  // 雷附体    ⚠️ DR-BT5:结算否决但上行不拒绝 ⇒ 已统一
+  BATTLE_ST_FOCUS       = 24;  // 专注战斗
+  BATTLE_ST_RESIST_F    = 25;  // 火抗
+  BATTLE_ST_RESIST_I    = 26;  // 冰抗
+  BATTLE_ST_RESIST_T    = 27;  // 雷抗
+  BATTLE_ST_F_ENCLOSE2  = 28;  // 火附
+  BATTLE_ST_I_ENCLOSE2  = 29;  // 冰附
+  BATTLE_ST_T_ENCLOSE2  = 30;  // 雷附
+
+  // ────────────────────────────────────────────────────────────────
+  // ★★ 31..43 —— DR-BT4 修正区。
+  //    原版三张表都停在这里之前(31/32/31),这 13 种状态因此**无法被抵抗**。
+  //    佐证:冰爆术 1(#15)有抵抗槽,而它的分级版本 2–10(#35–43)没有 ——
+  //    同族技能的分级版本不应在「可否抵抗」上有本质差异。
+  //    ⇒ 本枚举定义到 43,抵抗表由它同源生成 ⇒ 13 种状态获得抵抗槽。
+  // ────────────────────────────────────────────────────────────────
+  BATTLE_ST_RESIST_F_I_T = 31; // 三属抗
+  BATTLE_ST_WATER        = 32; // 水附体
+  BATTLE_ST_WORKANNEX    = 33; // 附身
+  BATTLE_ST_FEAR         = 34; // 恐惧
+  BATTLE_ST_ICECRACK2    = 35; // 冰爆术 2
+  BATTLE_ST_ICECRACK3    = 36; // 冰爆术 3
+  BATTLE_ST_ICECRACK4    = 37; // 冰爆术 4
+  BATTLE_ST_ICECRACK5    = 38; // 冰爆术 5
+  BATTLE_ST_ICECRACK6    = 39; // 冰爆术 6
+  BATTLE_ST_ICECRACK7    = 40; // 冰爆术 7
+  BATTLE_ST_ICECRACK8    = 41; // 冰爆术 8
+  BATTLE_ST_ICECRACK9    = 42; // 冰爆术 9
+  BATTLE_ST_ICECRACK10   = 43; // 冰爆术 10
+  // ★ BATTLE_ST_END = 44。新增状态一律追加在 43 之后,并同步三张派生表。
+}
+
+// 不可行动的原因。
+//
+// ★★ DR-BT5 裁定的新增下行字段。原版有两套判据:
+//    checkErrorStatus(上行校验)5 项 · CanMoveCheck(结算否决)8 项 ——
+//    魔障 / 雷附体 / 世界末日集气**只被结算否决,上行不拒绝**
+//    ⇒ 玩家「能点但必然作废」,是假交互(与 DR-CP6 冲突)。
+//
+// 裁定:统一为 CanMoveCheck 的 8 项(shared/rules 侧单一判定函数),
+//      并把原因下发给客户端 → 菜单置灰(对接 DR-CP7)。
+enum CannotActReason {
+  option (sg.width) = 8;
+
+  CANNOT_ACT_NONE       = 0;  // 可行动
+  CANNOT_ACT_PARALYSIS  = 1;  // 麻痹
+  CANNOT_ACT_STONE      = 2;  // 石化
+  CANNOT_ACT_SLEEP      = 3;  // 睡眠
+  CANNOT_ACT_DIZZY      = 4;  // 晕眩
+  CANNOT_ACT_DRAGNET    = 5;  // 天罗地网
+  CANNOT_ACT_BARRIER    = 6;  // ★ 魔障 —— 原版上行不拒绝,现统一否决并置灰
+  CANNOT_ACT_T_ENCLOSE  = 7;  // ★ 雷附体 —— 同上
+  CANNOT_ACT_CHARGING   = 8;  // ★ 世界末日集气中 —— 同上
+}

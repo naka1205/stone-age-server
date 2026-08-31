@@ -1,0 +1,44 @@
+// domain/common.proto —— 领域层公共值对象
+//
+// 归属:schema/domain/ ⇒ shared/ 可依赖(02-protocol.md §9)。
+// ⚠️ 本组 schema 不得引用 schema/transport/ 的任何类型。
+
+syntax = "proto3";
+
+package sg.domain;
+
+import "sg_options.proto";
+
+// ── 坐标与朝向 ────────────────────────────────────────────────
+
+message Vec2 {
+  int32 x = 1;
+  int32 y = 2;
+}
+
+// 8 方向。显式赋值(02 §1.1 落地规则 2)。
+enum Direction {
+  option (sg.width) = 8;
+  DIR_NORTH      = 0;
+  DIR_NORTH_EAST = 1;
+  DIR_EAST       = 2;
+  DIR_SOUTH_EAST = 3;
+  DIR_SOUTH      = 4;
+  DIR_SOUTH_WEST = 5;
+  DIR_WEST       = 6;
+  DIR_NORTH_WEST = 7;
+}
+
+// ── 实体引用 ──────────────────────────────────────────────────
+
+// 触发窗口的来源实体(02 §5.3 改变 3:系统触发不再用 -1)。
+enum EntitySource {
+  ENTITY_SOURCE_INVALID = 0;  // ★ 非法值,不是「系统」
+  ENTITY_SOURCE_SYSTEM  = 1;  // ★ 取代原版 objindex = -1
+  ENTITY_SOURCE_ENTITY  = 2;  // 具体实体,配合 entity_id 使用
+}
+
+message EntityRef {
+  EntitySource source    = 1;
+  uint32       entity_id = 2;  // source == ENTITY 时有效
+}
