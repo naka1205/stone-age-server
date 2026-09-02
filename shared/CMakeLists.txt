@@ -14,6 +14,22 @@
 #    而不是等到客户端集成那天。
 set(SG_SHARED_CXX_STANDARD 17 CACHE STRING "shared/ 的 C++ 标准下限（受 GameStudio 约束）")
 
+# ── ★★ 独立可消费性(2026-09-02,客户端骨架落地时实测暴露)───────────
+#
+# 本文件原先依赖两样**只在服务端顶层存在**的东西:目标 `sg_idl` 与函数
+# `sg_apply_warnings()`。⇒ 客户端按 DR-TS3 只引入 `shared/` 一个目录时,
+# `add_subdirectory` **在配置期就失败**,D2 的物理前提根本走不到编译那一步。
+#
+# ⚠️ 这不是"客户端应该自己先定义 sg_idl" —— 那等于要求消费方知道本目录的内部依赖名,
+#    与 DR-TS3 承诺的「FetchContent 直接可用」冲突。⇒ 缺口在本文件,补在本文件。
+#
+# 两处都写成「有就用、没有就就地补」,因此服务端顶层构建的行为**完全不变**。
+if(NOT TARGET sg_idl)
+    add_library(sg_idl INTERFACE)
+    target_include_directories(sg_idl INTERFACE
+        "${CMAKE_CURRENT_LIST_DIR}/../idl/generated/cpp")
+endif()
+
 add_library(sg_shared STATIC
     rules/battle.cpp
 )
@@ -35,7 +51,12 @@ set_target_properties(sg_shared PROPERTIES
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF)
 
-sg_apply_warnings(sg_shared)
+# ★ 告警口径由**消费方**给:服务端有 sg_apply_warnings(cmake/SgWarnings.cmake),
+#   客户端有它自己的一套(工具链不同,-Wconversion 这类开关不可能逐字通用)。
+#   ⇒ 有则用,无则由消费方在自己那侧施加,不在此处硬编码任何编译选项。
+if(COMMAND sg_apply_warnings)
+    sg_apply_warnings(sg_shared)
+endif()
 
 # ⚠️ 这里**不**给 sg_shared 加任何其它 target_link_libraries(除 sg_idl):
 #    一旦链上 pthread / 日志 / 网络,客户端侧的 FetchContent 就会被迫一起拉。
