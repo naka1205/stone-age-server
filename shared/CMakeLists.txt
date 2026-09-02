@@ -44,6 +44,31 @@ target_link_libraries(sg_shared PUBLIC sg_idl)
 
 target_compile_features(sg_shared PUBLIC cxx_std_17)
 
+# ── ★★ 浮点语义:禁止 FMA 合并(2026-09-02,跨编译器验证时固化)────────
+#
+# `00` §0 已认下第 ③ 层「规则与公式不可自证」,而 **L3 黄金用例集是唯一补偿手段**
+# (§9.0.3 更把它升级为与移植同步的硬要求)。
+# ⇒ 用例集的价值全部押在一件事上:**同样的输入,两端算出逐位相同的结果**。
+#
+# ⚠️ 但伤害公式是 `float`(移植期实测纠正了 `05` §3.1 的「整数除法」),
+#    而 `a*b+c` 是否被合并成单条 FMA 指令**由编译器自行决定**:
+#      GCC   默认 -ffp-contract=fast  ← 跨语句都能合并
+#      clang 默认 on(仅语句内)
+#      MSVC  默认 /fp:precise
+#    三者结果可以逐位不同,且**不会有任何告警**。
+#
+# ★ 2026-09-02 实测:GCC 15 / libstdc++ 下 2,148 断言确实全绿 ——
+#   但那是**当前公式恰好没踩到合并点**,不是这条性质成立。
+#   ⇒ 显式关掉,让"逐位一致"从运气变成纪律。
+#
+# ⚠️ 这与本文件上方「不硬编码任何编译选项」不矛盾:那条针对的是**告警口径**
+#    (风格,消费方各有一套);本条是**语义要求**,消费方换一套就会算错。
+if(MSVC)
+    target_compile_options(sg_shared PUBLIC /fp:precise)
+else()
+    target_compile_options(sg_shared PUBLIC -ffp-contract=off)
+endif()
+
 # ★ 阶段 0.1/1.1 起 sg_shared 是 STATIC(此前是 INTERFACE 的纯头契约层)。
 #   ⚠️ 标准仍锁 17 —— 见上方 SG_SHARED_CXX_STANDARD。它要被 GameStudio(C++17)编译。
 set_target_properties(sg_shared PROPERTIES

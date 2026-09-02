@@ -60,13 +60,13 @@ struct MessageBody {
 
 inline void encode(sg::idl::Writer& w, const MessageBody& m) {
   sg::idl::write_vec(w, m.lines,
-      [](sg::idl::Writer& w, const sg::idl::FixedStr<255>& e) { sg::idl::write_str(w, e); });
+      [](sg::idl::Writer& we, const sg::idl::FixedStr<255>& e) { sg::idl::write_str(we, e); });
   w.b(m.wide);
 }
 
 inline void decode(sg::idl::Reader& r, MessageBody& m) {
   sg::idl::read_vec(r, m.lines,
-      [](sg::idl::Reader& r, sg::idl::FixedStr<255>& e) { sg::idl::read_str(r, e); });
+      [](sg::idl::Reader& re, sg::idl::FixedStr<255>& e) { sg::idl::read_str(re, e); });
   if (!r.ok()) return;
   m.wide = r.b();
   if (!r.ok()) return;
@@ -80,14 +80,14 @@ struct LineInputBody {
 
 inline void encode(sg::idl::Writer& w, const LineInputBody& m) {
   sg::idl::write_vec(w, m.lines,
-      [](sg::idl::Writer& w, const sg::idl::FixedStr<255>& e) { sg::idl::write_str(w, e); });
+      [](sg::idl::Writer& we, const sg::idl::FixedStr<255>& e) { sg::idl::write_str(we, e); });
   w.u32(m.max_len);
   w.b(m.wide);
 }
 
 inline void decode(sg::idl::Reader& r, LineInputBody& m) {
   sg::idl::read_vec(r, m.lines,
-      [](sg::idl::Reader& r, sg::idl::FixedStr<255>& e) { sg::idl::read_str(r, e); });
+      [](sg::idl::Reader& re, sg::idl::FixedStr<255>& e) { sg::idl::read_str(re, e); });
   if (!r.ok()) return;
   m.max_len = r.u32();
   if (!r.ok()) return;
@@ -123,17 +123,17 @@ struct SelectBody {
 
 inline void encode(sg::idl::Writer& w, const SelectBody& m) {
   sg::idl::write_vec(w, m.lines,
-      [](sg::idl::Writer& w, const sg::idl::FixedStr<255>& e) { sg::idl::write_str(w, e); });
+      [](sg::idl::Writer& we, const sg::idl::FixedStr<255>& e) { sg::idl::write_str(we, e); });
   sg::idl::write_vec(w, m.choices,
-      [](sg::idl::Writer& w, const sg::domain::Choice& e) { encode(w, e); });
+      [](sg::idl::Writer& we, const sg::domain::Choice& e) { encode(we, e); });
 }
 
 inline void decode(sg::idl::Reader& r, SelectBody& m) {
   sg::idl::read_vec(r, m.lines,
-      [](sg::idl::Reader& r, sg::idl::FixedStr<255>& e) { sg::idl::read_str(r, e); });
+      [](sg::idl::Reader& re, sg::idl::FixedStr<255>& e) { sg::idl::read_str(re, e); });
   if (!r.ok()) return;
   sg::idl::read_vec(r, m.choices,
-      [](sg::idl::Reader& r, sg::domain::Choice& e) { decode(r, e); });
+      [](sg::idl::Reader& re, sg::domain::Choice& e) { decode(re, e); });
   if (!r.ok()) return;
 }
 
@@ -223,14 +223,14 @@ struct ShopBody {
 inline void encode(sg::idl::Writer& w, const ShopBody& m) {
   encode(w, m.header);
   sg::idl::write_vec(w, m.entries,
-      [](sg::idl::Writer& w, const sg::domain::ShopEntry& e) { encode(w, e); });
+      [](sg::idl::Writer& we, const sg::domain::ShopEntry& e) { encode(we, e); });
 }
 
 inline void decode(sg::idl::Reader& r, ShopBody& m) {
   decode(r, m.header);
   if (!r.ok()) return;
   sg::idl::read_vec(r, m.entries,
-      [](sg::idl::Reader& r, sg::domain::ShopEntry& e) { decode(r, e); });
+      [](sg::idl::Reader& re, sg::domain::ShopEntry& e) { decode(re, e); });
   if (!r.ok()) return;
 }
 
@@ -240,12 +240,12 @@ struct RawListBody {
 
 inline void encode(sg::idl::Writer& w, const RawListBody& m) {
   sg::idl::write_vec(w, m.rows,
-      [](sg::idl::Writer& w, const sg::idl::FixedStr<255>& e) { sg::idl::write_str(w, e); });
+      [](sg::idl::Writer& we, const sg::idl::FixedStr<255>& e) { sg::idl::write_str(we, e); });
 }
 
 inline void decode(sg::idl::Reader& r, RawListBody& m) {
   sg::idl::read_vec(r, m.rows,
-      [](sg::idl::Reader& r, sg::idl::FixedStr<255>& e) { sg::idl::read_str(r, e); });
+      [](sg::idl::Reader& re, sg::idl::FixedStr<255>& e) { sg::idl::read_str(re, e); });
   if (!r.ok()) return;
 }
 

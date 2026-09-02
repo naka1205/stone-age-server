@@ -180,7 +180,7 @@ inline void encode(sg::idl::Writer& w, const BattleSnapshot& m) {
   w.u64(m.battle_id);
   w.u32(m.field_attribute);
   sg::idl::write_vec(w, m.combatants,
-      [](sg::idl::Writer& w, const sg::domain::CombatantState& e) { encode(w, e); });
+      [](sg::idl::Writer& we, const sg::domain::CombatantState& e) { encode(we, e); });
 }
 
 inline void decode(sg::idl::Reader& r, BattleSnapshot& m) {
@@ -189,7 +189,7 @@ inline void decode(sg::idl::Reader& r, BattleSnapshot& m) {
   m.field_attribute = r.u32();
   if (!r.ok()) return;
   sg::idl::read_vec(r, m.combatants,
-      [](sg::idl::Reader& r, sg::domain::CombatantState& e) { decode(r, e); });
+      [](sg::idl::Reader& re, sg::domain::CombatantState& e) { decode(re, e); });
   if (!r.ok()) return;
 }
 
@@ -368,14 +368,14 @@ struct TextBox {
 inline void encode(sg::idl::Writer& w, const TextBox& m) {
   w.u32(m.message_id);
   sg::idl::write_vec(w, m.args,
-      [](sg::idl::Writer& w, const std::int32_t& e) { w.i32(e); });
+      [](sg::idl::Writer& we, const std::int32_t& e) { we.i32(e); });
 }
 
 inline void decode(sg::idl::Reader& r, TextBox& m) {
   m.message_id = r.u32();
   if (!r.ok()) return;
   sg::idl::read_vec(r, m.args,
-      [](sg::idl::Reader& r, std::int32_t& e) { e = r.i32(); });
+      [](sg::idl::Reader& re, std::int32_t& e) { e = re.i32(); });
   if (!r.ok()) return;
 }
 
@@ -924,7 +924,7 @@ inline void encode(sg::idl::Writer& w, const BattleEvents& m) {
   w.u64(m.battle_id);
   w.u32(m.turn);
   sg::idl::write_vec(w, m.events,
-      [](sg::idl::Writer& w, const sg::domain::BattleEvent& e) { encode(w, e); });
+      [](sg::idl::Writer& we, const sg::domain::BattleEvent& e) { encode(we, e); });
 }
 
 inline void decode(sg::idl::Reader& r, BattleEvents& m) {
@@ -933,7 +933,7 @@ inline void decode(sg::idl::Reader& r, BattleEvents& m) {
   m.turn = r.u32();
   if (!r.ok()) return;
   sg::idl::read_vec(r, m.events,
-      [](sg::idl::Reader& r, sg::domain::BattleEvent& e) { decode(r, e); });
+      [](sg::idl::Reader& re, sg::domain::BattleEvent& e) { decode(re, e); });
   if (!r.ok()) return;
 }
 

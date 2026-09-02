@@ -86,38 +86,43 @@ class CppGen:
         return t
 
     # ── 元素级编解码语句 ──────────────────────────────────────
-    def write_elem(self, f: D.Field, expr: str) -> str:
+    #
+    # ★ `w` / `r` 是流参数名。之所以做成参数而不是硬编码:repeated 字段会把语句
+    #   包进一个 lambda,而 lambda 的形参若也叫 `w`/`r`,就会**遮蔽外层同名形参**。
+    #   ⚠️ GCC 的 -Wshadow 会报,Apple clang 不报(2026-09-02 跨编译器验证实测,
+    #      GCC 15 / libstdc++ 下 36 处)。⇒ lambda 内改用 `we` / `re`。
+    def write_elem(self, f: D.Field, expr: str, w: str = "w") -> str:
         if f.ptype in SCALAR_MAP:
-            return f"w.{SCALAR_MAP[f.ptype][1]}({expr});"
+            return f"{w}.{SCALAR_MAP[f.ptype][1]}({expr});"
         if f.ptype == D.T_STRING:
-            return f"sg::idl::write_str(w, {expr});"
+            return f"sg::idl::write_str({w}, {expr});"
         if f.ptype == D.T_ENUM:
             u = ENUM_UNDERLYING[self.s.enums[f.type_name].width]
             width = self.s.enums[f.type_name].width
             m = {8: "u8", 16: "u16", 32: "u32"}[width]
-            return f"w.{m}(static_cast<{u}>({expr}));"
-        return f"encode(w, {expr});"
+            return f"{w}.{m}(static_cast<{u}>({expr}));"
+        return f"encode({w}, {expr});"
 
-    def read_elem(self, f: D.Field, expr: str) -> str:
+    def read_elem(self, f: D.Field, expr: str, r: str = "r") -> str:
         if f.ptype in SCALAR_MAP:
-            return f"{expr} = r.{SCALAR_MAP[f.ptype][2]}();"
+            return f"{expr} = {r}.{SCALAR_MAP[f.ptype][2]}();"
         if f.ptype == D.T_STRING:
-            return f"sg::idl::read_str(r, {expr});"
+            return f"sg::idl::read_str({r}, {expr});"
         if f.ptype == D.T_ENUM:
             width = self.s.enums[f.type_name].width
             m = {8: "u8", 16: "u16", 32: "u32"}[width]
-            return f"{expr} = static_cast<{self.qual(f.type_name)}>(r.{m}());"
-        return f"decode(r, {expr});"
+            return f"{expr} = static_cast<{self.qual(f.type_name)}>({r}.{m}());"
+        return f"decode({r}, {expr});"
 
     def write_field(self, f: D.Field, owner: str, indent: str) -> list[str]:
         acc = f"{owner}.{f.name}"
         if not f.repeated:
             return [indent + self.write_elem(f, acc)]
         et = self.elem_type(f)
-        body = self.write_elem(f, "e")
+        body = self.write_elem(f, "e", "we")
         return [
             f"{indent}sg::idl::write_vec(w, {acc},",
-            f"{indent}    [](sg::idl::Writer& w, const {et}& e) {{ {body} }});",
+            f"{indent}    [](sg::idl::Writer& we, const {et}& e) {{ {body} }});",
         ]
 
     def read_field(self, f: D.Field, owner: str, indent: str) -> list[str]:
@@ -125,10 +130,10 @@ class CppGen:
         if not f.repeated:
             return [indent + self.read_elem(f, acc)]
         et = self.elem_type(f)
-        body = self.read_elem(f, "e")
+        body = self.read_elem(f, "e", "re")
         return [
             f"{indent}sg::idl::read_vec(r, {acc},",
-            f"{indent}    [](sg::idl::Reader& r, {et}& e) {{ {body} }});",
+            f"{indent}    [](sg::idl::Reader& re, {et}& e) {{ {body} }});",
         ]
 
     # ── 消息体 ────────────────────────────────────────────────
