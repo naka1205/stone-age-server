@@ -13,21 +13,25 @@ include(FetchContent)
 FetchContent_Declare(doctest
     GIT_REPOSITORY https://github.com/doctest/doctest.git
     GIT_TAG        v2.4.11
-    GIT_SHALLOW    TRUE)
-
-# ⚠️★ 故意**只取源码,不 add_subdirectory**(即不用 FetchContent_MakeAvailable)。
-#
-# 理由是实测:doctest v2.4.11 的顶层 CMakeLists 写着 `cmake_minimum_required(VERSION 3.0)`,
-# 而新版 CMake 已移除对 < 3.5 的兼容 ⇒ `MakeAvailable` 直接配置失败。
-#
-# ★ 但这对本项目**不构成问题** —— DR-TS4 选 doctest 的理由第一条就是
-#   「**单头文件**、编译开销低」。我们要的就是那一个头,不是它的构建系统。
-#   ⇒ 自己建一个 INTERFACE target 指过去,把第三方 CMake 的版本策略完全隔离在外。
-#   这同时避免了它的 install/export 规则污染本项目的安装面。
-FetchContent_GetProperties(doctest)
-if(NOT doctest_POPULATED)
-  FetchContent_Populate(doctest)
-endif()
+    GIT_SHALLOW    TRUE
+    # ⚠️★ 故意**只取源码,不 add_subdirectory**。
+    #
+    # 理由是实测:doctest v2.4.11 的顶层 CMakeLists 写着
+    # `cmake_minimum_required(VERSION 3.0)`,而新版 CMake 已移除对 < 3.5 的兼容
+    # ⇒ 让它参与配置会直接失败。
+    #
+    # ★ 但这对本项目**不构成问题** —— DR-TS4 选 doctest 的理由第一条就是
+    #   「**单头文件**、编译开销低」。我们要的就是那一个头,不是它的构建系统。
+    #   这同时避免了它的 install/export 规则污染本项目的安装面。
+    #
+    # ★ 实现手法(2026-09-02 改):SOURCE_SUBDIR 指向一个**不存在的子目录**,
+    #   MakeAvailable 找不到 CMakeLists.txt 就只下载、不 add_subdirectory。
+    #   这是 CMake 官方给的「只填充」写法。
+    #   ⚠️ 原先用的 `FetchContent_Populate(doctest)` 在 CMake 4.x 已废弃,
+    #      且官方明说**将来会完全移除**(CMP0169)⇒ 那是一颗定时炸弹,不是风格问题。
+    #      客户端仓同处已同步改。
+    SOURCE_SUBDIR  sg-do-not-configure)
+FetchContent_MakeAvailable(doctest)
 
 add_library(sg_doctest INTERFACE)
 target_include_directories(sg_doctest SYSTEM INTERFACE "${doctest_SOURCE_DIR}")
