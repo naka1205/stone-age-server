@@ -69,6 +69,23 @@ else()
     target_compile_options(sg_shared PUBLIC -ffp-contract=off)
 endif()
 
+# ── ★★ 源码字符集:MSVC 必须显式 /utf-8(2026-09-02,Windows 验证前置)────
+#
+# `shared/rules/*.cpp|h` 是 **UTF-8**,带大量中文注释(battle.cpp 161 行 / constants.h 109 行)。
+# ⚠️ MSVC 默认按**系统 ANSI 代码页**读源文件(简体中文 Windows = 936/GBK)⇒ C4819 刷屏,
+#    而某些 UTF-8 字节序列在 GBK 下会被读成尾随反斜杠一类,可能直接编译错误。
+#
+# ★ 为什么写在**这里**而不是只写在消费方的告警口径里:
+#   本文件上方那条「告警口径由消费方给」是对的,但 `/utf-8` 不是告警口径 ——
+#   它决定**源文件怎么被解码**,是 DR-TS3「FetchContent 直接可用」的一部分。
+#   ⚠️ 客户端只 `add_subdirectory(shared)` 时**不会**调用任何 `sg_apply_warnings`
+#     ⇒ 若只补在两仓的告警函数里,`sg_shared` 这个目标本身仍然没有它。
+#   这与本文件开头那个 `sg_idl` / `sg_apply_warnings` 缺口(d939247)是同一类问题:
+#   **凡是「消费方不做就会坏」的东西,都得本目录自己保证。**
+if(MSVC)
+    target_compile_options(sg_shared PUBLIC /utf-8)
+endif()
+
 # ★ 阶段 0.1/1.1 起 sg_shared 是 STATIC(此前是 INTERFACE 的纯头契约层)。
 #   ⚠️ 标准仍锁 17 —— 见上方 SG_SHARED_CXX_STANDARD。它要被 GameStudio(C++17)编译。
 set_target_properties(sg_shared PROPERTIES

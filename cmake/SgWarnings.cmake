@@ -6,7 +6,20 @@
 
 function(sg_apply_warnings target)
   if(MSVC)
-    target_compile_options(${target} PRIVATE /W4 /permissive-)
+    # ★★ `/utf-8` 不是风格选项,是**正确性**选项(2026-09-02 补,Windows 验证前置)。
+    #
+    # 本仓源码是 **UTF-8**,且中文**不止出现在注释里**:
+    #   · doctest 用例名  TEST_CASE("相克矩阵:与 battle_event.c:922-949 逐项一致")
+    #   · 断言消息        assert(false && "相克矩阵与 05-battle.md §3.4 原表不符")
+    #   · printf 输出     "★ 相克矩阵重排错误 [攻%d][守%d]"
+    #
+    # ⚠️ MSVC 默认按**系统 ANSI 代码页**读源文件(简体中文 Windows = 936/GBK)
+    #    ⇒ 轻则 C4819 刷屏 + 用例名与断言消息乱码,
+    #      重则某个 UTF-8 字节序列在 GBK 下被读成尾随反斜杠一类,**直接编译错误**。
+    #
+    # ★ 客户端仓的 SgClientWarnings.cmake 早有这一行,本文件此前漏了 ——
+    #   两端都是 clang 时永远不会暴露,与 d939247 那个缺口是同一类。
+    target_compile_options(${target} PRIVATE /W4 /utf-8 /permissive-)
   else()
     target_compile_options(${target} PRIVATE
         -Wall
