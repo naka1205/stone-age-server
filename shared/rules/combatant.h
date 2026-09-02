@@ -82,6 +82,20 @@ struct CombatModifiers {
   //   仅当攻方是玩家时生效:per −= RAND(0.8×hit, 1.2×hit),下限 0。§3.2
   int hit_right = 0;
 
+  // ── 攻击次数(§3.9)──────────────────────────────────────────
+  //
+  // ★ 两条路径**不同**,判据是"有没有武器",不是武器类型:
+  //     有武器 → RAND(attack_num_min, attack_num_max),≤0 则 1
+  //     空手   → 分档抽,可达 10 段(DR-BT1 裁定照抄,各段全额)
+  //
+  // ⚠️★ `unarmed` 单独立一个字段而不是用 `weapon == kNone` 推:原版判据是
+  //    **`itemindex` 无效**(手里没东西),而 `WeaponClass::kNone` 是
+  //    「武器相性表的第 0 类」—— 两者不是一回事,合并会让"持无类别武器"
+  //    被误判成空手,从而获得 10 段连击。
+  bool unarmed = true;
+  int  attack_num_min = 1;
+  int  attack_num_max = 1;
+
   // ★ 铁壁防御的加成开关(原 `CHAR_MAGICSUPERWALL > 0`,`_MAGIC_SUPERWALL` 8.0 开)。
   //   ⚠️ 与 `other_status_nums` 是两件事:前者决定**是否**加成,后者是加成**基数**。
   //   原版只有 `MAGICSUPERWALL > 0` 时才读 `OTHERSTATUSNUMS`。
@@ -94,6 +108,10 @@ struct Combatant {
   bool          occupied = false;  // 该槽是否有单位;false 时其余字段无意义
   CombatantKind kind     = CombatantKind::kEnemy;
   std::uint8_t  slot     = 0;      // 0..9 己方 / 10..19 敌方(kSideOffset)
+
+  // ★ 等级 —— 参与两处:空手连击的 `lv < 10` 门槛(§3.9)、
+  //   暴击伤害的 `LV攻 / LV守`(§3.3,批次 0.5 未实现)。
+  std::int32_t level = 1;
 
   // ── 生命 ──
   std::int32_t hp     = 0;
@@ -154,6 +172,13 @@ struct Combatant {
   //   **攻方**酒醉时守方回避率 += RAND(20,30)。
   // ⚠️ 与 `BATTLE_ST_DRUNK` 状态槽是两个来源,原版分别读 ⇒ 此处独立成字段。
   bool drunk = false;
+
+  // ★ 混乱值(原 `CHAR_WORKCONFUSION`)—— §3.5 防御减伤的**第二个条件**:
+  //   触发要求「守方指令 = 防御 **且 混乱值 ≤ 0**」。
+  // ⚠️ 与 `BATTLE_ST_CONFUSION` 状态槽同样是两个来源 ⇒ 独立成字段,理由同 `drunk`。
+  //    用 `status == CONFUSION` 代替会漏掉「混乱值 > 0 但状态槽已被别的状态占住」的情形
+  //    —— 而 §4.1 的全局互斥恰恰让这种情形成为常态。
+  std::int32_t confusion = 0;
 
   // ★ 反应类状态计数(原 `BATTLE_GetDamageReact`)> 0 ⇒ 守方不可回避(§3.2 第三道),
   //   且伤害走 §3.7 的六种反应类型分支。

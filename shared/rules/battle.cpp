@@ -423,4 +423,330 @@ bool RollDodge(const Combatant& attacker,
   return rng.Rand(1, 10000) <= static_cast<int>(per);
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  回合调度(批次 0.5)
+// ═══════════════════════════════════════════════════════════════════
+//
+// 对应原版 `BATTLE_Battling`(`battle.c`,1,983 行)**的第 6 步本身** ——
+// 覆盖边界与「暴击 / 反击为何有意留空」见 battle.h 的批次 0.5 注记。
+//
+// ★ 四步改造在本段的具体表现:
+//   ① 原版 `gWeponType` / `gDamageDiv` / `gBattleStausChange` 等 10 个 g* 隐式传参
+//      → 这里全是局部量与显式入参,一个文件级变量都没有;
+//   ② 原版 `BATTLE_DamageSub` 直接 `CHAR_setInt(HP)` → 这里只 `PushDamage`,
+//      ★ **`field` 是 const 引用,连想写都写不了** —— 由类型系统兜底,不靠自觉;
+//   ③ 原版 `strcat` 拼 `szAllBattleString` 再 send → 这里只追加事件;
+//   ④ 原版 `RAND()` → `rng`。
+
+std::int32_t ComputeActionDex(const Combatant& c,
+                              const sg::domain::BattleCommand& command,
+                              IRandom& rng) noexcept {
+  // 基数(`BATTLE_DexCalc`):WORKQUICK + 20。
+  std::int32_t dex = c.quick + kDexBase;
+
+  // ⚠️ 批次 0.5 只有默认档。★ 但**必须把 command 收进入参**:其余 8 档全部
+  //    按指令种类分,签名现在不收、将来就得改所有调用点与全部用例。
+  (void)command;
+  dex -= rng.Rand(0, static_cast<int>(c.quick * kDexJitterRatio));
+
+  // ⚠️★ **不夹下限。** 原版 `if (dex <= 1) dex = 1;` 是被注释掉的 ⇒ dex 可为 0 或负。
+  return dex + c.mods.sequence;
+}
+
+int BuildActionOrder(const BattleField& field,
+                     const TurnCommands& commands,
+                     IRandom& rng,
+                     std::uint8_t (&order)[kSlotCount]) noexcept {
+  std::int32_t keys[kSlotCount] = {};
+  int count = 0;
+
+  // ⚠️★ **必须按槽号升序遍历、逐个抽 dex。** 抽取顺序决定 rng 的消费序列,
+  //    换个遍历顺序 ⇒ 同种子给出不同战斗 ⇒ 可回放性失效(黄金用例集全批失败)。
+  for (int i = 0; i < kSlotCount; ++i) {
+    const Combatant& c = field.at(i);
+    if (!c.occupied || c.dead) continue;
+    if (!commands.present[i]) continue;   // 无指令 ⇒ 本回合不行动(敌方由 AI 填齐)
+    keys[count]  = ComputeActionDex(c, commands.commands[i], rng);
+    order[count] = static_cast<std::uint8_t>(i);
+    ++count;
+  }
+
+  // ★★ DR-BT8:同速按**入场位次** ⇒ 稳定排序,大 dex 在前。
+  //
+  // ⚠️ 用插入排序而不是 `std::sort`,两条理由缺一不可:
+  //   ① `std::sort` **不保证稳定** ⇒ 同 dex 时顺序由实现决定,正是 DR-BT8 要消灭的
+  //      那种不可复现(原版 `EsCmp` 不满足严格弱序,同一份输入在两套标准库上会排出
+  //      不同结果);`std::stable_sort` 稳定,但**可能分配内存** ⇒ 撞 15 §9.1
+  //      「运行期零分配」。
+  //   ② n ≤ 20,插入排序在这个规模上本来就不慢。
+  for (int i = 1; i < count; ++i) {
+    const std::int32_t key  = keys[i];
+    const std::uint8_t slot = order[i];
+    int j = i - 1;
+    // 严格 `<` ⇒ 相等时不再前移 ⇒ 保持槽号升序 = 入场位次。
+    while (j >= 0 && keys[j] < key) {
+      keys[j + 1]  = keys[j];
+      order[j + 1] = order[j];
+      --j;
+    }
+    keys[j + 1]  = key;
+    order[j + 1] = slot;
+  }
+  return count;
+}
+
+int RollAttackCount(const Combatant& attacker,
+                    const RulesConfig& config,
+                    IRandom& rng) noexcept {
+  // ── 有武器:RAND(min, max),≤0 则 1 ────────────────────────────
+  if (!attacker.mods.unarmed) {
+    const int n = rng.Rand(attacker.mods.attack_num_min, attacker.mods.attack_num_max);
+    return n <= 0 ? 1 : n;
+  }
+
+  // ── 空手:两道前置(等级 ≥ 10 且是玩家),否则恒 1 段 ────────────
+  if (attacker.level < kUnarmedMultihitMinLevel || !attacker.IsPlayer()) return 1;
+
+  // ⚠️ DR-BT1 的开关只管**各段是否全额**(`gDamageDiv`),不管**段数怎么抽**。
+  //    ⇒ 关掉它不该让空手变回单段 —— 那是另一个改动。
+  (void)config;
+
+  // luckwork = LUCK × 5,上限 25。★ LUCK 自身上限也是 25(combatant.h)。
+  int luckwork = attacker.luck * kUnarmedLuckFactor;
+  if (luckwork > kUnarmedLuckCap) luckwork = kUnarmedLuckCap;
+
+  const int roll = rng.Rand(1, kUnarmedRollMax);
+  if (roll <= kUnarmedThreshold10 + luckwork) {
+    return rng.Rand(kUnarmedBurstMin, kUnarmedBurstMax);   // ★ 可达 10 段
+  }
+  if (roll <= kUnarmedThreshold3 + luckwork) return 3;
+  if (roll <= kUnarmedThreshold2 + luckwork) return 2;
+  return 1;
+}
+
+double RollGuardFactor(IRandom& rng) noexcept {
+  const int roll = rng.Rand(1, 100);
+  for (const GuardTier& tier : kGuardTiers) {
+    if (roll <= tier.upper_bound) return tier.factor;
+  }
+  // 不可达(最后一档上界就是 100)。★ 兜底取最强减伤而不是 1.0:
+  //   万一表被改窄,宁可少扣血,也不要静默变成"防御无效"。
+  return kGuardTiers[0].factor;
+}
+
+RideSplit SplitRideDamage(std::int32_t damage,
+                          std::int32_t my_defense,
+                          std::int32_t pet_defense) noexcept {
+  RideSplit split;
+  const std::int64_t total_def =
+      static_cast<std::int64_t>(my_defense) + pet_defense;
+  if (total_def <= 0) {
+    // 双方防御都是 0 ⇒ 比例无定义。★ 全部记在主人身上,不是各半 ——
+    //   原式在这种情形下会除零,新实现必须显式选一个,且不能让宠物凭空扛伤。
+    split.player = damage;
+    split.pet    = 0;
+    return split;
+  }
+  // ★ DR-BT2 修正:分子是 **myDef**(防御高者多扛),且**无 +1** ⇒ 无损分摊。
+  split.player = static_cast<std::int32_t>(
+      static_cast<std::int64_t>(damage) * my_defense / total_def);
+  split.pet = damage - split.player;
+  return split;
+}
+
+namespace {
+
+// 事件缓冲的追加器。★ 只有它能写 `out.events`,截断判定收在一处。
+//
+// ⚠️★ 原版在这里犯过 05 §10.4 那个错(`strncat` 第三参用错 ⇒ 等价无上界 `strcat`,
+//    余量 56 字节且无第二道防线)。⇒ 本实现**溢出就置位并停止追加**,
+//    由 `ResolveTurn` 返回 false 把它交给调用方分包,绝不静默丢弃。
+class EventSink {
+ public:
+  explicit EventSink(sg::domain::BattleEvents& out) noexcept : out_(out) {}
+
+  bool overflowed() const noexcept { return overflowed_; }
+
+  // 追加一个事件槽并返回它;满了返回 nullptr。
+  sg::domain::BattleEvent* Push(sg::domain::BattleEvent::BodyKind kind) noexcept {
+    sg::domain::BattleEvent* e = out_.events.push_back();
+    if (e == nullptr) {
+      overflowed_ = true;
+      return nullptr;
+    }
+    *e = sg::domain::BattleEvent{};
+    e->body_kind = kind;
+    return e;
+  }
+
+ private:
+  sg::domain::BattleEvents& out_;
+  bool overflowed_ = false;
+};
+
+bool IsGuarding(const sg::domain::BattleCommand& cmd) noexcept {
+  return cmd.command_kind == sg::domain::BattleCommand::CommandKind::GUARD;
+}
+
+// 守方本回合是否在施咒(§3.2:咒术时 kawashi_para 取 0.027,更易被闪)。
+bool IsCastingSpell(const TurnCommands& commands, int slot) noexcept {
+  if (!commands.present[slot]) return false;
+  return commands.commands[slot].command_kind ==
+         sg::domain::BattleCommand::CommandKind::SPELL;
+}
+
+}  // namespace
+
+bool ResolveTurn(const BattleField& field,
+                 const TurnCommands& commands,
+                 const RulesConfig& config,
+                 IRandom& rng,
+                 sg::domain::BattleEvents& out) noexcept {
+  out.battle_id = field.battle_id;
+  out.turn      = field.turn;
+  out.events.clear();
+  EventSink sink(out);
+
+  // ★ HP 的**本地**镜像。L3 不写世界状态(`field` 是 const)——
+  //   但同一回合内的后续攻击必须看到前面造成的伤害,否则一回合里能把同一个
+  //   已死目标反复打死。⇒ 在这里维护一份局部账,回合结束即丢弃;
+  //   真正的写回由调用方按事件列表执行(四步改造第②步的形态)。
+  std::int32_t hp[kSlotCount];
+  std::int32_t pet_hp[kSlotCount];
+  bool dead[kSlotCount];
+  for (int i = 0; i < kSlotCount; ++i) {
+    hp[i]     = field.at(i).hp;
+    pet_hp[i] = field.at(i).ride_hp;
+    dead[i]   = field.at(i).dead;
+  }
+
+  std::uint8_t order[kSlotCount] = {};
+  const int actor_count = BuildActionOrder(field, commands, rng, order);
+
+  for (int n = 0; n < actor_count; ++n) {
+    const int actor_slot = order[n];
+    const Combatant& actor = field.at(actor_slot);
+
+    // 回合内先被打死的单位不再行动(原版同样在派发前查存活)。
+    if (dead[actor_slot]) continue;
+
+    // ★ DR-BT5:能否行动的**唯一**判据。上行校验与结算走同一个函数。
+    // ⚠️ 不产事件:不可行动的原因走 `BattleSelfInfo.cannot_act` 在**指令阶段**下发
+    //    (DR-CP7 菜单置灰),而不是等结算完再告诉玩家"你刚才动不了"——
+    //    那正是 DR-CP6 反对的假交互。
+    if (CheckCanAct(actor) != sg::domain::CannotActReason::CANNOT_ACT_NONE) continue;
+
+    const sg::domain::BattleCommand& cmd = commands.commands[actor_slot];
+
+    // ── 指令分发 ─────────────────────────────────────────────
+    //
+    // ⚠️★ 批次 0.5 只接 ATTACK / GUARD / WAIT 三种。其余七种**显式落到 default**
+    //    并被跳过 —— 不是"忘了写",是它们各自绑着未移植的链路(见 battle.h 的表)。
+    //    ⇒ 接入时在这里补 case,**不要**在调用方拦截:那会让 L3 之外出现第二处
+    //      指令语义,与 DR-BT5「唯一真源」同类的错误。
+    if (cmd.command_kind != sg::domain::BattleCommand::CommandKind::ATTACK) {
+      // GUARD 与 WAIT 本身不产事件:防御的效果体现在**被攻击时**的减伤(§3.5),
+      // 由下方攻击链路读 `IsGuarding` 得到。
+      continue;
+    }
+
+    const int target_slot = static_cast<int>(cmd.command.attack.target);
+    if (target_slot < 0 || target_slot >= kSlotCount) continue;
+    const Combatant& target = field.at(target_slot);
+    if (!target.occupied || dead[target_slot]) continue;
+
+    // ── 攻击次数(§3.9 / DR-BT1)──────────────────────────────
+    const int hits = RollAttackCount(actor, config, rng);
+
+    sg::domain::BattleEvent* hit_event =
+        sink.Push(sg::domain::BattleEvent::BodyKind::HIT);
+    if (hit_event == nullptr) break;
+    hit_event->body.hit.attacker     = static_cast<std::uint32_t>(actor_slot);
+    hit_event->body.hit.kind         = sg::domain::AttackKind::ATTACK_KIND_MELEE;
+    hit_event->body.hit.skill_id     = 0;
+    hit_event->body.hit.variant      = 0;
+    hit_event->body.hit.target_count = 0;   // ★ 逐段回填,见下
+
+    const bool guarding = commands.present[target_slot] &&
+                          IsGuarding(commands.commands[target_slot]) &&
+                          target.confusion <= 0;
+    const bool casting = IsCastingSpell(commands, target_slot);
+
+    std::uint32_t emitted = 0;
+    for (int h = 0; h < hits; ++h) {
+      // ★ 目标在多段之间可能被打死 ⇒ 剩余段数作废(原版同样逐段查存活)。
+      if (dead[target_slot]) break;
+
+      sg::domain::BattleEvent* dmg_event =
+          sink.Push(sg::domain::BattleEvent::BodyKind::DAMAGE);
+      if (dmg_event == nullptr) break;
+      sg::domain::Damage& d = dmg_event->body.damage;
+      d.target          = static_cast<std::uint32_t>(target_slot);
+      d.hp_delta        = 0;
+      d.pet_hp_delta    = 0;
+      d.mp_delta        = 0;
+      d.flags           = 0;
+      d.status_applied  = sg::domain::BattleStatus::BATTLE_ST_NONE;
+      ++emitted;
+
+      // ── 回避(§3.2)───────────────────────────────────────
+      //
+      // ⚠️ 闪避也要产事件:客户端要演"闪"这个动作(原版 BD 带 BCF_DODGE)。
+      //    ★ 而且**必须在这里就产**,不能"闪了就跳过" —— 事件流是演出脚本,
+      //      少一条客户端就少一个动作,1.4 的验收口径正是逐条一致。
+      if (RollDodge(actor, target, guarding, casting, config, rng)) {
+        d.flags = static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_DODGE);
+        continue;
+      }
+
+      // ── 伤害(§3.1 七步 + §3.4 相克)────────────────────────
+      std::int32_t damage = ComputeDamage(field, actor, target, config, rng);
+
+      // ── 防御减伤:六档随机(§3.5)────────────────────────────
+      //
+      // ⚠️★ 触发条件是「守方指令 = 防御 **且 混乱值 ≤ 0**」——
+      //    两条都在 `guarding` 里,别只判指令。
+      if (guarding) {
+        damage = static_cast<std::int32_t>(damage * RollGuardFactor(rng));
+        d.flags |= static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_GUARD);
+      } else {
+        d.flags |= static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_NORMAL);
+      }
+      if (damage < 0) damage = 0;
+
+      // ── 骑宠分摊(§3.6,DR-BT2 修正式)──────────────────────
+      std::int32_t to_player = damage;
+      std::int32_t to_pet    = 0;
+      if (target.has_ride && pet_hp[target_slot] > 0) {
+        const RideSplit split =
+            SplitRideDamage(damage, target.defense, target.ride_defense);
+        to_player = split.player;
+        to_pet    = split.pet;
+      }
+
+      hp[target_slot]     -= to_player;
+      pet_hp[target_slot] -= to_pet;
+      d.hp_delta     = -to_player;
+      d.pet_hp_delta = -to_pet;
+
+      // ★ 骑宠死亡的连带(§3.6:解除骑乘 + 换回原图 + 置落马标记)在**表现侧**,
+      //   由调用方按 `pet_hp_delta` 打完后的 HP 判定并下发 BattleSnapshot。
+      //   ⇒ L3 不产 RideState —— 那是快照字段,不是事件。
+
+      if (hp[target_slot] <= 0) {
+        dead[target_slot] = true;
+        d.flags |= static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_DEATH);
+      }
+
+      // ⚠️ 反击(§3.5)在此处插入 —— 批次 0.5 未实现,理由见 battle.h。
+    }
+
+    hit_event->body.hit.target_count = emitted;
+    if (sink.overflowed()) break;
+  }
+
+  // ★ 返回 false = 被迫截断。调用方**必须**处理(分包),不得当成"成功"。
+  return !sink.overflowed();
+}
+
 }  // namespace sg::rules

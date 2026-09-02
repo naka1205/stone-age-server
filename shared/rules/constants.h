@@ -77,8 +77,17 @@ inline constexpr int    kDodgeBonusBow      = 20;    // 攻方持弓
 // ── 防御减伤:六档随机 ──────────────────────────────────────────
 //
 // ★ [8.0] 05-battle.md §3.5:**不是固定系数**,是按 RAND(1,100) 分六档。
-//   期望系数 ≈ 0.155,且 **25% 概率完全免伤**。
-//   触发条件:守方指令 = 防御 **且 混乱值 ≤ 0**。
+//   **25% 概率完全免伤。**
+//
+// ⚠️★ **期望系数是 0.175,不是 0.155**(2026-09-03 移植期实测纠正)——
+//   `05` §3.5 与本文件原先都写「期望 ≈ 0.155」,按档宽加权手算是:
+//       (25×0 + 25×0.1 + 20×0.2 + 15×0.3 + 10×0.4 + 5×0.5) / 100 = **0.175**
+//   六档表本身与源码一致(用例逐边界断言过),错的只是那个概括值。
+//   差 0.02 看着小,但它是**全局防御强度**的口径:照 0.155 去调平衡,
+//   会把"防御比预期弱 13%"当成别处的数值问题去改。
+//   回归断言:`tests/rules_battle_test.cpp` 的「防御减伤:六档逐个边界」。
+//
+//   触发条件:守方指令 = 防御 **且 混乱值 ≤ 0**(两条,缺一不可)。
 struct GuardTier { int upper_bound; double factor; };
 inline constexpr GuardTier kGuardTiers[] = {
     { 25,  0.00},   // 25%
@@ -90,8 +99,46 @@ inline constexpr GuardTier kGuardTiers[] = {
 };
 
 // 反击伤害 = damage × 0.75,下限 1。[8.0] §3.5
+//
+// ⚠️★ **反击本身在批次 0.5 未实现**,这两个常量目前无人调用 —— 见 battle.h
+//    「§3.5 只给了 per 的构成,没给判定阈与取数入口」。常量先留着,不代表已覆盖。
 inline constexpr double kCounterDamageRate = 0.75;
 inline constexpr int    kCounterDamageMin  = 1;
+
+// ── 行动顺序 ────────────────────────────────────────────────────
+//
+// [8.0] 05-battle.md §2.5:`排序键 = dex + sequence`,
+//       `dex = BATTLE_DexCalc(...)` 基数 = `WORKQUICK + 20`,再按指令种类分 9 档修正。
+//
+// ⚠️★ **`if (dex <= 1) dex = 1;` 在原版是被注释掉的** ⇒ **dex 可为 0 甚至负**。
+//    新实现不得"顺手加个下限" —— 那会改变慢速单位之间的相对顺序。
+inline constexpr int kDexBase = 20;
+
+// 默认档(普攻 / 防御)的修正:`dex −= RAND(0, 0.1·WORKQUICK)`。
+// ⚠️ 其余 8 档(变身 ×0.8 / 附体 −RAND(0.3w,0.5w) / 疾速 +30% / 暗月 +20% /
+//    道具 −RAND(0,0.1w)+15% …)绑在尚未接入的指令上 ⇒ 批次 0.5 不实现,见 battle.cpp。
+inline constexpr double kDexJitterRatio = 0.1;
+
+// ── 空手连击的段数分档(DR-BT1)──────────────────────────────────
+//
+// [8.0] 05-battle.md §3.9。★ DR-BT1 已裁定 **照抄**(各段全额,`gDamageDiv` 保持 1.0),
+// 量化前提是 **LUCK 上限 25** ⇒ 触发上限 3.5%、期望段数 1.31。
+//
+// ⚠️ 判据是 `luckwork = LUCK × 5`(上限 25),`randwork = RAND(1,1000)`:
+//      ≤ 10 + luckwork → RAND(5,10)   ★ 空手连击可达 10 段
+//      ≤ 30 + luckwork → 3
+//      ≤ 70 + luckwork → 2
+//      否则            → 1
+// ⚠️★ 且**等级 < 10 或非玩家一律 1 段** —— 少了这道会让所有敌人都可能多段。
+inline constexpr int kUnarmedMultihitMinLevel = 10;
+inline constexpr int kUnarmedLuckFactor  = 5;
+inline constexpr int kUnarmedLuckCap     = 25;
+inline constexpr int kUnarmedRollMax     = 1000;
+inline constexpr int kUnarmedThreshold10 = 10;   // → RAND(5,10) 段
+inline constexpr int kUnarmedThreshold3  = 30;   // → 3 段
+inline constexpr int kUnarmedThreshold2  = 70;   // → 2 段
+inline constexpr int kUnarmedBurstMin    = 5;
+inline constexpr int kUnarmedBurstMax    = 10;
 
 // ── 属性 ────────────────────────────────────────────────────────
 //

@@ -29,6 +29,9 @@
 #include "rules/battle.h"
 
 #include <cmath>
+#include <cstring>
+#include <utility>
+#include <vector>
 
 using namespace sg::rules;
 using sg::domain::BattleStatus;
@@ -546,4 +549,494 @@ TEST_CASE("回避:硬上限 75%,极端 dex 差也不会必闪") {
   const double rate = static_cast<double>(dodged) / trials;
   CHECK(rate > 0.70);
   CHECK(rate < 0.80);   // ★ 上限 75% ⇒ 不可能接近 1.0
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  7. 回合调度(批次 0.5)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ 本节断言的口径与前六节一致:每条要么指到源码行号,要么指到一条 DR,
+//    要么是可复核的实测。★ 暴击与反击**没有用例** —— 因为它们没有实现,
+//    而没有实现的理由(文档只给了 per 的构成、没给判定阈)本身就写在
+//    `battle.h` 的批次 0.5 注记里。**不为未实现的东西写"预期"用例**:
+//    那会把猜测提前固化成基线。
+
+namespace {
+
+// 可编排的随机源 —— 用来把"抽到第几档"从概率变成断言。
+//
+// ★ 为什么不用 SeededRandom 撞运气:分档边界(§3.5 的 25/50/70/85/95/100、
+//   §3.9 的 10/30/70)必须**逐个边界值**验,而不是"跑一万次看分布像不像"。
+//   分布用例挡不住"档位表抄错一格"这种最常见的移植错误。
+class ScriptedRandom final : public IRandom {
+ public:
+  explicit ScriptedRandom(std::vector<int> script) : script_(std::move(script)) {}
+
+  int Rand(int lo, int hi) override {
+    const int v = Next();
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+  }
+  int RandMod(int n) override {
+    if (n <= 0) return 0;
+    const int v = Next();
+    return v % n;
+  }
+
+ private:
+  int Next() {
+    if (script_.empty()) return 0;
+    // ★ 用尽后**重复最后一个值**,不回卷:回卷会让"多消费了一次随机数"这种
+    //   偏差在长序列里自愈,从而掩盖 rng 消费序列的变化。
+    if (cursor_ >= script_.size()) return script_.back();
+    return script_[cursor_++];
+  }
+  std::vector<int> script_;
+  std::size_t cursor_ = 0;
+};
+
+// 恒取上界的随机源。★ 回避判定是 `RAND(1,10000) <= per` 而 per 硬上限 7500
+//   ⇒ 取 10000 时**必不闪避**,把回避这个自由度从调度用例里摘出去。
+class MaxRandom final : public IRandom {
+ public:
+  int Rand(int lo, int hi) override { return hi > lo ? hi : lo; }
+  int RandMod(int n) override { return n > 0 ? n - 1 : 0; }
+};
+
+TurnCommands NoCommands() { return TurnCommands{}; }
+
+void SetAttack(TurnCommands& tc, int slot, int target) {
+  tc.present[slot] = true;
+  tc.commands[slot] = sg::domain::BattleCommand{};
+  tc.commands[slot].command_kind = sg::domain::BattleCommand::CommandKind::ATTACK;
+  tc.commands[slot].command.attack.target = static_cast<std::uint32_t>(target);
+}
+
+void SetKind(TurnCommands& tc, int slot,
+             sg::domain::BattleCommand::CommandKind kind) {
+  tc.present[slot] = true;
+  tc.commands[slot] = sg::domain::BattleCommand{};
+  tc.commands[slot].command_kind = kind;
+}
+
+std::size_t CountKind(const sg::domain::BattleEvents& ev,
+                      sg::domain::BattleEvent::BodyKind kind) {
+  std::size_t n = 0;
+  for (std::size_t i = 0; i < ev.events.size(); ++i)
+    if (ev.events[i].body_kind == kind) ++n;
+  return n;
+}
+
+}  // namespace
+
+// ── 行动顺序 ───────────────────────────────────────────────────────────────
+
+TEST_CASE("行动顺序:排序键 = quick + 20 + sequence,且不夹下限") {
+  // `BATTLE_DexCalc` 基数 = WORKQUICK + 20(05 §2.5)。
+  // quick == 0 ⇒ 抖动项 RAND(0, 0) == 0 ⇒ dex 恒等于基数,可以精确断言。
+  auto c = MakeCombatant(CombatantKind::kPlayer, 100, 100, /*quick=*/0);
+  sg::domain::BattleCommand cmd{};
+  cmd.command_kind = sg::domain::BattleCommand::CommandKind::ATTACK;
+
+  SeededRandom rng(1);
+  CHECK(ComputeActionDex(c, cmd, rng) == kDexBase);
+
+  // 装备「先攻」直接加在排序键上。
+  c.mods.sequence = 7;
+  CHECK(ComputeActionDex(c, cmd, rng) == kDexBase + 7);
+
+  // ⚠️★ 原版 `if (dex <= 1) dex = 1;` **是被注释掉的** ⇒ 结果可以 ≤ 1 甚至为负。
+  //    这里用负 sequence 逼出该情形:若有人"顺手加个下限",这条会失败。
+  c.mods.sequence = -100;
+  CHECK(ComputeActionDex(c, cmd, rng) < 0);
+}
+
+TEST_CASE("行动顺序:同速按入场位次(DR-BT8)") {
+  // ★★ 这是 DR-BT8 的回归用例。原版 `EsCmp` 是布尔比较器(小于与等于都返回 0),
+  //    不满足严格弱序 ⇒ 同速顺序是标准库未定义行为(00 §10.2 六项之一)。
+  //    DR-BT8 裁定「按入场位次」⇒ 全员同速时,顺序必须恰好是槽号升序。
+  //    ⚠️ 若把实现里的插入排序换成 std::sort,这条就会在某些标准库上失败。
+  BattleField f = MakeField();
+  TurnCommands tc = NoCommands();
+  for (int i = 0; i < kSlotCount; ++i) {
+    f.at(i) = MakeCombatant(CombatantKind::kPlayer, 100, 100, /*quick=*/0);
+    f.at(i).slot = static_cast<std::uint8_t>(i);
+    SetKind(tc, i, sg::domain::BattleCommand::CommandKind::WAIT);
+  }
+
+  std::uint8_t order[kSlotCount] = {};
+  SeededRandom rng(12345);
+  const int n = BuildActionOrder(f, tc, rng, order);
+  REQUIRE(n == kSlotCount);
+  for (int i = 0; i < kSlotCount; ++i) CHECK(order[i] == i);
+}
+
+TEST_CASE("行动顺序:快的先动;无指令 / 已死 / 空槽不入列") {
+  BattleField f = MakeField();
+  TurnCommands tc = NoCommands();
+
+  for (int i = 0; i < 4; ++i) {
+    f.at(i) = MakeCombatant(CombatantKind::kPlayer, 100, 100, /*quick=*/0);
+    f.at(i).slot = static_cast<std::uint8_t>(i);
+  }
+  f.at(1).mods.sequence = 50;   // 用 sequence 制造确定的速度差(quick=0 ⇒ 无抖动)
+  f.at(2).dead = true;          // 已死不入列
+  // slot 3 有单位但**不给指令** ⇒ 不入列(05 §2.2 第 1 步:敌方由 AI 填齐)
+  SetKind(tc, 0, sg::domain::BattleCommand::CommandKind::WAIT);
+  SetKind(tc, 1, sg::domain::BattleCommand::CommandKind::WAIT);
+  SetKind(tc, 2, sg::domain::BattleCommand::CommandKind::WAIT);
+
+  std::uint8_t order[kSlotCount] = {};
+  SeededRandom rng(7);
+  const int n = BuildActionOrder(f, tc, rng, order);
+  REQUIRE(n == 2);
+  CHECK(order[0] == 1);   // sequence +50 ⇒ 先动
+  CHECK(order[1] == 0);
+}
+
+// ── 攻击次数(§3.9 / DR-BT1)──────────────────────────────────────────────
+
+TEST_CASE("攻击次数:有武器走 RAND(min,max),≤0 则 1") {
+  const RulesConfig cfg{};
+  auto c = MakeCombatant(CombatantKind::kPlayer, 100, 100);
+  c.level = 50;
+  c.mods.unarmed = false;
+  c.mods.attack_num_min = 2;
+  c.mods.attack_num_max = 2;
+
+  SeededRandom rng(1);
+  CHECK(RollAttackCount(c, cfg, rng) == 2);
+
+  // 武器数据坏成 0 / 负数时兜底 1 段(原版 `if (n <= 0) n = 1;`)。
+  c.mods.attack_num_min = 0;
+  c.mods.attack_num_max = 0;
+  CHECK(RollAttackCount(c, cfg, rng) == 1);
+}
+
+TEST_CASE("攻击次数:空手的两道前置 —— 等级 ≥ 10 且是玩家") {
+  const RulesConfig cfg{};
+
+  // ★ 若漏掉这两道,**所有敌人都可能触发 10 连击**。
+  auto low_level = MakeCombatant(CombatantKind::kPlayer, 100, 100);
+  low_level.level = kUnarmedMultihitMinLevel - 1;
+  low_level.luck  = 25;
+  auto enemy = MakeCombatant(CombatantKind::kEnemy, 100, 100);
+  enemy.level = 99;
+  enemy.luck  = 25;
+
+  // 脚本首值 1 ⇒ 落在最优档;若前置失效就会返回多段。
+  ScriptedRandom r1({1, 10});
+  ScriptedRandom r2({1, 10});
+  CHECK(RollAttackCount(low_level, cfg, r1) == 1);
+  CHECK(RollAttackCount(enemy, cfg, r2) == 1);
+}
+
+TEST_CASE("攻击次数:空手四档逐个边界(DR-BT1 照抄)") {
+  const RulesConfig cfg{};
+  auto c = MakeCombatant(CombatantKind::kPlayer, 100, 100);
+  c.level = kUnarmedMultihitMinLevel;
+  c.luck  = 0;          // ⇒ luckwork = 0,阈值恰为 10 / 30 / 70
+
+  auto count_for = [&](int roll, int burst) {
+    ScriptedRandom rng({roll, burst});
+    return RollAttackCount(c, cfg, rng);
+  };
+
+  CHECK(count_for(10, 7) == 7);    // ≤ 10 ⇒ RAND(5,10);脚本给 7
+  CHECK(count_for(11, 0) == 3);    // ≤ 30 ⇒ 3
+  CHECK(count_for(30, 0) == 3);
+  CHECK(count_for(31, 0) == 2);    // ≤ 70 ⇒ 2
+  CHECK(count_for(70, 0) == 2);
+  CHECK(count_for(71, 0) == 1);    // 否则 1
+
+  // ★ RAND(5,10) 的两端被夹住 ⇒ 段数上限确实是 10(「空手连击可达 10 段」)。
+  CHECK(count_for(1, 99) == kUnarmedBurstMax);
+  CHECK(count_for(1, -99) == kUnarmedBurstMin);
+
+  // luckwork = LUCK × 5 上限 25 ⇒ luck 25 时首档阈值 = 10 + 25 = 35。
+  c.luck = 25;
+  CHECK(count_for(35, 6) == 6);
+  CHECK(count_for(36, 0) == 3);   // 越过首档,落到「≤ 30 + 25 = 55」这一档
+}
+
+// ── 防御减伤六档(§3.5)──────────────────────────────────────────────────
+
+TEST_CASE("防御减伤:六档逐个边界,期望系数 0.175(★ 文档的 0.155 算错了)") {
+  // 表在 constants.h(kGuardTiers)。★ 逐边界断言,挡"抄错一格"。
+  auto factor_at = [](int roll) {
+    ScriptedRandom rng({roll});
+    return RollGuardFactor(rng);
+  };
+  CHECK(factor_at(1)   == doctest::Approx(0.00));
+  CHECK(factor_at(25)  == doctest::Approx(0.00));   // ★ 25% 概率完全免伤
+  CHECK(factor_at(26)  == doctest::Approx(0.10));
+  CHECK(factor_at(50)  == doctest::Approx(0.10));
+  CHECK(factor_at(51)  == doctest::Approx(0.20));
+  CHECK(factor_at(70)  == doctest::Approx(0.20));
+  CHECK(factor_at(71)  == doctest::Approx(0.30));
+  CHECK(factor_at(85)  == doctest::Approx(0.30));
+  CHECK(factor_at(86)  == doctest::Approx(0.40));
+  CHECK(factor_at(95)  == doctest::Approx(0.40));
+  CHECK(factor_at(96)  == doctest::Approx(0.50));
+  CHECK(factor_at(100) == doctest::Approx(0.50));
+
+  // ★★ **一处被本用例当场推翻的文档数字(2026-09-03)**:
+  //    `05` §3.5 与 constants.h 都写「期望系数 ≈ 0.155」——**算错了**。
+  //    按档宽加权手算(不靠抽样):
+  //        (25×0.00 + 25×0.10 + 20×0.20 + 15×0.30 + 10×0.40 + 5×0.50) / 100
+  //      = (0 + 2.5 + 4.0 + 4.5 + 4.0 + 2.5) / 100 = **0.175**
+  //    ⇒ 六档表本身与源码一致(上面 12 条边界断言),错的只是那个概括值。
+  //    ⚠️ 差 0.02 看着小,但它是**全局防御强度**的口径:照 0.155 去调平衡,
+  //      会把"防御比预期弱 13%"当成数值问题去改别处。
+  const double expected = (25 * 0.00 + 25 * 0.10 + 20 * 0.20 +
+                           15 * 0.30 + 10 * 0.40 + 5 * 0.50) / 100.0;
+  CHECK(expected == doctest::Approx(0.175));
+}
+
+// ── 骑宠分摊(§3.6 / DR-BT2)─────────────────────────────────────────────
+
+TEST_CASE("骑宠分摊:DR-BT2 修正 —— 无损,且防御高者多扛") {
+  // ⚠️ 原式 `player = damage·petDef/(myDef+petDef) + 1` 有两处 `+1`(总伤多 2),
+  //    且 petDef 在分子 ⇒ **宠物防御越高、主人吃得越多**,反向惩罚养骑宠。
+  //    DR-BT2 裁定 = 修正:分子改 myDef、去掉 +1。
+  const RideSplit s = SplitRideDamage(100, /*myDef=*/300, /*petDef=*/100);
+  CHECK(s.player + s.pet == 100);   // ① 无损(IDL Damage 的注释按此写)
+  CHECK(s.player == 75);            // ② 主人防御 3 倍于宠物 ⇒ 主人扛 75%
+  CHECK(s.pet == 25);
+
+  // 反向确认:宠物防御高时宠物多扛 —— 这正是原式做不到的。
+  const RideSplit s2 = SplitRideDamage(100, /*myDef=*/100, /*petDef=*/300);
+  CHECK(s2.player == 25);
+  CHECK(s2.pet == 75);
+
+  // 双方防御都是 0 ⇒ 原式除零。新实现全部记在主人身上,且仍然无损。
+  const RideSplit s3 = SplitRideDamage(37, 0, 0);
+  CHECK(s3.player == 37);
+  CHECK(s3.pet == 0);
+}
+
+// ── ResolveTurn ───────────────────────────────────────────────────────────
+
+namespace {
+
+// 一场 1v1:slot 0 是玩家(空手、等级 1 ⇒ 恒 1 段),slot 10 是敌人。
+struct Duel {
+  BattleField  field = MakeField();
+  TurnCommands cmds  = NoCommands();
+};
+
+Duel MakeDuel(int atk = 1000, int def = 10) {
+  Duel d;
+  d.field.at(0) = MakeCombatant(CombatantKind::kPlayer, atk, 100);
+  d.field.at(0).slot = 0;
+  d.field.at(10) = MakeCombatant(CombatantKind::kEnemy, 100, def);
+  d.field.at(10).slot = 10;
+  SetAttack(d.cmds, 0, 10);
+  return d;
+}
+
+}  // namespace
+
+TEST_CASE("ResolveTurn:一次普攻 ⇒ Hit + Damage,且 target_count 与 Damage 数一致") {
+  Duel d = MakeDuel();
+  sg::domain::BattleEvents ev{};
+  MaxRandom rng;
+
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+  CHECK(ev.battle_id == d.field.battle_id);
+  CHECK(ev.turn == d.field.turn);
+
+  REQUIRE(ev.events.size() == 2);
+  REQUIRE(ev.events[0].body_kind == sg::domain::BattleEvent::BodyKind::HIT);
+  const sg::domain::Hit& hit = ev.events[0].body.hit;
+  CHECK(hit.attacker == 0u);
+  CHECK(hit.kind == sg::domain::AttackKind::ATTACK_KIND_MELEE);
+  CHECK(hit.skill_id == 0u);
+  // ★ 变长目标列表的新形状(IDL 注释):Hit 声明 target_count,其后紧跟同样多个 Damage。
+  //   ⚠️ 这条关系一旦对不上,客户端就会把下一个 Hit 当成本次的目标读进来。
+  CHECK(hit.target_count == 1u);
+  CHECK(CountKind(ev, sg::domain::BattleEvent::BodyKind::DAMAGE) == hit.target_count);
+
+  REQUIRE(ev.events[1].body_kind == sg::domain::BattleEvent::BodyKind::DAMAGE);
+  const sg::domain::Damage& dmg = ev.events[1].body.damage;
+  CHECK(dmg.target == 10u);
+  CHECK(dmg.hp_delta < 0);
+  CHECK((dmg.flags &
+         static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_NORMAL)) != 0u);
+}
+
+TEST_CASE("ResolveTurn:L3 不写世界状态 —— field 逐字节不变") {
+  // ★★ 这是四步改造第②步的**机械验证**:原版 `BATTLE_DamageSub` 直接
+  //    `CHAR_setInt(HP)`,新实现只产事件、由调用方应用。
+  //    (`field` 已是 const 引用,类型系统本就挡住了写;本用例挡的是
+  //     "将来有人把 const 去掉"这种回归。)
+  Duel d = MakeDuel();
+  const BattleField before = d.field;
+  sg::domain::BattleEvents ev{};
+  SeededRandom rng(99);
+  ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev);
+  CHECK(std::memcmp(&before, &d.field, sizeof(BattleField)) == 0);
+}
+
+TEST_CASE("ResolveTurn:回避产事件而不是被跳过(DODGE 标志)") {
+  // ⚠️ 闪避**必须**产事件:事件流是演出脚本,少一条客户端就少一个动作 ——
+  //    而 1.4 的验收口径正是「事件流端到端一致」(客户端 01 §12.1)。
+  Duel d = MakeDuel();
+  d.field.at(10).mods.always_dodge = true;   // ⑦ 必闪(_PETSKILL_SETDUCK,8.0 开)
+
+  sg::domain::BattleEvents ev{};
+  SeededRandom rng(5);
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+  REQUIRE(ev.events.size() == 2);
+  const sg::domain::Damage& dmg = ev.events[1].body.damage;
+  CHECK((dmg.flags &
+         static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_DODGE)) != 0u);
+  CHECK(dmg.hp_delta == 0);
+  CHECK(ev.events[0].body.hit.target_count == 1u);
+}
+
+TEST_CASE("ResolveTurn:致死置 DEATH,且同回合剩余段数作废") {
+  Duel d = MakeDuel(/*atk=*/100000, /*def=*/1);
+  d.field.at(0).level = kUnarmedMultihitMinLevel;
+  d.field.at(10).hp = 1;
+
+  // 脚本:段数档(1 ⇒ 首档)· 段数(10)· 其后一律取上界。
+  ScriptedRandom rng({1, 10, 10000});
+  sg::domain::BattleEvents ev{};
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+  // ★ 10 段只打出 1 条 Damage ⇒ 剩余 9 段作废(原版同样逐段查存活)。
+  CHECK(CountKind(ev, sg::domain::BattleEvent::BodyKind::DAMAGE) == 1);
+  CHECK(ev.events[0].body.hit.target_count == 1u);
+  CHECK((ev.events[1].body.damage.flags &
+         static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_DEATH)) != 0u);
+}
+
+TEST_CASE("ResolveTurn:不可行动者不产事件(DR-BT5)") {
+  // ★ 原因在**指令阶段**由 BattleSelfInfo.cannot_act 下发(DR-CP7 置灰),
+  //   不是结算完再告诉玩家"你刚才动不了"(DR-CP6 反对的假交互)。
+  for (const auto st : {BattleStatus::BATTLE_ST_PARALYSIS,
+                        BattleStatus::BATTLE_ST_STONE,
+                        BattleStatus::BATTLE_ST_SLEEP}) {
+    Duel d = MakeDuel();
+    d.field.at(0).status = static_cast<std::uint8_t>(st);
+    sg::domain::BattleEvents ev{};
+    MaxRandom rng;
+    REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+    CHECK(ev.events.size() == 0);
+  }
+}
+
+TEST_CASE("ResolveTurn:批次 0.5 未接入的指令一律跳过,不产事件") {
+  // ⚠️ 本用例把**覆盖边界**钉住:逃跑 / 捕获 / 道具 / 换宠 / 宠技 / 职技 / 咒术
+  //    在批次 0.5 里必须是"什么都不发生",而不是"发生了一半"。
+  //    ⇒ 接入任一指令时本用例会失败,那正是提醒去更新 battle.h 的覆盖边界表。
+  using K = sg::domain::BattleCommand::CommandKind;
+  for (const auto k : {K::GUARD, K::WAIT, K::ESCAPE, K::CAPTURE, K::PET_IN,
+                       K::PET_OUT, K::USE_ITEM, K::PET_SKILL, K::PROF_SKILL, K::SPELL}) {
+    Duel d = MakeDuel();
+    SetKind(d.cmds, 0, k);
+    sg::domain::BattleEvents ev{};
+    MaxRandom rng;
+    REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+    CHECK(ev.events.size() == 0);
+  }
+}
+
+TEST_CASE("ResolveTurn:守方防御 ⇒ 减伤且置 GUARD;混乱值 > 0 时不减伤") {
+  // ★ §3.5 的触发条件是**两条**:守方指令 = 防御 **且 混乱值 ≤ 0**。
+  //   ⚠️ 只判指令会让"混乱中的防御"也吃到减伤 —— 这条用例就是挡它的。
+  auto run = [](int confusion, std::uint32_t* flags_out) {
+    Duel d = MakeDuel(/*atk=*/100000, /*def=*/1);
+    d.field.at(10).confusion = confusion;
+    d.field.at(10).hp = d.field.at(10).max_hp = 100000000;
+    SetKind(d.cmds, 10, sg::domain::BattleCommand::CommandKind::GUARD);
+    sg::domain::BattleEvents ev{};
+    MaxRandom rng;   // 防御减伤抽到 RAND(1,100) == 100 ⇒ 系数 0.50(最弱一档)
+    ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev);
+    REQUIRE(ev.events.size() >= 2);
+    *flags_out = ev.events[1].body.damage.flags;
+    return ev.events[1].body.damage.hp_delta;
+  };
+
+  std::uint32_t guard_flags = 0, confused_flags = 0;
+  const std::int32_t guarded  = run(/*confusion=*/0, &guard_flags);
+  const std::int32_t confused = run(/*confusion=*/1, &confused_flags);
+
+  CHECK((guard_flags &
+         static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_GUARD)) != 0u);
+  CHECK((confused_flags &
+         static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_GUARD)) == 0u);
+  CHECK(guarded > confused);   // hp_delta 是负数 ⇒ 掉血更少 = 值更大
+}
+
+TEST_CASE("ResolveTurn:骑宠分摊写进 hp_delta / pet_hp_delta") {
+  Duel d = MakeDuel(/*atk=*/100000, /*def=*/1);
+  d.field.at(10).has_ride     = true;
+  d.field.at(10).ride_hp      = 500;
+  d.field.at(10).ride_max_hp  = 500;
+  d.field.at(10).defense      = 300;
+  d.field.at(10).ride_defense = 100;
+  d.field.at(10).hp = d.field.at(10).max_hp = 100000000;
+
+  sg::domain::BattleEvents ev{};
+  MaxRandom rng;
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+  REQUIRE(ev.events.size() == 2);
+  const sg::domain::Damage& dmg = ev.events[1].body.damage;
+
+  CHECK(dmg.hp_delta < 0);
+  CHECK(dmg.pet_hp_delta < 0);
+  // ★ DR-BT2 修正后的方向:主人防御 300 > 宠物 100 ⇒ 主人扛得更多。
+  CHECK(-dmg.hp_delta > -dmg.pet_hp_delta);
+}
+
+TEST_CASE("ResolveTurn:事件溢出返回 false,不静默截断") {
+  // ⚠️★ 05 §10.4:原版 `szAllBattleString` 的 strncat 第三参写错、等价无上界 strcat,
+  //    余量仅 56 字节且**无第二道防线**。⇒ 新实现宁可分包,不可静默截断。
+  //
+  // 构造:20 个单位环形互攻,每人 30 段 ⇒ 20 × (1 + 30) = 620 > 256。
+  // ★ 攻击力 0 ⇒ damage 走「defense > attack」分支、再被第 7 步的 ×70/100 压成 0
+  //   ⇒ 没人会死,段数不会因死亡提前中断。
+  BattleField f = MakeField();
+  TurnCommands tc = NoCommands();
+  for (int i = 0; i < kSlotCount; ++i) {
+    f.at(i) = MakeCombatant(CombatantKind::kPlayer, /*atk=*/0, /*def=*/1000);
+    f.at(i).slot = static_cast<std::uint8_t>(i);
+    f.at(i).hp = f.at(i).max_hp = 1000000;
+    f.at(i).mods.unarmed = false;
+    f.at(i).mods.attack_num_min = 30;
+    f.at(i).mods.attack_num_max = 30;
+    SetAttack(tc, i, (i + 1) % kSlotCount);
+  }
+
+  sg::domain::BattleEvents ev{};
+  MaxRandom rng;
+  CHECK(ResolveTurn(f, tc, RulesConfig{}, rng, ev) == false);
+  CHECK(ev.events.size() == ev.events.capacity());
+}
+
+TEST_CASE("ResolveTurn:可回放 —— 同种子 + 同输入 ⇒ 事件流逐位相同") {
+  // ★★ 这是 00 §0 第 ③ 层「不可自证」的补偿手段本身(05 §1.5):
+  //    无法与原版比对,但**可以与自己的历史行为比对**。
+  //    ⚠️ 调度层比公式层更容易破这条 —— 遍历顺序、提前 break、少抽一次随机数都会破。
+  Duel a = MakeDuel();
+  Duel b = MakeDuel();
+  SetAttack(a.cmds, 10, 0);
+  SetAttack(b.cmds, 10, 0);
+  a.field.at(0).level = b.field.at(0).level = 30;   // ⇒ 空手可多段,序列更长
+
+  sg::domain::BattleEvents ev1{}, ev2{};
+  SeededRandom r1(0xC0FFEE), r2(0xC0FFEE);
+  const bool ok1 = ResolveTurn(a.field, a.cmds, RulesConfig{}, r1, ev1);
+  const bool ok2 = ResolveTurn(b.field, b.cmds, RulesConfig{}, r2, ev2);
+
+  CHECK(ok1 == ok2);
+  REQUIRE(ev1.events.size() == ev2.events.size());
+  CHECK(ev1.events.size() > 0);
+  // 逐位比较:生成物是 POD(sg_idl_runtime.h 的 ② 条)⇒ 可直接 memcmp。
+  CHECK(std::memcmp(&ev1, &ev2, sizeof(sg::domain::BattleEvents)) == 0);
+  CHECK(r1.state() == r2.state());   // ★ 随机源的消费序列也必须一致
 }
