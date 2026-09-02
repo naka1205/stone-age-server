@@ -25,6 +25,20 @@ import re
 import sys
 from pathlib import Path
 
+# ★★ Windows 上的输出编码不是风格问题,是**退出码正确性**问题(2026-09-02 实测)。
+#
+#   简中 Windows 控制台默认 cp936(GBK),而本脚本的输出含 ✅ / ★ / ⇒ ——
+#   `print` 会抛 UnicodeEncodeError,于是两种情况**都读不出真相**:
+#     · 纯度通过时:崩在成功那一行 ⇒ 退出码 1 ⇒ CI 报「D2 的守卫失败」,而它其实通过了;
+#     · 纯度失败时:崩在打印违规清单那一行 ⇒ 看到的是 traceback,不是「D2 被破了」。
+#
+#   ⇒ 与 shared/ 自己给 `/utf-8` 同理:凡「消费方不做就会坏」的,脚本自己保证。
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):   # 被重定向到不支持 reconfigure 的对象
+        pass
+
 ROOT = Path(__file__).resolve().parent.parent
 SHARED = ROOT / "shared"
 

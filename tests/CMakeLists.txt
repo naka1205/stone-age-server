@@ -89,9 +89,28 @@ if(Python3_FOUND)
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_SOURCE_DIR}/tools/check_shared_purity.py)
   # IDL schema 与生成物同步(02 §8 检查 1–3 + 生成物入库)
-  add_test(NAME idl_verify
-           COMMAND ${Python3_EXECUTABLE}
-                   ${CMAKE_SOURCE_DIR}/idl/codegen/sgidl_gen.py --verify)
+  #
+  # ⚠️★ 它需要 **protoc**,而 protoc 是**构建期工具**、不是运行时依赖:
+  #    DR-TS1 边界 ① 运行时不链接 libprotobuf;DR-TS2 生成物入库
+  #    ⇒ **只消费生成物的人根本不需要装 protoc**(客户端连 protoc 都不需要)。
+  #    ⇒ 「本机没有 protoc」是一种正常状态,不该表现为一条常红的 ctest ——
+  #      常红会训练人忽略红色,而这个仓最怕的恰是「把绿/红读错」(00 §10.4)。
+  #
+  # ⇒ 按本文件下方「Python3 缺失」的同一先例处理:**不注册 + 大声告警**。
+  # ⚠️ 但 CI 上必须有 protoc,否则这道关就**静默消失**了 —— 那比常红更坏。
+  find_program(SG_PROTOC NAMES protoc)
+  if(SG_PROTOC)
+    add_test(NAME idl_verify
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_SOURCE_DIR}/idl/codegen/sgidl_gen.py --verify)
+  else()
+    message(WARNING
+        "未找到 protoc —— IDL 生成物同步检查(idl_verify)不会注册。\n"
+        "   ⚠️ 这不是可选的风格检查:它守的是「schema 改了、生成物没重跑」这类"
+        "静默漂移(02 §8 检查 1–3)。**CI 上必须有 protoc。**\n"
+        "   本机若只消费生成物则无需安装(DR-TS2 已入库);改 schema 前请先装上,"
+        "或设 PROTOC=<路径>。")
+  endif()
 else()
   message(WARNING
       "未找到 Python3 —— shared/ 依赖纯度与 IDL 同步检查将不会运行。"

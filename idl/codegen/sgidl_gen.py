@@ -19,11 +19,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+# ★★ 同 tools/check_shared_purity.py:Windows 控制台默认 cp936,而本脚本输出含
+#   ✅ / ★ ⇒ print 抛 UnicodeEncodeError,退出码变 1,把「通过」读成「失败」。
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -39,6 +48,31 @@ REGISTRY = Path(__file__).resolve().parent / "registry" / "msg_ids.json"
 OPTION_FILE = "sg_options.proto"
 
 
+def resolve_protoc() -> str:
+    """定位 protoc。
+
+    ★ DR-TS1 边界 ①:protoc **只在构建期**用于把 .proto 解析成 descriptor set,
+      运行时不链接 libprotobuf ⇒ 它是构建工具,不是依赖。
+      叠加 DR-TS2(生成物入库)⇒ **只消费生成物的人根本不需要装 protoc**。
+
+    ⚠️ 因此「缺 protoc」是一种**正常状态**,必须给一句能照着做的诊断 ——
+      不要让它表现为 subprocess 抛出的 `FileNotFoundError: [WinError 2]` traceback
+      (2026-09-02 Windows 一次性验证实测:那份 traceback 读起来像脚本坏了,
+       而真实情况只是这台机器没装构建期工具)。
+    """
+    exe = os.environ.get("PROTOC") or "protoc"
+    found = shutil.which(exe)
+    if not found:
+        raise SystemExit(
+            f"★ 找不到 protoc（{exe}）。\n"
+            "  它只在构建期用于解析 .proto（DR-TS1 边界 ①），运行时不链接 libprotobuf；\n"
+            "  生成物已入库（DR-TS2）⇒ 只**消费**生成物无需 protoc，\n"
+            "  只有**改 schema 或校验生成物同步**时才需要它。\n"
+            "  装法：winget install Google.Protobuf ／ choco install protoc ／ brew install protobuf\n"
+            "  或用环境变量指定：PROTOC=<protoc 可执行文件路径>")
+    return found
+
+
 def run_protoc(schema_dir: Path) -> bytes:
     protos = sorted(p.relative_to(schema_dir).as_posix()
                     for p in schema_dir.rglob("*.proto"))
@@ -46,7 +80,7 @@ def run_protoc(schema_dir: Path) -> bytes:
         raise SystemExit(f"schema 目录下没有 .proto 文件：{schema_dir}")
     with tempfile.TemporaryDirectory() as td:
         out = Path(td) / "descriptor.pb"
-        cmd = ["protoc", f"--proto_path={schema_dir}",
+        cmd = [resolve_protoc(), f"--proto_path={schema_dir}",
                f"--descriptor_set_out={out}", "--include_imports", *protos]
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
