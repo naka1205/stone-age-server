@@ -117,22 +117,27 @@ stone-age-server/
 │   └── generated/              ✅ 两端共用的生成产物 —— **入库**(DR-TS2 已择一并固定)
 ├── shared/                     ✅ ★★ 与客户端共享的源码,只依赖标准库
 │   ├── rules/                  ✅ L3 契约(constants / random / config / combatant / battle)
-│   │                              ⬜ 实现属阶段 1.1
+│   │                              ⬜ 实现属阶段 0.1/1.1(按 `00` §1.3.1 分批)
 │   └── model/                  ✅ handle.h(M10)  ⬜ 实体族属阶段 1.2
-├── src/                        ⬜ 阶段 2
-│   ├── platform/               L0:日志 · 指标 · 配置 · 时钟 · 随机源实现
-│   ├── net/                    L0:ITransport(TCP)· 缓冲 · 编解码接入
-│   ├── storage/                L0:MySQL 访问 · 工作单元 · 迁移
-│   ├── lock/                   L0:ILock(Redis)
-│   ├── gateway/                模块
-│   ├── world/                  模块
-│   ├── session_storage/        模块
-│   ├── social/                 模块
+├── src/                        ⬜ ★ 最小切面属阶段 1.5(`00` §9.0.4),其余阶段 2
+│   ├── platform/               1.5:配置 · 日志 · 单调时钟 · IRandom 实现  │ 2:指标 · 热重载
+│   ├── net/                    1.5:ITransport(TCP)· ★ 长度前缀成帧 · 编解码接入
+│   ├── storage/                ⬜ 阶段 2:MySQL 访问 · 工作单元 · 迁移
+│   ├── lock/                   ⬜ 阶段 2:ILock(Redis)
+│   ├── gateway/                ⬜ 阶段 2
+│   ├── world/                  1.5:最小 tick + 一场战斗的生命周期  │ 2:NPC · 移动 · 视野
+│   ├── session_storage/        ⬜ 阶段 2
+│   ├── social/                 ⬜ 阶段 2
 │   └── main.cpp                ★ 单一入口,按配置装载模块
 ├── tests/                      ✅ 契约冒烟 + IDL 冒烟 + 两条脚本检查(ctest 四项)
-├── tools/                      ✅ check_shared_purity.py  ⬜ 数据导入 / schema 迁移
+├── tools/                      ✅ check_shared_purity.py · rescope_battle_port.py
+│                               ⬜ 数据导入 / schema 迁移
 └── deploy/                     ⬜ Dockerfile · compose(测试单容器)· 生产编排
 ```
+
+⚠️★ **1.5 只建最小切面,但目录与链接边界要一次立对**:`00` §3.1 要求各模块
+编译为独立静态库、只对外暴露 `include/<module>/api.h`。**事后拆比一开始就分贵得多**,
+而违反它的后果是 `00` §10.4 三类静默错误里最难查的那种(单容器跑通、生产分布式挂)。
 
 ★ **`shared/` 是 D2 的物理体现** —— 该目录被客户端仓以 CMake `FetchContent` + 锁定 tag 方式引用
 (DR-TS3),**两端编译同一份源码**。因此它只能依赖标准库:不得出现 socket、MySQL、日志、
@@ -429,7 +434,7 @@ storage 侧   UoW:  InnoDB 事务
 
 | # | 欠债 | 说明 |
 |---|---|---|
-| 1 | ★ **`BATTLE_Battling` 四步改造未做** | 阶段 0.1,D2 的物理前提,**与语言选型无关,无论哪条路线都要付**;⚠️ **规模按 `00` §1.3 实测重排**(第②步 52.4×) |
+| 1 | 🔄 ★ **`BATTLE_Battling` 移植为 L3 —— 批次 0 已落地,其余未做** | 阶段 **0.1/1.1**(★ 0.1 与 1.1 已于 2026-08-31 合并 —— `00` §9.0.3 裁定**一遍到位,不做中间态**:两段式产出的"改造后的 C"因 P1/P2 永远无法编译测试,且 720 处要编辑两次)。**已落地**:批次 0 的四条公式(`shared/rules/battle.cpp`)+ 黄金用例集(15 用例 / 2,148 断言)。**未做**:回合调度 `ResolveTurn`、批次 A/B/C/D。⚠️ 规模按 `00` §1.3.1 批次表(第②步净规模 **720** 处,不是 1,047 —— 31.2% 是指令登记) |
 | 2 | ✅ ~~**D2 的可撤销点未兑现**~~ | ★★ **已于 2026-08-31 兑现并关闭**(阶段 0.0):全闭包 + 全指令分支 + 两张技能表重跑,覆盖 340 个函数(13.1×)⇒ **D2 存续、D1 不动**。见 `00` §1.1;产物 `stoneage-plan/tools/battle_purity_full.json` |
 | 3 | ✅ ~~协议 IDL schema 未定稿~~ 选型已定,**schema 本身仍待写** | DR-TS1 已裁定(`11` §1.1):`.proto` 语法 + 自写 codegen → 纯 POD。阶段 0.2 可开工 |
 | 4 | 6 项**永久不可判定** | `00` §10.2;其中 `fmdplevelexp` 是 **10 倍的裁定风险敞口,确认无法关闭** |

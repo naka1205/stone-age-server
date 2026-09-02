@@ -14,21 +14,28 @@
 #    而不是等到客户端集成那天。
 set(SG_SHARED_CXX_STANDARD 17 CACHE STRING "shared/ 的 C++ 标准下限（受 GameStudio 约束）")
 
-add_library(sg_shared INTERFACE)
+add_library(sg_shared STATIC
+    rules/battle.cpp
+)
 
-target_include_directories(sg_shared INTERFACE "${CMAKE_CURRENT_LIST_DIR}")
+target_include_directories(sg_shared PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
 
 # ✅ 允许:IDL 的 domain/ 组(事件与领域值对象)
 # ❌ 禁止:IDL 的 transport/ 组
 #   —— 但 sg_idl 这个 target 同时暴露两组(生成物的 #include 从 generated/cpp 根算起,
 #      靠 include 路径隔离不了)。⇒ 该边界由 tools/check_shared_purity.py 强制。
-target_link_libraries(sg_shared INTERFACE sg_idl)
+target_link_libraries(sg_shared PUBLIC sg_idl)
 
-target_compile_features(sg_shared INTERFACE cxx_std_17)
+target_compile_features(sg_shared PUBLIC cxx_std_17)
 
-# ⚠️ 这里**不**给 sg_shared 加任何 target_link_libraries(除 sg_idl):
+# ★ 阶段 0.1/1.1 起 sg_shared 是 STATIC(此前是 INTERFACE 的纯头契约层)。
+#   ⚠️ 标准仍锁 17 —— 见上方 SG_SHARED_CXX_STANDARD。它要被 GameStudio(C++17)编译。
+set_target_properties(sg_shared PROPERTIES
+    CXX_STANDARD ${SG_SHARED_CXX_STANDARD}
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF)
+
+sg_apply_warnings(sg_shared)
+
+# ⚠️ 这里**不**给 sg_shared 加任何其它 target_link_libraries(除 sg_idl):
 #    一旦链上 pthread / 日志 / 网络,客户端侧的 FetchContent 就会被迫一起拉。
-
-# 目前 shared/ 全是头文件(契约层)。
-# TODO(阶段 1.1):rules/battle.cpp 等实现落地后,把 sg_shared 从 INTERFACE
-#   改成 STATIC 并在此列出源文件;届时同时接入 doctest(DR-TS4)。

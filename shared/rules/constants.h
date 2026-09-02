@@ -40,9 +40,22 @@ inline constexpr int    kAttrMax = 100;        // 单属上限,且 Σ 四属 + �
 inline constexpr double kDefenseCoefNewPower = 0.70;
 
 // ★★ [8.0] 攻防比的**质变阈值**。低于它伤害几乎为 0,超过它线性放大 2 倍。
-//   ⚠️ 原版第二分支上界用**浮点** `defense*8.0/7.0`、第三分支下界用**整数除法**
-//      `defense*8/7` ⇒ 边界处存在**两分支都不命中的窄缝**,此时 damage 保持初值 0。
-//      两版一致 ⇒ 这是原版行为,实现时须**保留**该窄缝(见 battle.h 的移植注记)。
+//
+// ⚠️★ **一处已被实测推翻的文档说法(2026-08-31 更正)**:
+//   `05-battle.md` §3.1 原称「第二分支上界用浮点 `defense*8.0/7.0`、第三分支下界用
+//   **整数除法** `defense*8/7` ⇒ 边界处存在**两分支都不命中的窄缝**,damage 保持 0」。
+//   逐条核对源码 `battle_event.c:1225-1235` 后,**两个论断都不成立**:
+//
+//   ① **不是整数除法** —— `float attack, defense;`(`:1164`)⇒ `defense*8/7` 是
+//      **float 运算**,不是整数除法;
+//   ② ★★ **没有窄缝,方向恰好相反** —— 实测(float 口径扫 2,862 万组:**0 组窄缝**;
+//      即便按原文的整数除法口径扫 20 万 defense:**0 组窄缝、171,429 组重叠**)。
+//      整数除法只会让下界**变小**,产生的是**重叠**而非缝;而三分支是 `else if` 串联,
+//      重叠区间由**第二分支**接管。
+//
+//   ⇒ **边界值走第二分支 `RAND(0, attack/16)`,不是 0。**
+//   ⚠️ 若照原文实现"窄缝返回 0",会**引入原版没有的行为**。
+//   证据用例:`tests/rules_battle_test.cpp` 的 "三分段:无窄缝,边界走第二分支"。
 inline constexpr int kAttackDefenseThresholdNum = 8;
 inline constexpr int kAttackDefenseThresholdDen = 7;
 
@@ -120,6 +133,28 @@ inline constexpr int kElementDivisor = 10000;
 
 // ⚠️ 四属结界按**地水火风顺序 `else if` 串联** ⇒ **只有第一个命中的结界生效,不叠加**。
 //   这是原版行为,不是 bug ——实现时须保留短路语义。
+
+// ── ★★ 场地属性:与 Element **不同的编码**,不可混用 ──────────────
+//
+// ⚠️⚠️ 这是本文件的**第二处顺序陷阱**(第一处是 Element vs 相克表头)。
+//   原版 `battle.h:581-585` 的 `BATTLE_ATTR_*` 是:
+//       NONE = 0 · EARTH = 1 · WATER = 2 · FIRE = 3 · WIND = 4
+//   而 `Element` 是:
+//       地 = 0 · 水 = 1 · 火 = 2 · 风 = 3 · 无 = 4
+//   ⇒ **两者的 0 含义相反**(一个是"无属性场地",一个是"地属性")。
+//
+// ★ 实测代价:移植 `BATTLE_FieldAttAdjust` 时若直接拿 `Element` 当场地编码,
+//   「无属性场地」会被当成「地属性场地」⇒ 纯地攻方的场地系数从 0.5 变成 1.0,
+//   与守方的比值翻倍 ⇒ **伤害整体 ×2,而且只在特定属性组合下出现**。
+//   这个 bug 在 2026-08-31 移植时真的发生了,被相克用例的手算基准接住
+//   (期望 150、实得 300)。⇒ 显式建枚举,不复用 Element。
+enum class FieldAttribute : std::uint8_t {
+  kNone  = 0,   // ★ 无属性场地 —— 与 Element::kEarth 同为 0,含义完全不同
+  kEarth = 1,
+  kWater = 2,
+  kFire  = 3,
+  kWind  = 4,
+};
 
 // 场地属性:power = 0.5(默认)或 0.5 + 该属值·att_pow·0.0001·0.5
 // 最终 damage × (At_FieldPow / Df_FieldPow)。★ 分母最小 0.5,不会除零。

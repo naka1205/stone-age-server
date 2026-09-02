@@ -51,6 +51,8 @@ enum class CombatantKind : std::uint8_t {
 //    L3 的输入面越小,黄金用例集越可控。
 struct CombatModifiers {
   // 攻方「无视防御 N%」⇒ defense × (1 − N/100)。§3.1 第 2 步。
+  // ⚠️★ 原版判据是 `> 1` 而不是 `> 0`(`battle_event.c:1218`)
+  //    ⇒ **N == 1 时不生效**。照 §3.1 写成 `> 0` 会引入原版没有的 1% 减防。
   int ignore_defense_percent = 0;
 
   // 守方「必闪」:★ 六道前置否决之一 —— 命中则**直接返回"已回避"**,不走概率。
@@ -58,6 +60,11 @@ struct CombatModifiers {
 
   // 守方带 NODUCK:同为六道前置否决之一(不可回避)。
   bool no_duck = false;
+
+  // ★ 守方带 ABIO(`CHAR_BATTLEFLG_ABIO`,`battle_event.c:797`)⇒ 同样不可回避。
+  // ⚠️ **05 §3.2 的「六道前置否决」清单漏了这一道**(2026-08-31 对源码复核时发现)。
+  //    实际是 6 道否决 + 1 道必闪,ABIO 是其中之一。
+  bool abio = false;
 
   // 装备「先攻」⇒ 行动顺序排序键 = dex + sequence。§2.5
   int sequence = 0;
@@ -70,6 +77,15 @@ struct CombatModifiers {
 
   // 攻方是否持弓 ⇒ 守方回避率 +20。§3.2
   bool wielding_bow = false;
+
+  // ★ 攻方命中率装备(原 `CHAR_WORKHITRIGHT`,`_EQUIT_HITRIGHT` 在 8.0 **开**)。
+  //   仅当攻方是玩家时生效:per −= RAND(0.8×hit, 1.2×hit),下限 0。§3.2
+  int hit_right = 0;
+
+  // ★ 铁壁防御的加成开关(原 `CHAR_MAGICSUPERWALL > 0`,`_MAGIC_SUPERWALL` 8.0 开)。
+  //   ⚠️ 与 `other_status_nums` 是两件事:前者决定**是否**加成,后者是加成**基数**。
+  //   原版只有 `MAGICSUPERWALL > 0` 时才读 `OTHERSTATUSNUMS`。
+  bool super_wall = false;
 };
 
 // ── 一个战斗单位 ──────────────────────────────────────────────
@@ -120,6 +136,28 @@ struct Combatant {
   std::int32_t status_turns = 0;  // 剩余回合
   // ⚠️ 虚弱 / 魔障期间,**身上所有状态的回合数都不减少**(§4.3)。
   //    又因 §4.1 全局互斥,"所有状态"实际只有虚弱/魔障自己。
+
+  // ★★ 世界末日集气(原 `CHAR_DOOMTIME`)—— **不是 `status` 的取值,是独立字段**。
+  //
+  // 理由(2026-08-31 对源码复核):`BATTLE_CanMoveCheck` 的 8 项里,前 7 项查的都是
+  // 单槽状态机能表达的量,唯独第 8 项 `CHAR_DOOMTIME`(`battle.c:8108`)是
+  // **自己发动技能的集气计时**,可与其他状态并存 ——
+  // DR-BT5 的裁定理由原话:「世界末日集气是**自己发动的技能**的集气过程」。
+  // ⇒ 压进 `status` 会丢掉"集气中同时被下毒"这种合法组合。
+  std::int32_t charging_turns = 0;
+
+  // ★ 本回合是否处于「集气完成」(原指令 `BATTLE_COM_S_CHARGE_OK`)。
+  //   攻方带此标志时,守方**一律不可回避**(§3.2 六道否决第一道)。
+  bool charge_ready = false;
+
+  // ★ 醉(原 `CHAR_WORKDRUNK > 0`)—— §3.2 「酒醉真正生效处」:
+  //   **攻方**酒醉时守方回避率 += RAND(20,30)。
+  // ⚠️ 与 `BATTLE_ST_DRUNK` 状态槽是两个来源,原版分别读 ⇒ 此处独立成字段。
+  bool drunk = false;
+
+  // ★ 反应类状态计数(原 `BATTLE_GetDamageReact`)> 0 ⇒ 守方不可回避(§3.2 第三道),
+  //   且伤害走 §3.7 的六种反应类型分支。
+  int damage_react = 0;
 
   // ── 骑宠 ──
   //

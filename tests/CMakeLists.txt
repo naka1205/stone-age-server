@@ -1,9 +1,38 @@
 # tests/CMakeLists.txt
 #
-# ⚠️ 现在用标准 <cassert>,不是 doctest。
-#    DR-TS4 已裁定 doctest,但接入点在阶段 1.1 ——
-#    契约层的用例数很少,而 shared/rules 有实现后黄金用例集才会成批出现。
-#    过早引入会给 shared/ 的客户端集成加一个此刻不必要的 FetchContent。
+# ★ doctest 已接入(DR-TS4)。接入时机由 **DR-TS6** 提前:
+#   原计划「阶段 1.1 有实现后再接」,但 DR-TS6 裁定 0.1 一遍到位、放弃两段式后,
+#   **黄金用例集从「建议做」升级为「与移植同步进行的硬要求」**
+#   —— 它是 `00` §0 中 ③ 层「规则能写出来但无法自证正确」的主要补偿手段。
+#   ⇒ 必须在移植第一个函数**之前**就位,不能等移植完再补。
+#
+# ⚠️ doctest 只进 tests/,**不进 shared/** —— 客户端以 FetchContent 引用 shared/ 时
+#    不应被迫拉一个测试框架(`01` §4「shared/ 只依赖标准库」)。
+
+include(FetchContent)
+FetchContent_Declare(doctest
+    GIT_REPOSITORY https://github.com/doctest/doctest.git
+    GIT_TAG        v2.4.11
+    GIT_SHALLOW    TRUE)
+
+# ⚠️★ 故意**只取源码,不 add_subdirectory**(即不用 FetchContent_MakeAvailable)。
+#
+# 理由是实测:doctest v2.4.11 的顶层 CMakeLists 写着 `cmake_minimum_required(VERSION 3.0)`,
+# 而新版 CMake 已移除对 < 3.5 的兼容 ⇒ `MakeAvailable` 直接配置失败。
+#
+# ★ 但这对本项目**不构成问题** —— DR-TS4 选 doctest 的理由第一条就是
+#   「**单头文件**、编译开销低」。我们要的就是那一个头,不是它的构建系统。
+#   ⇒ 自己建一个 INTERFACE target 指过去,把第三方 CMake 的版本策略完全隔离在外。
+#   这同时避免了它的 install/export 规则污染本项目的安装面。
+FetchContent_GetProperties(doctest)
+if(NOT doctest_POPULATED)
+  FetchContent_Populate(doctest)
+endif()
+
+add_library(sg_doctest INTERFACE)
+target_include_directories(sg_doctest SYSTEM INTERFACE "${doctest_SOURCE_DIR}")
+# ★ SYSTEM:第三方头不参与本项目的告警口径(cmake/SgWarnings.cmake 开了
+#   -Wconversion / -Wold-style-cast 等,doctest 自己并不按这套写)。
 
 # ── 契约层冒烟 ───────────────────────────────────────────────────
 #
@@ -19,6 +48,24 @@ set_target_properties(sg_contract_smoke PROPERTIES
 sg_apply_warnings(sg_contract_smoke)
 sg_enable_assertions(sg_contract_smoke)   # ★ 见 cmake/SgWarnings.cmake:防「绿色的假测试」
 add_test(NAME contract_smoke COMMAND sg_contract_smoke)
+
+# ── ★★ L3 黄金用例集(阶段 0.1/1.1 批次 0)────────────────────────
+#
+# 它承担两件事,缺一不可:
+#   ① **回归**:同种子 + 同输入 ⇒ 逐位相同(可回放,`01` §10);
+#   ② **溯源**:每条断言指到 `battle_event.c` / `battle.c` 的行号或一条 DR。
+#
+# ⚠️ 同样锁 C++17 —— 用例集也要能在客户端工具链下跑,否则"双端同一份规则"
+#    只有实现是共享的、验证不是。
+add_executable(sg_rules_battle_test rules_battle_test.cpp)
+target_link_libraries(sg_rules_battle_test PRIVATE sg_shared sg_doctest)
+set_target_properties(sg_rules_battle_test PROPERTIES
+    CXX_STANDARD ${SG_SHARED_CXX_STANDARD}
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF)
+sg_apply_warnings(sg_rules_battle_test)
+sg_enable_assertions(sg_rules_battle_test)
+add_test(NAME rules_battle COMMAND sg_rules_battle_test)
 
 # ── IDL 生成物冒烟(与 idl/tests/run.sh 同源)──────────────────────
 #

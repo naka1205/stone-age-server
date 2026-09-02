@@ -73,6 +73,13 @@ sg::domain::CannotActReason CheckCanAct(const Combatant& c) noexcept;
 // ⚠️★ 调用方**必须**处理 false:05 §10.4 记录了原版在状态串上
 //    「strncat 第三参用错、等价于无上界 strcat,余量仅 56 字节且无第二道防线」
 //    的教训 —— 新实现宁可分包,不可静默截断。
+//
+// ⚠️★ **尚未实现(2026-08-31)。** 本函数是**回合调度**,不是公式 ——
+//    它对应原版 `BATTLE_Battling` 的 1,983 行,规模见 `00` §1.3.1 的批次表。
+//    批次 0 先交付四条公式(下方四个函数)+ 黄金用例集,理由:
+//    公式是 `00` §0 中 ③ 层「不可自证」的**主要补偿点**,且已天然是纯的
+//    (`07` §11.3 判据 ①)⇒ 先把可测的部分测住,再接调度。
+//    ⇒ 现在调用它会**链接失败**,这是有意的:宁可编译期挡住,不放一个空壳进去。
 bool ResolveTurn(const BattleField& field,
                  const TurnCommands& commands,
                  const RulesConfig& config,
@@ -85,19 +92,46 @@ bool ResolveTurn(const BattleField& field,
 //   **四条主公式(伤害 / 回避 / 暴击 / 相克)已经天然是纯的** ——
 //   它们是 L3 里最该被用例覆盖的部分,也是 ③ 层不可自证的主要补偿点。
 
-// 四属性相克系数。结果已含 §3.4 的 /10000。
+// 四属性相克 —— ★ 结算路径。**给 damage、返回 damage**,不是返回系数。
+//
+// ⚠️★ 为什么不做成「返回系数,调用方乘」:原版 `BATTLE_AttrAdjust` 先把 damage
+//    乘进攻方属性向量,再调返回 **int** 的 `BATTLE_AttrCalc`
+//    ⇒ 链路上有**三次整数截断**。改成系数形式数学上等价,但截断位置变了
+//    ⇒ 与原版逐位不同,可回放性失效。**形状也是公式的一部分。**
+std::int32_t ApplyElementMatrix(const BattleField& field,
+                                const Combatant& attacker,
+                                const Combatant& defender,
+                                std::int32_t damage) noexcept;
+
+// 四属性相克系数 —— ⚠️ **纯展示/测试用,结算路径不得调用。**
+//
+// 它没有 `ApplyElementMatrix` 的三次截断,两者只在数学上等价、逐位不等价。
+// 保留它是因为「量纲自洽」这条性质(Σatk = Σdef = 100 ⇒ 全无属性时系数 1.0)
+// 值得被独立断言;拿它去算伤害就复活了「同一语义两份实现」这个 bug 类。
 double ElementCoefficient(const Combatant& attacker, const Combatant& defender) noexcept;
 
 // 伤害主公式(§3.1 七步)。
 //
-// ⚠️★ 移植注记 —— 三处**必须原样保留**的原版行为:
-//   ① 防御修正的括号是 `(defense × rand + 2) / 100`,**不是** `defense × (rand + 2)/100`。
-//      `rand()%10 == 0` 时该项 = 2/100 = 0(整数除法)。两版一致 ⇒ 不要"修正"括号。
-//   ② 三分段主公式的第二分支上界用**浮点** `defense*8.0/7.0`、
-//      第三分支下界用**整数除法** `defense*8/7` ⇒ 边界处有**两分支都不命中的窄缝**,
-//      此时 damage 保持初值 0。两版一致 ⇒ **保留窄缝**。
+// ⚠️★ 移植注记 —— 三处**必须原样保留**的原版行为(2026-08-31 已逐条对源码复核,
+//     其中 ①② 与文档原文不符,以本注记为准):
+//   ① 防御修正是 `defense += (defense * (rand()%10) + 2) / 100`。
+//      ⚠️ 文档称「`rand()%10 == 0` 时该项 = 2/100 = 0(**整数除法**)」——**不成立**:
+//      `battle_event.c:1164` 是 `float attack, defense;` ⇒ 该式是**浮点除法**,
+//      `rand()%10 == 0` 时该项 = **0.02**,不是 0。
+//   ② ★★ **三分段没有"窄缝"。** 文档称第二分支上界用浮点、第三分支下界用整数除法
+//      ⇒ 边界处两分支都不命中、damage 保持 0。实测**两个论断都不成立**:
+//      不是整数除法(同 ①),且实测 0 组窄缝 / 171,429 组**重叠** ——
+//      整数除法只会让下界变小 ⇒ 产生重叠而非缝,而 `else if` 让**第二分支**接管。
+//      ⇒ **边界值走 `RAND(0, attack/16)`,不是 0。**
+//      ⚠️ 照原文实现"窄缝返回 0"会引入原版没有的行为。
 //   ③ 第 7 步 `× getDamageCalc()/100` 的默认值是 **70 不是 100**
 //      (RulesConfig::damage_calc_percent)。
+//
+// ★ 另有一条不可省的类型语义:原版 `attack` / `defense` 是 **float**(不是 double)。
+//   本实现用 `float` 保留,因为分支边界比较对精度敏感。
+//
+// ⚠️ **批次 0(普攻链路)的三处有意空缺**,均在实现处就地记明、非遗漏:
+//   四属结界 · 附加伤害/减免 · 「舍己」忽略装备 —— 三者都属职业/宠物技能链路。
 std::int32_t ComputeDamage(const BattleField& field,
                            const Combatant& attacker,
                            const Combatant& defender,
@@ -106,11 +140,17 @@ std::int32_t ComputeDamage(const BattleField& field,
 
 // 回避判定。true = 已闪避。
 //
-// ⚠️ **六道前置否决**任一命中直接返回(不走概率):
+// ⚠️ **七道前置**(不是文档说的六道)任一命中直接返回:
 //    攻方集气完成 / 守方防御 / 守方有反应类状态 / 守方不能行动 /
-//    守方带 NODUCK / ★ 守方自带「必闪」技 ⇒ 直接 true。
+//    守方带 NODUCK / ★ 守方带 ABIO(**05 §3.2 漏了这一道**)/
+//    ★ 守方自带「必闪」技 ⇒ 直接 true。
+//
+// ⚠️★ 原版在闪避成功时嵌了 `PROFESSION_SKILL_LVEVEL_UP` 副作用
+//    (`battle_event.c:899`)—— 正是四步改造第②步要剥离的典型。
+//    本函数**只返回判定结果**,技能升级由调用方按事件处理。
 bool RollDodge(const Combatant& attacker,
                const Combatant& defender,
+               bool defender_guarding,
                bool defender_casting_spell,
                const RulesConfig& config,
                IRandom& rng) noexcept;
