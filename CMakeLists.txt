@@ -22,7 +22,7 @@ project(stone_age_server
 
 # ── C++20,不用编译器扩展 ──────────────────────────────────────────
 # D1 裁定 C++20;GameStudio 是 C++17 ⇒ shared/ 的代码必须在 C++17 下也能编译,
-# 否则双端共享会在客户端侧失败。见 §shared/CMakeLists.txt 的 SG_SHARED_CXX_STANDARD。
+# 否则双端共享会在客户端侧失败。见 §shared/CMakeLists.txt 的 SA_SHARED_CXX_STANDARD。
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -32,31 +32,32 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
-include(SgWarnings)
+include(SaWarnings)
 
-option(SG_BUILD_TESTS "构建测试" ON)
+option(SA_BUILD_TESTS "构建测试" ON)
 
 # ── IDL 生成产物 ─────────────────────────────────────────────────
 #
 # DR-TS2:生成产物**入库**,构建期不跑 protoc、不依赖 libprotobuf
 #         ⇒ 客户端连 protoc 都不需要。
-# 重新生成是**显式动作**:python3 idl/codegen/sgidl_gen.py
+# 重新生成是**显式动作**:python3 idl/codegen/saidl_gen.py
 #
 # ⚠️ 这里故意**不**把 codegen 挂成构建步骤。理由:schema 改动会动协议号,
 #    那是需要走 CI 检查 2(编号稳定性)与人工复核的事,不该被一次顺手的
 #    `cmake --build` 静默带过。
-add_library(sg_idl INTERFACE)
-target_include_directories(sg_idl INTERFACE
+add_library(sa_idl INTERFACE)
+target_include_directories(sa_idl INTERFACE
     "${CMAKE_CURRENT_LIST_DIR}/idl/generated/cpp")
 
-# ⚠️★ sg_idl 同时暴露 domain/ 与 transport/ 两组头。
+# ⚠️★ sa_idl 同时暴露 domain/ 与 transport/ 两组头。
 #    **靠 include 路径无法隔离**(生成物的 #include 一律从 generated/cpp 根算起)。
 #    ⇒ 「shared/ 不得依赖传输类型」(02 §9)由 tools/check_shared_purity.py 强制,
 #      不由 CMake 强制。该脚本是 CI 必跑项,不是可选的风格检查。
 
 add_subdirectory(shared)
+add_subdirectory(src)
 
-if(SG_BUILD_TESTS)
+if(SA_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
 endif()
@@ -64,5 +65,5 @@ endif()
 # TODO(阶段 1.1):引入 doctest(DR-TS4 已裁定)。
 #   现在 tests/ 用标准 <cassert>,因为契约层的用例数还很少;
 #   等 shared/rules 有实现、黄金用例集开始成批录入时再接 FetchContent。
-# TODO(阶段 2):src/ 各模块(platform / net / storage / lock / gateway /
-#   world / session_storage / social)与 deploy/。
+# TODO(阶段 2):src/ 其余模块(storage / lock / gateway /
+#   session_storage / social)与 deploy/。

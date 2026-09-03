@@ -22,7 +22,7 @@
 #include <cstring>
 #include <type_traits>
 
-using namespace sg;
+using namespace sa;
 
 // ── ② 相克矩阵重排的回归保护 ──────────────────────────────────
 //

@@ -1,4 +1,4 @@
-// sg_idl_runtime.h —— IDL 生成代码的运行时支撑
+// sa_idl_runtime.h —— IDL 生成代码的运行时支撑
 //
 // ★ 本文件是**手写**的,不是生成物;codegen 只负责把它复制进 idl/generated/cpp/。
 //
@@ -12,14 +12,14 @@
 //    用 strncat 第三参写错、等价无上界 strcat,余量仅 56 字节(07 §10.4)。
 //    本文件的 Reader 不提供任何「不校验」的读取入口。
 
-#ifndef SG_IDL_RUNTIME_H
-#define SG_IDL_RUNTIME_H
+#ifndef SA_IDL_RUNTIME_H
+#define SA_IDL_RUNTIME_H
 
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 
-namespace sg {
+namespace sa {
 namespace idl {
 
 // ── 定长字符串 ────────────────────────────────────────────────
@@ -237,6 +237,6 @@ inline void read_vec(Reader& r, FixedVec<T, N>& v, F read_elem) {
 }
 
 }  // namespace idl
-}  // namespace sg
+}  // namespace sa
 
-#endif  // SG_IDL_RUNTIME_H
+#endif  // SA_IDL_RUNTIME_H

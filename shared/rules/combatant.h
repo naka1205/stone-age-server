@@ -5,7 +5,7 @@
 //        resolve_turn(BattleSnapshot, Commands, IRandom&) -> BattleEvents
 //    其中 Commands 与 BattleEvents 已由 IDL 给出,而**输入侧一直没有定义**。
 //
-// ⚠️★ **与 `sg::domain::BattleSnapshot` 同名不同物,不要混用**:
+// ⚠️★ **与 `sa::domain::BattleSnapshot` 同名不同物,不要混用**:
 //
 //    | | `domain::BattleSnapshot`(IDL) | 本文件的 `BattleField` |
 //    |---|---|---|
@@ -24,14 +24,14 @@
 //
 // ⚠️ shared/ 只依赖标准库(01 §4)。
 
-#ifndef SG_SHARED_RULES_COMBATANT_H
-#define SG_SHARED_RULES_COMBATANT_H
+#ifndef SA_SHARED_RULES_COMBATANT_H
+#define SA_SHARED_RULES_COMBATANT_H
 
 #include <cstdint>
 
 #include "rules/constants.h"
 
-namespace sg::rules {
+namespace sa::rules {
 
 // ── 实体族(M2 的判别键)──────────────────────────────────────
 //
@@ -232,6 +232,6 @@ struct BattleField {
   }
 };
 
-}  // namespace sg::rules
+}  // namespace sa::rules
 
-#endif  // SG_SHARED_RULES_COMBATANT_H
+#endif  // SA_SHARED_RULES_COMBATANT_H

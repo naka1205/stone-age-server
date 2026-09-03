@@ -15,9 +15,9 @@
 
 syntax = "proto3";
 
-package sg.domain;
+package sa.domain;
 
-import "sg_options.proto";
+import "sa_options.proto";
 import "domain/common.proto";
 
 // ── 窗口类型 ──────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ import "domain/common.proto";
 //    10 §13 待补 2 已登记(1 天,需常量传播确定取值域)—— 那批取值确定后,
 //    要么落进本枚举的既有成员,要么在此追加新成员,**不得走「数字直传」的后门**。
 enum WindowKind {
-  option (sg.width) = 16;
+  option (sa.width) = 16;
 
   WINDOW_KIND_INVALID = 0;
 
@@ -83,7 +83,7 @@ enum WindowKind {
 // 按钮位掩码。★ 位号沿用原版 —— 10 §5.4 实测**两端 100% 一致**,
 // 是少数不需要改的地方。按位或组合。
 enum ButtonFlag {
-  option (sg.width) = 8;
+  option (sa.width) = 8;
 
   BUTTON_FLAG_NONE   = 0;
   BUTTON_FLAG_OK     = 1;   // 1<<0
@@ -114,7 +114,7 @@ enum ButtonFlag {
 
 // 纯文本消息(原 MESSAGE / WIDEMESSAGE)。
 message MessageBody {
-  repeated string lines = 1 [(sg.max_count) = 16, (sg.max_len) = 255];
+  repeated string lines = 1 [(sa.max_count) = 16, (sa.max_len) = 255];
   // ★ 改变 2:原版把「消息行数」写在负载第一个 token —— 那是分隔符复用。
   //   repeated 自带计数,该 token 消失。
 
@@ -125,7 +125,7 @@ message MessageBody {
 
 // 单行输入(原 MESSAGEANDLINEINPUT / WIDEMESSAGEANDLINEINPUT)。
 message LineInputBody {
-  repeated string lines = 1 [(sg.max_count) = 16, (sg.max_len) = 255];
+  repeated string lines = 1 [(sa.max_count) = 16, (sa.max_len) = 255];
   uint32 max_len = 2;
   bool   wide    = 3;
 }
@@ -136,14 +136,14 @@ message Choice {
   //   09 §3.7 实测:NPC 脚本的条件分支与文案是**位置耦合**的 ——
   //   重排分支就错位。DR-PR1 / DR-NQ2 裁定:改**显式 id**。
   uint32 choice_id = 1;
-  string text      = 2 [(sg.max_len) = 255];
+  string text      = 2 [(sa.max_len) = 255];
   bool   enabled   = 3;  // ★ 置灰而非隐藏(DR-CP7 同源:不做假交互)
 }
 
 // 选择框(原 SELECT)。
 message SelectBody {
-  repeated string lines   = 1 [(sg.max_count) = 16, (sg.max_len) = 255];
-  repeated Choice choices = 2 [(sg.max_count) = 32];
+  repeated string lines   = 1 [(sa.max_count) = 16, (sa.max_len) = 255];
+  repeated Choice choices = 2 [(sa.max_count) = 32];
 }
 
 // 商店窗口的店级信息。
@@ -158,13 +158,13 @@ message SelectBody {
 message ShopHeader {
   bool   can_buy         = 1;  // 能否购买旗标
   bool   reuse_previous  = 2;  // 是否沿用前次数据(原版的增量下发机制)
-  string shop_name       = 3 [(sg.max_len) = 63];
-  string message         = 4 [(sg.max_len) = 255];
-  string shop_message    = 5 [(sg.max_len) = 255];
-  string count_message   = 6 [(sg.max_len) = 255];  // 询问个数
-  string level_low_message   = 7 [(sg.max_len) = 255];  // 等级不足
-  string confirm_message     = 8 [(sg.max_len) = 255];  // 确认
-  string item_full_message   = 9 [(sg.max_len) = 255];  // 道具栏满
+  string shop_name       = 3 [(sa.max_len) = 63];
+  string message         = 4 [(sa.max_len) = 255];
+  string shop_message    = 5 [(sa.max_len) = 255];
+  string count_message   = 6 [(sa.max_len) = 255];  // 询问个数
+  string level_low_message   = 7 [(sa.max_len) = 255];  // 等级不足
+  string confirm_message     = 8 [(sa.max_len) = 255];  // 确认
+  string item_full_message   = 9 [(sa.max_len) = 255];  // 道具栏满
 }
 
 // 商店的一个条目。⚠️ 同上,待欠债 2 结清后复核。
@@ -179,7 +179,7 @@ message ShopEntry {
 
 message ShopBody {
   ShopHeader header = 1;
-  repeated ShopEntry entries = 2 [(sg.max_count) = 32];
+  repeated ShopEntry entries = 2 [(sa.max_count) = 32];
 }
 
 // 尚未展开负载的窗口类型的通用体。
@@ -188,13 +188,13 @@ message ShopBody {
 //    只是 body 的结构化定义延后。每补一种,就从这里挪到自己的 body 变体。
 //    ⇒ 首批(1.4 demo)只需要 Message / LineInput / Select 三种真正结构化。
 message RawListBody {
-  repeated string rows = 1 [(sg.max_count) = 32, (sg.max_len) = 255];
+  repeated string rows = 1 [(sa.max_count) = 32, (sa.max_len) = 255];
 }
 
 // ── 窗口开启(下行)──────────────────────────────────────────────
 
 message WindowOpen {
-  option (sg.msg_id) = 0x0601;
+  option (sa.msg_id) = 0x0601;
 
   // ★ 取代原版 seqno。DR-PR3:窗口会话状态放**服务端**,
   //   window_id 只需**一次会话内唯一**,不建全局编号空间。
@@ -222,7 +222,7 @@ message WindowOpen {
 // ── 窗口回执(上行)──────────────────────────────────────────────
 
 message WindowReply {
-  option (sg.msg_id) = 0x0602;
+  option (sa.msg_id) = 0x0602;
 
   uint32    window_id = 1;  // 原样带回
   EntityRef source    = 2;  // 原样带回
@@ -230,7 +230,7 @@ message WindowReply {
 
   oneof result {
     uint32 choice_id = 4;  // SELECT:★ 回传显式 id,不是位置序号
-    string text      = 5 [(sg.max_len) = 255];  // LINE_INPUT
+    string text      = 5 [(sa.max_len) = 255];  // LINE_INPUT
                            // ⚠️ 这是**物理上限**;每个窗口自己的
                            //   LineInputBody.max_len 是业务上限,服务端须二次校验。
     uint32 entry_id  = 6;  // 商店族:同样是显式 id

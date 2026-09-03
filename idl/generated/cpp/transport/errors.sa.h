@@ -1,15 +1,15 @@
 // ★ 本文件由 idl/codegen 从 schema 生成，请勿手工编辑。
 // 来源：transport/errors.proto
 //
-// 修改方式：改 schema → 重跑 `python3 idl/codegen/sgidl_gen.py` → 提交生成物
+// 修改方式：改 schema → 重跑 `python3 idl/codegen/saidl_gen.py` → 提交生成物
 // （DR-TS2：生成产物入库，客户端连 protoc 都不需要）。
 
-#ifndef SG_IDL_TRANSPORT_ERRORS_SG_H
-#define SG_IDL_TRANSPORT_ERRORS_SG_H
+#ifndef SA_IDL_TRANSPORT_ERRORS_SA_H
+#define SA_IDL_TRANSPORT_ERRORS_SA_H
 
-#include "sg_idl_runtime.h"
+#include "sa_idl_runtime.h"
 
-namespace sg {
+namespace sa {
 namespace transport {
 
 enum class Status : std::uint8_t {
@@ -34,6 +34,6 @@ enum class Disposition : std::uint8_t {
 };
 
 }  // namespace transport
-}  // namespace sg
+}  // namespace sa
 
-#endif  // SG_IDL_TRANSPORT_ERRORS_SG_H
+#endif  // SA_IDL_TRANSPORT_ERRORS_SA_H

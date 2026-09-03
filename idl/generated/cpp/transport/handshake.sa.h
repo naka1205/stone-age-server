@@ -1,15 +1,15 @@
 // ★ 本文件由 idl/codegen 从 schema 生成，请勿手工编辑。
 // 来源：transport/handshake.proto
 //
-// 修改方式：改 schema → 重跑 `python3 idl/codegen/sgidl_gen.py` → 提交生成物
+// 修改方式：改 schema → 重跑 `python3 idl/codegen/saidl_gen.py` → 提交生成物
 // （DR-TS2：生成产物入库，客户端连 protoc 都不需要）。
 
-#ifndef SG_IDL_TRANSPORT_HANDSHAKE_SG_H
-#define SG_IDL_TRANSPORT_HANDSHAKE_SG_H
+#ifndef SA_IDL_TRANSPORT_HANDSHAKE_SA_H
+#define SA_IDL_TRANSPORT_HANDSHAKE_SA_H
 
-#include "sg_idl_runtime.h"
+#include "sa_idl_runtime.h"
 
-namespace sg {
+namespace sa {
 namespace transport {
 
 enum class RejectReason : std::uint8_t {
@@ -22,18 +22,18 @@ enum class RejectReason : std::uint8_t {
 
 struct HandshakeRequest {
   std::uint32_t protocol_version;
-  sg::idl::FixedStr<63> client_build;
+  sa::idl::FixedStr<63> client_build;
 };
 
-inline void encode(sg::idl::Writer& w, const HandshakeRequest& m) {
+inline void encode(sa::idl::Writer& w, const HandshakeRequest& m) {
   w.u32(m.protocol_version);
-  sg::idl::write_str(w, m.client_build);
+  sa::idl::write_str(w, m.client_build);
 }
 
-inline void decode(sg::idl::Reader& r, HandshakeRequest& m) {
+inline void decode(sa::idl::Reader& r, HandshakeRequest& m) {
   m.protocol_version = r.u32();
   if (!r.ok()) return;
-  sg::idl::read_str(r, m.client_build);
+  sa::idl::read_str(r, m.client_build);
   if (!r.ok()) return;
 }
 
@@ -42,12 +42,12 @@ struct HandshakeAccepted {
   std::uint32_t heartbeat_interval_ms;
 };
 
-inline void encode(sg::idl::Writer& w, const HandshakeAccepted& m) {
+inline void encode(sa::idl::Writer& w, const HandshakeAccepted& m) {
   w.u64(m.session_id);
   w.u32(m.heartbeat_interval_ms);
 }
 
-inline void decode(sg::idl::Reader& r, HandshakeAccepted& m) {
+inline void decode(sa::idl::Reader& r, HandshakeAccepted& m) {
   m.session_id = r.u64();
   if (!r.ok()) return;
   m.heartbeat_interval_ms = r.u32();
@@ -55,17 +55,17 @@ inline void decode(sg::idl::Reader& r, HandshakeAccepted& m) {
 }
 
 struct HandshakeRejected {
-  sg::transport::RejectReason reason;
+  sa::transport::RejectReason reason;
   std::uint32_t required_protocol_version;
 };
 
-inline void encode(sg::idl::Writer& w, const HandshakeRejected& m) {
+inline void encode(sa::idl::Writer& w, const HandshakeRejected& m) {
   w.u8(static_cast<std::uint8_t>(m.reason));
   w.u32(m.required_protocol_version);
 }
 
-inline void decode(sg::idl::Reader& r, HandshakeRejected& m) {
-  m.reason = static_cast<sg::transport::RejectReason>(r.u8());
+inline void decode(sa::idl::Reader& r, HandshakeRejected& m) {
+  m.reason = static_cast<sa::transport::RejectReason>(r.u8());
   if (!r.ok()) return;
   m.required_protocol_version = r.u32();
   if (!r.ok()) return;
@@ -75,11 +75,11 @@ struct Ping {
   std::uint64_t client_time_ms;
 };
 
-inline void encode(sg::idl::Writer& w, const Ping& m) {
+inline void encode(sa::idl::Writer& w, const Ping& m) {
   w.u64(m.client_time_ms);
 }
 
-inline void decode(sg::idl::Reader& r, Ping& m) {
+inline void decode(sa::idl::Reader& r, Ping& m) {
   m.client_time_ms = r.u64();
   if (!r.ok()) return;
 }
@@ -89,12 +89,12 @@ struct Pong {
   std::uint64_t server_time_ms;
 };
 
-inline void encode(sg::idl::Writer& w, const Pong& m) {
+inline void encode(sa::idl::Writer& w, const Pong& m) {
   w.u64(m.client_time_ms);
   w.u64(m.server_time_ms);
 }
 
-inline void decode(sg::idl::Reader& r, Pong& m) {
+inline void decode(sa::idl::Reader& r, Pong& m) {
   m.client_time_ms = r.u64();
   if (!r.ok()) return;
   m.server_time_ms = r.u64();
@@ -102,6 +102,6 @@ inline void decode(sg::idl::Reader& r, Pong& m) {
 }
 
 }  // namespace transport
-}  // namespace sg
+}  // namespace sa
 
-#endif  // SG_IDL_TRANSPORT_HANDSHAKE_SG_H
+#endif  // SA_IDL_TRANSPORT_HANDSHAKE_SA_H

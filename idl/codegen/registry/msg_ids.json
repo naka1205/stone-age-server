@@ -1,6 +1,6 @@
 {
   "enums": {
-    "sg.domain.AttackKind": {
+    "sa.domain.AttackKind": {
       "ATTACK_KIND_BLOOD_DRAIN": 6,
       "ATTACK_KIND_DEEP_POISON": 5,
       "ATTACK_KIND_INVALID": 0,
@@ -10,7 +10,7 @@
       "ATTACK_KIND_RANGED": 2,
       "ATTACK_KIND_SPELL": 4
     },
-    "sg.domain.BattleStatus": {
+    "sa.domain.BattleStatus": {
       "BATTLE_ST_BARRIER": 9,
       "BATTLE_ST_BLOODWORMS": 18,
       "BATTLE_ST_CONFUSION": 6,
@@ -56,7 +56,7 @@
       "BATTLE_ST_WEAKEN": 7,
       "BATTLE_ST_WORKANNEX": 33
     },
-    "sg.domain.ButtonFlag": {
+    "sa.domain.ButtonFlag": {
       "BUTTON_FLAG_CANCEL": 2,
       "BUTTON_FLAG_NEXT": 32,
       "BUTTON_FLAG_NO": 8,
@@ -65,7 +65,7 @@
       "BUTTON_FLAG_PREV": 16,
       "BUTTON_FLAG_YES": 4
     },
-    "sg.domain.CannotActReason": {
+    "sa.domain.CannotActReason": {
       "CANNOT_ACT_BARRIER": 6,
       "CANNOT_ACT_CHARGING": 8,
       "CANNOT_ACT_DIZZY": 4,
@@ -76,7 +76,7 @@
       "CANNOT_ACT_STONE": 2,
       "CANNOT_ACT_T_ENCLOSE": 7
     },
-    "sg.domain.CombatantFlag": {
+    "sa.domain.CombatantFlag": {
       "COMBATANT_FLAG_BARRIER": 8192,
       "COMBATANT_FLAG_BLOODWORMS": 4194304,
       "COMBATANT_FLAG_CHANGE": 1073741824,
@@ -110,7 +110,7 @@
       "COMBATANT_FLAG_WATER": 268435456,
       "COMBATANT_FLAG_WEAKEN": 2048
     },
-    "sg.domain.DamageFlag": {
+    "sa.domain.DamageFlag": {
       "DAMAGE_FLAG_ABSORB": 2048,
       "DAMAGE_FLAG_ACUPUNCTURE": 134217728,
       "DAMAGE_FLAG_ANTINTER": 268435456,
@@ -141,7 +141,7 @@
       "DAMAGE_FLAG_ULTIMATE_2": 128,
       "DAMAGE_FLAG_VANISH": 4096
     },
-    "sg.domain.Direction": {
+    "sa.domain.Direction": {
       "DIR_EAST": 2,
       "DIR_NORTH": 0,
       "DIR_NORTH_EAST": 1,
@@ -151,12 +151,12 @@
       "DIR_SOUTH_WEST": 5,
       "DIR_WEST": 6
     },
-    "sg.domain.EntitySource": {
+    "sa.domain.EntitySource": {
       "ENTITY_SOURCE_ENTITY": 2,
       "ENTITY_SOURCE_INVALID": 0,
       "ENTITY_SOURCE_SYSTEM": 1
     },
-    "sg.domain.MenuFlag": {
+    "sa.domain.MenuFlag": {
       "MENU_FLAG_BOOMERANG": 4,
       "MENU_FLAG_ENEMY_SURPRISAL": 16,
       "MENU_FLAG_JOIN": 1,
@@ -165,14 +165,14 @@
       "MENU_FLAG_PLAYER_MENU_OFF": 2,
       "MENU_FLAG_PLAYER_SURPRISAL": 32
     },
-    "sg.domain.RideState": {
+    "sa.domain.RideState": {
       "RIDE_STATE_FELL": 2,
       "RIDE_STATE_FELL_FOX": 3,
       "RIDE_STATE_FELL_PIG": 4,
       "RIDE_STATE_NONE": 0,
       "RIDE_STATE_RIDING": 1
     },
-    "sg.domain.WindowKind": {
+    "sa.domain.WindowKind": {
       "WINDOW_KIND_ANGEL_MESSAGE": 41,
       "WINDOW_KIND_DEPOT_SHOP": 12,
       "WINDOW_KIND_FAMILY_BOARD": 22,
@@ -201,20 +201,20 @@
       "WINDOW_KIND_SELECT": 3,
       "WINDOW_KIND_SHOP_MENU": 10
     },
-    "sg.transport.Disposition": {
+    "sa.transport.Disposition": {
       "DISPOSITION_ABORT": 3,
       "DISPOSITION_COMPENSATE": 2,
       "DISPOSITION_RETRY": 1,
       "DISPOSITION_UNSPECIFIED": 0
     },
-    "sg.transport.RejectReason": {
+    "sa.transport.RejectReason": {
       "REJECT_BANNED": 4,
       "REJECT_MAINTENANCE": 3,
       "REJECT_SERVER_FULL": 2,
       "REJECT_UNSPECIFIED": 0,
       "REJECT_VERSION_MISMATCH": 1
     },
-    "sg.transport.Status": {
+    "sa.transport.Status": {
       "STATUS_ABORTED": 7,
       "STATUS_CONFLICT": 3,
       "STATUS_DEADLINE_EXCEEDED": 8,
@@ -229,18 +229,18 @@
     }
   },
   "messages": {
-    "sg.domain.BattleCommand": 528,
-    "sg.domain.BattleEvents": 517,
-    "sg.domain.BattleLeave": 516,
-    "sg.domain.BattleSelfInfo": 515,
-    "sg.domain.BattleSnapshot": 513,
-    "sg.domain.BattleTurnBegin": 514,
-    "sg.domain.WindowOpen": 1537,
-    "sg.domain.WindowReply": 1538,
-    "sg.transport.HandshakeAccepted": 2,
-    "sg.transport.HandshakeRejected": 3,
-    "sg.transport.HandshakeRequest": 1,
-    "sg.transport.Ping": 4,
-    "sg.transport.Pong": 5
+    "sa.domain.BattleCommand": 528,
+    "sa.domain.BattleEvents": 517,
+    "sa.domain.BattleLeave": 516,
+    "sa.domain.BattleSelfInfo": 515,
+    "sa.domain.BattleSnapshot": 513,
+    "sa.domain.BattleTurnBegin": 514,
+    "sa.domain.WindowOpen": 1537,
+    "sa.domain.WindowReply": 1538,
+    "sa.transport.HandshakeAccepted": 2,
+    "sa.transport.HandshakeRejected": 3,
+    "sa.transport.HandshakeRequest": 1,
+    "sa.transport.Ping": 4,
+    "sa.transport.Pong": 5
   }
 }

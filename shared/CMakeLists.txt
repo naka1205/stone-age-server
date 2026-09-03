@@ -12,37 +12,37 @@
 #    ⇒ shared/ 的源码必须在 **C++17** 下也能编译,否则双端共享在客户端侧当场失败。
 #    这里显式把 shared 目标降到 17,让不兼容在**服务端构建时**就暴露,
 #    而不是等到客户端集成那天。
-set(SG_SHARED_CXX_STANDARD 17 CACHE STRING "shared/ 的 C++ 标准下限（受 GameStudio 约束）")
+set(SA_SHARED_CXX_STANDARD 17 CACHE STRING "shared/ 的 C++ 标准下限（受 GameStudio 约束）")
 
 # ── ★★ 独立可消费性(2026-09-02,客户端骨架落地时实测暴露)───────────
 #
-# 本文件原先依赖两样**只在服务端顶层存在**的东西:目标 `sg_idl` 与函数
-# `sg_apply_warnings()`。⇒ 客户端按 DR-TS3 只引入 `shared/` 一个目录时,
+# 本文件原先依赖两样**只在服务端顶层存在**的东西:目标 `sa_idl` 与函数
+# `sa_apply_warnings()`。⇒ 客户端按 DR-TS3 只引入 `shared/` 一个目录时,
 # `add_subdirectory` **在配置期就失败**,D2 的物理前提根本走不到编译那一步。
 #
-# ⚠️ 这不是"客户端应该自己先定义 sg_idl" —— 那等于要求消费方知道本目录的内部依赖名,
+# ⚠️ 这不是"客户端应该自己先定义 sa_idl" —— 那等于要求消费方知道本目录的内部依赖名,
 #    与 DR-TS3 承诺的「FetchContent 直接可用」冲突。⇒ 缺口在本文件,补在本文件。
 #
 # 两处都写成「有就用、没有就就地补」,因此服务端顶层构建的行为**完全不变**。
-if(NOT TARGET sg_idl)
-    add_library(sg_idl INTERFACE)
-    target_include_directories(sg_idl INTERFACE
+if(NOT TARGET sa_idl)
+    add_library(sa_idl INTERFACE)
+    target_include_directories(sa_idl INTERFACE
         "${CMAKE_CURRENT_LIST_DIR}/../idl/generated/cpp")
 endif()
 
-add_library(sg_shared STATIC
+add_library(sa_shared STATIC
     rules/battle.cpp
 )
 
-target_include_directories(sg_shared PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
+target_include_directories(sa_shared PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
 
 # ✅ 允许:IDL 的 domain/ 组(事件与领域值对象)
 # ❌ 禁止:IDL 的 transport/ 组
-#   —— 但 sg_idl 这个 target 同时暴露两组(生成物的 #include 从 generated/cpp 根算起,
+#   —— 但 sa_idl 这个 target 同时暴露两组(生成物的 #include 从 generated/cpp 根算起,
 #      靠 include 路径隔离不了)。⇒ 该边界由 tools/check_shared_purity.py 强制。
-target_link_libraries(sg_shared PUBLIC sg_idl)
+target_link_libraries(sa_shared PUBLIC sa_idl)
 
-target_compile_features(sg_shared PUBLIC cxx_std_17)
+target_compile_features(sa_shared PUBLIC cxx_std_17)
 
 # ── ★★ 浮点语义:禁止 FMA 合并(2026-09-02,跨编译器验证时固化)────────
 #
@@ -64,9 +64,9 @@ target_compile_features(sg_shared PUBLIC cxx_std_17)
 # ⚠️ 这与本文件上方「不硬编码任何编译选项」不矛盾:那条针对的是**告警口径**
 #    (风格,消费方各有一套);本条是**语义要求**,消费方换一套就会算错。
 if(MSVC)
-    target_compile_options(sg_shared PUBLIC /fp:precise)
+    target_compile_options(sa_shared PUBLIC /fp:precise)
 else()
-    target_compile_options(sg_shared PUBLIC -ffp-contract=off)
+    target_compile_options(sa_shared PUBLIC -ffp-contract=off)
 endif()
 
 # ── ★★ 源码字符集:MSVC 必须显式 /utf-8(2026-09-02,Windows 验证前置)────
@@ -78,27 +78,27 @@ endif()
 # ★ 为什么写在**这里**而不是只写在消费方的告警口径里:
 #   本文件上方那条「告警口径由消费方给」是对的,但 `/utf-8` 不是告警口径 ——
 #   它决定**源文件怎么被解码**,是 DR-TS3「FetchContent 直接可用」的一部分。
-#   ⚠️ 客户端只 `add_subdirectory(shared)` 时**不会**调用任何 `sg_apply_warnings`
-#     ⇒ 若只补在两仓的告警函数里,`sg_shared` 这个目标本身仍然没有它。
-#   这与本文件开头那个 `sg_idl` / `sg_apply_warnings` 缺口(d939247)是同一类问题:
+#   ⚠️ 客户端只 `add_subdirectory(shared)` 时**不会**调用任何 `sa_apply_warnings`
+#     ⇒ 若只补在两仓的告警函数里,`sa_shared` 这个目标本身仍然没有它。
+#   这与本文件开头那个 `sa_idl` / `sa_apply_warnings` 缺口(d939247)是同一类问题:
 #   **凡是「消费方不做就会坏」的东西,都得本目录自己保证。**
 if(MSVC)
-    target_compile_options(sg_shared PUBLIC /utf-8)
+    target_compile_options(sa_shared PUBLIC /utf-8)
 endif()
 
-# ★ 阶段 0.1/1.1 起 sg_shared 是 STATIC(此前是 INTERFACE 的纯头契约层)。
-#   ⚠️ 标准仍锁 17 —— 见上方 SG_SHARED_CXX_STANDARD。它要被 GameStudio(C++17)编译。
-set_target_properties(sg_shared PROPERTIES
-    CXX_STANDARD ${SG_SHARED_CXX_STANDARD}
+# ★ 阶段 0.1/1.1 起 sa_shared 是 STATIC(此前是 INTERFACE 的纯头契约层)。
+#   ⚠️ 标准仍锁 17 —— 见上方 SA_SHARED_CXX_STANDARD。它要被 GameStudio(C++17)编译。
+set_target_properties(sa_shared PROPERTIES
+    CXX_STANDARD ${SA_SHARED_CXX_STANDARD}
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF)
 
-# ★ 告警口径由**消费方**给:服务端有 sg_apply_warnings(cmake/SgWarnings.cmake),
+# ★ 告警口径由**消费方**给:服务端有 sa_apply_warnings(cmake/SaWarnings.cmake),
 #   客户端有它自己的一套(工具链不同,-Wconversion 这类开关不可能逐字通用)。
 #   ⇒ 有则用,无则由消费方在自己那侧施加,不在此处硬编码任何编译选项。
-if(COMMAND sg_apply_warnings)
-    sg_apply_warnings(sg_shared)
+if(COMMAND sa_apply_warnings)
+    sa_apply_warnings(sa_shared)
 endif()
 
-# ⚠️ 这里**不**给 sg_shared 加任何其它 target_link_libraries(除 sg_idl):
+# ⚠️ 这里**不**给 sa_shared 加任何其它 target_link_libraries(除 sa_idl):
 #    一旦链上 pthread / 日志 / 网络,客户端侧的 FetchContent 就会被迫一起拉。

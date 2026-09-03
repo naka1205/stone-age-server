@@ -9,9 +9,9 @@
 
 syntax = "proto3";
 
-package sg.transport;
+package sa.transport;
 
-import "sg_options.proto";
+import "sa_options.proto";
 import "transport/errors.proto";
 
 // ★ 续体三元组。为什么不是一个自增整数(02 §7.1):
@@ -20,7 +20,7 @@ import "transport/errors.proto";
 //   ⇒ 重启后旧实例的迟到应答可能命中新实例的同号连接,投递给不相干的玩家。
 //   instance_id(哪个实例)+ generation(第几次启动)+ request_id(哪个请求),缺一不可。
 message RequestHeader {
-  option (sg.transport_only) = true;
+  option (sa.transport_only) = true;
 
   uint32 instance_id = 1;
   uint32 generation  = 2;
@@ -29,7 +29,7 @@ message RequestHeader {
 }
 
 message ResponseHeader {
-  option (sg.transport_only) = true;
+  option (sa.transport_only) = true;
 
   uint64 request_id = 1;
   Status status     = 2;
@@ -41,7 +41,7 @@ message ResponseHeader {
 // ★★ 资产类操作不得走这条路 —— 17 §5.4 实测公共仓库 fire-and-forget 后
 //    立刻销毁本地道具对象 ⇒ 道具永久蒸发。资产移动一律「预留 → 提交」两阶段。
 message Ack {
-  option (sg.transport_only) = true;
+  option (sa.transport_only) = true;
 
   bool accepted = 1;
 }

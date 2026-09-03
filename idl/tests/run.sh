@@ -13,13 +13,13 @@ set -e
 cd "$(dirname "$0")/.."
 
 echo "── 1/2 schema 检查 + 生成物同步 ──"
-python3 codegen/sgidl_gen.py --verify
+python3 codegen/saidl_gen.py --verify
 
 echo "── 3 编译生成物 ──"
 CXX=${CXX:-c++}
-$CXX -std=c++20 -Wall -Wextra -Werror -Igenerated/cpp tests/smoke.cpp -o /tmp/sg_idl_smoke
+$CXX -std=c++20 -Wall -Wextra -Werror -Igenerated/cpp tests/smoke.cpp -o /tmp/sa_idl_smoke
 
 echo "── 4 运行 ──"
-/tmp/sg_idl_smoke
+/tmp/sa_idl_smoke
 
 echo "✅ IDL 四道关全部通过"

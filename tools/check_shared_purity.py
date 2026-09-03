@@ -13,7 +13,7 @@
       (Envelope、连接、会话)。否则 01 §4 的『shared/ 只依赖标准库』就破了。」
 
 ⚠️ 为什么必须用脚本而不是 CMake 的 include 路径隔离:
-   IDL 生成物的 #include 一律从 generated/cpp 根算起(如 "domain/common.sg.h"),
+   IDL 生成物的 #include 一律从 generated/cpp 根算起(如 "domain/common.sa.h"),
    ⇒ 只要把 generated/cpp 加进 include path,domain/ 与 transport/ 就同时可见,
      无法只暴露其一。而且 CMake 也管不住 `#include <sys/socket.h>` 这类。
 
@@ -70,7 +70,7 @@ BANNED = [
     (re.compile(r"(spdlog|prometheus|fmt/)"),
      "日志/指标 —— 属 L0;L3 是纯函数,不记日志"),
     (re.compile(r"(asio|boost)"),
-     "asio/boost —— 属 sg_net(L0)"),
+     "asio/boost —— 属 sa_net(L0)"),
     (re.compile(r"^\.\./src/|^src/"),
      "服务端源码 —— shared/ 不得反向依赖 src/"),
     (re.compile(r"^(chrono|ctime)$"),
@@ -85,7 +85,7 @@ BANNED = [
 ]
 
 # 允许的项目内前缀。
-ALLOWED_PROJECT_PREFIXES = ("rules/", "model/", "domain/", "sg_idl_runtime.h", "ids.h")
+ALLOWED_PROJECT_PREFIXES = ("rules/", "model/", "domain/", "sa_idl_runtime.h", "ids.h")
 
 
 def main() -> int:

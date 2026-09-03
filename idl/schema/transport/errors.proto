@@ -9,12 +9,12 @@
 
 syntax = "proto3";
 
-package sg.transport;
+package sa.transport;
 
-import "sg_options.proto";
+import "sa_options.proto";
 
 enum Status {
-  option (sg.width) = 8;
+  option (sa.width) = 8;
 
   STATUS_OK                  = 0;
   STATUS_INVALID_ARGUMENT    = 1;
@@ -32,7 +32,7 @@ enum Status {
 // 调用方对错误的处置类别。★ 每个业务错误码必须映射到其中之一,
 // 不允许出现「只提示、不处置」的错误(02 §7.2)。
 enum Disposition {
-  option (sg.width) = 8;
+  option (sa.width) = 8;
 
   DISPOSITION_UNSPECIFIED = 0;  // ★ 非法:未绑定处置的错误码不得上线
   DISPOSITION_RETRY       = 1;  // 可重试(幂等或带 request_id 去重)

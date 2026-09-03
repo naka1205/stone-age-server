@@ -13,12 +13,12 @@
 //
 // ⚠️ shared/ 只依赖标准库(01 §4)。本文件不得 #include 任何项目内的传输类型。
 
-#ifndef SG_SHARED_RULES_CONSTANTS_H
-#define SG_SHARED_RULES_CONSTANTS_H
+#ifndef SA_SHARED_RULES_CONSTANTS_H
+#define SA_SHARED_RULES_CONSTANTS_H
 
 #include <cstdint>
 
-namespace sg::rules {
+namespace sa::rules {
 
 // ── 伤害与回避的基本系数 ──────────────────────────────────────────
 // 全部 [8/8] —— 05-battle.md §3 卷首:「已跨版本核对 8/8 一致」。
@@ -233,6 +233,6 @@ inline constexpr int kBattleStatusCount = 44;
 // [8.0] 超时。05-battle.md §2.2 步骤 3。
 inline constexpr int kBattleTimeLimitSeconds = 3600;
 
-}  // namespace sg::rules
+}  // namespace sa::rules
 
-#endif  // SG_SHARED_RULES_CONSTANTS_H
+#endif  // SA_SHARED_RULES_CONSTANTS_H

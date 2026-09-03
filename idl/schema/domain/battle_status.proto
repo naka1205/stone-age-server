@@ -20,9 +20,9 @@
 
 syntax = "proto3";
 
-package sg.domain;
+package sa.domain;
 
-import "sg_options.proto";
+import "sa_options.proto";
 
 // 44 种战斗状态。0 = 正常。
 //
@@ -32,7 +32,7 @@ import "sg_options.proto";
 //    ★ 新实现若按「每种状态一个独立字段、可并存」设计,行为会与原版完全不同。
 //    唯一例外:职业技能可给已有状态的目标叠加(05 §4.1)。
 enum BattleStatus {
-  option (sg.width) = 8;
+  option (sa.width) = 8;
 
   BATTLE_ST_NONE        = 0;   // 正常
   BATTLE_ST_POISON      = 1;   // 毒
@@ -99,7 +99,7 @@ enum BattleStatus {
 // 裁定:统一为 CanMoveCheck 的 8 项(shared/rules 侧单一判定函数),
 //      并把原因下发给客户端 → 菜单置灰(对接 DR-CP7)。
 enum CannotActReason {
-  option (sg.width) = 8;
+  option (sa.width) = 8;
 
   CANNOT_ACT_NONE       = 0;  // 可行动
   CANNOT_ACT_PARALYSIS  = 1;  // 麻痹

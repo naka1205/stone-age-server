@@ -1,15 +1,15 @@
 // ★ 本文件由 idl/codegen 从 schema 生成，请勿手工编辑。
 // 来源：domain/common.proto
 //
-// 修改方式：改 schema → 重跑 `python3 idl/codegen/sgidl_gen.py` → 提交生成物
+// 修改方式：改 schema → 重跑 `python3 idl/codegen/saidl_gen.py` → 提交生成物
 // （DR-TS2：生成产物入库，客户端连 protoc 都不需要）。
 
-#ifndef SG_IDL_DOMAIN_COMMON_SG_H
-#define SG_IDL_DOMAIN_COMMON_SG_H
+#ifndef SA_IDL_DOMAIN_COMMON_SA_H
+#define SA_IDL_DOMAIN_COMMON_SA_H
 
-#include "sg_idl_runtime.h"
+#include "sa_idl_runtime.h"
 
-namespace sg {
+namespace sa {
 namespace domain {
 
 enum class Direction : std::uint8_t {
@@ -34,12 +34,12 @@ struct Vec2 {
   std::int32_t y;
 };
 
-inline void encode(sg::idl::Writer& w, const Vec2& m) {
+inline void encode(sa::idl::Writer& w, const Vec2& m) {
   w.i32(m.x);
   w.i32(m.y);
 }
 
-inline void decode(sg::idl::Reader& r, Vec2& m) {
+inline void decode(sa::idl::Reader& r, Vec2& m) {
   m.x = r.i32();
   if (!r.ok()) return;
   m.y = r.i32();
@@ -47,23 +47,23 @@ inline void decode(sg::idl::Reader& r, Vec2& m) {
 }
 
 struct EntityRef {
-  sg::domain::EntitySource source;
+  sa::domain::EntitySource source;
   std::uint32_t entity_id;
 };
 
-inline void encode(sg::idl::Writer& w, const EntityRef& m) {
+inline void encode(sa::idl::Writer& w, const EntityRef& m) {
   w.u32(static_cast<std::uint32_t>(m.source));
   w.u32(m.entity_id);
 }
 
-inline void decode(sg::idl::Reader& r, EntityRef& m) {
-  m.source = static_cast<sg::domain::EntitySource>(r.u32());
+inline void decode(sa::idl::Reader& r, EntityRef& m) {
+  m.source = static_cast<sa::domain::EntitySource>(r.u32());
   if (!r.ok()) return;
   m.entity_id = r.u32();
   if (!r.ok()) return;
 }
 
 }  // namespace domain
-}  // namespace sg
+}  // namespace sa
 
-#endif  // SG_IDL_DOMAIN_COMMON_SG_H
+#endif  // SA_IDL_DOMAIN_COMMON_SA_H

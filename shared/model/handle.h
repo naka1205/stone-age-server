@@ -17,12 +17,12 @@
 // ⚠️ 与之配套的另一半在协议侧:服务间续体带 (instance_id, generation, request_id)
 //    三元组(02 §7.1),缺一不可。本文件只管进程内。
 
-#ifndef SG_SHARED_MODEL_HANDLE_H
-#define SG_SHARED_MODEL_HANDLE_H
+#ifndef SA_SHARED_MODEL_HANDLE_H
+#define SA_SHARED_MODEL_HANDLE_H
 
 #include <cstdint>
 
-namespace sg::model {
+namespace sa::model {
 
 // 实体句柄。
 //
@@ -44,6 +44,6 @@ struct EntityHandle {
 
 inline constexpr EntityHandle kNullHandle{};
 
-}  // namespace sg::model
+}  // namespace sa::model
 
-#endif  // SG_SHARED_MODEL_HANDLE_H
+#endif  // SA_SHARED_MODEL_HANDLE_H

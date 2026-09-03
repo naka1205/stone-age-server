@@ -14,12 +14,12 @@
 // ⚠️ 因此实现方**不得**在 L3 内部调用任何其他随机源(包括 std::rand、
 //    std::mt19937 的全局实例、时间戳)。一处漏网,整个用例集失去意义。
 
-#ifndef SG_SHARED_RULES_RANDOM_H
-#define SG_SHARED_RULES_RANDOM_H
+#ifndef SA_SHARED_RULES_RANDOM_H
+#define SA_SHARED_RULES_RANDOM_H
 
 #include <cstdint>
 
-namespace sg::rules {
+namespace sa::rules {
 
 // 注入式随机源。★ 两个方法对应原版仅有的两个入口。
 class IRandom {
@@ -78,6 +78,6 @@ class SeededRandom final : public IRandom {
   std::uint64_t state_;
 };
 
-}  // namespace sg::rules
+}  // namespace sa::rules
 
-#endif  // SG_SHARED_RULES_RANDOM_H
+#endif  // SA_SHARED_RULES_RANDOM_H

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""sgidl_gen —— 石器时代协议 IDL 代码生成器。
+"""saidl_gen —— 石器时代协议 IDL 代码生成器。
 
     schema/*.proto
          ↓  protoc --descriptor_set_out          ★ protoc 只在构建期用于解析
     descriptor set
          ↓  本脚本（零第三方依赖）
-    generated/cpp/*.sg.h                          ★ 纯 POD + inline 编解码，运行时零依赖
+    generated/cpp/*.sa.h                          ★ 纯 POD + inline 编解码，运行时零依赖
 
 用法：
-    python3 idl/codegen/sgidl_gen.py               # 生成 + 检查 + 更新编号表
-    python3 idl/codegen/sgidl_gen.py --check       # 只检查，不写文件（CI 用）
-    python3 idl/codegen/sgidl_gen.py --verify      # 检查生成物是否与 schema 同步（CI 用）
+    python3 idl/codegen/saidl_gen.py               # 生成 + 检查 + 更新编号表
+    python3 idl/codegen/saidl_gen.py --check       # 只检查，不写文件（CI 用）
+    python3 idl/codegen/saidl_gen.py --verify      # 检查生成物是否与 schema 同步（CI 用）
 
 依据：11-decision-register.md §1.1（DR-TS1）、02-protocol.md §8。
 """
@@ -36,7 +36,7 @@ for _s in (sys.stdout, sys.stderr):
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from sgidl import checks, cpp, descriptor  # noqa: E402
+from saidl import checks, cpp, descriptor  # noqa: E402
 
 IDL_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_DIR = IDL_DIR / "schema"
@@ -45,7 +45,7 @@ SUPPORT_DIR = Path(__file__).resolve().parent / "support"
 REGISTRY = Path(__file__).resolve().parent / "registry" / "msg_ids.json"
 
 # 只提供 option 定义，不产出生成物
-OPTION_FILE = "sg_options.proto"
+OPTION_FILE = "sa_options.proto"
 
 
 def resolve_protoc() -> str:
@@ -95,7 +95,7 @@ def generate(schema: descriptor.Schema) -> dict[str, str]:
     for protofile in sorted(schema.files):
         files[gen.header_name(protofile)] = gen.emit_file(protofile)
     files["ids.h"] = gen.emit_ids()
-    files["sg_idl_runtime.h"] = (SUPPORT_DIR / "sg_idl_runtime.h").read_text(
+    files["sa_idl_runtime.h"] = (SUPPORT_DIR / "sa_idl_runtime.h").read_text(
         encoding="utf-8")
     return files
 
@@ -151,7 +151,7 @@ def main() -> int:
     if args.verify:
         diffs = verify_out(files, OUT_DIR)
         if diffs:
-            sys.stderr.write("\n★ 生成物与 schema 不同步，请重跑 sgidl_gen.py 并提交：\n\n")
+            sys.stderr.write("\n★ 生成物与 schema 不同步，请重跑 saidl_gen.py 并提交：\n\n")
             for d in diffs:
                 sys.stderr.write(f"  - {d}\n")
             return 1

@@ -13,9 +13,9 @@
 
 syntax = "proto3";
 
-package sg.transport;
+package sa.transport;
 
-import "sg_options.proto";
+import "sa_options.proto";
 
 // 信封头。★ 不含版本号 —— 协议版本不匹配在握手阶段直接拒绝,
 // 不做「按版本走不同解析路径」(那是旧实现 bNewServer 双协议分支的老路,02 §2.1)。
@@ -23,7 +23,7 @@ import "sg_options.proto";
 // body 不作为字段出现:它是「紧跟在信封头之后的、由 msg_id 决定类型的字节」,
 // 长度由帧层的 u32 length 给出。把 body 建模成 bytes 会引入无上限变长字段。
 message EnvelopeHeader {
-  option (sg.transport_only) = true;
+  option (sa.transport_only) = true;
 
   uint32 msg_id  = 1;  // 见 idl/generated/cpp/ids.h
   uint64 corr_id = 2;  // 请求-响应关联;Notify 为 0(02 §2.1)

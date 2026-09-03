@@ -66,6 +66,11 @@ EXPECTED_TESTS = {
     "idl_smoke",        # IDL 生成物体积与编解码
     "shared_purity",    # ★★ D2 的守卫:shared/ 只依赖标准库
     "idl_verify",       # ★ schema 与生成物同步(需 protoc)
+    # ── 阶段 1.5(2026-09-04 接入构建时补齐)──────────────────────
+    "net_framing",        # 帧层 / 信封层 / 会话状态机
+    "platform_config",    # 配置装载与快速失败
+    "world_tick",         # ★ 最小 tick 与「战斗速度 ≠ tick 频率」
+    "module_boundaries",  # ★★ 00 §3.1 的守卫:进程内捷径(需 Python3)
 }
 
 
@@ -126,9 +131,9 @@ def main():
 
     # ── §1 配置 ────────────────────────────────────────────────────
     #
-    # ★ SG_WERROR=ON:文档里「0 告警」被当凭据用了很多次,但至今没有任何机制
+    # ★ SA_WERROR=ON:文档里「0 告警」被当凭据用了很多次,但至今没有任何机制
     #   保证它继续为真。CI 上让告警**中断构建**,那句话才是可持续的。
-    #   (cmake/SgWarnings.cmake 卷首有为什么本地默认 OFF 的理由。)
+    #   (cmake/SaWarnings.cmake 卷首有为什么本地默认 OFF 的理由。)
     cfg = ["cmake", "-S", str(REPO), "-B", str(build),
            f"-DCMAKE_BUILD_TYPE={args.config}", "-DSG_WERROR=ON"]
     if args.generator:
@@ -144,7 +149,7 @@ def main():
                      ("未找到 Python3", "shared_purity 与 idl_verify 都不会注册")):
         if pat in out:
             print(f"\n⚠️★ 配置期告警:{pat} ⇒ {why}", flush=True)
-    rep.record(1, "配置", True, f"{args.config} · SG_WERROR=ON")
+    rep.record(1, "配置", True, f"{args.config} · SA_WERROR=ON")
 
     # ── §2 ★★ 测试注册清单(最先判,理由见 EXPECTED_TESTS 卷首)────────
     rc, out = run(["ctest", "--test-dir", str(build), "-C", args.config, "-N"])
@@ -171,7 +176,7 @@ def main():
     #    当然不会再报一次告警。这条是 2026-09-02 Windows 验证时踩出来的。
     rc, _ = run(["cmake", "--build", str(build), "--config", args.config,
                  "--clean-first", "--parallel"])
-    rep.record(3, "清洁构建(SG_WERROR ⇒ 告警即失败)", rc == 0,
+    rep.record(3, "清洁构建(SA_WERROR ⇒ 告警即失败)", rc == 0,
                "" if rc == 0 else "构建失败或存在告警")
     if rc != 0:
         return rep.summarize()
@@ -198,14 +203,14 @@ def negative_check(build, config):
     防的是 00 §10.4 那一族里最危险的一种:CMake 的 Release / RelWithDebInfo /
     MinSizeRel 都定义 NDEBUG,而 NDEBUG 把 `assert` **整个编译掉** ⇒ 测试照常
     链接、照常退出码 0、照常打印 OK,但一条都没验证。
-    cmake/SgWarnings.cmake 的 sg_enable_assertions() 就是为此存在的,
+    cmake/SaWarnings.cmake 的 sa_enable_assertions() 就是为此存在的,
     而**它自己没有任何东西守着**。
 
     ⚠️★ 探针必须打在 contract_smoke 上,不能打在黄金用例集上 ——
         这是 2026-09-02 首次执行 win_validate.ps1 时纠正的一处错误:
         黄金用例集用 doctest 的 CHECK,**它与 NDEBUG 无关**,不管 assert
         有没有被编译掉,改错矩阵它都会红 ⇒ 那样得到的"失败"证明不了
-        sg_enable_assertions() 有效,反会把假阳性读成"断言防线成立"。
+        sa_enable_assertions() 有效,反会把假阳性读成"断言防线成立"。
         ★★ 本节要防的错误,恰恰会发生在本节自己身上。
 
     ★ contract_smoke 的 CheckElementMatrix() 是**先 printf 再 assert**
@@ -228,7 +233,7 @@ def negative_check(build, config):
     try:
         target.write_text(pat.sub(r"\g<1>9.9", orig, count=1), encoding="utf-8")
         rc_build, _ = run(["cmake", "--build", str(build), "--config", config,
-                           "--target", "sg_contract_smoke"])
+                           "--target", "sa_contract_smoke"])
         if rc_build != 0:
             return ("★ 断言防线反向验证", False,
                     "注入后**构建失败** ⇒ 本项不结论(是注入方式的问题,"
@@ -244,7 +249,7 @@ def negative_check(build, config):
 
         if rc_test != 0 and saw_assert:
             return ("★ 断言防线反向验证", True,
-                    "改错矩阵后 assert 确实触发并使测试失败 ⇒ sg_enable_assertions() 有效")
+                    "改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效")
         if rc_test != 0:
             return ("★ 断言防线反向验证", True,
                     "测试确实失败,但输出未见 assert 字样(可能被 abort 截断)"
@@ -260,7 +265,7 @@ def negative_check(build, config):
         backup.unlink()
         # 还原后重建,避免给后续步骤留下改坏的产物。
         run(["cmake", "--build", str(build), "--config", config,
-             "--target", "sg_contract_smoke"])
+             "--target", "sa_contract_smoke"])
 
 
 if __name__ == "__main__":

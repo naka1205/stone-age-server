@@ -1,10 +1,10 @@
-# cmake/SgWarnings.cmake —— 统一的告警口径
+# cmake/SaWarnings.cmake —— 统一的告警口径
 #
 # ★★ 本仓最容易踩的错误归为**三类静默错误**
 #   (slot 别名合并 / 照抄 8.5 / 进程内捷径)—— 它们的共同点是**不报错、不崩溃**。
 #   编译器能替我们抓住的那部分,一条都不该放过。
 
-# ── ★ SG_WERROR:把告警当错误 ──────────────────────────────────────
+# ── ★ SA_WERROR:把告警当错误 ──────────────────────────────────────
 #
 # ⚠️★ **默认 OFF,CI 上 ON。这个不对称是有意的。**
 #
@@ -21,9 +21,9 @@
 # 新版本常带来新告警 ⇒ CI 可能因**编译器升级**而非代码改动变红。
 # 这是接受的:那种红说明「新编译器发现了旧代码里的东西」,值得看一眼,
 # 不是噪声。真正不可接受的是反过来 —— 告警悄悄堆积而没人知道。
-option(SG_WERROR "把编译告警当作错误(CI 用;本地默认关)" OFF)
+option(SA_WERROR "把编译告警当作错误(CI 用;本地默认关)" OFF)
 
-function(sg_apply_warnings target)
+function(sa_apply_warnings target)
   if(MSVC)
     # ★★ `/utf-8` 不是风格选项,是**正确性**选项(2026-09-02 补,Windows 验证前置)。
     #
@@ -36,10 +36,10 @@ function(sg_apply_warnings target)
     #    ⇒ 轻则 C4819 刷屏 + 用例名与断言消息乱码,
     #      重则某个 UTF-8 字节序列在 GBK 下被读成尾随反斜杠一类,**直接编译错误**。
     #
-    # ★ 客户端仓的 SgClientWarnings.cmake 早有这一行,本文件此前漏了 ——
+    # ★ 客户端仓的 SaClientWarnings.cmake 早有这一行,本文件此前漏了 ——
     #   两端都是 clang 时永远不会暴露,与 d939247 那个缺口是同一类。
     target_compile_options(${target} PRIVATE /W4 /utf-8 /permissive-)
-    if(SG_WERROR)
+    if(SA_WERROR)
       target_compile_options(${target} PRIVATE /WX)
     endif()
   else()
@@ -54,7 +54,7 @@ function(sg_apply_warnings target)
         -Wold-style-cast
         -Wnon-virtual-dtor
     )
-    if(SG_WERROR)
+    if(SA_WERROR)
       target_compile_options(${target} PRIVATE -Werror)
     endif()
   endif()
@@ -71,7 +71,7 @@ endfunction()
 # 若不是开了 -Wall/-Wextra,这个假绿色不会有任何外部表现。
 #
 # ⚠️ 这与 00 §10.4 的「三类静默错误」同源:不报错、不崩溃,只是悄悄什么都不做。
-function(sg_enable_assertions target)
+function(sa_enable_assertions target)
   if(MSVC)
     target_compile_options(${target} PRIVATE /UNDEBUG)
   else()

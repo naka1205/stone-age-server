@@ -45,7 +45,7 @@ F_ENUMVAL_NUMBER = 2
 
 F_ONEOF_NAME = 1
 
-# ── sg_options.proto 的扩展字段号 ────────────────────────────────
+# ── sa_options.proto 的扩展字段号 ────────────────────────────────
 OPT_MSG_ID = 50001
 OPT_TRANSPORT_ONLY = 50002
 OPT_DEPRECATED_ID = 50003
@@ -101,7 +101,7 @@ class Oneof:
 
 @dataclass
 class Message:
-    fqname: str                # sg.domain.Vec2
+    fqname: str                # sa.domain.Vec2
     fields: list[Field]
     oneofs: list[Oneof]
     msg_id: int | None
@@ -185,7 +185,7 @@ def _parse_enum(ed, package: str, prefix: str, filename: str) -> Enum:
         ))
     width = _opt_uint(wire.get_msg(ed, F_ENUM_OPTIONS), OPT_ENUM_WIDTH) or 32
     if width not in (8, 16, 32):
-        raise SchemaError(f"枚举 {fq} 的 (sg.width) = {width}，只允许 8 / 16 / 32")
+        raise SchemaError(f"枚举 {fq} 的 (sa.width) = {width}，只允许 8 / 16 / 32")
     return Enum(fqname=fq, values=values, width=width, file=filename, package=package)
 
 
@@ -195,7 +195,7 @@ def _parse_message(md, package: str, prefix: str, filename: str,
     fq = f"{package}.{prefix}{name}" if package else f"{prefix}{name}"
 
     if wire.get_msgs(md, F_MSG_EXTENSION):
-        # extend 只允许出现在 sg_options.proto（那份文件不参与生成）
+        # extend 只允许出现在 sa_options.proto（那份文件不参与生成）
         raise SchemaError(f"消息 {fq} 内出现 extend —— 业务 schema 不得使用扩展")
 
     options = wire.get_msg(md, F_MSG_OPTIONS)
@@ -230,11 +230,11 @@ def _parse_message(md, package: str, prefix: str, filename: str,
 
         if ptype == T_STRING and max_len is None:
             raise SchemaError(
-                f"{fq}.{fname} 是 string 但未标注 [(sg.max_len) = N]。\n"
+                f"{fq}.{fname} 是 string 但未标注 [(sa.max_len) = N]。\n"
                 "  DR-TS1 边界 ②：变长字段必须给出显式定长上限。")
         if repeated and max_count is None:
             raise SchemaError(
-                f"{fq}.{fname} 是 repeated 但未标注 [(sg.max_count) = N]。\n"
+                f"{fq}.{fname} 是 repeated 但未标注 [(sa.max_count) = N]。\n"
                 "  DR-TS1 边界 ②：变长字段必须给出显式定长上限。")
 
         oneof_index = wire.get_int(fd, F_FLD_ONEOF_INDEX, None)

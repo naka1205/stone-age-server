@@ -11,20 +11,20 @@
 // 构建:c++ -std=c++20 -Wall -Wextra -I../generated/cpp smoke.cpp -o smoke && ./smoke
 
 #include "ids.h"
-#include "domain/common.sg.h"
-#include "domain/battle_events.sg.h"
-#include "domain/window.sg.h"
-#include "transport/envelope.sg.h"
-#include "transport/errors.sg.h"
-#include "transport/handshake.sg.h"
-#include "transport/interservice.sg.h"
+#include "domain/common.sa.h"
+#include "domain/battle_events.sa.h"
+#include "domain/window.sa.h"
+#include "transport/envelope.sa.h"
+#include "transport/errors.sa.h"
+#include "transport/handshake.sa.h"
+#include "transport/interservice.sa.h"
 
 #include <cassert>
 #include <cstdio>
 #include <cstring>
 #include <type_traits>
 
-using namespace sg;
+using namespace sa;
 
 // ── ① POD 约束(DR-TS1 边界 ②)──────────────────────────────────
 static_assert(std::is_trivially_copyable_v<transport::HandshakeRequest>);

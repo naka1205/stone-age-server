@@ -278,7 +278,7 @@ int main() {
     return 0;
 }
 "@
-$probeDir = Join-Path $env:TEMP "sg_probe"
+$probeDir = Join-Path $env:TEMP "sa_probe"
 New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
 $probeSrc = Join-Path $probeDir "probe.cpp"
 Set-Content -Path $probeSrc -Value $probe -Encoding UTF8
@@ -298,7 +298,7 @@ Pop-Location
 
 # ─────────────────────────────────────────────────────────────────
 Section "5. Python 侧检查(路径分隔符 / 编码)"
-# check_shared_purity.py 与 sgidl_gen.py --verify 已在 ctest 里跑过,
+# check_shared_purity.py 与 saidl_gen.py --verify 已在 ctest 里跑过,
 # 这里单独再跑一次并显示输出 —— 它们在 Windows 上最可能因路径与编码出问题。
 
 Push-Location $ServerDir
@@ -313,7 +313,7 @@ Record "shared/ 纯度检查(Windows)" ($LASTEXITCODE -eq 0) "exit=$LASTEXITCODE
 #    ⇒ 无 protoc 时记为「未验」而不是「失败」——
 #      ★ 但脚本仍要跑一遍,验它在 Windows 上给的是**一句能照着做的诊断**,
 #        而不是 subprocess 抛的 `WinError 2` traceback(2026-09-02 首跑就是那样)。
-$idlOut = (& python idl\codegen\sgidl_gen.py --verify 2>&1) -join "`n"
+$idlOut = (& python idl\codegen\saidl_gen.py --verify 2>&1) -join "`n"
 $idlOut | Out-Host
 $idlExit = $LASTEXITCODE
 if (Get-Command protoc -ErrorAction SilentlyContinue) {
@@ -333,7 +333,7 @@ Pop-Location
 # ─────────────────────────────────────────────────────────────────
 Section "6. ★ 断言防线反向验证(防「绿色的假测试」)"
 #
-# SgWarnings.cmake 的 sg_enable_assertions() 有一个 MSVC 分支(/UNDEBUG),
+# SaWarnings.cmake 的 sa_enable_assertions() 有一个 MSVC 分支(/UNDEBUG),
 # 它**从未被执行过**。若它在 MSVC 下不生效,后果与 2026-08-31 服务端踩过的
 # 那次完全一样:测试照常退出码 0、照常打印 OK,但一条都没验证 ——
 # 而那时我们会把它读成「D2 在 MSVC 上通过了」。
@@ -342,12 +342,12 @@ Section "6. ★ 断言防线反向验证(防「绿色的假测试」)"
 #
 # ⚠️★★ **初版有两处写错,2026-09-02 首次执行时实测纠正**:
 #
-#   ① **目标打错了。** 初版打 `sg_rules_battle_test` / `-R rules_battle`,但守相克矩阵的
+#   ① **目标打错了。** 初版打 `sa_rules_battle_test` / `-R rules_battle`,但守相克矩阵的
 #      `assert(false && "相克矩阵与 05-battle.md §3.4 原表不符")` 在
 #      **tests/contract_smoke.cpp:72**,不在黄金用例集里;
 #      而黄金用例集用的是 **doctest 的 CHECK —— 它与 NDEBUG 无关**,
 #      不管 `/UNDEBUG` 生效与否,改错矩阵它都会红。
-#      ⇒ 那样得到的「失败」**证明不了** `sg_enable_assertions()` 的 MSVC 分支有效,
+#      ⇒ 那样得到的「失败」**证明不了** `sa_enable_assertions()` 的 MSVC 分支有效,
 #        反而会把一个**假阳性**读成「断言在 MSVC 下有效」。
 #        ★★ 这正是本节要防的那类错误,只不过发生在上一层。
 #
@@ -377,7 +377,7 @@ if ($SkipNegative) {
             Set-Content -Path $target -Value ($pattern.Replace($orig, '${1}9.9', 1)) `
                         -Encoding UTF8 -NoNewline
 
-            & cmake --build $sBuild --config $Config --target sg_contract_smoke 2>&1 | Out-Null
+            & cmake --build $sBuild --config $Config --target sa_contract_smoke 2>&1 | Out-Null
             $nbOk = ($LASTEXITCODE -eq 0)
 
             # ⚠️ `--timeout 60`:MSVC 的 assert 走 _wassert,控制台程序**理论上**写 stderr
@@ -412,8 +412,8 @@ if ($SkipNegative) {
         Copy-Item $backup $target -Force
         Remove-Item $backup -Force
         # 还原后重建,避免留下改坏的产物
-        & cmake --build $sBuild --config $Config --target sg_contract_smoke 2>&1 | Out-Null
-        Log "  已还原 constants.h 并重建 sg_contract_smoke。"
+        & cmake --build $sBuild --config $Config --target sa_contract_smoke 2>&1 | Out-Null
+        Log "  已还原 constants.h 并重建 sa_contract_smoke。"
     }
 }
 

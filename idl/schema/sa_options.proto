@@ -1,4 +1,4 @@
-// sg_options.proto —— 自定义 option 定义
+// sa_options.proto —— 自定义 option 定义
 //
 // 依据:11-decision-register.md §1.1 DR-TS1 边界 ②③
 //   ③ msg_id 不是 protobuf 的概念 ⇒ 用自定义 option 显式标注,codegen 校验唯一性
@@ -8,7 +8,7 @@
 
 syntax = "proto3";
 
-package sg;
+package sa;
 
 import "google/protobuf/descriptor.proto";
 

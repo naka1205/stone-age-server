@@ -33,9 +33,9 @@
 #include <utility>
 #include <vector>
 
-using namespace sg::rules;
-using sg::domain::BattleStatus;
-using sg::domain::CannotActReason;
+using namespace sa::rules;
+using sa::domain::BattleStatus;
+using sa::domain::CannotActReason;
 
 namespace {
 
@@ -608,20 +608,20 @@ TurnCommands NoCommands() { return TurnCommands{}; }
 
 void SetAttack(TurnCommands& tc, int slot, int target) {
   tc.present[slot] = true;
-  tc.commands[slot] = sg::domain::BattleCommand{};
-  tc.commands[slot].command_kind = sg::domain::BattleCommand::CommandKind::ATTACK;
+  tc.commands[slot] = sa::domain::BattleCommand{};
+  tc.commands[slot].command_kind = sa::domain::BattleCommand::CommandKind::ATTACK;
   tc.commands[slot].command.attack.target = static_cast<std::uint32_t>(target);
 }
 
 void SetKind(TurnCommands& tc, int slot,
-             sg::domain::BattleCommand::CommandKind kind) {
+             sa::domain::BattleCommand::CommandKind kind) {
   tc.present[slot] = true;
-  tc.commands[slot] = sg::domain::BattleCommand{};
+  tc.commands[slot] = sa::domain::BattleCommand{};
   tc.commands[slot].command_kind = kind;
 }
 
-std::size_t CountKind(const sg::domain::BattleEvents& ev,
-                      sg::domain::BattleEvent::BodyKind kind) {
+std::size_t CountKind(const sa::domain::BattleEvents& ev,
+                      sa::domain::BattleEvent::BodyKind kind) {
   std::size_t n = 0;
   for (std::size_t i = 0; i < ev.events.size(); ++i)
     if (ev.events[i].body_kind == kind) ++n;
@@ -636,8 +636,8 @@ TEST_CASE("行动顺序:排序键 = quick + 20 + sequence,且不夹下限") {
   // `BATTLE_DexCalc` 基数 = WORKQUICK + 20(05 §2.5)。
   // quick == 0 ⇒ 抖动项 RAND(0, 0) == 0 ⇒ dex 恒等于基数,可以精确断言。
   auto c = MakeCombatant(CombatantKind::kPlayer, 100, 100, /*quick=*/0);
-  sg::domain::BattleCommand cmd{};
-  cmd.command_kind = sg::domain::BattleCommand::CommandKind::ATTACK;
+  sa::domain::BattleCommand cmd{};
+  cmd.command_kind = sa::domain::BattleCommand::CommandKind::ATTACK;
 
   SeededRandom rng(1);
   CHECK(ComputeActionDex(c, cmd, rng) == kDexBase);
@@ -662,7 +662,7 @@ TEST_CASE("行动顺序:同速按入场位次(DR-BT8)") {
   for (int i = 0; i < kSlotCount; ++i) {
     f.at(i) = MakeCombatant(CombatantKind::kPlayer, 100, 100, /*quick=*/0);
     f.at(i).slot = static_cast<std::uint8_t>(i);
-    SetKind(tc, i, sg::domain::BattleCommand::CommandKind::WAIT);
+    SetKind(tc, i, sa::domain::BattleCommand::CommandKind::WAIT);
   }
 
   std::uint8_t order[kSlotCount] = {};
@@ -683,9 +683,9 @@ TEST_CASE("行动顺序:快的先动;无指令 / 已死 / 空槽不入列") {
   f.at(1).mods.sequence = 50;   // 用 sequence 制造确定的速度差(quick=0 ⇒ 无抖动)
   f.at(2).dead = true;          // 已死不入列
   // slot 3 有单位但**不给指令** ⇒ 不入列(05 §2.2 第 1 步:敌方由 AI 填齐)
-  SetKind(tc, 0, sg::domain::BattleCommand::CommandKind::WAIT);
-  SetKind(tc, 1, sg::domain::BattleCommand::CommandKind::WAIT);
-  SetKind(tc, 2, sg::domain::BattleCommand::CommandKind::WAIT);
+  SetKind(tc, 0, sa::domain::BattleCommand::CommandKind::WAIT);
+  SetKind(tc, 1, sa::domain::BattleCommand::CommandKind::WAIT);
+  SetKind(tc, 2, sa::domain::BattleCommand::CommandKind::WAIT);
 
   std::uint8_t order[kSlotCount] = {};
   SeededRandom rng(7);
@@ -840,7 +840,7 @@ Duel MakeDuel(int atk = 1000, int def = 10) {
 
 TEST_CASE("ResolveTurn:一次普攻 ⇒ Hit + Damage,且 target_count 与 Damage 数一致") {
   Duel d = MakeDuel();
-  sg::domain::BattleEvents ev{};
+  sa::domain::BattleEvents ev{};
   MaxRandom rng;
 
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
@@ -848,22 +848,22 @@ TEST_CASE("ResolveTurn:一次普攻 ⇒ Hit + Damage,且 target_count 与 Damage
   CHECK(ev.turn == d.field.turn);
 
   REQUIRE(ev.events.size() == 2);
-  REQUIRE(ev.events[0].body_kind == sg::domain::BattleEvent::BodyKind::HIT);
-  const sg::domain::Hit& hit = ev.events[0].body.hit;
+  REQUIRE(ev.events[0].body_kind == sa::domain::BattleEvent::BodyKind::HIT);
+  const sa::domain::Hit& hit = ev.events[0].body.hit;
   CHECK(hit.attacker == 0u);
-  CHECK(hit.kind == sg::domain::AttackKind::ATTACK_KIND_MELEE);
+  CHECK(hit.kind == sa::domain::AttackKind::ATTACK_KIND_MELEE);
   CHECK(hit.skill_id == 0u);
   // ★ 变长目标列表的新形状(IDL 注释):Hit 声明 target_count,其后紧跟同样多个 Damage。
   //   ⚠️ 这条关系一旦对不上,客户端就会把下一个 Hit 当成本次的目标读进来。
   CHECK(hit.target_count == 1u);
-  CHECK(CountKind(ev, sg::domain::BattleEvent::BodyKind::DAMAGE) == hit.target_count);
+  CHECK(CountKind(ev, sa::domain::BattleEvent::BodyKind::DAMAGE) == hit.target_count);
 
-  REQUIRE(ev.events[1].body_kind == sg::domain::BattleEvent::BodyKind::DAMAGE);
-  const sg::domain::Damage& dmg = ev.events[1].body.damage;
+  REQUIRE(ev.events[1].body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE);
+  const sa::domain::Damage& dmg = ev.events[1].body.damage;
   CHECK(dmg.target == 10u);
   CHECK(dmg.hp_delta < 0);
   CHECK((dmg.flags &
-         static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_NORMAL)) != 0u);
+         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_NORMAL)) != 0u);
 }
 
 TEST_CASE("ResolveTurn:L3 不写世界状态 —— field 逐字节不变") {
@@ -873,7 +873,7 @@ TEST_CASE("ResolveTurn:L3 不写世界状态 —— field 逐字节不变") {
   //     "将来有人把 const 去掉"这种回归。)
   Duel d = MakeDuel();
   const BattleField before = d.field;
-  sg::domain::BattleEvents ev{};
+  sa::domain::BattleEvents ev{};
   SeededRandom rng(99);
   ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev);
   CHECK(std::memcmp(&before, &d.field, sizeof(BattleField)) == 0);
@@ -885,14 +885,14 @@ TEST_CASE("ResolveTurn:回避产事件而不是被跳过(DODGE 标志)") {
   Duel d = MakeDuel();
   d.field.at(10).mods.always_dodge = true;   // ⑦ 必闪(_PETSKILL_SETDUCK,8.0 开)
 
-  sg::domain::BattleEvents ev{};
+  sa::domain::BattleEvents ev{};
   SeededRandom rng(5);
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
   REQUIRE(ev.events.size() == 2);
-  const sg::domain::Damage& dmg = ev.events[1].body.damage;
+  const sa::domain::Damage& dmg = ev.events[1].body.damage;
   CHECK((dmg.flags &
-         static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_DODGE)) != 0u);
+         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_DODGE)) != 0u);
   CHECK(dmg.hp_delta == 0);
   CHECK(ev.events[0].body.hit.target_count == 1u);
 }
@@ -904,14 +904,14 @@ TEST_CASE("ResolveTurn:致死置 DEATH,且同回合剩余段数作废") {
 
   // 脚本:段数档(1 ⇒ 首档)· 段数(10)· 其后一律取上界。
   ScriptedRandom rng({1, 10, 10000});
-  sg::domain::BattleEvents ev{};
+  sa::domain::BattleEvents ev{};
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
   // ★ 10 段只打出 1 条 Damage ⇒ 剩余 9 段作废(原版同样逐段查存活)。
-  CHECK(CountKind(ev, sg::domain::BattleEvent::BodyKind::DAMAGE) == 1);
+  CHECK(CountKind(ev, sa::domain::BattleEvent::BodyKind::DAMAGE) == 1);
   CHECK(ev.events[0].body.hit.target_count == 1u);
   CHECK((ev.events[1].body.damage.flags &
-         static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_DEATH)) != 0u);
+         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_DEATH)) != 0u);
 }
 
 TEST_CASE("ResolveTurn:不可行动者不产事件(DR-BT5)") {
@@ -922,7 +922,7 @@ TEST_CASE("ResolveTurn:不可行动者不产事件(DR-BT5)") {
                         BattleStatus::BATTLE_ST_SLEEP}) {
     Duel d = MakeDuel();
     d.field.at(0).status = static_cast<std::uint8_t>(st);
-    sg::domain::BattleEvents ev{};
+    sa::domain::BattleEvents ev{};
     MaxRandom rng;
     REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
     CHECK(ev.events.size() == 0);
@@ -933,12 +933,12 @@ TEST_CASE("ResolveTurn:批次 0.5 未接入的指令一律跳过,不产事件") 
   // ⚠️ 本用例把**覆盖边界**钉住:逃跑 / 捕获 / 道具 / 换宠 / 宠技 / 职技 / 咒术
   //    在批次 0.5 里必须是"什么都不发生",而不是"发生了一半"。
   //    ⇒ 接入任一指令时本用例会失败,那正是提醒去更新 battle.h 的覆盖边界表。
-  using K = sg::domain::BattleCommand::CommandKind;
+  using K = sa::domain::BattleCommand::CommandKind;
   for (const auto k : {K::GUARD, K::WAIT, K::ESCAPE, K::CAPTURE, K::PET_IN,
                        K::PET_OUT, K::USE_ITEM, K::PET_SKILL, K::PROF_SKILL, K::SPELL}) {
     Duel d = MakeDuel();
     SetKind(d.cmds, 0, k);
-    sg::domain::BattleEvents ev{};
+    sa::domain::BattleEvents ev{};
     MaxRandom rng;
     REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
     CHECK(ev.events.size() == 0);
@@ -952,8 +952,8 @@ TEST_CASE("ResolveTurn:守方防御 ⇒ 减伤且置 GUARD;混乱值 > 0 时不�
     Duel d = MakeDuel(/*atk=*/100000, /*def=*/1);
     d.field.at(10).confusion = confusion;
     d.field.at(10).hp = d.field.at(10).max_hp = 100000000;
-    SetKind(d.cmds, 10, sg::domain::BattleCommand::CommandKind::GUARD);
-    sg::domain::BattleEvents ev{};
+    SetKind(d.cmds, 10, sa::domain::BattleCommand::CommandKind::GUARD);
+    sa::domain::BattleEvents ev{};
     MaxRandom rng;   // 防御减伤抽到 RAND(1,100) == 100 ⇒ 系数 0.50(最弱一档)
     ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev);
     REQUIRE(ev.events.size() >= 2);
@@ -966,9 +966,9 @@ TEST_CASE("ResolveTurn:守方防御 ⇒ 减伤且置 GUARD;混乱值 > 0 时不�
   const std::int32_t confused = run(/*confusion=*/1, &confused_flags);
 
   CHECK((guard_flags &
-         static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_GUARD)) != 0u);
+         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_GUARD)) != 0u);
   CHECK((confused_flags &
-         static_cast<std::uint32_t>(sg::domain::DamageFlag::DAMAGE_FLAG_GUARD)) == 0u);
+         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_GUARD)) == 0u);
   CHECK(guarded > confused);   // hp_delta 是负数 ⇒ 掉血更少 = 值更大
 }
 
@@ -981,11 +981,11 @@ TEST_CASE("ResolveTurn:骑宠分摊写进 hp_delta / pet_hp_delta") {
   d.field.at(10).ride_defense = 100;
   d.field.at(10).hp = d.field.at(10).max_hp = 100000000;
 
-  sg::domain::BattleEvents ev{};
+  sa::domain::BattleEvents ev{};
   MaxRandom rng;
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
   REQUIRE(ev.events.size() == 2);
-  const sg::domain::Damage& dmg = ev.events[1].body.damage;
+  const sa::domain::Damage& dmg = ev.events[1].body.damage;
 
   CHECK(dmg.hp_delta < 0);
   CHECK(dmg.pet_hp_delta < 0);
@@ -1012,7 +1012,7 @@ TEST_CASE("ResolveTurn:事件溢出返回 false,不静默截断") {
     SetAttack(tc, i, (i + 1) % kSlotCount);
   }
 
-  sg::domain::BattleEvents ev{};
+  sa::domain::BattleEvents ev{};
   MaxRandom rng;
   CHECK(ResolveTurn(f, tc, RulesConfig{}, rng, ev) == false);
   CHECK(ev.events.size() == ev.events.capacity());
@@ -1028,7 +1028,7 @@ TEST_CASE("ResolveTurn:可回放 —— 同种子 + 同输入 ⇒ 事件流逐�
   SetAttack(b.cmds, 10, 0);
   a.field.at(0).level = b.field.at(0).level = 30;   // ⇒ 空手可多段,序列更长
 
-  sg::domain::BattleEvents ev1{}, ev2{};
+  sa::domain::BattleEvents ev1{}, ev2{};
   SeededRandom r1(0xC0FFEE), r2(0xC0FFEE);
   const bool ok1 = ResolveTurn(a.field, a.cmds, RulesConfig{}, r1, ev1);
   const bool ok2 = ResolveTurn(b.field, b.cmds, RulesConfig{}, r2, ev2);
@@ -1036,7 +1036,7 @@ TEST_CASE("ResolveTurn:可回放 —— 同种子 + 同输入 ⇒ 事件流逐�
   CHECK(ok1 == ok2);
   REQUIRE(ev1.events.size() == ev2.events.size());
   CHECK(ev1.events.size() > 0);
-  // 逐位比较:生成物是 POD(sg_idl_runtime.h 的 ② 条)⇒ 可直接 memcmp。
-  CHECK(std::memcmp(&ev1, &ev2, sizeof(sg::domain::BattleEvents)) == 0);
+  // 逐位比较:生成物是 POD(sa_idl_runtime.h 的 ② 条)⇒ 可直接 memcmp。
+  CHECK(std::memcmp(&ev1, &ev2, sizeof(sa::domain::BattleEvents)) == 0);
   CHECK(r1.state() == r2.state());   // ★ 随机源的消费序列也必须一致
 }

@@ -5,9 +5,9 @@
 
 syntax = "proto3";
 
-package sg.domain;
+package sa.domain;
 
-import "sg_options.proto";
+import "sa_options.proto";
 
 // ── 坐标与朝向 ────────────────────────────────────────────────
 
@@ -18,7 +18,7 @@ message Vec2 {
 
 // 8 方向。显式赋值(02 §1.1 落地规则 2)。
 enum Direction {
-  option (sg.width) = 8;
+  option (sa.width) = 8;
   DIR_NORTH      = 0;
   DIR_NORTH_EAST = 1;
   DIR_EAST       = 2;

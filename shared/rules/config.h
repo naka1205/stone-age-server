@@ -10,10 +10,10 @@
 //      (如 `_BATTLE_NEWPOWER`,见 constants.h 的 kDefenseCoefNewPower)
 //    ⇒ 把后者也做成开关,等于把"已经关掉的后路"重新打开。
 
-#ifndef SG_SHARED_RULES_CONFIG_H
-#define SG_SHARED_RULES_CONFIG_H
+#ifndef SA_SHARED_RULES_CONFIG_H
+#define SA_SHARED_RULES_CONFIG_H
 
-namespace sg::rules {
+namespace sa::rules {
 
 struct RulesConfig {
   // ── DR-BT1:空手多段连击各段全额 ──────────────────────────────
@@ -59,6 +59,6 @@ struct RulesConfig {
   bool replicate_atoi_truncation = false;
 };
 
-}  // namespace sg::rules
+}  // namespace sa::rules
 
-#endif  // SG_SHARED_RULES_CONFIG_H
+#endif  // SA_SHARED_RULES_CONFIG_H

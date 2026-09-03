@@ -1,16 +1,16 @@
 // ★ 本文件由 idl/codegen 从 schema 生成，请勿手工编辑。
 // 来源：domain/window.proto
 //
-// 修改方式：改 schema → 重跑 `python3 idl/codegen/sgidl_gen.py` → 提交生成物
+// 修改方式：改 schema → 重跑 `python3 idl/codegen/saidl_gen.py` → 提交生成物
 // （DR-TS2：生成产物入库，客户端连 protoc 都不需要）。
 
-#ifndef SG_IDL_DOMAIN_WINDOW_SG_H
-#define SG_IDL_DOMAIN_WINDOW_SG_H
+#ifndef SA_IDL_DOMAIN_WINDOW_SA_H
+#define SA_IDL_DOMAIN_WINDOW_SA_H
 
-#include "sg_idl_runtime.h"
-#include "domain/common.sg.h"
+#include "sa_idl_runtime.h"
+#include "domain/common.sa.h"
 
-namespace sg {
+namespace sa {
 namespace domain {
 
 enum class WindowKind : std::uint16_t {
@@ -54,40 +54,40 @@ enum class ButtonFlag : std::uint8_t {
 };
 
 struct MessageBody {
-  sg::idl::FixedVec<sg::idl::FixedStr<255>, 16> lines;
+  sa::idl::FixedVec<sa::idl::FixedStr<255>, 16> lines;
   bool wide;
 };
 
-inline void encode(sg::idl::Writer& w, const MessageBody& m) {
-  sg::idl::write_vec(w, m.lines,
-      [](sg::idl::Writer& we, const sg::idl::FixedStr<255>& e) { sg::idl::write_str(we, e); });
+inline void encode(sa::idl::Writer& w, const MessageBody& m) {
+  sa::idl::write_vec(w, m.lines,
+      [](sa::idl::Writer& we, const sa::idl::FixedStr<255>& e) { sa::idl::write_str(we, e); });
   w.b(m.wide);
 }
 
-inline void decode(sg::idl::Reader& r, MessageBody& m) {
-  sg::idl::read_vec(r, m.lines,
-      [](sg::idl::Reader& re, sg::idl::FixedStr<255>& e) { sg::idl::read_str(re, e); });
+inline void decode(sa::idl::Reader& r, MessageBody& m) {
+  sa::idl::read_vec(r, m.lines,
+      [](sa::idl::Reader& re, sa::idl::FixedStr<255>& e) { sa::idl::read_str(re, e); });
   if (!r.ok()) return;
   m.wide = r.b();
   if (!r.ok()) return;
 }
 
 struct LineInputBody {
-  sg::idl::FixedVec<sg::idl::FixedStr<255>, 16> lines;
+  sa::idl::FixedVec<sa::idl::FixedStr<255>, 16> lines;
   std::uint32_t max_len;
   bool wide;
 };
 
-inline void encode(sg::idl::Writer& w, const LineInputBody& m) {
-  sg::idl::write_vec(w, m.lines,
-      [](sg::idl::Writer& we, const sg::idl::FixedStr<255>& e) { sg::idl::write_str(we, e); });
+inline void encode(sa::idl::Writer& w, const LineInputBody& m) {
+  sa::idl::write_vec(w, m.lines,
+      [](sa::idl::Writer& we, const sa::idl::FixedStr<255>& e) { sa::idl::write_str(we, e); });
   w.u32(m.max_len);
   w.b(m.wide);
 }
 
-inline void decode(sg::idl::Reader& r, LineInputBody& m) {
-  sg::idl::read_vec(r, m.lines,
-      [](sg::idl::Reader& re, sg::idl::FixedStr<255>& e) { sg::idl::read_str(re, e); });
+inline void decode(sa::idl::Reader& r, LineInputBody& m) {
+  sa::idl::read_vec(r, m.lines,
+      [](sa::idl::Reader& re, sa::idl::FixedStr<255>& e) { sa::idl::read_str(re, e); });
   if (!r.ok()) return;
   m.max_len = r.u32();
   if (!r.ok()) return;
@@ -97,88 +97,88 @@ inline void decode(sg::idl::Reader& r, LineInputBody& m) {
 
 struct Choice {
   std::uint32_t choice_id;
-  sg::idl::FixedStr<255> text;
+  sa::idl::FixedStr<255> text;
   bool enabled;
 };
 
-inline void encode(sg::idl::Writer& w, const Choice& m) {
+inline void encode(sa::idl::Writer& w, const Choice& m) {
   w.u32(m.choice_id);
-  sg::idl::write_str(w, m.text);
+  sa::idl::write_str(w, m.text);
   w.b(m.enabled);
 }
 
-inline void decode(sg::idl::Reader& r, Choice& m) {
+inline void decode(sa::idl::Reader& r, Choice& m) {
   m.choice_id = r.u32();
   if (!r.ok()) return;
-  sg::idl::read_str(r, m.text);
+  sa::idl::read_str(r, m.text);
   if (!r.ok()) return;
   m.enabled = r.b();
   if (!r.ok()) return;
 }
 
 struct SelectBody {
-  sg::idl::FixedVec<sg::idl::FixedStr<255>, 16> lines;
-  sg::idl::FixedVec<sg::domain::Choice, 32> choices;
+  sa::idl::FixedVec<sa::idl::FixedStr<255>, 16> lines;
+  sa::idl::FixedVec<sa::domain::Choice, 32> choices;
 };
 
-inline void encode(sg::idl::Writer& w, const SelectBody& m) {
-  sg::idl::write_vec(w, m.lines,
-      [](sg::idl::Writer& we, const sg::idl::FixedStr<255>& e) { sg::idl::write_str(we, e); });
-  sg::idl::write_vec(w, m.choices,
-      [](sg::idl::Writer& we, const sg::domain::Choice& e) { encode(we, e); });
+inline void encode(sa::idl::Writer& w, const SelectBody& m) {
+  sa::idl::write_vec(w, m.lines,
+      [](sa::idl::Writer& we, const sa::idl::FixedStr<255>& e) { sa::idl::write_str(we, e); });
+  sa::idl::write_vec(w, m.choices,
+      [](sa::idl::Writer& we, const sa::domain::Choice& e) { encode(we, e); });
 }
 
-inline void decode(sg::idl::Reader& r, SelectBody& m) {
-  sg::idl::read_vec(r, m.lines,
-      [](sg::idl::Reader& re, sg::idl::FixedStr<255>& e) { sg::idl::read_str(re, e); });
+inline void decode(sa::idl::Reader& r, SelectBody& m) {
+  sa::idl::read_vec(r, m.lines,
+      [](sa::idl::Reader& re, sa::idl::FixedStr<255>& e) { sa::idl::read_str(re, e); });
   if (!r.ok()) return;
-  sg::idl::read_vec(r, m.choices,
-      [](sg::idl::Reader& re, sg::domain::Choice& e) { decode(re, e); });
+  sa::idl::read_vec(r, m.choices,
+      [](sa::idl::Reader& re, sa::domain::Choice& e) { decode(re, e); });
   if (!r.ok()) return;
 }
 
 struct ShopHeader {
   bool can_buy;
   bool reuse_previous;
-  sg::idl::FixedStr<63> shop_name;
-  sg::idl::FixedStr<255> message;
-  sg::idl::FixedStr<255> shop_message;
-  sg::idl::FixedStr<255> count_message;
-  sg::idl::FixedStr<255> level_low_message;
-  sg::idl::FixedStr<255> confirm_message;
-  sg::idl::FixedStr<255> item_full_message;
+  sa::idl::FixedStr<63> shop_name;
+  sa::idl::FixedStr<255> message;
+  sa::idl::FixedStr<255> shop_message;
+  sa::idl::FixedStr<255> count_message;
+  sa::idl::FixedStr<255> level_low_message;
+  sa::idl::FixedStr<255> confirm_message;
+  sa::idl::FixedStr<255> item_full_message;
 };
 
-inline void encode(sg::idl::Writer& w, const ShopHeader& m) {
+inline void encode(sa::idl::Writer& w, const ShopHeader& m) {
   w.b(m.can_buy);
   w.b(m.reuse_previous);
-  sg::idl::write_str(w, m.shop_name);
-  sg::idl::write_str(w, m.message);
-  sg::idl::write_str(w, m.shop_message);
-  sg::idl::write_str(w, m.count_message);
-  sg::idl::write_str(w, m.level_low_message);
-  sg::idl::write_str(w, m.confirm_message);
-  sg::idl::write_str(w, m.item_full_message);
+  sa::idl::write_str(w, m.shop_name);
+  sa::idl::write_str(w, m.message);
+  sa::idl::write_str(w, m.shop_message);
+  sa::idl::write_str(w, m.count_message);
+  sa::idl::write_str(w, m.level_low_message);
+  sa::idl::write_str(w, m.confirm_message);
+  sa::idl::write_str(w, m.item_full_message);
 }
 
-inline void decode(sg::idl::Reader& r, ShopHeader& m) {
+inline void decode(sa::idl::Reader& r, ShopHeader& m) {
   m.can_buy = r.b();
   if (!r.ok()) return;
   m.reuse_previous = r.b();
   if (!r.ok()) return;
-  sg::idl::read_str(r, m.shop_name);
+  sa::idl::read_str(r, m.shop_name);
   if (!r.ok()) return;
-  sg::idl::read_str(r, m.message);
+  sa::idl::read_str(r, m.message);
   if (!r.ok()) return;
-  sg::idl::read_str(r, m.shop_message);
+  sa::idl::read_str(r, m.shop_message);
   if (!r.ok()) return;
-  sg::idl::read_str(r, m.count_message);
+  sa::idl::read_str(r, m.count_message);
   if (!r.ok()) return;
-  sg::idl::read_str(r, m.level_low_message);
+  sa::idl::read_str(r, m.level_low_message);
   if (!r.ok()) return;
-  sg::idl::read_str(r, m.confirm_message);
+  sa::idl::read_str(r, m.confirm_message);
   if (!r.ok()) return;
-  sg::idl::read_str(r, m.item_full_message);
+  sa::idl::read_str(r, m.item_full_message);
   if (!r.ok()) return;
 }
 
@@ -191,7 +191,7 @@ struct ShopEntry {
   bool purchasable;
 };
 
-inline void encode(sg::idl::Writer& w, const ShopEntry& m) {
+inline void encode(sa::idl::Writer& w, const ShopEntry& m) {
   w.u32(m.entry_id);
   w.u32(m.item_id);
   w.u32(m.image_id);
@@ -200,7 +200,7 @@ inline void encode(sg::idl::Writer& w, const ShopEntry& m) {
   w.b(m.purchasable);
 }
 
-inline void decode(sg::idl::Reader& r, ShopEntry& m) {
+inline void decode(sa::idl::Reader& r, ShopEntry& m) {
   m.entry_id = r.u32();
   if (!r.ok()) return;
   m.item_id = r.u32();
@@ -216,44 +216,44 @@ inline void decode(sg::idl::Reader& r, ShopEntry& m) {
 }
 
 struct ShopBody {
-  sg::domain::ShopHeader header;
-  sg::idl::FixedVec<sg::domain::ShopEntry, 32> entries;
+  sa::domain::ShopHeader header;
+  sa::idl::FixedVec<sa::domain::ShopEntry, 32> entries;
 };
 
-inline void encode(sg::idl::Writer& w, const ShopBody& m) {
+inline void encode(sa::idl::Writer& w, const ShopBody& m) {
   encode(w, m.header);
-  sg::idl::write_vec(w, m.entries,
-      [](sg::idl::Writer& we, const sg::domain::ShopEntry& e) { encode(we, e); });
+  sa::idl::write_vec(w, m.entries,
+      [](sa::idl::Writer& we, const sa::domain::ShopEntry& e) { encode(we, e); });
 }
 
-inline void decode(sg::idl::Reader& r, ShopBody& m) {
+inline void decode(sa::idl::Reader& r, ShopBody& m) {
   decode(r, m.header);
   if (!r.ok()) return;
-  sg::idl::read_vec(r, m.entries,
-      [](sg::idl::Reader& re, sg::domain::ShopEntry& e) { decode(re, e); });
+  sa::idl::read_vec(r, m.entries,
+      [](sa::idl::Reader& re, sa::domain::ShopEntry& e) { decode(re, e); });
   if (!r.ok()) return;
 }
 
 struct RawListBody {
-  sg::idl::FixedVec<sg::idl::FixedStr<255>, 32> rows;
+  sa::idl::FixedVec<sa::idl::FixedStr<255>, 32> rows;
 };
 
-inline void encode(sg::idl::Writer& w, const RawListBody& m) {
-  sg::idl::write_vec(w, m.rows,
-      [](sg::idl::Writer& we, const sg::idl::FixedStr<255>& e) { sg::idl::write_str(we, e); });
+inline void encode(sa::idl::Writer& w, const RawListBody& m) {
+  sa::idl::write_vec(w, m.rows,
+      [](sa::idl::Writer& we, const sa::idl::FixedStr<255>& e) { sa::idl::write_str(we, e); });
 }
 
-inline void decode(sg::idl::Reader& r, RawListBody& m) {
-  sg::idl::read_vec(r, m.rows,
-      [](sg::idl::Reader& re, sg::idl::FixedStr<255>& e) { sg::idl::read_str(re, e); });
+inline void decode(sa::idl::Reader& r, RawListBody& m) {
+  sa::idl::read_vec(r, m.rows,
+      [](sa::idl::Reader& re, sa::idl::FixedStr<255>& e) { sa::idl::read_str(re, e); });
   if (!r.ok()) return;
 }
 
 struct WindowOpen {
   std::uint32_t window_id;
-  sg::domain::WindowKind kind;
+  sa::domain::WindowKind kind;
   std::uint32_t buttons;
-  sg::domain::EntityRef source;
+  sa::domain::EntityRef source;
   enum class BodyKind : std::uint16_t {
     NONE = 0,
     MESSAGE = 5,
@@ -264,15 +264,15 @@ struct WindowOpen {
   };
   BodyKind body_kind;
   union BodyUnion {
-    sg::domain::MessageBody message;
-    sg::domain::LineInputBody line_input;
-    sg::domain::SelectBody select;
-    sg::domain::ShopBody shop;
-    sg::domain::RawListBody raw_list;
+    sa::domain::MessageBody message;
+    sa::domain::LineInputBody line_input;
+    sa::domain::SelectBody select;
+    sa::domain::ShopBody shop;
+    sa::domain::RawListBody raw_list;
   } body;
 };
 
-inline void encode(sg::idl::Writer& w, const WindowOpen& m) {
+inline void encode(sa::idl::Writer& w, const WindowOpen& m) {
   w.u32(m.window_id);
   w.u16(static_cast<std::uint16_t>(m.kind));
   w.u32(m.buttons);
@@ -300,10 +300,10 @@ inline void encode(sg::idl::Writer& w, const WindowOpen& m) {
   }
 }
 
-inline void decode(sg::idl::Reader& r, WindowOpen& m) {
+inline void decode(sa::idl::Reader& r, WindowOpen& m) {
   m.window_id = r.u32();
   if (!r.ok()) return;
-  m.kind = static_cast<sg::domain::WindowKind>(r.u16());
+  m.kind = static_cast<sa::domain::WindowKind>(r.u16());
   if (!r.ok()) return;
   m.buttons = r.u32();
   if (!r.ok()) return;
@@ -346,7 +346,7 @@ inline void decode(sg::idl::Reader& r, WindowOpen& m) {
 
 struct WindowReply {
   std::uint32_t window_id;
-  sg::domain::EntityRef source;
+  sa::domain::EntityRef source;
   std::uint32_t button;
   enum class ResultKind : std::uint16_t {
     NONE = 0,
@@ -357,12 +357,12 @@ struct WindowReply {
   ResultKind result_kind;
   union ResultUnion {
     std::uint32_t choice_id;
-    sg::idl::FixedStr<255> text;
+    sa::idl::FixedStr<255> text;
     std::uint32_t entry_id;
   } result;
 };
 
-inline void encode(sg::idl::Writer& w, const WindowReply& m) {
+inline void encode(sa::idl::Writer& w, const WindowReply& m) {
   w.u32(m.window_id);
   encode(w, m.source);
   w.u32(m.button);
@@ -372,7 +372,7 @@ inline void encode(sg::idl::Writer& w, const WindowReply& m) {
       w.u32(m.result.choice_id);
       break;
     case WindowReply::ResultKind::TEXT:
-      sg::idl::write_str(w, m.result.text);
+      sa::idl::write_str(w, m.result.text);
       break;
     case WindowReply::ResultKind::ENTRY_ID:
       w.u32(m.result.entry_id);
@@ -383,7 +383,7 @@ inline void encode(sg::idl::Writer& w, const WindowReply& m) {
   }
 }
 
-inline void decode(sg::idl::Reader& r, WindowReply& m) {
+inline void decode(sa::idl::Reader& r, WindowReply& m) {
   m.window_id = r.u32();
   if (!r.ok()) return;
   decode(r, m.source);
@@ -399,7 +399,7 @@ inline void decode(sg::idl::Reader& r, WindowReply& m) {
         m.result_kind = WindowReply::ResultKind::CHOICE_ID;
         break;
       case 5:
-        sg::idl::read_str(r, m.result.text);
+        sa::idl::read_str(r, m.result.text);
         m.result_kind = WindowReply::ResultKind::TEXT;
         break;
       case 6:
@@ -418,6 +418,6 @@ inline void decode(sg::idl::Reader& r, WindowReply& m) {
 }
 
 }  // namespace domain
-}  // namespace sg
+}  // namespace sa
 
-#endif  // SG_IDL_DOMAIN_WINDOW_SG_H
+#endif  // SA_IDL_DOMAIN_WINDOW_SA_H

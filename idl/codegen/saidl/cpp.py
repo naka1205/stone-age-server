@@ -2,7 +2,7 @@
 
 生成物形状（DR-TS1 §1.1）：
     struct 是聚合体（无用户构造/析构/虚函数）⇒ 可 memcpy、可放进 union；
-    string → sg::idl::FixedStr<max_len>；repeated → sg::idl::FixedVec<T, max_count>；
+    string → sa::idl::FixedStr<max_len>；repeated → sa::idl::FixedVec<T, max_count>；
     oneof  → tag + union，不生成继承（边界 ④）。
 
 编码格式（本项目自定义，不是 protobuf wire）：
@@ -36,7 +36,7 @@ ENUM_UNDERLYING = {8: "std::uint8_t", 16: "std::uint16_t", 32: "std::uint32_t"}
 
 
 def _split_ns(fqname: str, package: str) -> tuple[str, str]:
-    """sg.domain.Outer.Inner + 包 sg.domain → ('sg::domain', 'Outer_Inner')。"""
+    """sa.domain.Outer.Inner + 包 sa.domain → ('sa::domain', 'Outer_Inner')。"""
     rest = fqname[len(package) + 1:] if package else fqname
     return package.replace(".", "::"), rest.replace(".", "_")
 
@@ -74,7 +74,7 @@ class CppGen:
         if f.ptype in SCALAR_MAP:
             return SCALAR_MAP[f.ptype][0]
         if f.ptype == D.T_STRING:
-            return f"sg::idl::FixedStr<{f.max_len}>"
+            return f"sa::idl::FixedStr<{f.max_len}>"
         if f.ptype in (D.T_MESSAGE, D.T_ENUM):
             return self.qual(f.type_name)
         raise D.SchemaError(f"字段 {f.name} 的类型 {f.ptype} 无 C++ 映射")
@@ -82,7 +82,7 @@ class CppGen:
     def field_type(self, f: D.Field) -> str:
         t = self.elem_type(f)
         if f.repeated:
-            return f"sg::idl::FixedVec<{t}, {f.max_count}>"
+            return f"sa::idl::FixedVec<{t}, {f.max_count}>"
         return t
 
     # ── 元素级编解码语句 ──────────────────────────────────────
@@ -95,7 +95,7 @@ class CppGen:
         if f.ptype in SCALAR_MAP:
             return f"{w}.{SCALAR_MAP[f.ptype][1]}({expr});"
         if f.ptype == D.T_STRING:
-            return f"sg::idl::write_str({w}, {expr});"
+            return f"sa::idl::write_str({w}, {expr});"
         if f.ptype == D.T_ENUM:
             u = ENUM_UNDERLYING[self.s.enums[f.type_name].width]
             width = self.s.enums[f.type_name].width
@@ -107,7 +107,7 @@ class CppGen:
         if f.ptype in SCALAR_MAP:
             return f"{expr} = {r}.{SCALAR_MAP[f.ptype][2]}();"
         if f.ptype == D.T_STRING:
-            return f"sg::idl::read_str({r}, {expr});"
+            return f"sa::idl::read_str({r}, {expr});"
         if f.ptype == D.T_ENUM:
             width = self.s.enums[f.type_name].width
             m = {8: "u8", 16: "u16", 32: "u32"}[width]
@@ -121,8 +121,8 @@ class CppGen:
         et = self.elem_type(f)
         body = self.write_elem(f, "e", "we")
         return [
-            f"{indent}sg::idl::write_vec(w, {acc},",
-            f"{indent}    [](sg::idl::Writer& we, const {et}& e) {{ {body} }});",
+            f"{indent}sa::idl::write_vec(w, {acc},",
+            f"{indent}    [](sa::idl::Writer& we, const {et}& e) {{ {body} }});",
         ]
 
     def read_field(self, f: D.Field, owner: str, indent: str) -> list[str]:
@@ -132,8 +132,8 @@ class CppGen:
         et = self.elem_type(f)
         body = self.read_elem(f, "e", "re")
         return [
-            f"{indent}sg::idl::read_vec(r, {acc},",
-            f"{indent}    [](sg::idl::Reader& re, {et}& e) {{ {body} }});",
+            f"{indent}sa::idl::read_vec(r, {acc},",
+            f"{indent}    [](sa::idl::Reader& re, {et}& e) {{ {body} }});",
         ]
 
     # ── 消息体 ────────────────────────────────────────────────
@@ -186,7 +186,7 @@ class CppGen:
         L.append("")
 
         # ── encode ──
-        L.append(f"inline void encode(sg::idl::Writer& w, const {name}& m) {{")
+        L.append(f"inline void encode(sa::idl::Writer& w, const {name}& m) {{")
         if not items:
             L.append("  (void)w; (void)m;")
         for kind, item in items:
@@ -209,7 +209,7 @@ class CppGen:
         L.append("")
 
         # ── decode ──
-        L.append(f"inline void decode(sg::idl::Reader& r, {name}& m) {{")
+        L.append(f"inline void decode(sa::idl::Reader& r, {name}& m) {{")
         if not items:
             L.append("  (void)r; (void)m;")
         for kind, item in items:
@@ -268,22 +268,22 @@ class CppGen:
         return sorted(deps)
 
     def header_name(self, protofile: str) -> str:
-        return protofile[:-len(".proto")] + ".sg.h"
+        return protofile[:-len(".proto")] + ".sa.h"
 
     def emit_file(self, filename: str) -> str:
-        guard = ("SG_IDL_" + self.header_name(filename)
+        guard = ("SA_IDL_" + self.header_name(filename)
                  .replace("/", "_").replace(".", "_").upper())
         L = [
             "// ★ 本文件由 idl/codegen 从 schema 生成，请勿手工编辑。",
             f"// 来源：{filename}",
             "//",
-            "// 修改方式：改 schema → 重跑 `python3 idl/codegen/sgidl_gen.py` → 提交生成物",
+            "// 修改方式：改 schema → 重跑 `python3 idl/codegen/saidl_gen.py` → 提交生成物",
             "// （DR-TS2：生成产物入库，客户端连 protoc 都不需要）。",
             "",
             f"#ifndef {guard}",
             f"#define {guard}",
             "",
-            '#include "sg_idl_runtime.h"',
+            '#include "sa_idl_runtime.h"',
         ]
         for dep in self.deps_of(filename):
             L.append(f'#include "{self.header_name(dep)}"')
@@ -323,12 +323,12 @@ class CppGen:
             "// 02-protocol.md §1.1：每个 message 的编号在 IDL 里写死数字，",
             "// 不依赖声明顺序；编号一经发布不得复用。",
             "",
-            "#ifndef SG_IDL_IDS_H",
-            "#define SG_IDL_IDS_H",
+            "#ifndef SA_IDL_IDS_H",
+            "#define SA_IDL_IDS_H",
             "",
             "#include <cstdint>",
             "",
-            "namespace sg {",
+            "namespace sa {",
             "namespace idl {",
             "",
             "enum class MsgId : std::uint32_t {",
@@ -343,7 +343,7 @@ class CppGen:
         L += [
             "};",
             "",
-            "// 编译期把消息类型映射到编号：msg_id_of<sg::domain::Foo>()",
+            "// 编译期把消息类型映射到编号：msg_id_of<sa::domain::Foo>()",
             "template <typename T>",
             "struct MsgTraits;",
             "",
@@ -353,7 +353,7 @@ class CppGen:
             "}",
             "",
             "}  // namespace idl",
-            "}  // namespace sg",
+            "}  // namespace sa",
             "",
         ]
         seen_headers: set[str] = set()
@@ -366,7 +366,7 @@ class CppGen:
             seen_headers.add(hdr)
             L.append(f'#include "{hdr}"')
         L.append("")
-        L += ["namespace sg {", "namespace idl {", ""]
+        L += ["namespace sa {", "namespace idl {", ""]
         for m in numbered:
             if m.deprecated_id:
                 continue
@@ -377,6 +377,6 @@ class CppGen:
             L.append(f'  static constexpr const char* kName = "{m.fqname}";')
             L.append("};")
             L.append("")
-        L += ["}  // namespace idl", "}  // namespace sg", "",
-              "#endif  // SG_IDL_IDS_H", ""]
+        L += ["}  // namespace idl", "}  // namespace sa", "",
+              "#endif  // SA_IDL_IDS_H", ""]
         return "\n".join(L)

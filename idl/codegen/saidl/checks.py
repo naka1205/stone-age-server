@@ -149,7 +149,7 @@ def check_stability(schema: D.Schema, registry_path: Path) -> tuple[list[str], d
         if new_id is None:
             errs.append(
                 f"已发布消息 {name}（0x{old_id:04X}）在当前 schema 中消失。\n"
-                "  编号一经发布不得复用：请保留消息并标注 [(sg.deprecated_id) = true]。")
+                "  编号一经发布不得复用：请保留消息并标注 [(sa.deprecated_id) = true]。")
         elif new_id != old_id:
             errs.append(
                 f"已发布消息 {name} 的编号从 0x{old_id:04X} 改成了 0x{new_id:04X}。\n"

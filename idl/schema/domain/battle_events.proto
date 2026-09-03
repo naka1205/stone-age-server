@@ -31,9 +31,9 @@
 
 syntax = "proto3";
 
-package sg.domain;
+package sa.domain;
 
-import "sg_options.proto";
+import "sa_options.proto";
 import "domain/battle_status.proto";
 
 // ── 容量界 ────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ import "domain/battle_status.proto";
 //     BCF_NO_DAMAGE⇄ ATT_NOMISS       (bit26,★★ 语义相反的命名压在同一位)
 //   ⇒ 以本枚举为准。bit26 的真实语义是**双重攻击**(SSRC80 注释),不是「不会 miss」。
 enum DamageFlag {
-  option (sg.width) = 32;
+  option (sa.width) = 32;
 
   DAMAGE_FLAG_NONE        = 0;
   DAMAGE_FLAG_DEATH       = 1;          // 1<<0
@@ -103,7 +103,7 @@ enum DamageFlag {
 //    客户端叫 BC_PET_OK(「宠物可用」)—— **名字和语义都不同,但共用同一位**。
 //    本枚举取服务端语义。
 enum CombatantFlag {
-  option (sg.width) = 32;
+  option (sa.width) = 32;
 
   COMBATANT_FLAG_NONE       = 0;
   COMBATANT_FLAG_NEW        = 1;          // 1<<0  本回合入场 / 救援入场
@@ -141,7 +141,7 @@ enum CombatantFlag {
 
 // 我方菜单标志(原 BP_FLG_* × BATTLE_BP_*)。07 §8.3:6 位,双端 100% 一致。
 enum MenuFlag {
-  option (sg.width) = 8;
+  option (sa.width) = 8;
 
   MENU_FLAG_NONE             = 0;
   MENU_FLAG_JOIN             = 1;   // 1<<0 观战加入
@@ -156,7 +156,7 @@ enum MenuFlag {
 // 其中负值是「client 用来判断显示落马的文字」(battle_command.c 原注释)。
 // ⇒ 拆成显式枚举,不用魔数。
 enum RideState {
-  option (sg.width) = 8;
+  option (sa.width) = 8;
 
   RIDE_STATE_NONE        = 0;  // 无骑宠
   RIDE_STATE_RIDING      = 1;  // 骑乘中(pet_* 字段有效)
@@ -171,8 +171,8 @@ enum RideState {
 // `battle_command.c:BATTLE_MakeCharaString` 的 13 个 sprintf 参数,逐个对应。
 message CombatantState {
   uint32 slot        = 1;   // 原 pEntry[i].bid;0..9 己方 / 10..19 敌方
-  string name        = 2 [(sg.max_len) = 127];  // 原 STRING128 槽宽
-  string title       = 3 [(sg.max_len) = 127];  // 称号(富文本样式串,DR-PR6)
+  string name        = 2 [(sa.max_len) = 127];  // 原 STRING128 槽宽
+  string title       = 3 [(sa.max_len) = 127];  // 称号(富文本样式串,DR-PR6)
   uint32 image_id    = 4;   // CHAR_BASEIMAGENUMBER
   uint32 level       = 5;
   int32  hp          = 6;   // ⚠️ 原版下发前做 max(hp, 0) —— 保留该钳位
@@ -181,7 +181,7 @@ message CombatantState {
   RideState ride     = 9;
 
   // 骑宠信息。ride == RIDING 时有效,否则全零。
-  string pet_name    = 10 [(sg.max_len) = 127];
+  string pet_name    = 10 [(sa.max_len) = 127];
   uint32 pet_level   = 11;
   int32  pet_hp      = 12;
   int32  pet_max_hp  = 13;
@@ -190,11 +190,11 @@ message CombatantState {
 // 全场角色状态快照。★ 独立顶层消息 —— 原版 BC 就是单独 send 的,
 // 不进 szAllBattleString。放进事件流会让 BattleEvent 的 union 膨胀到 8 KB。
 message BattleSnapshot {
-  option (sg.msg_id) = 0x0201;
+  option (sa.msg_id) = 0x0201;
 
   uint64 battle_id = 1;
   uint32 field_attribute = 2;  // 原 BattleArray[].field_att,战场属性(影响相克)
-  repeated CombatantState combatants = 3 [(sg.max_count) = 20];
+  repeated CombatantState combatants = 3 [(sa.max_count) = 20];
 }
 
 // ── 回合开始(原 BA)────────────────────────────────────────────────
@@ -203,7 +203,7 @@ message BattleSnapshot {
 //    而不是等一回合结束 ⇒ 指令阶段报文量 = 玩家数²。
 // ⇒ 新实现按节拍聚合:就绪位变更攒批下发(与 01 §3.2 的 ca_flush_interval 同源)。
 message BattleTurnBegin {
-  option (sg.msg_id) = 0x0202;
+  option (sa.msg_id) = 0x0202;
 
   uint64 battle_id = 1;
   uint32 turn      = 2;
@@ -213,7 +213,7 @@ message BattleTurnBegin {
 // ── 我方私有信息(原 BP)────────────────────────────────────────────
 
 message BattleSelfInfo {
-  option (sg.msg_id) = 0x0203;
+  option (sa.msg_id) = 0x0203;
 
   uint64 battle_id = 1;
   uint32 slot      = 2;   // 我的位次;原版观战者固定发 20
@@ -228,7 +228,7 @@ message BattleSelfInfo {
 // ── 强制离场(原 BU)────────────────────────────────────────────────
 
 message BattleLeave {
-  option (sg.msg_id) = 0x0204;
+  option (sa.msg_id) = 0x0204;
 
   uint64 battle_id = 1;
   uint32 reason    = 2;  // 0 = 观战结束 · 1 = 超时(BATTLE_TIME_LIMIT = 3600 s)
@@ -238,7 +238,7 @@ message BattleLeave {
 
 // 攻击种类。原版用 7 个不同子命令表达,归约为一个枚举 + Hit。
 enum AttackKind {
-  option (sg.width) = 8;
+  option (sa.width) = 8;
 
   ATTACK_KIND_INVALID     = 0;
   ATTACK_KIND_MELEE       = 1;  // 原 BH
@@ -310,7 +310,7 @@ message TextBox {
   uint32 message_id = 1;
   // 参数按 message_id 对应的文案模板解释;
   // 承载 slot(查快照得名字)/ item_id(查道具表)/ 数量 等。
-  repeated int32 args = 2 [(sg.max_count) = 4];
+  repeated int32 args = 2 [(sa.max_count) = 4];
 }
 
 message Escape       { uint32 actor = 1; bool succeeded = 2; bool vanish = 3; }  // BE(et = 突然消失)
@@ -387,11 +387,11 @@ message BattleEvent {
 
 // 一个回合的演出事件流。★ events 的顺序**就是**演出顺序。
 message BattleEvents {
-  option (sg.msg_id) = 0x0205;
+  option (sa.msg_id) = 0x0205;
 
   uint64 battle_id = 1;
   uint32 turn      = 2;
-  repeated BattleEvent events = 3 [(sg.max_count) = 256];
+  repeated BattleEvent events = 3 [(sa.max_count) = 256];
 }
 
 // ── 上行指令 ──────────────────────────────────────────────────────
@@ -419,7 +419,7 @@ message SpellCmd  { uint32 spell_id = 1; uint32 target = 2; }
 message WaitCmd   {}
 
 message BattleCommand {
-  option (sg.msg_id) = 0x0210;
+  option (sa.msg_id) = 0x0210;
 
   uint64 battle_id = 1;
   // ★ 带回合号,防止迟到指令作用到新回合。

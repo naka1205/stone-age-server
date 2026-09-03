@@ -22,17 +22,17 @@
 //               socket / MySQL / Redis / 日志 / 任何 src/ 下的头
 //   ⇒ 由 tools/check_shared_purity.py 强制(CI 必跑)。
 
-#ifndef SG_SHARED_RULES_BATTLE_H
-#define SG_SHARED_RULES_BATTLE_H
+#ifndef SA_SHARED_RULES_BATTLE_H
+#define SA_SHARED_RULES_BATTLE_H
 
-#include "domain/battle_events.sg.h"
-#include "domain/battle_status.sg.h"
+#include "domain/battle_events.sa.h"
+#include "domain/battle_status.sa.h"
 
 #include "rules/combatant.h"
 #include "rules/config.h"
 #include "rules/random.h"
 
-namespace sg::rules {
+namespace sa::rules {
 
 // 本回合各槽的指令。
 //
@@ -40,7 +40,7 @@ namespace sg::rules {
 //    L3 不做鉴权、不判「这个技能你学过没」—— 那需要读角色的技能表,
 //    会把 L3 的输入面撑大到整个角色模型。
 struct TurnCommands {
-  sg::domain::BattleCommand commands[kSlotCount]{};
+  sa::domain::BattleCommand commands[kSlotCount]{};
   bool present[kSlotCount]{};   // 该槽本回合是否有指令(敌方由 AI 填,视为齐备)
 };
 
@@ -60,7 +60,7 @@ struct TurnCommands {
 //    正确做法不在"上行拒不拒绝"里选,而是置灰 + 告知原因。
 //
 // 返回 CANNOT_ACT_NONE 表示可行动。
-sg::domain::CannotActReason CheckCanAct(const Combatant& c) noexcept;
+sa::domain::CannotActReason CheckCanAct(const Combatant& c) noexcept;
 
 // ── 回合结算 ──────────────────────────────────────────────────
 //
@@ -106,7 +106,7 @@ bool ResolveTurn(const BattleField& field,
                  const TurnCommands& commands,
                  const RulesConfig& config,
                  IRandom& rng,
-                 sg::domain::BattleEvents& out) noexcept;
+                 sa::domain::BattleEvents& out) noexcept;
 
 // ── 调度子步骤(供上层与测试直接调用)──────────────────────────
 
@@ -118,7 +118,7 @@ bool ResolveTurn(const BattleField& field,
 // ⚠️ 批次 0.5 只实现**默认档**(`dex −= RAND(0, 0.1·quick)`)。其余 8 档绑在
 //    尚未接入的指令上,接入时在本函数内按 `kind` 分档,不要散到调用方。
 std::int32_t ComputeActionDex(const Combatant& c,
-                              const sg::domain::BattleCommand& command,
+                              const sa::domain::BattleCommand& command,
                               IRandom& rng) noexcept;
 
 // 计算本回合行动顺序,把槽号按先后写进 `order`,返回参与行动的单位数。
@@ -231,6 +231,6 @@ bool RollDodge(const Combatant& attacker,
                const RulesConfig& config,
                IRandom& rng) noexcept;
 
-}  // namespace sg::rules
+}  // namespace sa::rules
 
-#endif  // SG_SHARED_RULES_BATTLE_H
+#endif  // SA_SHARED_RULES_BATTLE_H

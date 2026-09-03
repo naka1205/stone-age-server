@@ -1,16 +1,16 @@
 // ★ 本文件由 idl/codegen 从 schema 生成，请勿手工编辑。
 // 来源：transport/interservice.proto
 //
-// 修改方式：改 schema → 重跑 `python3 idl/codegen/sgidl_gen.py` → 提交生成物
+// 修改方式：改 schema → 重跑 `python3 idl/codegen/saidl_gen.py` → 提交生成物
 // （DR-TS2：生成产物入库，客户端连 protoc 都不需要）。
 
-#ifndef SG_IDL_TRANSPORT_INTERSERVICE_SG_H
-#define SG_IDL_TRANSPORT_INTERSERVICE_SG_H
+#ifndef SA_IDL_TRANSPORT_INTERSERVICE_SA_H
+#define SA_IDL_TRANSPORT_INTERSERVICE_SA_H
 
-#include "sg_idl_runtime.h"
-#include "transport/errors.sg.h"
+#include "sa_idl_runtime.h"
+#include "transport/errors.sa.h"
 
-namespace sg {
+namespace sa {
 namespace transport {
 
 struct RequestHeader {
@@ -20,14 +20,14 @@ struct RequestHeader {
   std::uint32_t deadline_ms;
 };
 
-inline void encode(sg::idl::Writer& w, const RequestHeader& m) {
+inline void encode(sa::idl::Writer& w, const RequestHeader& m) {
   w.u32(m.instance_id);
   w.u32(m.generation);
   w.u64(m.request_id);
   w.u32(m.deadline_ms);
 }
 
-inline void decode(sg::idl::Reader& r, RequestHeader& m) {
+inline void decode(sa::idl::Reader& r, RequestHeader& m) {
   m.instance_id = r.u32();
   if (!r.ok()) return;
   m.generation = r.u32();
@@ -40,20 +40,20 @@ inline void decode(sg::idl::Reader& r, RequestHeader& m) {
 
 struct ResponseHeader {
   std::uint64_t request_id;
-  sg::transport::Status status;
+  sa::transport::Status status;
   std::uint32_t error_code;
 };
 
-inline void encode(sg::idl::Writer& w, const ResponseHeader& m) {
+inline void encode(sa::idl::Writer& w, const ResponseHeader& m) {
   w.u64(m.request_id);
   w.u8(static_cast<std::uint8_t>(m.status));
   w.u32(m.error_code);
 }
 
-inline void decode(sg::idl::Reader& r, ResponseHeader& m) {
+inline void decode(sa::idl::Reader& r, ResponseHeader& m) {
   m.request_id = r.u64();
   if (!r.ok()) return;
-  m.status = static_cast<sg::transport::Status>(r.u8());
+  m.status = static_cast<sa::transport::Status>(r.u8());
   if (!r.ok()) return;
   m.error_code = r.u32();
   if (!r.ok()) return;
@@ -63,16 +63,16 @@ struct Ack {
   bool accepted;
 };
 
-inline void encode(sg::idl::Writer& w, const Ack& m) {
+inline void encode(sa::idl::Writer& w, const Ack& m) {
   w.b(m.accepted);
 }
 
-inline void decode(sg::idl::Reader& r, Ack& m) {
+inline void decode(sa::idl::Reader& r, Ack& m) {
   m.accepted = r.b();
   if (!r.ok()) return;
 }
 
 }  // namespace transport
-}  // namespace sg
+}  // namespace sa
 
-#endif  // SG_IDL_TRANSPORT_INTERSERVICE_SG_H
+#endif  // SA_IDL_TRANSPORT_INTERSERVICE_SA_H
