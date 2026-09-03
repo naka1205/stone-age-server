@@ -1,8 +1,27 @@
 # cmake/SgWarnings.cmake —— 统一的告警口径
 #
-# ★ 为什么这不是"风格偏好":00 §10.4 把本项目最容易踩的错误归为**三类静默错误**
+# ★★ 本仓最容易踩的错误归为**三类静默错误**
 #   (slot 别名合并 / 照抄 8.5 / 进程内捷径)—— 它们的共同点是**不报错、不崩溃**。
 #   编译器能替我们抓住的那部分,一条都不该放过。
+
+# ── ★ SG_WERROR:把告警当错误 ──────────────────────────────────────
+#
+# ⚠️★ **默认 OFF,CI 上 ON。这个不对称是有意的。**
+#
+# 文档里「0 告警」被当作凭据用了很多次(§9.0.5 / §9.0.6 / §9.0.7.1),
+# 但至今**没有任何机制保证它继续为真** —— 告警只是滚过屏幕的文字,
+# 一次构建几百行输出,新增一条不会有人发现。
+# ⇒ 一次性验证记的是「那天 0 告警」;要让它明天还成立,只有让告警**中断构建**。
+#
+# 那为什么本地不默认开?因为开发中途的半成品代码(未使用的变量、
+# 临时注释掉的分支)会被 -Werror 直接打断,而那时人正在想别的事。
+# ⇒ **本地容忍告警、CI 不容忍**,两边的用途本就不同。
+#
+# ⚠️ 认下代价:GitHub runner 的编译器会随镜像升级(GCC 13→14→15),
+# 新版本常带来新告警 ⇒ CI 可能因**编译器升级**而非代码改动变红。
+# 这是接受的:那种红说明「新编译器发现了旧代码里的东西」,值得看一眼,
+# 不是噪声。真正不可接受的是反过来 —— 告警悄悄堆积而没人知道。
+option(SG_WERROR "把编译告警当作错误(CI 用;本地默认关)" OFF)
 
 function(sg_apply_warnings target)
   if(MSVC)
@@ -20,6 +39,9 @@ function(sg_apply_warnings target)
     # ★ 客户端仓的 SgClientWarnings.cmake 早有这一行,本文件此前漏了 ——
     #   两端都是 clang 时永远不会暴露,与 d939247 那个缺口是同一类。
     target_compile_options(${target} PRIVATE /W4 /utf-8 /permissive-)
+    if(SG_WERROR)
+      target_compile_options(${target} PRIVATE /WX)
+    endif()
   else()
     target_compile_options(${target} PRIVATE
         -Wall
@@ -32,6 +54,9 @@ function(sg_apply_warnings target)
         -Wold-style-cast
         -Wnon-virtual-dtor
     )
+    if(SG_WERROR)
+      target_compile_options(${target} PRIVATE -Werror)
+    endif()
   endif()
 endfunction()
 

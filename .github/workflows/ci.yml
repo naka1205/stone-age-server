@@ -1,0 +1,102 @@
+# .github/workflows/ci.yml —— stone-age-server
+#
+# ★★ 这条 CI 回答的问题与「一次性验证」不同,两者不可互替:
+#
+#     tools/win_validate.ps1(2026-09-02)  答「**今天这份代码**在 MSVC 下成不成立」
+#     本 workflow                          答「**明天改了**还成不成立」
+#
+#   01 §13 欠债 7 把这一条留着没关,理由就是这个。
+#
+# ── ★ 三个平台对应 D2 已结案的桌面三套工具链 ──────────────────────
+#
+#   ubuntu-latest   GCC / libstdc++    ← 00 §9.0.6 的 A 类(标准库差异)与 C 类(浮点)
+#   macos-latest    Apple clang / libc++
+#   windows-latest  MSVC               ← ★ B 类(编译器方言),**只有它能验**
+#
+# ⚠️ 别把这里的绿色读成「D2 永远成立」:emcc(绑 D4 解冻)与 Android NDK
+#    仍未验,而 shared/ × SG::Engine 的宏冲突面要等客户端 1.4 接表现层。
+#
+# ── ★★ 判定逻辑不在本文件里 ────────────────────────────────────────
+#
+#   全部交给 tools/ci_verify.py。理由见该脚本卷首:CI 平台会换,验收内容不该跟着换;
+#   而且它有两项**不是跑命令、是做判断**的检查(测试注册清单 / 断言防线反向验证),
+#   在 YAML 里写不下,也不该写。
+#   ⇒ 本地 `python3 tools/ci_verify.py` 与 CI 判的是同一套。
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ['shared-v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+# 同一分支上新的推送取消旧的运行 —— 排队等一个已经过时的结果没有意义。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # ⚠️ fail-fast: false —— 一个平台红了,另外两个的结果**仍然要看到**。
+      #    00 §9.0.6 拆 A/B/C 三类风险时的教训:把不同的未知数捆在一起,
+      #    一个卡住就全都拿不到结论。
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  name: 'Linux · GCC' }
+          - { os: macos-latest,   name: 'macOS · Apple clang' }
+          - { os: windows-latest, name: 'Windows · MSVC' }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ── ★★ protoc:不是可选依赖 ────────────────────────────────
+      #
+      # DR-TS2 生成物入库 ⇒ **只消费生成物的人不需要 protoc**,本机没有是正常状态。
+      # 但 CI 不同:idl_verify 守的是「schema 改了、生成物没重跑」这类静默漂移,
+      # 而 tests/CMakeLists.txt 在缺 protoc 时**不注册该测试**(常红会训练人忽略红色)
+      # ⇒ CI 上没有 protoc,这道关就**静默消失**,而 ctest 照样 100% passed。
+      #
+      # ★ 装了也不等于生效 —— 真正接住这件事的是 ci_verify.py §2 的注册清单断言,
+      #   下面这三步只是让它能通过。
+      - name: 安装 protoc(Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: 安装 protoc(macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: 安装 protoc(Windows)
+        if: runner.os == 'Windows'
+        run: choco install protoc -y --no-progress
+
+      - name: protoc 版本
+        run: protoc --version
+
+      # ★ Linux / macOS 用 Ninja(快);Windows 用 CMake 默认挑的 VS 生成器。
+      #   ⚠️ 不在 Windows 上指定 -G Ninja:01 §13 欠债 11 记的那个坑
+      #   (PATH 上的 ninja 可能是 depot_tools 的 ninja.bat)虽是本机环境问题,
+      #   但 VS 多配置生成器本就绕开它,没必要在 CI 上再赌一次。
+      - name: 安装 Ninja
+        if: runner.os != 'Windows'
+        uses: seanmiddleditch/gha-setup-ninja@v6
+
+      - name: 验证(配置 · 注册清单 · 清洁构建 · ctest · 断言防线)
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            python tools/ci_verify.py --config RelWithDebInfo
+          else
+            python tools/ci_verify.py --config RelWithDebInfo --generator Ninja
+          fi
