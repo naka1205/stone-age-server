@@ -135,7 +135,7 @@ def main():
     #   保证它继续为真。CI 上让告警**中断构建**,那句话才是可持续的。
     #   (cmake/SaWarnings.cmake 卷首有为什么本地默认 OFF 的理由。)
     cfg = ["cmake", "-S", str(REPO), "-B", str(build),
-           f"-DCMAKE_BUILD_TYPE={args.config}", "-DSG_WERROR=ON"]
+           f"-DCMAKE_BUILD_TYPE={args.config}", "-DSA_WERROR=ON"]
     if args.generator:
         cfg += ["-G", args.generator]
     rc, out = run(cfg)
@@ -149,6 +149,23 @@ def main():
                      ("未找到 Python3", "shared_purity 与 idl_verify 都不会注册")):
         if pat in out:
             print(f"\n⚠️★ 配置期告警:{pat} ⇒ {why}", flush=True)
+    # ⚠️★ **unused-cli 必须是硬失败,不能只是 CMake 的一句黄字**(2026-09-04 兑现)。
+    #
+    #   改名 sg_ → sa_ 时本行漏改成了 `-DSG_WERROR=ON`。CMake 不认识这个变量,
+    #   于是只印一句 "Manually-specified variables were not used",配置照样成功,
+    #   下面第 1 项照样报告「SA_WERROR=ON」—— 而 -Werror **整整一批提交都没开过**。
+    #   三平台全绿,绿得毫无意义。
+    #
+    #   ⇒ 这一族错误的共性:传错开关名不会失败,只会让开关静默失效。
+    #     凡「我们靠某个 -D 才成立的结论」,都要先证明那个 -D 真的被项目收下了。
+    #     (同族先例:RelWithDebInfo 定义 NDEBUG ⇒ assert 被编译掉,测试照样打印 OK。)
+    if "Manually-specified variables were not used" in out:
+        junk = re.findall(r"^\s{4}(\w+)\s*$", out, re.M)
+        rep.record(1, "配置", False,
+                   "★ CMake 收到了它不认识的 -D 变量:" + ", ".join(junk) +
+                   " ⇒ 对应开关静默失效,本次运行的所有『通过』都不可信")
+        return rep.summarize()
+
     rep.record(1, "配置", True, f"{args.config} · SA_WERROR=ON")
 
     # ── §2 ★★ 测试注册清单(最先判,理由见 EXPECTED_TESTS 卷首)────────

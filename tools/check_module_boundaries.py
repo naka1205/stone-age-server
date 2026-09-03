@@ -20,6 +20,21 @@ import re
 import sys
 from pathlib import Path
 
+# ★★ 与 check_shared_purity.py 同一段,理由也同一条:Windows 上的输出编码
+#    不是风格问题,是**退出码正确性**问题。
+#
+#   ⚠️ 本文件此前漏了这一段,而漏的代价在 2026-09-04 的 CI 上兑现了:
+#   GitHub 的 windows runner 上 Python 的 stdout 是 cp1252,`print("✅ …")`
+#   抛 UnicodeEncodeError ⇒ 退出码 1 ⇒ CI 报「§3.1 的守卫失败」,
+#   **而边界检查本身是通过的**。Linux/macOS 全绿,只有 Windows 红。
+#   ⇒ 惯例(ci_verify / check_shared_purity / saidl_gen 三处都有)存在,
+#     新加的脚本没跟上 —— 凡新增会被 ctest 注册的 Python 检查,都要带上它。
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):   # 被重定向到不支持 reconfigure 的对象
+        pass
+
 SRC = Path(__file__).resolve().parent.parent / "src"
 
 # ★★ 声明式依赖表 —— 这才是本脚本的核心资产。
