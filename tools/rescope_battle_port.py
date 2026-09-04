@@ -84,6 +84,18 @@ import re
 import sys
 from collections import Counter, defaultdict
 
+# ★★ 输出编码不是风格问题,是**退出码正确性**问题(与 check_shared_purity.py
+#   卷首同一条):简中 Windows 的 cp936 控制台遇到 ✅ / ★ / ⇒ 会抛
+#   UnicodeEncodeError,于是脚本**通过时也退出码 1**。
+# ⚠️ 本脚本是一次性分析工具,不在 CI 上跑 —— 这一行仍然加,因为
+#   ci_verify.py §0 的判据故意不带「哪些脚本在 CI 上跑」这种例外清单:
+#   例外清单本身就是下一个「各自记得」(00 §9.0.12)。
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):   # 被重定向到不支持 reconfigure 的对象
+        pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 PLAN_TOOLS = os.path.normpath(os.path.join(REPO, "..", "stoneage-plan", "tools"))

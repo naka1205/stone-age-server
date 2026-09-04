@@ -10,8 +10,10 @@
      它们在 YAML 里写不下,也不该写。
 
 ⚠️★ 归因顺序是有纪律的(承自 tools/win_validate.ps1 的实测教训):
-    先看 §2 测试注册清单 —— 若某条检查根本没注册,后面所有绿色都不完整;
-    再看 §5 断言防线   —— 若断言被编译掉,前面所有"通过"都不算数;
+    先看 §0 入口脚本编码 —— 若某个检查脚本会在 cp1252 下把"通过"印成退出码 1,
+                            它给出的红与绿都不含信息;
+    再看 §2 测试注册清单 —— 若某条检查根本没注册,后面所有绿色都不完整;
+    再看 §5 断言防线     —— 若断言被编译掉,前面所有"通过"都不算数;
     才轮到逐条测试结果。
   ⇒ 报告按这个顺序打印,不按执行顺序。
 
@@ -74,6 +76,51 @@ EXPECTED_TESTS = {
 }
 
 
+def check_script_encoding():
+    """★★ §0 凡入口脚本都必须显式设 UTF-8 输出 —— 把「各自记得」变成会失败的断言。
+
+    ⚠️★ 起因(2026-09-04 实测,00 §9.0.12):check_module_boundaries.py 漏了
+      卷首那一段 ⇒ windows runner 的 cp1252 stdout 遇到 print("✅ …") 抛
+      UnicodeEncodeError ⇒ 退出码 1 ⇒ CI 报「00 §3.1 的守卫失败」,
+      **而边界检查本身是通过的**。
+
+    ★ 值得记的不是这个错,是它**为什么会发生**:ci_verify.py /
+      check_shared_purity.py / saidl_gen.py 三处早就都有这一段,
+      check_shared_purity.py 卷首还专门写了半屏理由(2026-09-02 实测)。
+      惯例存在、理由写清楚了,新加的第四个脚本照样漏 ——
+      因为它是「每个文件各自记得」的纪律,而不是结构性保证。
+      ⇒ 与 §2 同族:让「应该都有」变成一条**会失败**的断言。
+
+    ★ 判据只有两条,故意做到不需要维护任何清单:
+        ① 有 `if __name__ == ...` 守卫 ⇒ 它会被当作入口执行,退出码有人读;
+        ② 源码含非 ASCII               ⇒ 它可能 print 出 cp936/cp1252 编不出的字符。
+      被 import 的模块**不在其列**(idl/codegen/saidl/*.py)—— 它们共用入口
+      已经设好的 sys.stdout,各自再设一遍是噪音。
+
+    ⚠️ 判据故意**不**写成「在 CI 上跑的脚本」:那需要一份清单,而清单本身
+       就是下一个「各自记得」。宁可对一次性分析工具也过严 ——
+       补一行的成本是 5 行,漏一个的成本是一次难以归因的红。
+    """
+    entry = re.compile(r"^\s*if\s+__name__\s*==", re.M)
+    offenders = []
+    for path in sorted(REPO.rglob("*.py")):
+        rel = path.relative_to(REPO)
+        if {"build", "_deps", ".git"} & set(rel.parts):
+            continue
+        src = path.read_text(encoding="utf-8")
+        if not entry.search(src) or src.isascii():
+            continue
+        if "reconfigure(encoding" not in src:
+            offenders.append(rel.as_posix())
+    if offenders:
+        return ("★★ 入口脚本输出编码", False,
+                f"缺 sys.stdout.reconfigure(encoding=\"utf-8\") 的入口脚本:"
+                f"{', '.join(offenders)} ⇒ 在 cp936 / cp1252 控制台上 print "
+                f"非 ASCII 会抛 UnicodeEncodeError,**通过时也退出码 1** ⇒ "
+                f"CI 会把它读成「这道检查失败了」,而检查本身可能是通过的")
+    return ("★★ 入口脚本输出编码", True, "全部入口脚本已显式设 UTF-8")
+
+
 class Report:
     """逐项记录,末尾按归因顺序汇总。"""
 
@@ -128,6 +175,13 @@ def main():
 
     build = (REPO / args.build_dir).resolve()
     rep = Report()
+
+    # ── §0 ★★ 入口脚本输出编码(最先判,且不需要构建)────────────────
+    #
+    # ⚠️ 排在配置之前是有理由的:它判的是「后面那些检查脚本的**退出码**
+    #    本身可不可信」。一个会在 cp1252 下把"通过"印成退出码 1 的脚本,
+    #    它给出的红与绿都不含信息 ⇒ 必须比它们先判。
+    rep.record(0, *check_script_encoding())
 
     # ── §1 配置 ────────────────────────────────────────────────────
     #
