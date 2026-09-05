@@ -1,16 +1,20 @@
-// src/net/framing.cpp —— 帧层与信封层
+// shared/wire/framing.cpp —— 帧层与信封层的实现(双端共享,DR-TS9 乙案)
 //
 // 02 §2 的分层:
 //   应用层   IDL 生成的 message
 //   信封层   EnvelopeHeader { msg_id, corr_id } + body
 //   帧层     [u32 length][payload]        ★ 本文件
-//   传输层   ITransport
+//   传输层   ITransport                   ← 宿主侧,不在本目录
+//
+// ★ 本文件 2026-09-06 从 `src/net/framing.cpp` 原样移入(逻辑一行未改),
+//   仅命名空间 `sa::net` → `sa::wire`。⇒ 18 条既有用例是这次重构的验收凭据:
+//   **断言一个都不改,全部仍绿**,否则就不是"移动"而是"重写"了。
 
-#include "net/api.h"
+#include "wire/framing.h"
 
 #include <cstring>
 
-namespace sa::net {
+namespace sa::wire {
 namespace {
 
 // 信封头的线上长度:u32 + u64。
@@ -112,4 +116,4 @@ bool DecodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
   return true;
 }
 
-}  // namespace sa::net
+}  // namespace sa::wire

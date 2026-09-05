@@ -118,10 +118,15 @@ stone-age-server/
 ├── shared/                     ✅ ★★ 与客户端共享的源码,只依赖标准库
 │   ├── rules/                  ✅ L3 契约(constants / random / config / combatant / battle)
 │   │                              🔄 实现属阶段 0.1/1.1(批次 0 / 0.5 已落地,A–D 未做)
+│   ├── wire/                   ✅ ★★ 成帧 + 信封编解码(2026-09-06 由 src/net 移入,DR-TS9 乙案)
+│   │                              ⚠️ 目标 `sa_wire`,与 `sa_shared` **分开** —— 它是 §9 那条
+│   │                              「不得引 transport/」边界唯一放宽的子树,分开才让差别落在构建图上
 │   └── model/                  ✅ handle.h(M10)  ⬜ 实体族属阶段 1.2
 ├── src/                        🔄 ★ 1.5 最小切面主体已落地,其余阶段 2
 │   ├── platform/               ✅ 1.5:配置 · 日志 · 单调时钟 · IRandom 实现  │ ⬜ 2:指标 · 热重载
-│   ├── net/                    ✅ 1.5:ITransport · ★ 长度前缀成帧 · 编解码接入 · 会话 · ★ TcpTransport(原生 socket + poll,DR-TS8)
+│   ├── net/                    ✅ 1.5:ITransport · 会话 · ★ TcpTransport(原生 socket + poll,DR-TS8)
+│   │                           ★ 只留**宿主侧** —— 成帧 / 信封已移入 shared/wire(DR-TS9);
+│   │                              `net/api.h` 保留 `using sa::wire::…` 别名,调用方一行未改
 │   │                           ⬜ WsTransport(D4 解冻)· 限流 · 重连窗口 —— 阶段 2
 │   ├── storage/                ⬜ 阶段 2:MySQL 访问 · 工作单元 · 迁移
 │   ├── lock/                   ⬜ 阶段 2:ILock(Redis)
@@ -154,7 +159,7 @@ stone-age-server/
 | 禁止 | 后果 |
 |---|---|
 | `transport/**` | `02` §9:`shared/` 依赖信封/握手/错误面 ⇒「只依赖标准库」破裂 |
-| socket / MySQL / Redis / 日志 / asio | 属 L0,客户端侧无法满足 ⇒ D2 当场失效 |
+| socket / MySQL / Redis / 日志 / ~~asio~~(DR-TS8 已定不引) | 属 L0,客户端侧无法满足 ⇒ D2 当场失效 |
 | ★ `<chrono>` / `<ctime>` | L3 读时钟即破坏**可回放性**(`05` §1.5) |
 | ★★ `<random>` | 随机源必须经注入的 `IRandom`(`07` §11.3 判据 ④);且 `std::uniform_int_distribution` 的取数方式**不由标准规定**,跨标准库实现序列不同 ⇒ 黄金用例集会整批失败 |
 | I/O / 并发原语 | L3 是纯函数(判据 ③) |
@@ -494,6 +499,7 @@ storage 侧   UoW:  InnoDB 事务
 | **11** | ✅ ~~⬜ ★★ **命名前缀 `sg_` → `sa_` 尚未执行**(新增 2026-09-04)~~ ⇒ **当日执行完毕并关闭** | **原文**:`00` §9.0.11 已裁定,**代码未动**。⚠️ 三处「改一半就红」的耦合须同批完成:① 跨仓契约 `SG_SHARED_GIT_TAG` / `SG_SHARED_SOURCE_DIR` / `SG_SHARED_GOLDEN_TEST`(两仓 + 重打 tag);② 两仓 `ci_verify.py` 的 `EXPECTED_TESTS` 是**目标名字面量** —— ★ 它会失败,而**那正是它该有的行为**,不要为改名放宽;③ `check_shared_purity.py` / `win_validate.ps1` 里**按名字匹配**的检查 —— 漏改是**静默失效**,比失败更坏(`00` §10.4)。⇒ 排在批次 A 之前<br>✅ **执行结果(2026-09-04:`ba2908f` 文档 · `d7a5754` 代码 · `d810c30` 归因;客户端 `7b10d25` / `06ff952`)**:全仓改名落地,`shared-v0.2.0` 已重打并前推客户端锁定 ref,两仓 × 两远端已推,**CI 三平台全绿**。⚠️ 预警的三条耦合**都按预期发生并按预期处置**(② 确实失败了,没有为改名放宽它)。<br>⚠️★ **但真正值得记的是预警自己漏掉的那一处**(`00` §9.0.12):`ci_verify.py` 仍传 `-DSG_WERROR=ON` 而 option 已成 `SA_WERROR` ⇒ CMake 只印一句 unused-cli、配置照样成功,**`-Werror` 自 `d7a5754` 起一直没开过**,而报告里那句「`SA_WERROR=ON`」是硬编码文本、**从来不是观测**。⇒ 本条预警点名了 ② 与 ③,**漏的恰恰是同一个文件里的另一行** —— 「按名字匹配的地方要同批改」这条纪律,连写下它的人也没能穷举完自己点名的文件。已加防线:配置期出现 `Manually-specified variables were not used` **即硬失败并列出变量名**(原则:凡靠某个 `-D` 才成立的结论,先证明那个 `-D` 被项目收下了),防线本身做了反向验证 |
 | **12** | ✅ ~~⬜ ★ **`TcpTransport` 未做 —— 1.5 的收尾项**(新增 2026-09-04)~~ ⇒ **2026-09-05 关闭** | **原文**:`src/net` 目前的传输实现是 `LoopbackTransport`(`net/api.h` 卷首已注明**是有意切分不是遗漏**,它同时是单容器形态下 `InProcTransport` 的雏形)。⇒ 成帧 · 会话 · 编解码接入都已在 Loopback 上验过 ⇒ 补 TCP **不动上层**。⚠️ 它是 1.4 端到端 demo 的前置<br>✅ **落地**(`00` §9.0.14):★ 原生 socket + `poll(2)`,**不走 asio**(DR-TS8,用户裁定)· 13 条真 socket 用例(★ 出站背压与续写 · 优雅关闭 · 端到端握手)· `main.cpp` 接线(绑端口失败拒绝启动 · SIGINT/SIGTERM 停机 · ★ 入口首次有测试 `server_self_test`)。★ **「上层一行没动」如期兑现** —— 印证了当初切分的理由。⚠️ 一条用例修过偶发红(内核自动调大缓冲把 3 MB 全吃下 ⇒ 客户端显式设小 `SO_RCVBUF` + 负载递增),30/30 绿 |
 | **13** | ⬜ ★ **`poll(2)` 是 O(连接数)**(新增 2026-09-05) | DR-TS8 认下的代价。上规模时换 epoll / kqueue / IOCP,`ITransport` 不动、上层不动。⚠️ 何时算「上规模」由 `15` 的容量画像决定:单线路个位数千连接内,poll 一次系统调用传整个数组不是主项(原版是每连接一次 `select`,§5.1)。属阶段 3 |
+| **15** | 🔧 ★★ **`shared/wire/` 已落地,但锁定 ref 未前推**(新增 2026-09-06) | `00` §9.0.15。`shared/` 这次**真的变了**(新增子树 + `CMakeLists` 改动)⇒ 按 §9.0.9 的耦合纪律必须打 **`shared-v0.3.0`** 并前推客户端 `SaShared.cmake` 的 `SA_SHARED_GIT_TAG`。⚠️ **在那之前客户端发布态(FetchContent / CI 的 d2-gate)编译的仍是没有 `wire/` 的那一份** —— 本地 `d2-only` 走联调态、已验过,**它绿不能替发布态作证**(与 §12.8 ① 同一条)。★ 两仓 × 两远端一起推,tag 必须同时存在于 gitee 与 GitHub |
 | **14** | ⬜ **节拍源是主线程 `sleep_for`,不是 §2 的定时线程**(新增 2026-09-05) | `main.cpp` 的 tick 循环按**绝对期限**睡到下一拍(不把 Tick 耗时累积成漂移)—— 1.5 的最简形态。§2 的「定时线程节拍源」与 I/O 线程池一起属阶段 2;届时 tick 第 1 步「统一时钟源」不变,变的只是谁在唤醒主线程 |
 
 ---

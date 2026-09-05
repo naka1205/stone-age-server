@@ -34,124 +34,38 @@
 #include "transport/envelope.sa.h"
 #include "transport/handshake.sa.h"
 #include "ids.h"
+#include "wire/framing.h"
 
 namespace sa::net {
 
-// ── 帧层:[u32 length][payload] ────────────────────────────────
+// ── 帧层与信封层:★★ 已于 2026-09-06 移出本模块(DR-TS9 乙案)──────────
 //
-// 02 §1.2:长度前缀。理由不是"约定俗成",而是 **TCP 是字节流、
-//   WebSocket 保留消息边界,长度前缀同时满足两者** ⇒ D4 解冻换 WsTransport 不动上层。
-// ⚠️ 旧实现按 '\n' 切行(GetOneLine),与"负载里可能有换行"直接冲突,靠转义硬撑。
-//    **新实现不按分隔符切帧。**
-
-// 单帧上限。★ 这个数字是**熔断**,不是容量规划:
-//   15 §4.3 实测原版每连接固定 324–452 KB 双缓冲,是 sizeof(Char)(12.3 KB)的
-//   26–37 倍,且是每连接成本主项。01 §5.3 裁定「按需增长 + 上限熔断」。
-//   ⇒ 这里是那个上限。最大的已知消息是 BattleEvents(7 KB 量级),留了 8 倍余量。
-inline constexpr std::uint32_t kMaxFrameBytes = 64u * 1024u;
-
-// 长度前缀本身的宽度。
-inline constexpr std::size_t kFrameHeaderBytes = 4;
-
-enum class FrameStatus : std::uint8_t {
-  kOk = 0,        // 取到一条完整帧
-  kNeedMore = 1,  // 还没收够,继续等
-  kTooLarge = 2,  // ★ 声明长度超过 kMaxFrameBytes ⇒ 连接必须关闭
-  kEmpty = 3,     // 声明长度为 0 ⇒ 协议违规(信封头本身就不止 0 字节)
-};
-
-// 增量成帧器。喂字节进去,取完整帧出来。
+// 它们现在住在 **`shared/wire/`**,与服务端和客户端**共编同一份**:
+//     FrameReader · WriteFrame · FrameStatus · EnvelopeView · DecodeEnvelope ·
+//     EncodeFramed · kMaxFrameBytes · kFrameHeaderBytes
 //
-// ⚠️★ kTooLarge / kEmpty 一旦出现就是**不可恢复**的:字节流已经无法再对齐,
-//    调用方必须关闭连接,不能"跳过这一帧继续读"。
-//    ⇒ 因此这两个状态是粘性的,Next() 会一直返回它。
-class FrameReader {
- public:
-  FrameReader() = default;
-
-  // 收到的原始字节。返回 false 表示累积缓冲超过了单帧上限 + 余量,
-  // 说明对端在灌垃圾 ⇒ 关闭连接。
-  bool Push(const std::uint8_t* data, std::size_t n);
-
-  // 取下一条完整帧。kOk 时 *payload / *len 指向内部缓冲,
-  // **在下一次 Push() 或 Pop() 之前有效**。
-  FrameStatus Next(const std::uint8_t** payload, std::uint32_t* len);
-
-  // 丢弃刚由 Next() 返回的那一帧。★ 与 Next() 分开是为了让调用方
-  //   可以零拷贝地处理帧内容,处理完再推进。
-  void Pop();
-
-  bool failed() const noexcept { return failed_; }
-  std::size_t buffered() const noexcept { return buf_.size() - read_; }
-
- private:
-  std::vector<std::uint8_t> buf_;
-  std::size_t read_ = 0;        // 已消费的前缀长度
-  std::uint32_t pending_ = 0;   // 刚由 Next() 交出的帧长(含头)
-  bool failed_ = false;
-};
-
-// 把一段负载写成一帧,追加到 out。负载超限返回 false(**不截断**)。
-bool WriteFrame(const std::uint8_t* payload, std::uint32_t len,
-                std::vector<std::uint8_t>& out);
-
-// ── 信封层:EnvelopeHeader { msg_id, corr_id } + body ──────────
+// ★ 裁定的理由(`11` §1.6):成帧与信封是**双端语义完全相同**的东西,
+//   而客户端 1.4 也要它们。三案里选了「双端共享一份」,与 D2 · DR-TS3 ·
+//   黄金用例集「复用不复制」· DR-BT5 反对双份实现同一条:
+//   **凡双端同一语义的只留一份,让漂移在编译期不可能发生。**
 //
-// 02 §2.1:body 不作为字段出现 —— 它是「紧跟在信封头之后、由 msg_id 决定类型
-//   的字节」,长度由帧层给出。把 body 建模成 bytes 会引入无上限变长字段。
-
-struct EnvelopeView {
-  std::uint32_t msg_id = 0;
-  std::uint64_t corr_id = 0;
-  const std::uint8_t* body = nullptr;
-  std::uint32_t body_len = 0;
-};
-
-// 从一条完整帧里剥出信封。格式不对返回 false ⇒ 整条消息作废,不存在部分成功。
-bool DecodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
-                    EnvelopeView& out);
-
-// 把一条 IDL 消息编成「帧 + 信封 + body」并追加到 out。
+// ⚠️ 本模块**保留 `sa::net::` 下的类型别名**(见下),不要求调用方改写 ——
+//    `world` / `tests` 的 `sa::net::FrameReader` 一行不用动。
+//    ★ 这不是偷懒:重构的验收凭据正是「18 条既有用例断言一个不改、全部仍绿」,
+//      若同时改调用方,就分不清红是搬错了还是改错了。
 //
-// ★ 模板而不是虚接口:msg_id 由 sa::idl::msg_id_of<M>() **编译期**取,
-//   调用点写不出"消息类型与编号对不上"这种错。
-//
-// ★★ 就地编码进 out 的尾部,**不用栈缓冲**:单帧上限是 64 KB,
-//    在栈上摆一个那么大的数组、每发一条消息摆一次,是一条自找的爆栈路径。
-//    ⇒ 先把 out 撑到最坏情况,编完再缩回实际长度。out 通常是每连接复用的
-//      出站缓冲 ⇒ 容量只涨一次,之后零分配(15 §9.1 的取向)。
-//
-// ⚠️ encode 用**非限定调用**:生成物的 encode 分别在 sa::domain 与
-//    sa::transport 两个命名空间里,靠 ADL 各自找到自己那个。
-//    写成限定调用就要为两组各写一份重载,那正是"同一语义两份实现"。
-template <typename M>
-bool EncodeFramed(std::uint64_t corr_id, const M& msg,
-                  std::vector<std::uint8_t>& out) {
-  const std::size_t start = out.size();
-  out.resize(start + kFrameHeaderBytes + kMaxFrameBytes);
+// ★ 留在本模块的是**宿主侧**:传输(socket / Loopback)与会话状态机。
+//   ⇒ `shared/wire` 处理**字节与结构**,`src/net` 处理**连接**。
+//     这条切分正是前者能双端共享的原因。
 
-  sa::idl::Writer w(out.data() + start + kFrameHeaderBytes, kMaxFrameBytes);
-
-  sa::transport::EnvelopeHeader head;
-  head.msg_id = sa::idl::msg_id_of<M>();
-  head.corr_id = corr_id;
-  encode(w, head);
-  encode(w, msg);
-
-  if (!w.ok()) {
-    out.resize(start);
-    return false;
-  }
-
-  const std::uint32_t payload_len = static_cast<std::uint32_t>(w.size());
-  out.resize(start + kFrameHeaderBytes + payload_len);
-  // 长度前缀:小端,与 IDL 运行时的整数序一致。
-  out[start + 0] = static_cast<std::uint8_t>(payload_len & 0xFFu);
-  out[start + 1] = static_cast<std::uint8_t>((payload_len >> 8) & 0xFFu);
-  out[start + 2] = static_cast<std::uint8_t>((payload_len >> 16) & 0xFFu);
-  out[start + 3] = static_cast<std::uint8_t>((payload_len >> 24) & 0xFFu);
-  return true;
-}
+using sa::wire::kMaxFrameBytes;
+using sa::wire::kFrameHeaderBytes;
+using sa::wire::FrameStatus;
+using sa::wire::FrameReader;
+using sa::wire::WriteFrame;
+using sa::wire::EnvelopeView;
+using sa::wire::DecodeEnvelope;
+using sa::wire::EncodeFramed;
 
 // ── 传输层 ────────────────────────────────────────────────────
 //

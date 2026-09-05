@@ -487,7 +487,43 @@ idl/generated →  两者都可依赖
 
 ⇒ 实践做法:IDL 分两组 schema ——
 `schema/domain/`(事件与领域值对象,`shared/` 可依赖)与
-`schema/transport/`(信封、握手、错误面,只有 `src/net` 依赖)。
+`schema/transport/`(信封、握手、错误面)。
+
+### 9.1 ★★ 该边界 2026-09-06 起**按子树**,不再按 `shared/` 整体(DR-TS9)
+
+> 上面那句「`shared/` 不得引用 `transport/`,只有 `src/net` 依赖」在 DR-TS9 裁定后**过窄了** ——
+> 它会挡住一个我们明确想要的东西:**双端共编的成帧 / 信封层**。
+
+```
+shared/rules/   ❌ transport/ 仍然禁止      ← 不放宽。L3 是纯函数,
+                                              信封是传输概念,进来就破了 05 §1.5 的契约
+shared/model/   ❌ 同上
+shared/wire/    ✅ transport/ 可**且只可**它引  ← 它的职责就是信封
+src/net/        ✅ 宿主侧,本来就可以
+```
+
+**为什么放宽**:成帧与信封编解码是**双端语义完全相同**的东西,客户端 1.4 也要一份。
+三案(自写第二份 / 双端共享 / 客户端直编服务端源文件)见 `11` §1.6,**用户 2026-09-06 拍板共享一份**。
+⇒ 与 D2 · DR-TS3 · 黄金用例集「复用不复制」· DR-BT5 反对双份实现同一条理由:
+**凡双端同一语义的东西只留一份,让漂移在编译期就不可能发生。**
+
+⚠️★ **放宽的实现方式本身是这条裁定的一部分,不是配套细节**:
+`tools/check_shared_purity.py` 的 `SUBTREE_ALLOWED` 只按**路径前缀**开口。
+若有人把它写成「整个 `shared/` 都允许 `transport/`」,L3 的纯度会一起被放掉,
+**而那不会有任何东西报错** —— 与 `00` §10.4 三类静默错误同族。
+⇒ 已有一条反向验证钉着它:往 `shared/rules/battle.h` 塞一行 `transport/` include,
+本脚本必须报红并点名(实测退出码 1,还原后 0)。
+
+★ **两处守卫,管的不是同一件事**:
+
+| 处 | 管什么 |
+|---|---|
+| `check_shared_purity.py` 的 `SUBTREE_ALLOWED` | 能不能 `#include` |
+| `shared/CMakeLists.txt` 拆出独立目标 `sa_wire` | 能不能**链接** —— `sa_shared` 的闭包里永远没有信封 |
+
+⇒ 目标切分让这条差别落在**构建图**上:谁想让 `rules` 用上 Envelope,得先改 `shared/CMakeLists.txt`。
+⚠️ 但构建图管不住 include(IDL 生成物的 `#include` 从 `generated/cpp` 根算起,
+`sa_idl` 一个目标同时暴露两组头)⇒ **两处都要,缺一处就是半个边界**。
 
 ---
 

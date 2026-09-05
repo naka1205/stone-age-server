@@ -44,6 +44,27 @@ target_link_libraries(sa_shared PUBLIC sa_idl)
 
 target_compile_features(sa_shared PUBLIC cxx_std_17)
 
+# ── ★★ sa_wire:成帧 + 信封编解码,双端共享(DR-TS9 乙案,2026-09-06)────────
+#
+# ★ 为什么是**独立目标**,不是塞进 sa_shared:
+#   本子树是 `02` §9 那条边界**唯一被放宽**的地方 —— 它可以引 `transport/` 组 IDL,
+#   而 `shared/rules` 不可以。做成两个目标,这条差别就落在**构建图**上:
+#   L3 那个目标的链接闭包里永远没有信封,谁想让 rules 用上 Envelope 得先改这个文件。
+#   ⚠️ 若合成一个目标,放宽就变成整个 `shared/` 的属性,而**那不会有任何东西报错**
+#     —— 与客户端 cmake/SaEngineIsolation.cmake 卷首那条同族:边界要落在形状上。
+#
+# ⚠️ 客户端只在需要网络时链它(1.4 的 `src/net`);D2 闸门只编 sa_shared ⇒ 两者互不牵连。
+add_library(sa_wire STATIC
+    wire/framing.cpp
+)
+
+target_include_directories(sa_wire PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
+
+# ✅ 本目标**可且只可**引 transport/ 组 —— 它的职责就是信封(见 wire/framing.h 卷首)。
+target_link_libraries(sa_wire PUBLIC sa_idl)
+
+target_compile_features(sa_wire PUBLIC cxx_std_17)
+
 # ── ★★ 浮点语义:禁止 FMA 合并(2026-09-02,跨编译器验证时固化)────────
 #
 # `00` §0 已认下第 ③ 层「规则与公式不可自证」,而 **L3 黄金用例集是唯一补偿手段**
@@ -63,6 +84,9 @@ target_compile_features(sa_shared PUBLIC cxx_std_17)
 #
 # ⚠️ 这与本文件上方「不硬编码任何编译选项」不矛盾:那条针对的是**告警口径**
 #    (风格,消费方各有一套);本条是**语义要求**,消费方换一套就会算错。
+# ⚠️ 只加在 sa_shared 上:公式在 rules/,wire/ 里没有一个 float。
+#    ★ 但**不要**因此把它写成"两个目标都加,反正无害" —— 这条选项是有语义的,
+#      加在不需要它的目标上会让下一个人以为 wire/ 里也有浮点约束要守。
 if(MSVC)
     target_compile_options(sa_shared PUBLIC /fp:precise)
 else()
@@ -82,13 +106,18 @@ endif()
 #     ⇒ 若只补在两仓的告警函数里,`sa_shared` 这个目标本身仍然没有它。
 #   这与本文件开头那个 `sa_idl` / `sa_apply_warnings` 缺口(d939247)是同一类问题:
 #   **凡是「消费方不做就会坏」的东西,都得本目录自己保证。**
+#   ⚠️★ **两个目标都要**:`wire/framing.{h,cpp}` 同样是带大量中文注释的 UTF-8 源文件,
+#     漏掉它就会在 MSVC 上 C4819 刷屏 —— 与上面那条 `/fp:precise` 相反,
+#     这一条是**解码方式**,凡本目录的源文件都需要。
 if(MSVC)
     target_compile_options(sa_shared PUBLIC /utf-8)
+    target_compile_options(sa_wire PUBLIC /utf-8)
 endif()
 
 # ★ 阶段 0.1/1.1 起 sa_shared 是 STATIC(此前是 INTERFACE 的纯头契约层)。
 #   ⚠️ 标准仍锁 17 —— 见上方 SA_SHARED_CXX_STANDARD。它要被 GameStudio(C++17)编译。
-set_target_properties(sa_shared PROPERTIES
+#   ⚠️ sa_wire 同锁 17 —— 它和 sa_shared 一样要被客户端(C++17)编译。
+set_target_properties(sa_shared sa_wire PROPERTIES
     CXX_STANDARD ${SA_SHARED_CXX_STANDARD}
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF)
@@ -98,7 +127,8 @@ set_target_properties(sa_shared PROPERTIES
 #   ⇒ 有则用,无则由消费方在自己那侧施加,不在此处硬编码任何编译选项。
 if(COMMAND sa_apply_warnings)
     sa_apply_warnings(sa_shared)
+    sa_apply_warnings(sa_wire)
 endif()
 
-# ⚠️ 这里**不**给 sa_shared 加任何其它 target_link_libraries(除 sa_idl):
+# ⚠️ 这里**不**给 sa_shared / sa_wire 加任何其它 target_link_libraries(除 sa_idl):
 #    一旦链上 pthread / 日志 / 网络,客户端侧的 FetchContent 就会被迫一起拉。
