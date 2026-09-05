@@ -104,6 +104,12 @@ enum class LogEvent : std::uint16_t {
   kConfigLoaded = 4,
   kConfigRejected = 5,   // ★ 拒绝启动,见本文件卷首
   kModuleLoaded = 6,
+  // ★ 01 §11.1 第 6 步「绑定端口」的失败面(2026-09-05,TcpTransport 接入入口时补)。
+  //   与 kConfigRejected 同一性质:任一步失败即拒绝启动,原因要在日志里说得出。
+  kListenFailed = 7,
+  // 收到 SIGINT / SIGTERM ⇒ 进入 01 §11.2 的停服路径。记它是为了让「进程为什么退了」
+  //   在日志里有答案 —— 被信号停掉与自己崩掉,事后看退出码分不出来。
+  kShutdownSignal = 8,
 
   // 100–199:网络与会话(01 §5)
   kConnectionAccepted = 100,
@@ -191,6 +197,11 @@ struct TempoConfig {
 
 struct ServerConfig {
   std::uint16_t listen_port = 8300;
+  // ★ 绑定地址(2026-09-04,TcpTransport 落地时补)。
+  //   默认 0.0.0.0 = 全部网卡 —— 单容器形态下这是唯一可用的取值。
+  //   ⚠️ 生产分布式(00 §4.1)要把 world / gateway 绑在内网网卡上,
+  //     那时它才真正起作用。⇒ 现在就把字段立出来,免得届时回头改配置面。
+  std::string bind_addr = "0.0.0.0";
   // ★ 单一整数,不做「主版本兼容、次版本忽略」的分支。不等即拒(02 §2.1)。
   std::uint32_t protocol_version = 1;
   std::uint32_t heartbeat_interval_ms = 30000;

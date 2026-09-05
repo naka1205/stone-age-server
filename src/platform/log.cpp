@@ -39,6 +39,8 @@ const char* EventName(LogEvent e) noexcept {
     case LogEvent::kConfigLoaded:         return "config_loaded";
     case LogEvent::kConfigRejected:       return "config_rejected";
     case LogEvent::kModuleLoaded:         return "module_loaded";
+    case LogEvent::kListenFailed:         return "listen_failed";
+    case LogEvent::kShutdownSignal:       return "shutdown_signal";
     case LogEvent::kConnectionAccepted:   return "connection_accepted";
     case LogEvent::kConnectionClosed:     return "connection_closed";
     case LogEvent::kHandshakeAccepted:    return "handshake_accepted";

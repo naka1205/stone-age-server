@@ -70,9 +70,12 @@ EXPECTED_TESTS = {
     "idl_verify",       # ★ schema 与生成物同步(需 protoc)
     # ── 阶段 1.5(2026-09-04 接入构建时补齐)──────────────────────
     "net_framing",        # 帧层 / 信封层 / 会话状态机
+    "net_tcp",            # ★ TcpTransport —— 1.5 收尾项,真 socket 上跑
     "platform_config",    # 配置装载与快速失败
     "world_tick",         # ★ 最小 tick 与「战斗速度 ≠ tick 频率」
     "module_boundaries",  # ★★ 00 §3.1 的守卫:进程内捷径(需 Python3)
+    # ── 1.5 收尾(2026-09-05,TcpTransport 接入入口)────────────────
+    "server_self_test",   # ★ 入口自检:启动 → 绑端口 → tick → 关闭,退出码即判据
 }
 
 
@@ -286,6 +289,18 @@ def negative_check(build, config):
 
     ★ contract_smoke 的 CheckElementMatrix() 是**先 printf 再 assert**
       ⇒ 四种结果可分辨,不只看退出码。
+
+    ⚠️★★ 还原不只是"把文件写回去"(2026-09-05 实测修正,00 §9.0.14):
+        初版用 shutil.copy2 还原 ⇒ 备份的 **mtime 一并被还原** ⇒ 还原后的 constants.h
+        比注入期间编出的 .o **更旧** ⇒ make / ninja 判定产物是新的、不再重编
+        ⇒ sa_shared 里改坏的 battle.cpp.o 原样留在 build 目录里。
+        而那句「还原后重建,避免留下改坏的产物」的 --target 只指了 sa_contract_smoke,
+        对 rules_battle 链的那份 sa_shared 无能为力。
+        ⇒ 下一个在同一目录做增量构建的人,会看到 rules_battle 报
+          「相克 [攻0][守1] 得 9.9 应 1.5」—— 一条与他的改动毫无关系的红。
+        ★ 这与 00 §9.0.12 / §9.0.13 是同一族:动作做了(还原),没有任何东西**观测**
+          它的结果(产物干净了没)。⇒ 见 _restore_and_recheck():还原 → 重建整个目录
+          → 复跑受影响的两条用例 → **断言它们回到绿**。
     """
     target = REPO / "shared" / "rules" / "constants.h"
     backup = target.with_suffix(".h.ci_verify_backup")
@@ -300,43 +315,78 @@ def negative_check(build, config):
                 "未匹配到 kElementMatrix 的初始化列表 ⇒ 注入模式已过期,"
                 "须同步修本脚本(**勿改测试去迁就脚本**)")
 
+    # 备份文件仍然留着:脚本若被中途杀掉,工作树里要有一份能手工还原的原件。
     shutil.copy2(target, backup)
     try:
-        target.write_text(pat.sub(r"\g<1>9.9", orig, count=1), encoding="utf-8")
-        rc_build, _ = run(["cmake", "--build", str(build), "--config", config,
-                           "--target", "sa_contract_smoke"])
-        if rc_build != 0:
-            return ("★ 断言防线反向验证", False,
-                    "注入后**构建失败** ⇒ 本项不结论(是注入方式的问题,"
-                    "不是断言的问题)")
-
-        # ⚠️ --timeout 60:MSVC 的 assert 走 _wassert,控制台程序理论上写 stderr 后
-        #    abort,但别把整趟验证押在这个假设上 —— 万一弹窗,超时也算失败,不会挂死。
-        rc_test, out = run(["ctest", "--test-dir", str(build), "-C", config,
-                            "-R", "contract_smoke", "--output-on-failure",
-                            "--timeout", "60"])
-        saw_assert = bool(re.search(r"[Aa]ssertion", out))
-        saw_printf = "相克矩阵重排错误" in out
-
-        if rc_test != 0 and saw_assert:
-            return ("★ 断言防线反向验证", True,
-                    "改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效")
-        if rc_test != 0:
-            return ("★ 断言防线反向验证", True,
-                    "测试确实失败,但输出未见 assert 字样(可能被 abort 截断)"
-                    "⇒ 防线成立,证据偏弱")
-        if saw_printf:
-            return ("★ 断言防线反向验证", False,
-                    "⚠️★★ 已打印「相克矩阵重排错误」却仍然通过 ⇒ "
-                    "**assert 被 NDEBUG 编译掉了**,前面所有绿色都不可信!")
-        return ("★ 断言防线反向验证", False,
-                "⚠️★ 改错后仍通过、且连 printf 都没出现 ⇒ 注入没进到编译产物,本项不成立")
+        verdict = _probe_with_bad_matrix(build, config, target,
+                                         pat.sub(r"\g<1>9.9", orig, count=1))
     finally:
-        shutil.copy2(backup, target)
-        backup.unlink()
-        # 还原后重建,避免给后续步骤留下改坏的产物。
-        run(["cmake", "--build", str(build), "--config", config,
-             "--target", "sa_contract_smoke"])
+        restore_problem = _restore_and_recheck(build, config, target, backup)
+
+    if restore_problem:
+        # ⚠️ 即便注入那一半通过了,也要判失败:build 目录此刻是脏的,
+        #    留给后面的人一个"看起来验过、实际被污染"的目录,比本项红更坏。
+        return ("★ 断言防线反向验证", False, restore_problem)
+    return verdict
+
+
+def _probe_with_bad_matrix(build, config, target, bad_text):
+    """注入改错的矩阵,只重建探针目标,读四态。(不负责还原 —— 见调用方的 finally。)"""
+    target.write_text(bad_text, encoding="utf-8")
+    rc_build, _ = run(["cmake", "--build", str(build), "--config", config,
+                       "--target", "sa_contract_smoke"])
+    if rc_build != 0:
+        return ("★ 断言防线反向验证", False,
+                "注入后**构建失败** ⇒ 本项不结论(是注入方式的问题,"
+                "不是断言的问题)")
+
+    # ⚠️ --timeout 60:MSVC 的 assert 走 _wassert,控制台程序理论上写 stderr 后
+    #    abort,但别把整趟验证押在这个假设上 —— 万一弹窗,超时也算失败,不会挂死。
+    rc_test, out = run(["ctest", "--test-dir", str(build), "-C", config,
+                        "-R", "contract_smoke", "--output-on-failure",
+                        "--timeout", "60"])
+    saw_assert = bool(re.search(r"[Aa]ssertion", out))
+    saw_printf = "相克矩阵重排错误" in out
+
+    if rc_test != 0 and saw_assert:
+        return ("★ 断言防线反向验证", True,
+                "改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效")
+    if rc_test != 0:
+        return ("★ 断言防线反向验证", True,
+                "测试确实失败,但输出未见 assert 字样(可能被 abort 截断)"
+                "⇒ 防线成立,证据偏弱")
+    if saw_printf:
+        return ("★ 断言防线反向验证", False,
+                "⚠️★★ 已打印「相克矩阵重排错误」却仍然通过 ⇒ "
+                "**assert 被 NDEBUG 编译掉了**,前面所有绿色都不可信!")
+    return ("★ 断言防线反向验证", False,
+            "⚠️★ 改错后仍通过、且连 printf 都没出现 ⇒ 注入没进到编译产物,本项不成立")
+
+
+def _restore_and_recheck(build, config, target, backup):
+    """还原源文件、重建**整个**目录、复跑受影响用例。返回问题描述;空串 = 干净。
+
+    ★ 三步缺一不可,每步对应一种曾经真实发生或必然会发生的失效:
+      ① write_bytes 而非 copy2 —— 让 mtime 是"现在",构建系统才看得见文件变了;
+      ② 重建整个目录而非 --target sa_contract_smoke —— 注入期间被重编的是 sa_shared,
+         它被 contract_smoke **和** rules_battle 两条链共享;
+      ③ 复跑那两条并断言通过 —— 「还原了」是动作,「产物干净了」才是结论,
+         中间要有一次观测(00 §9.0.13 的原则:观测值还要证明是对的)。
+    """
+    target.write_bytes(backup.read_bytes())
+    backup.unlink()
+    rc_build, _ = run(["cmake", "--build", str(build), "--config", config,
+                       "--parallel"])
+    if rc_build != 0:
+        return ("⚠️★★ 注入已还原,但**重建失败** ⇒ build 目录状态不明,"
+                "请删掉它重跑;在此之前它给出的任何绿色都不可信")
+    rc_test, _ = run(["ctest", "--test-dir", str(build), "-C", config,
+                      "-R", "contract_smoke|rules_battle", "--output-on-failure"])
+    if rc_test != 0:
+        return ("⚠️★★ 注入已还原并重建,但 contract_smoke / rules_battle **仍不通过**"
+                " ⇒ 改错矩阵的产物残留在 build 目录里(还原没有让构建系统看见文件变了)"
+                " ⇒ 请删掉 build 目录重跑,并检查本函数的还原方式")
+    return ""
 
 
 if __name__ == "__main__":

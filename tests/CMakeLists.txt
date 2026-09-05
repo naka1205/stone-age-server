@@ -85,7 +85,7 @@ add_test(NAME idl_smoke COMMAND sa_idl_smoke)
 # ⚠️ 这三个用 **C++20**(D1),不锁 C++17 —— 它们测的是 src/ 各模块,
 #    那是服务端独有的东西,不参与 D2 的双端共享。
 #    ⇒ 只有 shared/ 与它的用例集才受 GameStudio 的 C++17 约束。
-foreach(sa_t IN ITEMS net_framing platform_config world_tick)
+foreach(sa_t IN ITEMS net_framing net_tcp platform_config world_tick)
   add_executable(sa_${sa_t}_test ${sa_t}_test.cpp)
   sa_apply_warnings(sa_${sa_t}_test)
   sa_enable_assertions(sa_${sa_t}_test)
@@ -94,6 +94,34 @@ endforeach()
 target_link_libraries(sa_net_framing_test      PRIVATE sa_net sa_doctest)
 target_link_libraries(sa_platform_config_test  PRIVATE sa_platform sa_doctest)
 target_link_libraries(sa_world_tick_test       PRIVATE sa_world sa_doctest)
+
+# ── ★ TcpTransport 的用例要自己开 socket(2026-09-04)─────────────
+#
+# ★★ 它比其它三个多两笔链接,两笔都有理由:
+#   ① **ws2_32** —— sa_net 是 PRIVATE 链接它的(见 src/net/CMakeLists.txt:
+#     不让 winsock 的头与宏顺着依赖传染给 world 与其它测试)。
+#     ⇒ 本用例自己用裸 socket 当**测试客户端**,就得自己链一次。
+#     ⚠️ 这不是重复,恰恰是那条 PRIVATE 生效的证据。
+#   ② **Threads** —— 大负载往返那条用例要在另一个线程收,
+#     否则服务端要 Poll 才继续写、而 Poll 在同一线程上,必然死锁。
+#     ⚠️ Linux 上漏了它是**链接期**报错,mac 上却能过 —— 又一处
+#       「在一套工具链上验过 ≠ 三套都成立」(00 §9.0.6)。
+find_package(Threads REQUIRED)
+target_link_libraries(sa_net_tcp_test PRIVATE sa_net sa_doctest Threads::Threads)
+if(WIN32)
+  target_link_libraries(sa_net_tcp_test PRIVATE ws2_32)
+endif()
+
+# ── ★ 入口自检(2026-09-05,TcpTransport 接入入口时补)─────────────────
+#
+# main.cpp 此前**没有任何测试覆盖** —— 它是"产物",不开断言防线(src/CMakeLists.txt),
+# 而模块各自的用例都绕开它。接上真 socket 之后,入口多了三件只有它自己会做错的事:
+# 绑端口失败要拒绝启动、tick 循环要能停、Stop 与 World 的析构顺序不能反。
+# ⇒ 让 --self-test 成为 ctest 的一项:启动 → 绑系统分配的端口 → 跑够一个回合间隔
+#   → 关闭 → 退出码 0。它证明的是「入口能启动、能监听、能停」,不是某个端口空着
+#   (端口取 0 正是为了在 CI 上并行跑而不撞端口,见 main.cpp 的用法说明)。
+# ⚠️ 与客户端 `--autotest` 同一取向:一切生成物须可无人验证。
+add_test(NAME server_self_test COMMAND stone_age_server --self-test)
 
 # ── ★★ shared/ 依赖纯度(D2 的守卫)───────────────────────────────
 #

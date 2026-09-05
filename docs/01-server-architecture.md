@@ -107,7 +107,7 @@ tick(dt):
 
 ## 4. 目录结构
 
-> ✅ = 已落地(2026-08-31 阶段 1.0;`src/` 主体 2026-09-03 阶段 1.5)  ⬜ = 待建
+> ✅ = 已落地(2026-08-31 阶段 1.0;`src/` 主体 2026-09-03 阶段 1.5;TcpTransport 与入口接线 2026-09-05 收尾)  ⬜ = 待建
 
 ```
 stone-age-server/
@@ -121,17 +121,17 @@ stone-age-server/
 │   └── model/                  ✅ handle.h(M10)  ⬜ 实体族属阶段 1.2
 ├── src/                        🔄 ★ 1.5 最小切面主体已落地,其余阶段 2
 │   ├── platform/               ✅ 1.5:配置 · 日志 · 单调时钟 · IRandom 实现  │ ⬜ 2:指标 · 热重载
-│   ├── net/                    ✅ 1.5:ITransport · ★ 长度前缀成帧 · 编解码接入 · 会话
-│   │                           ⚠️ 传输实现目前是 LoopbackTransport;**TcpTransport 是 1.5 的收尾项**
+│   ├── net/                    ✅ 1.5:ITransport · ★ 长度前缀成帧 · 编解码接入 · 会话 · ★ TcpTransport(原生 socket + poll,DR-TS8)
+│   │                           ⬜ WsTransport(D4 解冻)· 限流 · 重连窗口 —— 阶段 2
 │   ├── storage/                ⬜ 阶段 2:MySQL 访问 · 工作单元 · 迁移
 │   ├── lock/                   ⬜ 阶段 2:ILock(Redis)
 │   ├── gateway/                ⬜ 阶段 2
 │   ├── world/                  ✅ 1.5:最小 tick + 一场战斗的生命周期  │ ⬜ 2:NPC · 移动 · 视野
 │   ├── session_storage/        ⬜ 阶段 2
 │   ├── social/                 ⬜ 阶段 2
-│   └── main.cpp                ✅ ★ 单一入口,按配置装载模块
-├── tests/                      ✅ 契约冒烟 + IDL 冒烟 + 成帧 + 两条脚本检查
-├── tools/                      ✅ check_shared_purity.py · rescope_battle_port.py · ci_verify.py
+│   └── main.cpp                ✅ ★ 单一入口:按配置装载模块 · 绑端口(失败即拒绝启动)· tick 循环 · 信号停机
+├── tests/                      ✅ 契约冒烟 · IDL 冒烟 · 成帧 · ★ TCP · 配置 · tick · ★ 入口自检 + 三条脚本检查
+├── tools/                      ✅ check_shared_purity.py · check_module_boundaries.py · rescope_battle_port.py · ci_verify.py · win_validate.ps1
 │                               ⬜ 数据导入 / schema 迁移
 └── deploy/                     ⬜ Dockerfile · compose(测试单容器)· 生产编排
 ```
@@ -208,13 +208,18 @@ DR-TS3 承诺「客户端以 FetchContent + 锁定 tag 引用 `shared/`」。
 
 ```
 ITransport
- ├─ TcpTransport        现在
- ├─ InProcTransport     单容器形态下的模块间传输
+ ├─ TcpTransport        ✅ 2026-09-05 —— ★ 原生 socket + poll(2),不走 asio(DR-TS8,00 §9.0.14 ①)
+ ├─ LoopbackTransport   ✅ 1.5 —— 全部非 socket 用例的载体;同时是下一行的雏形
+ ├─ InProcTransport     单容器形态下的模块间传输(阶段 3)
  └─ WsTransport         D4 解冻时新增,不动上层
 ```
 
 ⚠️ 协议**自带长度前缀**。TCP 是字节流、WebSocket 是保留消息边界的,长度前缀同时满足两者 ——
 这本来就该做,现在只是把理由写明。
+
+★ **TcpTransport 只做对三件事,其余是样板**(tcp_transport.cpp 卷首):① 出站背压 —— `send()` 写不完的尾巴排队、下一轮 `POLLOUT` 续写,
+配 `kMaxOutboundBytes` = 4 MB 熔断(对端连上却不读时断连,不等待);② 短读与粘包不是本层的事,`OnBytes` 交出的就是这一轮读到的字节;
+③ 回调期间容器不得失效(宿主会在 `OnBytes` 里反过来 `Send`)。★ `net/api.h` 里**没有一个平台类型** —— `windows.h` 的宏不许顺着 PUBLIC 头传染给 world 与 tests。
 
 ⚠️ **不复刻原版网络层**:`01` §3.1 的 `netloop_faster` 是**每个连接一次 `select` 系统调用**
 (1000 连接 = 一轮最多 1000 次 `select` + 1000 次 `read`),`15` 实测
@@ -430,6 +435,10 @@ storage 侧   UoW:  InnoDB 事务
 7. 进入 tick
 ```
 
+> ✅ **1.5 已接的步骤(2026-09-05)**:1 · 5 · 6 · 7。2 要 storage,3 要 L2 实体族,4 要内容管线 —— 都属阶段 2。
+> ★ 第 6 步失败的形态是 `listen_failed` 事件(带 errno 文本)+ 退出码 1,与第 1 步的 `config_rejected` 同一性质:
+> 任一步失败即拒绝启动,且原因要在日志里说得出(`00` §9.0.14 ②)。
+
 ### 11.2 关闭
 
 原版有 `ShutdownProc` 停服流程与 `WHILECLOSEALLSOCKETSSAVE` / `WHILESAVEWAIT` 状态。
@@ -440,6 +449,10 @@ storage 侧   UoW:  InnoDB 事务
               → 等待在途跨模块请求收敛(带 deadline)→ 落盘确认 → 退出
 ```
 
+> 1.5 只做了能做的一段(2026-09-05):SIGINT / SIGTERM ⇒ `shutdown_signal` ⇒ `RequestShutdown` ⇒ 同一 tick 的第 8 步关闭全部连接
+> ⇒ `Stop` 传输层 ⇒ 退出码 0。广播倒计时 / 逐会话保存 / 等在途请求收敛,要等 storage 与跨模块请求存在。
+> ⚠️ 信号处理函数里只置标志,日志与关连接都在主线程的 tick 里做。
+
 ⚠️ **保存必须"写成功再释放锁"**(§8.3),这正是原版 `charSave` 出错的地方。
 
 ---
@@ -449,7 +462,7 @@ storage 侧   UoW:  InnoDB 事务
 | 项 | 定 |
 |---|---|
 | 标准 / 构建 | C++20 / CMake(与 GameStudio 一致,是共享 `shared/` 的物理前提) |
-| 网络 | asio + C++20 协程 |
+| 网络 | ~~asio + C++20 协程~~ ⇒ ★ **原生 socket + poll(2),单线程 reactor**(DR-TS8,2026-09-04 用户裁定;`00` §9.0.14 ①)。⚠️ poll 是 O(连接数),上规模换 epoll / kqueue / IOCP,`ITransport` 不动(§13 欠债 13) |
 | 日志 / 指标 | spdlog + prometheus-cpp |
 | 测试 | doctest 或 GoogleTest;★ 覆盖率重点在 `shared/rules` |
 | 产物 | **单一二进制**,`--modules=gateway,world,session,social` 之类的配置决定装载 |
@@ -479,7 +492,9 @@ storage 侧   UoW:  InnoDB 事务
 | **9** | ⏭ ★ **`idl_verify`(schema 与生成物同步)依赖 `protoc`,而 `protoc` 不在每台机器上** | 2026-09-02 Windows 验证时暴露。`protoc` 是**构建期工具**(DR-TS1 边界 ①:运行时不链接 libprotobuf;DR-TS2:生成物入库)⇒ **只消费生成物的人不需要装它**,「本机没有」是正常状态。已处置:`sgidl_gen.py` 给清晰诊断 + 支持 `PROTOC=<路径>`;`tests/CMakeLists.txt` 按「Python3 缺失」的先例**不注册测试 + `message(WARNING)`**(常红会训练人忽略红色,`00` §10.4)。⚠️ **但 CI 上必须有 `protoc`,否则这道关会静默消失** —— 那比常红更坏。⇒ ✅ **2026-09-03 处置**:三个平台的 workflow 各装一次 protoc,★★ **但真正接住这件事的不是安装步骤,而是 `tools/ci_verify.py` 的测试注册清单断言** —— 装了 protoc 不等于 `find_program` 找得到、不等于测试注册上了,只有「注册的测试集合 == 期望集合」这条断言会在它消失时**失败**。⇒ 本条降级为「已有守卫,保留说明」 |
 | **10** | ✅ ~~⚠️★ **新增(2026-09-03):CI 的 workflow 本身尚未在 GitHub 上真跑过一次**~~ ⇒ **当日归因完毕并关闭** | **原文**:`tools/ci_verify.py` 已在本地 macOS/clang 下五项全绿(含测试注册清单、清洁构建 `SG_WERROR`、断言防线反向验证),客户端侧的发布态也在临时目录里真跑通了。**但 `.github/workflows/ci.yml` 本身 —— 矩阵展开、runner 镜像、三条 protoc 安装步骤、Windows 侧的 VS 生成器选择 —— 全部未经执行。**⚠️ 首跑很可能红,且**红的原因多半与本仓代码无关**(runner 的 GCC 版本比本地的 15.2 旧 ⇒ `SG_WERROR` 下冒出新告警;`choco install protoc` 的包名/可用性;`seanmiddleditch/gha-setup-ninja` 的版本)。★ 这与 `00` §9.0.7.1 的教训同族:**「脚本写好了」和「脚本真跑过一次」之间隔着五个缺口** —— 那次一次性验证的全部价值,恰恰在首跑没通过以及为什么。⇒ 首跑结果须逐条归因后再写文档,**不要在跑通之前把欠债 7 的 ② 当成已兑现**。<br>✅ **首跑结果(`00` §9.0.10)**:★ **预判的三种红一个都没发生** —— 服务端 `verify` **三平台全绿、五项全过**(配置 `SG_WERROR=ON` · 测试注册清单 5/5 · 清洁构建 0 告警 · `ctest` 5/5 · 断言防线反向验证)⇒ **欠债 7 的 ② 一并兑现**。★ 附带一笔此前未知的凭据:三个 runner 自带的 protoc 分别是 **3.21.12 / 35.1 / 36.1**,跨一个大版本时代而 `idl_verify` 仍过 ⇒ **生成物不依赖特定 protoc 版本**(欠债 9 只处置了「本机没有」,从未回答「版本差异要紧吗」)。<br>⚠️★ **真正的红在预判之外,且在客户端侧**:三平台同一步同因 `could not read Username for 'https://github.com'` ⇒ 两个镜像仓当时是 private,而 runner 的 `GITHUB_TOKEN` 只授权它自己那一个仓 —— ★★ **这是 `00` §9.0.9「tag 必须同时存在于两个远端」那条耦合的第二面(跨仓可见性),17 份文档里没有一处记过**,而 tag 一致性当时恰恰是满足的。⇒ 已按用户裁定把两个镜像仓改为 **public**,重跑三平台全绿并**取日志逐项核验**(发布态 · 锁定 ref `shared-v0.1.0` · 33 用例 / 2,276 断言),不凭绿灯结案。⚠️ **遗留约束**:public 是客户端 CI 成立的前提,**改回 private 必须同时落地 PAT secret 方案**,否则会回到那个与"权限设置"看不出关系的红 |
 | **11** | ✅ ~~⬜ ★★ **命名前缀 `sg_` → `sa_` 尚未执行**(新增 2026-09-04)~~ ⇒ **当日执行完毕并关闭** | **原文**:`00` §9.0.11 已裁定,**代码未动**。⚠️ 三处「改一半就红」的耦合须同批完成:① 跨仓契约 `SG_SHARED_GIT_TAG` / `SG_SHARED_SOURCE_DIR` / `SG_SHARED_GOLDEN_TEST`(两仓 + 重打 tag);② 两仓 `ci_verify.py` 的 `EXPECTED_TESTS` 是**目标名字面量** —— ★ 它会失败,而**那正是它该有的行为**,不要为改名放宽;③ `check_shared_purity.py` / `win_validate.ps1` 里**按名字匹配**的检查 —— 漏改是**静默失效**,比失败更坏(`00` §10.4)。⇒ 排在批次 A 之前<br>✅ **执行结果(2026-09-04:`ba2908f` 文档 · `d7a5754` 代码 · `d810c30` 归因;客户端 `7b10d25` / `06ff952`)**:全仓改名落地,`shared-v0.2.0` 已重打并前推客户端锁定 ref,两仓 × 两远端已推,**CI 三平台全绿**。⚠️ 预警的三条耦合**都按预期发生并按预期处置**(② 确实失败了,没有为改名放宽它)。<br>⚠️★ **但真正值得记的是预警自己漏掉的那一处**(`00` §9.0.12):`ci_verify.py` 仍传 `-DSG_WERROR=ON` 而 option 已成 `SA_WERROR` ⇒ CMake 只印一句 unused-cli、配置照样成功,**`-Werror` 自 `d7a5754` 起一直没开过**,而报告里那句「`SA_WERROR=ON`」是硬编码文本、**从来不是观测**。⇒ 本条预警点名了 ② 与 ③,**漏的恰恰是同一个文件里的另一行** —— 「按名字匹配的地方要同批改」这条纪律,连写下它的人也没能穷举完自己点名的文件。已加防线:配置期出现 `Manually-specified variables were not used` **即硬失败并列出变量名**(原则:凡靠某个 `-D` 才成立的结论,先证明那个 `-D` 被项目收下了),防线本身做了反向验证 |
-| **12** | ⬜ ★ **`TcpTransport` 未做 —— 1.5 的收尾项**(新增 2026-09-04) | `src/net` 目前的传输实现是 `LoopbackTransport`(`net/api.h` 卷首已注明**是有意切分不是遗漏**,它同时是单容器形态下 `InProcTransport` 的雏形)。⇒ 成帧 · 会话 · 编解码接入都已在 Loopback 上验过 ⇒ 补 TCP **不动上层**。⚠️ 它是 1.4 端到端 demo 的前置 |
+| **12** | ✅ ~~⬜ ★ **`TcpTransport` 未做 —— 1.5 的收尾项**(新增 2026-09-04)~~ ⇒ **2026-09-05 关闭** | **原文**:`src/net` 目前的传输实现是 `LoopbackTransport`(`net/api.h` 卷首已注明**是有意切分不是遗漏**,它同时是单容器形态下 `InProcTransport` 的雏形)。⇒ 成帧 · 会话 · 编解码接入都已在 Loopback 上验过 ⇒ 补 TCP **不动上层**。⚠️ 它是 1.4 端到端 demo 的前置<br>✅ **落地**(`00` §9.0.14):★ 原生 socket + `poll(2)`,**不走 asio**(DR-TS8,用户裁定)· 13 条真 socket 用例(★ 出站背压与续写 · 优雅关闭 · 端到端握手)· `main.cpp` 接线(绑端口失败拒绝启动 · SIGINT/SIGTERM 停机 · ★ 入口首次有测试 `server_self_test`)。★ **「上层一行没动」如期兑现** —— 印证了当初切分的理由。⚠️ 一条用例修过偶发红(内核自动调大缓冲把 3 MB 全吃下 ⇒ 客户端显式设小 `SO_RCVBUF` + 负载递增),30/30 绿 |
+| **13** | ⬜ ★ **`poll(2)` 是 O(连接数)**(新增 2026-09-05) | DR-TS8 认下的代价。上规模时换 epoll / kqueue / IOCP,`ITransport` 不动、上层不动。⚠️ 何时算「上规模」由 `15` 的容量画像决定:单线路个位数千连接内,poll 一次系统调用传整个数组不是主项(原版是每连接一次 `select`,§5.1)。属阶段 3 |
+| **14** | ⬜ **节拍源是主线程 `sleep_for`,不是 §2 的定时线程**(新增 2026-09-05) | `main.cpp` 的 tick 循环按**绝对期限**睡到下一拍(不把 Tick 耗时累积成漂移)—— 1.5 的最简形态。§2 的「定时线程节拍源」与 I/O 线程池一起属阶段 2;届时 tick 第 1 步「统一时钟源」不变,变的只是谁在唤醒主线程 |
 
 ---
 

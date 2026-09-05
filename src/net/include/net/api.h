@@ -6,20 +6,27 @@
 //   ✅ 要:ITransport · ★ 长度前缀成帧 · IDL 编解码接入 · 握手会话
 //   ⬜ 不要:WsTransport(D4 冻着)· 限流 · 重连窗口
 //
-// ⚠️★ 本批次**没有** TcpTransport —— 这是有意切分,不是漏了。
-//    01 §12 定的网络栈是 **asio + C++20 协程**,那是一笔独立的引入
-//    (第三方依赖 + 三平台 CI + 协程调度)。而本模块真正难写对、
+// ⚠️★ ~~本批次**没有** TcpTransport —— 这是有意切分,不是漏了。~~
+//    ⇒ ✅ **2026-09-04 补齐,1.5 收尾**。原文与它的理由保留在下面,因为
+//      **那个切分本身是对的**,值得留作先例:
+//    ~~01 §12 定的网络栈是 **asio + C++20 协程**,那是一笔独立的引入
+//    (第三方依赖 + 三平台 CI + 协程调度)。~~而本模块真正难写对、
 //    也真正值得先被用例钉死的是**成帧与会话状态机**,它们**不需要 socket**
 //    —— 与 §9.0.5 那条纠正同源:D2 的第一次实证也不需要网络,
 //      当初却被排在了最后。⇒ 先把能脱离 socket 验的部分验完。
-//    ⇒ LoopbackTransport 是本批次的传输实现,它同时也是 01 §5.1
-//      列的 InProcTransport 的雏形(单容器形态下的模块间传输)。
+//    ★ 事后看这个切分买到了什么:TcpTransport 落地时**上层一行没动** ——
+//      成帧、会话、编解码接入已经在 Loopback 上被 18 条用例钉死,
+//      新代码里出的错只可能是 socket 那一层的,归因面小一个数量级。
+//    ⚠️ 选型最终**没走 asio**(用户 2026-09-04 裁定),理由见下方 TcpTransport。
+//    ⇒ LoopbackTransport 保留:它同时是 01 §5.1 列的 InProcTransport 的雏形
+//      (单容器形态下的模块间传输),也是全部非 socket 用例的载体。
 
 #ifndef SA_NET_API_H
 #define SA_NET_API_H
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string_view>
 #include <vector>
 
@@ -216,6 +223,79 @@ class LoopbackTransport final : public ITransport {
   ITransportEvents* events_ = nullptr;
   std::vector<Conn> conns_;
   ConnectionId next_id_ = 1;
+};
+
+// ── TCP 传输(2026-09-04,1.5 收尾项)─────────────────────────────
+//
+// ★★ 选型与 01 §12 那张技术栈表的字面偏离,**由用户于 2026-09-04 裁定**:
+//    §12 写的是「网络 = asio + C++20 协程」,本实现走**原生 socket + poll(2)**。
+//    三条理由,按分量排:
+//    ① ★ `ITransport::Poll()` 的契约(主线程 tick 第 2 步调用、不得阻塞)
+//       **本来就是 reactor**。asio 协程的价值在这个接口下发挥不出来 ——
+//       要么改接口让 io_context 独占一个线程(那推翻的是 01 §2 的线程模型),
+//       要么退化成 `io_context.poll()`,那只是把下面这段 poll 包了一层。
+//    ② 它会是服务端 `src/` 的**第一个运行时第三方依赖**(doctest 只进 tests/)
+//       ⇒ FetchContent + 三平台 CI 是一笔独立的引入成本。
+//    ③ ★ 与 `platform/api.h` §日志 那处偏离**同一条先例**:接口先立死、库延后引,
+//       因为 `ITransport` 已经把替换成本压到局部 —— 换 asio 不动上层一行。
+//    ⚠️ 认下的代价:poll(2) 是 O(连接数)。⇒ 上规模时要换 epoll/kqueue/IOCP,
+//       **但那不是本批次的事**,且 §5.1 批的是原版「每连接一次 select」
+//       (1000 连接 = 1000 次系统调用),poll 一次调用传整个数组已经不同量级。
+//
+// ⚠️★ **本类刻意不出现任何平台类型**(`SOCKET` / `fd` / `WSAPOLLFD` 一个都没有):
+//    `net/api.h` 是 PUBLIC 头,`world` 与 tests 都吃它。一旦这里 include
+//    `<winsock2.h>`,`windows.h` 那套宏(`min`/`max`/`ERROR`/`near`)就顺着
+//    传染给每一个引用者 —— ★ 与客户端 00 §9.0.11 ② 那条依赖方向教训同族:
+//    **谁依赖谁,要在头文件的形状上就不可能搞反**,不能靠"记得别 include"。
+//    ⇒ 一切平台细节关在 tcp_transport.cpp 的 Impl 里。
+//
+// ── 本批次的切面 ──
+//   ✅ 要:监听 · accept · 非阻塞收发 · ★ 出站背压(写不完要排队)· 上限熔断
+//   ⬜ 不要:限流 · 重连窗口 · TLS · IPv6 · WsTransport(D4 冻着)
+
+// 每连接出站队列上限。★ 它是**熔断**,与 kMaxFrameBytes 同一条理由(01 §5.3
+//   「按需增长 + 上限熔断」):对端连上却不读,出站队列就会无限涨 ——
+//   那是一条不需要任何攻击技巧的内存耗尽路径。⇒ 超限即断连,不是等待。
+inline constexpr std::size_t kMaxOutboundBytes = 4u * 1024u * 1024u;
+
+class TcpTransport final : public ITransport {
+ public:
+  TcpTransport();
+  ~TcpTransport() override;
+  TcpTransport(const TcpTransport&) = delete;
+  TcpTransport& operator=(const TcpTransport&) = delete;
+
+  // 绑定并开始监听。⚠️ 失败返回 false —— 调用方**必须拒绝启动**
+  //   (01 §11.1「任一步失败即拒绝启动」),原因见 last_error()。
+  // ★ port = 0 表示由系统分配,之后用 listen_port() 取回实际端口。
+  //   这不是测试专用后门:它是让用例能在 CI 上并行跑而不撞端口的唯一干净办法。
+  bool Listen(const char* bind_addr, std::uint16_t port);
+
+  // 实际监听的端口。未监听时为 0。
+  std::uint16_t listen_port() const noexcept;
+
+  // 最近一次失败的原因。★ net **不链 sa_platform**(见 CMakeLists 里那条注释)
+  //   ⇒ 本模块不打日志,把错误交给宿主去打成 kConnectionClosed 之类的结构化事件。
+  const char* last_error() const noexcept;
+
+  // 停止监听并关闭全部连接。⚠️ 会为每条连接回调 OnDisconnected。
+  void Stop();
+
+  // ── ITransport ──
+  void SetEvents(ITransportEvents* events) override;
+  bool Send(ConnectionId id, const std::uint8_t* data, std::size_t n) override;
+  void Close(ConnectionId id) override;
+  // ⚠️ 非阻塞:poll 超时为 0。01 §2「主线程绝不允许阻塞」。
+  void Poll() override;
+
+  // ── 观察面(测试与运维)──
+  std::size_t connection_count() const noexcept;
+  // 尚未写出去的字节数 —— 背压是否真的发生过,只有这个数说得出来。
+  std::size_t pending_outbound(ConnectionId id) const noexcept;
+
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 // ── 会话(01 §5.2)──────────────────────────────────────────────
