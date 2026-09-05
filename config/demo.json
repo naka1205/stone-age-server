@@ -1,0 +1,16 @@
+{
+  "listen_port": 8300,
+  "bind_addr": "127.0.0.1",
+  "protocol_version": 1,
+  "log_level": "debug",
+
+  "tempo": {
+    "tick_hz": 60,
+    "battle_turn_interval_ms": 1200
+  },
+
+  "demo_battle": {
+    "enabled": true,
+    "slot": 0
+  }
+}

@@ -77,6 +77,37 @@ void RejectUnknownKeys(const json::Value& obj, std::string_view prefix,
   }
 }
 
+// 绑定地址的形状校验。★ 只认点分十进制 IPv4 与空串 ——
+//   判据取自 tcp_transport.cpp 的 Listen():它对非空地址走 inet_pton(AF_INET),
+//   认不出就绑定失败。⇒ 这里认的集合必须与那边一致,否则配置说"合法"而端口绑不上,
+//   报错会晚到第 6 步、且以 errno 文本的面目出现,与"地址写错了"看不出关系。
+// ⚠️ 主机名与 IPv6 都**不**放行:前者要 DNS(1.5 没有解析路径),后者 Listen 侧还不支持。
+bool IsIpv4Literal(const std::string& s) {
+  int octets = 0;
+  std::size_t i = 0;
+  while (i < s.size()) {
+    if (octets == 4) return false;
+    std::size_t digits = 0;
+    int value = 0;
+    while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
+      value = value * 10 + (s[i] - '0');
+      if (++digits > 3) return false;
+      ++i;
+    }
+    if (digits == 0 || value > 255) return false;
+    // ★ 前导零一律拒:inet_pton 也拒(它与 inet_aton 的区别正在于此),
+    //   而人写 "010.0.0.1" 时想的多半是十进制 10。
+    if (digits > 1 && s[i - digits] == '0') return false;
+    ++octets;
+    if (i < s.size()) {
+      if (s[i] != '.') return false;
+      ++i;
+      if (i == s.size()) return false;   // 尾随的点
+    }
+  }
+  return octets == 4;
+}
+
 bool ParseLogLevel(std::string_view s, LogLevel& out) {
   if (s == "trace") { out = LogLevel::kTrace; return true; }
   if (s == "debug") { out = LogLevel::kDebug; return true; }
@@ -116,8 +147,9 @@ ConfigResult ParseConfig(std::string_view json_text) {
   ServerConfig cfg;
 
   RejectUnknownKeys(root, "",
-                    {"listen_port", "protocol_version", "heartbeat_interval_ms",
-                     "rng_seed", "log_level", "tempo", "modules"},
+                    {"listen_port", "bind_addr", "protocol_version",
+                     "heartbeat_interval_ms", "rng_seed", "log_level", "tempo",
+                     "modules", "demo_battle"},
                     r);
 
   // ── listen_port ───────────────────────────────────────────
@@ -125,6 +157,26 @@ ConfigResult ParseConfig(std::string_view json_text) {
   std::uint64_t port = cfg.listen_port;
   if (ReadUInt(root, "", "listen_port", 1024, 65535, port, r)) {
     cfg.listen_port = static_cast<std::uint16_t>(port);
+  }
+
+  // ── bind_addr ─────────────────────────────────────────────
+  //
+  // ⚠️★ **本项此前是一个静默失效的配置面**(2026-09-06 装配 1.4 时发现):
+  //    字段在 ServerConfig 里、main.cpp 三处在用、Listen() 吃它,
+  //    唯独这里从不读它、也没把它列进已知键 ⇒ 配置文件里写 bind_addr
+  //    **会被当成"未知的配置项"而拒绝启动**,而默认值恰好能用
+  //    ⇒ 没写的人不受影响,写了的人拿到一条与拼写错误同样的报错。
+  //    ★ 与 00 §9.0.12 那个 `-DSG_WERROR` 同族:开关看着在,实际没接上。
+  if (const json::Value* ba = root.Find("bind_addr"); ba != nullptr) {
+    if (!ba->is_string()) {
+      AddError(r, "bind_addr", "应为字符串");
+    } else if (!IsIpv4Literal(ba->as_string())) {
+      AddError(r, "bind_addr",
+               "只能是点分十进制 IPv4(如 0.0.0.0 / 127.0.0.1),"
+               "主机名与 IPv6 尚不支持,实际为 \"" + ba->as_string() + "\"");
+    } else {
+      cfg.bind_addr = ba->as_string();
+    }
   }
 
   // ── protocol_version ──────────────────────────────────────
@@ -190,6 +242,32 @@ ConfigResult ParseConfig(std::string_view json_text) {
       std::uint64_t cl = cfg.tempo.char_loop_interval_ms;
       if (ReadUInt(*tp, "tempo", "char_loop_interval_ms", 100, 60000, cl, r)) {
         cfg.tempo.char_loop_interval_ms = static_cast<std::uint32_t>(cl);
+      }
+    }
+  }
+
+  // ── demo_battle(1.4 脚手架,见 api.h)────────────────────────
+  if (const json::Value* db = root.Find("demo_battle"); db != nullptr) {
+    if (!db->is_object()) {
+      AddError(r, "demo_battle", "应为对象");
+    } else {
+      RejectUnknownKeys(*db, "demo_battle", {"enabled", "slot"}, r);
+
+      if (const json::Value* en = db->Find("enabled"); en != nullptr) {
+        if (!en->is_bool()) {
+          AddError(r, "demo_battle.enabled", "应为 true 或 false");
+        } else {
+          cfg.demo_battle.enabled = en->as_bool();
+        }
+      }
+
+      // 上限 9:己方是 0..9(rules::kSideOffset = 10)。
+      // ⚠️ 不写成 19 —— 让玩家落到敌方半场是配置写错,不是一种玩法。
+      //   ★ 这里是 platform,够不着 rules::kSideOffset(L0 不依赖 L3),
+      //     ⇒ 数字写死在这里,并由 world 侧一条静态断言钉住两者一致。
+      std::uint64_t slot = cfg.demo_battle.slot;
+      if (ReadUInt(*db, "demo_battle", "slot", 0, 9, slot, r)) {
+        cfg.demo_battle.slot = static_cast<std::uint8_t>(slot);
       }
     }
   }

@@ -130,7 +130,56 @@ void ApplyEvents(const sa::domain::BattleEvents& events,
   }
 }
 
+// ── 1.4 demo 的战场(脚手架,见 platform/api.h 的 DemoBattleConfig)────
+//
+// ⚠️★ **这些数字不是内容数据,也不假装是。**
+//   00 §0 已认下 ③ 层「规则不可自证」与 ④ 层「表现与手感永远无法验证」,
+//   真正的敌人数值属 L4 内容导入(D 线),不在 1.4 的路径上。
+//   ⇒ 此处只需满足两条**可判定**的性质,它们都由用例钉着:
+//     ① 客户端一条指令不发,战斗也要在有限回合内结束 ——
+//        否则 demo 挂起时分不清是"敌人打不动"还是"事件流断了";
+//     ② 客户端正常出招时,战斗**更快**结束 ⇒ 指令确实被采纳了。
+//        ★ 这一条才是 1.4 真正要证明的东西:上行链路是通的。
+sa::rules::BattleField MakeDemoField() {
+  sa::rules::BattleField f{};
+
+  sa::rules::Combatant& me = f.at(0);
+  me.occupied = true;
+  me.kind = sa::rules::CombatantKind::kPlayer;
+  me.slot = 0;
+  me.level = 20;
+  me.hp = 400;
+  me.max_hp = 400;
+  me.mp = 100;
+  me.max_mp = 100;
+  me.attack = 300;
+  me.defense = 40;
+  me.quick = 200;
+  me.luck = 10;
+
+  sa::rules::Combatant& foe = f.at(sa::rules::kSideOffset);
+  foe.occupied = true;
+  foe.kind = sa::rules::CombatantKind::kEnemy;
+  foe.slot = static_cast<std::uint8_t>(sa::rules::kSideOffset);
+  foe.level = 18;
+  foe.hp = 260;
+  foe.max_hp = 260;
+  foe.attack = 260;
+  foe.defense = 30;
+  foe.quick = 150;
+  foe.luck = 5;
+  return f;
+}
+
 }  // namespace
+
+// ★★ config.cpp 把 demo_battle.slot 的上限写死成 9,因为 L0 够不着 L3
+//    (platform 不依赖 rules,那是分层的硬约束)。⇒ 两处一致性由这里守。
+//    ⚠️ 少了它,某天 kSideOffset 改了、配置校验照旧,表现是玩家被放进敌方半场
+//      而没有任何一处报错 —— 00 §10.4 那类静默错误。
+static_assert(sa::rules::kSideOffset == 10,
+              "demo_battle.slot 的配置上限(config.cpp 里的 9)是按 "
+              "kSideOffset == 10 写死的;kSideOffset 变了就要同步改那里");
 
 struct World::Impl {
   // 一条连接上的全部状态。★ Connection 与 Session 在 1.5 是 1:1,
@@ -371,6 +420,38 @@ bool World::JoinBattle(BattleId battle, sa::net::SessionId session,
   b.members.push_back(session);
   b.slot_of[session] = slot;
   cit->second.session->MarkOnline();
+
+  // ★★ 入场即下发**自己是谁**与**现在是第几回合**,否则客户端无从组指令:
+  //    BattleCommand 要带 battle_id 与 turn,而这两样它此刻都还不知道
+  //    —— 缺这一步,上行链路在 demo 里根本走不到。
+  //
+  // ⚠️ 这不是 demo 专用的东西,所以放在 JoinBattle 而不是 OnSessionReady:
+  //    任何入场路径(阶段 2 的选角、观战加入)都需要它。
+  sa::domain::BattleSelfInfo self;
+  self.battle_id = b.id;
+  self.slot = slot;
+  self.mp = b.field.at(slot).mp;
+  // ⚠️ menu_flags 留 0:菜单构成(观战加入 / 先制 / 宠物菜单开关)属阶段 2 的
+  //    UI 契约,此处**不猜** —— 与批次 0.5 对暴击/反击的处置同一条纪律。
+  self.menu_flags = 0;
+  // ★ 但 cannot_act **不留 0**:DR-BT5 把「能否行动」定为 rules::CheckCanAct
+  //   这一个真源,而它已经在 L3 里 ⇒ 照真源填,不是硬编码一个"可以行动"。
+  self.cannot_act = sa::rules::CheckCanAct(b.field.at(slot));
+  (void)cit->second.session->Push(self, cit->second.outbound);
+
+  sa::domain::BattleTurnBegin begin;
+  begin.battle_id = b.id;
+  begin.turn = b.field.turn;
+  begin.ready_mask = 0;   // 1.5 没有收集期,理由见 Tick 第 4 步
+  (void)cit->second.session->Push(begin, cit->second.outbound);
+
+  // ⚠️ 入场日志放在这里而不是调用方:任何入场路径都该留痕,
+  //   而"谁在哪场的哪个槽"是排查战斗问题时第一个要问的东西。
+  s.logger.Log(sa::platform::LogLevel::kInfo,
+               sa::platform::LogEvent::kBattleJoined,
+               {{"battle_id", b.id},
+                {"session_id", session},
+                {"slot", static_cast<std::uint64_t>(slot)}});
   return true;
 }
 
@@ -462,9 +543,39 @@ void World::OnDisconnected(sa::net::ConnectionId id) {
 
 // ══ ISessionHost ═════════════════════════════════════════════════
 void World::OnSessionReady(sa::net::SessionId id) {
-  impl_->logger.Log(sa::platform::LogLevel::kInfo,
-                    sa::platform::LogEvent::kHandshakeAccepted,
-                    {{"session_id", id}});
+  Impl& s = *impl_;
+  s.logger.Log(sa::platform::LogLevel::kInfo,
+               sa::platform::LogEvent::kHandshakeAccepted,
+               {{"session_id", id}});
+
+  // ── 1.4 demo 的入场装配(默认关,见 platform/api.h 的 DemoBattleConfig)──
+  //
+  // ⚠️★ 这是**脚手架**:真玩法里「握手完进哪里」是选角与登录点的结果(阶段 2,
+  //    要 storage)。此处走捷径是为了让 1.4 有一条能被客户端走通的路径,
+  //    而不是因为这条捷径是对的。⇒ 阶段 2 接上选角时整块删掉。
+  if (!s.config.demo_battle.enabled) return;
+
+  // ★ 每条会话开**自己的**一场,不共用:多会话共用一场就要回答
+  //   "第二个人落在哪个槽""先来的打到一半后来的怎么进",那是组队/观战的玩法口径
+  //   (阶段 2),不该由一段 demo 脚手架顺手定下来。
+  const BattleId battle = StartBattle(MakeDemoField());
+  const std::uint8_t slot = s.config.demo_battle.slot;
+  if (!JoinBattle(battle, id, slot)) {
+    // ⚠️ 进不去要**报出来**。这条路径上 JoinBattle 的每一个 false 都意味着
+    //    上面刚建的战斗成了没人看的孤儿,而客户端会停在"连上了但什么都没发生"
+    //    —— 那正是 00 §10.4 说的静默错误。
+    s.logger.Log(sa::platform::LogLevel::kError,
+                 sa::platform::LogEvent::kBattleJoinFailed,
+                 {{"battle_id", battle},
+                  {"session_id", id},
+                  {"reason", std::string_view("demo_join_failed")}});
+    return;
+  }
+  s.logger.Log(sa::platform::LogLevel::kDebug,
+               sa::platform::LogEvent::kSessionStateChanged,
+               {{"session_id", id},
+                {"state", std::string_view("online")},
+                {"demo", true}});
 }
 
 void World::OnBattleCommand(sa::net::SessionId id,

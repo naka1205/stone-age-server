@@ -53,6 +53,8 @@ const char* EventName(LogEvent e) noexcept {
     case LogEvent::kBattleFinished:       return "battle_finished";
     case LogEvent::kBattleSeed:           return "battle_seed";
     case LogEvent::kBattleEventsTruncated:return "battle_events_truncated";
+    case LogEvent::kBattleJoinFailed:     return "battle_join_failed";
+    case LogEvent::kBattleJoined:         return "battle_joined";
   }
   return "unknown";
 }

@@ -12,6 +12,8 @@
 
 #include "world/api.h"
 
+#include <cstdint>
+#include <map>
 #include <vector>
 
 using namespace sa::world;
@@ -290,6 +292,299 @@ TEST_CASE("停服请求 ⇒ 关闭全部连接并停止") {
   CHECK(f.world.ticks() == at_stop);
 }
 
+// ══ 1.4 装配:一条会话从握手到打完 ═══════════════════════════════
+//
+// ★★ 本节是 **1.4 最小双端 demo 的服务端侧凭据**。
+//    此前 world 的用例只断言「sent(id) 非空」—— 那证明不了 1.4 的验收口径。
+//    00 §9.0.4 / 客户端 01 §12.1 定的口径是**事件流端到端一致**:
+//    服务端 ResolveTurn 产出的 BattleEvents 被客户端**逐条正确消费**。
+//    ⇒ 下面这个 ClientMirror 就是**用客户端的方式读服务端**:
+//      成帧 → 信封 → 按 msg_id 解码 → 组指令回发。
+//      客户端 src/net 要做的事,它这里先做了一遍。
+//
+// ⚠️★ 它证明的**不是**客户端能跑,而是**服务端这一侧的线上契约是自洽的** ——
+//    帧能对齐、信封能解、字段有值、上行指令能被采纳。
+//    客户端仓那份用的是同一份 shared/wire(DR-TS9 乙案)⇒ 这三样它不必再验一遍,
+//    它要验的是**表现层**。两边的分工由此变得清楚。
+
+namespace {
+
+// 一个只用 wire + IDL 的"客户端"。★ 刻意不碰 sa::net 的会话与传输 ——
+//   那两样客户端有自己的实现(01 §12.1),而**成帧与信封是共享的那一份**。
+struct ClientMirror {
+  sa::net::FrameReader reader;
+
+  // 已收到的消息计数,按 msg_id。
+  std::map<std::uint32_t, int> seen;
+  // 按到达顺序记下 msg_id —— 顺序本身是契约的一部分
+  // (客户端得先知道自己是谁,才谈得上组指令)。
+  std::vector<std::uint32_t> order;
+
+  bool has_self = false;
+  sa::domain::BattleSelfInfo self{};
+  std::uint64_t battle_id = 0;
+  std::uint32_t turn = 0;
+  bool has_turn = false;
+
+  // ★ 逐槽累计伤害 —— 1.4 验收要的"逐条正确消费"落到实处:
+  //   不只是"收到了 BattleEvents",而是**事件体里的字段被读出来并用上了**。
+  std::map<std::uint32_t, std::int64_t> damage_taken;
+  int battle_events_msgs = 0;
+  int damage_events = 0;
+
+  // 喂一段服务端出站字节,把里面所有完整帧消费掉。
+  void Feed(const std::vector<std::uint8_t>& bytes) {
+    if (bytes.empty()) return;
+    REQUIRE(reader.Push(bytes.data(), bytes.size()));
+    for (;;) {
+      const std::uint8_t* p = nullptr;
+      std::uint32_t len = 0;
+      const sa::net::FrameStatus st = reader.Next(&p, &len);
+      if (st == sa::net::FrameStatus::kNeedMore) break;
+      REQUIRE(st == sa::net::FrameStatus::kOk);
+
+      sa::net::EnvelopeView env;
+      REQUIRE(sa::net::DecodeEnvelope(p, len, env));
+      // ⚠️ body 必须在 Pop() 之前用掉或拷走(net_framing_test.cpp 卷首的教训)。
+      Dispatch(env);
+      reader.Pop();
+    }
+  }
+
+  void Dispatch(const sa::net::EnvelopeView& env) {
+    ++seen[env.msg_id];
+    order.push_back(env.msg_id);
+    sa::idl::Reader rd(env.body, env.body_len);
+
+    switch (static_cast<sa::idl::MsgId>(env.msg_id)) {
+      case sa::idl::MsgId::BattleSelfInfo: {
+        decode(rd, self);
+        REQUIRE(rd.ok());
+        has_self = true;
+        battle_id = self.battle_id;
+        break;
+      }
+      case sa::idl::MsgId::BattleTurnBegin: {
+        sa::domain::BattleTurnBegin b;
+        decode(rd, b);
+        REQUIRE(rd.ok());
+        battle_id = b.battle_id;
+        turn = b.turn;
+        has_turn = true;
+        break;
+      }
+      case sa::idl::MsgId::BattleEvents: {
+        sa::domain::BattleEvents ev;
+        decode(rd, ev);
+        REQUIRE(rd.ok());
+        ++battle_events_msgs;
+        for (std::size_t i = 0; i < ev.events.size(); ++i) {
+          const sa::domain::BattleEvent& e = ev.events[i];
+          if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) {
+            ++damage_events;
+            damage_taken[e.body.damage.target] += -e.body.damage.hp_delta;
+          }
+        }
+        break;
+      }
+      default:
+        break;   // 握手回执等,计数已记下
+    }
+  }
+
+  int count(sa::idl::MsgId id) const {
+    const auto it = seen.find(static_cast<std::uint32_t>(id));
+    return it == seen.end() ? 0 : it->second;
+  }
+
+  // ⚠️ 用它而不是 damage_taken[slot]:map::operator[] 不是 const,
+  //    且会**插入**一个 0 —— 在断言里悄悄改被观测对象是很坏的习惯。
+  std::int64_t damage_of(std::uint32_t slot) const {
+    const auto it = damage_taken.find(slot);
+    return it == damage_taken.end() ? 0 : it->second;
+  }
+};
+
+sa::platform::ServerConfig DemoConfig() {
+  const sa::platform::ConfigResult r = sa::platform::ParseConfig(R"({
+    "protocol_version": 1,
+    "log_level": "error",
+    "tempo": { "tick_hz": 100, "battle_turn_interval_ms": 1000 },
+    "demo_battle": { "enabled": true, "slot": 0 }
+  })");
+  REQUIRE(r.ok);
+  return r.config;
+}
+
+// 跑一整场 demo。submit_commands = 客户端是否每回合出招。
+// 返回 mirror(收到了什么)与最终的 turns_resolved。
+struct DemoRun {
+  ClientMirror mirror;
+  std::uint32_t turns = 0;
+  bool finished = false;
+};
+
+DemoRun RunDemo(bool submit_commands, std::uint64_t master_seed) {
+  DemoRun out;
+  sa::platform::ServerConfig cfg = DemoConfig();
+  sa::platform::ManualClock clock{0};
+  sa::platform::Logger logger{sa::platform::LogLevel::kError};
+  sa::platform::RandomSource random{master_seed};
+  sa::net::LoopbackTransport transport;
+  World w(cfg, clock, logger, random, transport);
+
+  const sa::net::ConnectionId id = transport.Connect();
+  const std::vector<std::uint8_t> hs = HandshakeBytes(cfg.protocol_version);
+  transport.Deliver(id, hs.data(), hs.size());
+  w.Tick();
+  out.mirror.Feed(transport.sent(id));
+  transport.ClearSent(id);
+
+  // 客户端此刻必须已经知道:我是谁、现在第几回合。
+  REQUIRE(out.mirror.has_self);
+  REQUIRE(out.mirror.has_turn);
+
+  std::uint32_t last_submitted = 0xFFFFFFFFu;
+  for (int i = 0; i < 60; ++i) {
+    if (submit_commands && out.mirror.has_turn &&
+        out.mirror.turn != last_submitted) {
+      sa::domain::BattleCommand cmd{};
+      cmd.battle_id = out.mirror.battle_id;
+      cmd.turn = out.mirror.turn;
+      cmd.command_kind = sa::domain::BattleCommand::CommandKind::ATTACK;
+      cmd.command.attack.target =
+          static_cast<std::uint32_t>(sa::rules::kSideOffset);
+      std::vector<std::uint8_t> wire;
+      REQUIRE(sa::net::EncodeFramed(0, cmd, wire));
+      transport.Deliver(id, wire.data(), wire.size());
+      last_submitted = out.mirror.turn;
+    }
+
+    clock.Advance(1000);
+    w.Tick();
+    out.mirror.Feed(transport.sent(id));
+    transport.ClearSent(id);
+
+    const BattleStats* st = w.stats(out.mirror.battle_id);
+    REQUIRE(st != nullptr);
+    if (st->finished) break;
+  }
+
+  const BattleStats* st = w.stats(out.mirror.battle_id);
+  REQUIRE(st != nullptr);
+  out.turns = st->turns_resolved;
+  out.finished = st->finished;
+  return out;
+}
+
+}  // namespace
+
+// ★ 握手完就能拿到"我是谁" —— 缺这一步客户端组不出 BattleCommand
+//   (它要 battle_id 与 turn,而这两样握手回执里都没有)。
+TEST_CASE("demo 装配:握手即入场,且入场信息先于事件流到达") {
+  const DemoRun run = RunDemo(false, 0x2026'09'06ull);
+
+  CHECK(run.mirror.count(sa::idl::MsgId::HandshakeAccepted) == 1);
+  CHECK(run.mirror.count(sa::idl::MsgId::BattleSelfInfo) == 1);
+  CHECK(run.mirror.has_self);
+  CHECK(run.mirror.self.slot == 0);
+  CHECK(run.mirror.self.battle_id != 0);
+  // ★ DR-BT5:cannot_act 取自 rules::CheckCanAct 这个唯一真源,
+  //   健康的角色应当是"可行动"。
+  CHECK(run.mirror.self.cannot_act ==
+        sa::domain::CannotActReason::CANNOT_ACT_NONE);
+
+  // ★★ 顺序:自我信息必须排在第一条 BattleEvents 之前。
+  //    反过来的话客户端会先收到一堆不知道打给谁看的事件。
+  std::size_t self_at = run.mirror.order.size();
+  std::size_t first_events_at = run.mirror.order.size();
+  for (std::size_t i = 0; i < run.mirror.order.size(); ++i) {
+    const auto id = static_cast<sa::idl::MsgId>(run.mirror.order[i]);
+    if (id == sa::idl::MsgId::BattleSelfInfo && self_at == run.mirror.order.size()) {
+      self_at = i;
+    }
+    if (id == sa::idl::MsgId::BattleEvents &&
+        first_events_at == run.mirror.order.size()) {
+      first_events_at = i;
+    }
+  }
+  CHECK(self_at < first_events_at);
+}
+
+// ★★ 性质 ①(见 world.cpp 的 MakeDemoField):客户端一条指令不发,
+//    战斗也必须在有限回合内结束 —— 否则 demo 挂起时分不清是敌人打不动
+//    还是事件流断了。
+TEST_CASE("demo 战斗会自己打完 —— 客户端不出招也不会卡住") {
+  const DemoRun run = RunDemo(false, 0x1111);
+  CHECK(run.finished);
+  CHECK(run.turns > 0);
+  CHECK(run.mirror.battle_events_msgs > 0);
+  CHECK(run.mirror.damage_events > 0);
+  // 玩家没出招 ⇒ 敌方(slot 10)**一点伤害都不该吃到**。
+  // ⚠️ 这条同时守着 L3 的既定语义:「无指令 ⇒ 本回合不行动」。
+  CHECK(run.mirror.damage_of(
+            static_cast<std::uint32_t>(sa::rules::kSideOffset)) == 0);
+  // 而玩家自己在挨打。
+  CHECK(run.mirror.damage_of(0) > 0);
+}
+
+// ★★★ 本文件里与 1.4 关系最直接的一条:**上行链路真的被采纳了**。
+//    同一份战场、同一主种子,唯一的差别是客户端有没有把 BattleCommand 发上来。
+//    ⇒ 敌方吃到伤害这件事,只可能来自那条上行指令。
+TEST_CASE("端到端:客户端出招 ⇒ 敌方吃到伤害(上行链路的凭据)") {
+  const DemoRun idle = RunDemo(false, 0x2222);
+  const DemoRun active = RunDemo(true, 0x2222);
+
+  const auto foe = static_cast<std::uint32_t>(sa::rules::kSideOffset);
+  CHECK(idle.mirror.damage_of(foe) == 0);
+  CHECK(active.mirror.damage_of(foe) > 0);
+
+  CHECK(active.finished);
+  // 出招方打得更快 —— 不是数值口味,是"指令确实进了结算"的可判定表现。
+  CHECK(active.turns < idle.turns);
+}
+
+// ⚠️ 默认关。理由见 platform/api.h 的 DemoBattleConfig:
+//   打开后握手即入场会把会话语义从 kAuthenticated 变成 kOnline,
+//   那是**可观察的语义变化**,不能是默认行为。
+TEST_CASE("demo 装配默认关 —— 握手完只是已认证,不会自己进战斗") {
+  Fixture f;   // MakeConfig() 里没有 demo_battle 段
+  REQUIRE_FALSE(f.config.demo_battle.enabled);
+
+  const sa::net::ConnectionId id = f.transport.Connect();
+  const std::vector<std::uint8_t> hs = HandshakeBytes(f.config.protocol_version);
+  f.transport.Deliver(id, hs.data(), hs.size());
+  f.world.Tick();
+
+  CHECK(f.world.session_state(id) == sa::net::SessionState::kAuthenticated);
+
+  ClientMirror m;
+  m.Feed(f.transport.sent(id));
+  CHECK(m.count(sa::idl::MsgId::HandshakeAccepted) == 1);
+  CHECK(m.count(sa::idl::MsgId::BattleSelfInfo) == 0);
+  CHECK(m.count(sa::idl::MsgId::BattleTurnBegin) == 0);
+}
+
+// ★ 槽位是配置项,且**真的**按它落位 —— 不是读进来就丢。
+TEST_CASE("demo 槽位按配置落位") {
+  sa::platform::ServerConfig cfg = DemoConfig();
+  cfg.demo_battle.slot = 3;
+  sa::platform::ManualClock clock{0};
+  sa::platform::Logger logger{sa::platform::LogLevel::kError};
+  sa::platform::RandomSource random{0x3333};
+  sa::net::LoopbackTransport transport;
+  World w(cfg, clock, logger, random, transport);
+
+  const sa::net::ConnectionId id = transport.Connect();
+  const std::vector<std::uint8_t> hs = HandshakeBytes(cfg.protocol_version);
+  transport.Deliver(id, hs.data(), hs.size());
+  w.Tick();
+
+  ClientMirror m;
+  m.Feed(transport.sent(id));
+  REQUIRE(m.has_self);
+  CHECK(m.self.slot == 3);
+}
 // ★ 迟到的指令不该被采纳:02 §1.3 的取向是不靠"下一个到达的包就是回复",
 //   这里同理 —— 上一回合的决定在新回合里执行是错的。
 TEST_CASE("指令必须指向当前回合") {

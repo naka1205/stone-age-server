@@ -129,6 +129,14 @@ enum class LogEvent : std::uint16_t {
   //    「规则不可自证」最实际的补偿 —— 而它成立的前提是**种子留得下来**。
   kBattleSeed = 204,
   kBattleEventsTruncated = 205,  // ResolveTurn 返回 false,见 battle.h
+  // ★ 入场失败(2026-09-06,1.4 装配时补)。⚠️ 级别 error 不是 warn:
+  //   入场失败意味着战斗建了却没人在看,而客户端那头表现为
+  //   「连上了但什么都没发生」—— 00 §10.4 那类静默错误必须在日志里有名字。
+  kBattleJoinFailed = 206,
+  // ★ 入场成功:谁进了哪场的哪个槽。⚠️ 单独一条而不是复用 kBattleStarted ——
+  //   「开了一场」与「有人进来了」是两件事,且一场可以进多个人。
+  //   用同一个编号打两次、字段还不同,会让日志消费方无从对齐(编号是对外契约)。
+  kBattleJoined = 207,
 };
 
 // 日志字段。定长语义、不做格式化字符串 —— printf 风格的日志无法被机器消费。
@@ -195,6 +203,24 @@ struct TempoConfig {
   std::uint32_t char_loop_interval_ms = 1000;
 };
 
+// ★★ 1.4 demo 的入场装配(2026-09-06)——**脚手架,不是玩法**。
+//
+// 1.5 的 world 里没有任何进入战斗的路径:`StartBattle` / `JoinBattle` 此前
+// 只被测试调用(00 §9.0.14 ④)。而 1.4 要验的是**事件流端到端一致**,
+// 那需要一条真客户端连上来之后确实能收到事件流。
+//
+// ⚠️★ **默认关**,理由不是保守:
+//   ① 打开后握手即入场 ⇒ 会话状态由 kAuthenticated 直接变成 kOnline,
+//      那是**可观察的语义变化**。默认开会让既有用例断言的会话语义被悄悄改掉;
+//   ② 「握手完该进哪里」在真玩法里是**选角 + 登录点**的结果(阶段 2,要 storage),
+//      此处这条捷径与它冲突 ⇒ 必须是显式打开的临时物,不能变成默认行为。
+//   ⇒ 用 config/demo.json 打开它(仓库内已备),阶段 2 接上选角后整块删掉。
+struct DemoBattleConfig {
+  bool enabled = false;
+  // 玩家落在哪个槽。0..9 是己方(rules::kSideOffset 之前)。
+  std::uint8_t slot = 0;
+};
+
 struct ServerConfig {
   std::uint16_t listen_port = 8300;
   // ★ 绑定地址(2026-09-04,TcpTransport 落地时补)。
@@ -209,6 +235,7 @@ struct ServerConfig {
   std::uint64_t rng_seed = 0;
   LogLevel log_level = LogLevel::kInfo;
   TempoConfig tempo{};
+  DemoBattleConfig demo_battle{};
   // 01 §12:产物是**单一二进制**,--modules=... 决定装载哪些模块。
   std::vector<std::string> modules{"world"};
 };

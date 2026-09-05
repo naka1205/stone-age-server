@@ -31,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # ★★ Windows 上的输出编码不是风格问题,是**退出码正确性**问题 ——
@@ -330,8 +331,33 @@ def negative_check(build, config):
     return verdict
 
 
+def _cross_second_boundary():
+    """睡到下一整秒,让接下来那次写入的 mtime 严格大于此前产物的整秒值。
+
+    ⚠️★★ 2026-09-06 实测暴露的第六种失效形态,与 00 §9.0.12/13/14③ 同族:
+        §9.0.14 ③ 已经把还原从 copy2 改成 write_bytes,让 mtime **是"现在"**。
+        但 **Unix Makefiles 按整秒比较** —— 若还原写入与注入期编出的 .o
+        落在**同一秒**,make 判定产物不比源文件旧 ⇒ **重建被整个跳过**,
+        改坏的 battle.cpp.o 原样留下。
+        ★ 实测:constants.h 与 sa_shared.dir/rules/battle.cpp.o 同为 01:53:43
+          ⇒ `cmake --build` 全程 "Built target",一个文件都没重编。
+
+    ★ 它是**竞态**,不是确定性 bug:同一段代码在 ninja 目录里、或写入恰好跨过
+      秒边界时都会通过 ⇒ 表现为"偶发红",而 00 §10.4 已把偶发红列为最难归因的一类。
+      ⚠️ 上一次修复没能覆盖它,恰恰因为「mtime 是现在」听起来已经够了 ——
+        够不够取决于**构建系统的时间分辨率**,那是它说了算,不是我们。
+
+    ⇒ 代价是每趟多不到 1 秒,买的是"还原一定被看见"。
+    """
+    now = time.time()
+    time.sleep(1.02 - (now - int(now)))
+
+
 def _probe_with_bad_matrix(build, config, target, bad_text):
     """注入改错的矩阵,只重建探针目标,读四态。(不负责还原 —— 见调用方的 finally。)"""
+    # ★ 注入侧同理:若写入与上一次构建的 .o 同秒,注入不会被编进去,
+    #   本项会以「注入没进到编译产物」失败 —— 同一个竞态的另一面。
+    _cross_second_boundary()
     target.write_text(bad_text, encoding="utf-8")
     rc_build, _ = run(["cmake", "--build", str(build), "--config", config,
                        "--target", "sa_contract_smoke"])
@@ -368,11 +394,16 @@ def _restore_and_recheck(build, config, target, backup):
 
     ★ 三步缺一不可,每步对应一种曾经真实发生或必然会发生的失效:
       ① write_bytes 而非 copy2 —— 让 mtime 是"现在",构建系统才看得见文件变了;
+         ⚠️★ **仅此仍不够**:Unix Makefiles 按**整秒**比较,同秒写入等于没写
+         ⇒ 先 _cross_second_boundary()(2026-09-06 实测,见该函数);
       ② 重建整个目录而非 --target sa_contract_smoke —— 注入期间被重编的是 sa_shared,
          它被 contract_smoke **和** rules_battle 两条链共享;
       ③ 复跑那两条并断言通过 —— 「还原了」是动作,「产物干净了」才是结论,
          中间要有一次观测(00 §9.0.13 的原则:观测值还要证明是对的)。
     """
+    # ⚠️★★ 见 _cross_second_boundary():write_bytes 让 mtime 是"现在"仍然不够,
+    #    "现在"若与注入期产物同秒,make 就看不见这次还原。
+    _cross_second_boundary()
     target.write_bytes(backup.read_bytes())
     backup.unlink()
     rc_build, _ = run(["cmake", "--build", str(build), "--config", config,

@@ -98,6 +98,106 @@ TEST_CASE("越界与类型错") {
   }
 }
 
+// ★★ bind_addr:本项此前是一个**静默失效的配置面**(2026-09-06 发现)。
+//    字段在 ServerConfig 里、main.cpp 三处在用、Listen() 吃它,
+//    唯独 ParseConfig 从不读它、也没列进已知键
+//    ⇒ 写了 bind_addr 的配置文件**会被当成拼写错误而拒绝启动**,
+//      而默认值恰好能用 ⇒ 没写的人永远发现不了。
+//    ⇒ 与 00 §9.0.12 那个 `-DSG_WERROR` 同族:开关看着在,实际没接上。
+TEST_CASE("bind_addr 被真的读进去") {
+  const ConfigResult r = ParseConfig(R"({ "bind_addr": "127.0.0.1" })");
+  REQUIRE(r.ok);
+  CHECK(r.config.bind_addr == "127.0.0.1");
+}
+
+TEST_CASE("bind_addr 默认值") {
+  const ConfigResult r = ParseConfig("{}");
+  REQUIRE(r.ok);
+  CHECK(r.config.bind_addr == "0.0.0.0");
+}
+
+// ⚠️★ 认得的地址集合必须与 tcp_transport.cpp 的 Listen() 一致 ——
+//    它对非空地址走 inet_pton(AF_INET)。配置说"合法"而端口绑不上的话,
+//    报错会晚到启动第 6 步、且以 errno 文本的面目出现,
+//    与"地址写错了"看不出关系。
+TEST_CASE("bind_addr 只认点分十进制 IPv4") {
+  SUBCASE("主机名不放行 —— 1.5 没有 DNS 解析路径") {
+    const ConfigResult r = ParseConfig(R"({ "bind_addr": "localhost" })");
+    CHECK_FALSE(r.ok);
+    CHECK(HasError(r, "bind_addr"));
+  }
+  SUBCASE("IPv6 不放行 —— Listen() 侧还不支持") {
+    const ConfigResult r = ParseConfig(R"({ "bind_addr": "::1" })");
+    CHECK_FALSE(r.ok);
+  }
+  SUBCASE("段值越界") {
+    const ConfigResult r = ParseConfig(R"({ "bind_addr": "1.2.3.256" })");
+    CHECK_FALSE(r.ok);
+  }
+  SUBCASE("段数不足") {
+    const ConfigResult r = ParseConfig(R"({ "bind_addr": "10.0.1" })");
+    CHECK_FALSE(r.ok);
+  }
+  SUBCASE("尾随的点") {
+    const ConfigResult r = ParseConfig(R"({ "bind_addr": "10.0.0.1." })");
+    CHECK_FALSE(r.ok);
+  }
+  SUBCASE("空串") {
+    const ConfigResult r = ParseConfig(R"({ "bind_addr": "" })");
+    CHECK_FALSE(r.ok);
+  }
+  // ★ 前导零:inet_pton 也拒(它与 inet_aton 的区别正在于此),
+  //   而人写 "010.0.0.1" 时想的多半是十进制 10。
+  SUBCASE("前导零") {
+    const ConfigResult r = ParseConfig(R"({ "bind_addr": "010.0.0.1" })");
+    CHECK_FALSE(r.ok);
+  }
+  SUBCASE("类型错") {
+    const ConfigResult r = ParseConfig(R"({ "bind_addr": 3232235777 })");
+    CHECK_FALSE(r.ok);
+  }
+}
+
+// ── demo_battle(1.4 脚手架)──────────────────────────────────
+TEST_CASE("demo_battle 默认关 —— 它改变会话语义,不能是默认行为") {
+  const ConfigResult r = ParseConfig("{}");
+  REQUIRE(r.ok);
+  CHECK_FALSE(r.config.demo_battle.enabled);
+  CHECK(r.config.demo_battle.slot == 0);
+}
+
+TEST_CASE("demo_battle 被真的读进去") {
+  const ConfigResult r =
+      ParseConfig(R"({ "demo_battle": { "enabled": true, "slot": 4 } })");
+  REQUIRE(r.ok);
+  CHECK(r.config.demo_battle.enabled);
+  CHECK(r.config.demo_battle.slot == 4);
+}
+
+TEST_CASE("demo_battle 的错法") {
+  SUBCASE("enabled 不是布尔") {
+    const ConfigResult r = ParseConfig(R"({ "demo_battle": { "enabled": 1 } })");
+    CHECK_FALSE(r.ok);
+    CHECK(HasError(r, "demo_battle.enabled"));
+  }
+  // ★ 上限 9:己方是 0..9。让玩家落到敌方半场是配置写错,不是一种玩法。
+  SUBCASE("槽号落到敌方半场") {
+    const ConfigResult r = ParseConfig(R"({ "demo_battle": { "slot": 10 } })");
+    CHECK_FALSE(r.ok);
+    CHECK(HasError(r, "demo_battle.slot"));
+  }
+  SUBCASE("未知子项") {
+    const ConfigResult r =
+        ParseConfig(R"({ "demo_battle": { "enabld": true } })");
+    CHECK_FALSE(r.ok);
+    CHECK(HasError(r, "demo_battle.enabld"));
+  }
+  SUBCASE("不是对象") {
+    const ConfigResult r = ParseConfig(R"({ "demo_battle": true })");
+    CHECK_FALSE(r.ok);
+  }
+}
+
 TEST_CASE("log_level 只认五个名字") {
   CHECK(ParseConfig(R"({ "log_level": "warn" })").ok);
   CHECK_FALSE(ParseConfig(R"({ "log_level": "verbose" })").ok);
