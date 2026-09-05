@@ -24,9 +24,7 @@ inline void encode(sa::idl::Writer& w, const EnvelopeHeader& m) {
 
 inline void decode(sa::idl::Reader& r, EnvelopeHeader& m) {
   m.msg_id = r.u32();
-  if (!r.ok()) return;
   m.corr_id = r.u64();
-  if (!r.ok()) return;
 }
 
 }  // namespace transport

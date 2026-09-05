@@ -143,31 +143,18 @@ inline void encode(sa::idl::Writer& w, const CombatantState& m) {
 
 inline void decode(sa::idl::Reader& r, CombatantState& m) {
   m.slot = r.u32();
-  if (!r.ok()) return;
   sa::idl::read_str(r, m.name);
-  if (!r.ok()) return;
   sa::idl::read_str(r, m.title);
-  if (!r.ok()) return;
   m.image_id = r.u32();
-  if (!r.ok()) return;
   m.level = r.u32();
-  if (!r.ok()) return;
   m.hp = r.i32();
-  if (!r.ok()) return;
   m.max_hp = r.i32();
-  if (!r.ok()) return;
   m.flags = r.u32();
-  if (!r.ok()) return;
   m.ride = static_cast<sa::domain::RideState>(r.u8());
-  if (!r.ok()) return;
   sa::idl::read_str(r, m.pet_name);
-  if (!r.ok()) return;
   m.pet_level = r.u32();
-  if (!r.ok()) return;
   m.pet_hp = r.i32();
-  if (!r.ok()) return;
   m.pet_max_hp = r.i32();
-  if (!r.ok()) return;
 }
 
 struct BattleSnapshot {
@@ -185,12 +172,9 @@ inline void encode(sa::idl::Writer& w, const BattleSnapshot& m) {
 
 inline void decode(sa::idl::Reader& r, BattleSnapshot& m) {
   m.battle_id = r.u64();
-  if (!r.ok()) return;
   m.field_attribute = r.u32();
-  if (!r.ok()) return;
   sa::idl::read_vec(r, m.combatants,
       [](sa::idl::Reader& re, sa::domain::CombatantState& e) { decode(re, e); });
-  if (!r.ok()) return;
 }
 
 struct BattleTurnBegin {
@@ -207,11 +191,8 @@ inline void encode(sa::idl::Writer& w, const BattleTurnBegin& m) {
 
 inline void decode(sa::idl::Reader& r, BattleTurnBegin& m) {
   m.battle_id = r.u64();
-  if (!r.ok()) return;
   m.turn = r.u32();
-  if (!r.ok()) return;
   m.ready_mask = r.u32();
-  if (!r.ok()) return;
 }
 
 struct BattleSelfInfo {
@@ -232,15 +213,10 @@ inline void encode(sa::idl::Writer& w, const BattleSelfInfo& m) {
 
 inline void decode(sa::idl::Reader& r, BattleSelfInfo& m) {
   m.battle_id = r.u64();
-  if (!r.ok()) return;
   m.slot = r.u32();
-  if (!r.ok()) return;
   m.menu_flags = r.u32();
-  if (!r.ok()) return;
   m.mp = r.i32();
-  if (!r.ok()) return;
   m.cannot_act = static_cast<sa::domain::CannotActReason>(r.u8());
-  if (!r.ok()) return;
 }
 
 struct BattleLeave {
@@ -255,9 +231,7 @@ inline void encode(sa::idl::Writer& w, const BattleLeave& m) {
 
 inline void decode(sa::idl::Reader& r, BattleLeave& m) {
   m.battle_id = r.u64();
-  if (!r.ok()) return;
   m.reason = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Hit {
@@ -278,15 +252,10 @@ inline void encode(sa::idl::Writer& w, const Hit& m) {
 
 inline void decode(sa::idl::Reader& r, Hit& m) {
   m.attacker = r.u32();
-  if (!r.ok()) return;
   m.kind = static_cast<sa::domain::AttackKind>(r.u8());
-  if (!r.ok()) return;
   m.skill_id = r.u32();
-  if (!r.ok()) return;
   m.variant = r.u32();
-  if (!r.ok()) return;
   m.target_count = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Damage {
@@ -309,17 +278,11 @@ inline void encode(sa::idl::Writer& w, const Damage& m) {
 
 inline void decode(sa::idl::Reader& r, Damage& m) {
   m.target = r.u32();
-  if (!r.ok()) return;
   m.hp_delta = r.i32();
-  if (!r.ok()) return;
   m.pet_hp_delta = r.i32();
-  if (!r.ok()) return;
   m.mp_delta = r.i32();
-  if (!r.ok()) return;
   m.flags = r.u32();
-  if (!r.ok()) return;
   m.status_applied = static_cast<sa::domain::BattleStatus>(r.u8());
-  if (!r.ok()) return;
 }
 
 struct StatusChange {
@@ -336,11 +299,8 @@ inline void encode(sa::idl::Writer& w, const StatusChange& m) {
 
 inline void decode(sa::idl::Reader& r, StatusChange& m) {
   m.target = r.u32();
-  if (!r.ok()) return;
   m.status = static_cast<sa::domain::BattleStatus>(r.u8());
-  if (!r.ok()) return;
   m.applied = r.b();
-  if (!r.ok()) return;
 }
 
 struct SetHp {
@@ -355,9 +315,7 @@ inline void encode(sa::idl::Writer& w, const SetHp& m) {
 
 inline void decode(sa::idl::Reader& r, SetHp& m) {
   m.target = r.u32();
-  if (!r.ok()) return;
   m.hp = r.i32();
-  if (!r.ok()) return;
 }
 
 struct TextBox {
@@ -373,10 +331,8 @@ inline void encode(sa::idl::Writer& w, const TextBox& m) {
 
 inline void decode(sa::idl::Reader& r, TextBox& m) {
   m.message_id = r.u32();
-  if (!r.ok()) return;
   sa::idl::read_vec(r, m.args,
       [](sa::idl::Reader& re, std::int32_t& e) { e = re.i32(); });
-  if (!r.ok()) return;
 }
 
 struct Escape {
@@ -393,11 +349,8 @@ inline void encode(sa::idl::Writer& w, const Escape& m) {
 
 inline void decode(sa::idl::Reader& r, Escape& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
   m.succeeded = r.b();
-  if (!r.ok()) return;
   m.vanish = r.b();
-  if (!r.ok()) return;
 }
 
 struct Quit {
@@ -410,7 +363,6 @@ inline void encode(sa::idl::Writer& w, const Quit& m) {
 
 inline void decode(sa::idl::Reader& r, Quit& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Enter {
@@ -423,7 +375,6 @@ inline void encode(sa::idl::Writer& w, const Enter& m) {
 
 inline void decode(sa::idl::Reader& r, Enter& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
 }
 
 struct FadeOut {
@@ -436,7 +387,6 @@ inline void encode(sa::idl::Writer& w, const FadeOut& m) {
 
 inline void decode(sa::idl::Reader& r, FadeOut& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
 }
 
 struct SwitchEquip {
@@ -449,7 +399,6 @@ inline void encode(sa::idl::Writer& w, const SwitchEquip& m) {
 
 inline void decode(sa::idl::Reader& r, SwitchEquip& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Reverse {
@@ -462,7 +411,6 @@ inline void encode(sa::idl::Writer& w, const Reverse& m) {
 
 inline void decode(sa::idl::Reader& r, Reverse& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Transform {
@@ -477,9 +425,7 @@ inline void encode(sa::idl::Writer& w, const Transform& m) {
 
 inline void decode(sa::idl::Reader& r, Transform& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
   m.image_id = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Nix {
@@ -492,7 +438,6 @@ inline void encode(sa::idl::Writer& w, const Nix& m) {
 
 inline void decode(sa::idl::Reader& r, Nix& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Synchronous {
@@ -505,7 +450,6 @@ inline void encode(sa::idl::Writer& w, const Synchronous& m) {
 
 inline void decode(sa::idl::Reader& r, Synchronous& m) {
   m.target = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Boomerang {
@@ -518,7 +462,6 @@ inline void encode(sa::idl::Writer& w, const Boomerang& m) {
 
 inline void decode(sa::idl::Reader& r, Boomerang& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Summon {
@@ -533,9 +476,7 @@ inline void encode(sa::idl::Writer& w, const Summon& m) {
 
 inline void decode(sa::idl::Reader& r, Summon& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
   m.image_id = r.u32();
-  if (!r.ok()) return;
 }
 
 struct CaptureAct {
@@ -552,11 +493,8 @@ inline void encode(sa::idl::Writer& w, const CaptureAct& m) {
 
 inline void decode(sa::idl::Reader& r, CaptureAct& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
   m.target = r.u32();
-  if (!r.ok()) return;
   m.flags = r.u32();
-  if (!r.ok()) return;
 }
 
 struct CallCompanions {
@@ -573,11 +511,8 @@ inline void encode(sa::idl::Writer& w, const CallCompanions& m) {
 
 inline void decode(sa::idl::Reader& r, CallCompanions& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
   m.amount = r.i32();
-  if (!r.ok()) return;
   m.flags = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Steal {
@@ -594,11 +529,8 @@ inline void encode(sa::idl::Writer& w, const Steal& m) {
 
 inline void decode(sa::idl::Reader& r, Steal& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
   m.amount = r.i32();
-  if (!r.ok()) return;
   m.flags = r.u32();
-  if (!r.ok()) return;
 }
 
 struct CaptureSelect {
@@ -619,15 +551,10 @@ inline void encode(sa::idl::Writer& w, const CaptureSelect& m) {
 
 inline void decode(sa::idl::Reader& r, CaptureSelect& m) {
   m.slot = r.u32();
-  if (!r.ok()) return;
   m.flags = r.u32();
-  if (!r.ok()) return;
   m.level = r.u32();
-  if (!r.ok()) return;
   m.hp = r.i32();
-  if (!r.ok()) return;
   m.max_hp = r.i32();
-  if (!r.ok()) return;
 }
 
 struct Boundary {
@@ -642,9 +569,7 @@ inline void encode(sa::idl::Writer& w, const Boundary& m) {
 
 inline void decode(sa::idl::Reader& r, Boundary& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
   m.element = r.u32();
-  if (!r.ok()) return;
 }
 
 struct PetBattleModel {
@@ -657,7 +582,6 @@ inline void encode(sa::idl::Writer& w, const PetBattleModel& m) {
 
 inline void decode(sa::idl::Reader& r, PetBattleModel& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
 }
 
 struct FireHunt {
@@ -670,7 +594,6 @@ inline void encode(sa::idl::Writer& w, const FireHunt& m) {
 
 inline void decode(sa::idl::Reader& r, FireHunt& m) {
   m.actor = r.u32();
-  if (!r.ok()) return;
 }
 
 struct BattleEvent {
@@ -808,8 +731,8 @@ inline void encode(sa::idl::Writer& w, const BattleEvent& m) {
 
 inline void decode(sa::idl::Reader& r, BattleEvent& m) {
   {
+    m.body_kind = BattleEvent::BodyKind::NONE;
     const std::uint16_t tag = r.u16();
-    if (!r.ok()) return;
     switch (tag) {
       case 1:
         decode(r, m.body.hit);
@@ -904,13 +827,11 @@ inline void decode(sa::idl::Reader& r, BattleEvent& m) {
         m.body_kind = BattleEvent::BodyKind::FIRE_HUNT;
         break;
       case 0:
-        m.body_kind = BattleEvent::BodyKind::NONE;
         break;
       default:
         r.fail();
-        return;
+        break;
     }
-    if (!r.ok()) return;
   }
 }
 
@@ -929,12 +850,9 @@ inline void encode(sa::idl::Writer& w, const BattleEvents& m) {
 
 inline void decode(sa::idl::Reader& r, BattleEvents& m) {
   m.battle_id = r.u64();
-  if (!r.ok()) return;
   m.turn = r.u32();
-  if (!r.ok()) return;
   sa::idl::read_vec(r, m.events,
       [](sa::idl::Reader& re, sa::domain::BattleEvent& e) { decode(re, e); });
-  if (!r.ok()) return;
 }
 
 struct Attack {
@@ -947,7 +865,6 @@ inline void encode(sa::idl::Writer& w, const Attack& m) {
 
 inline void decode(sa::idl::Reader& r, Attack& m) {
   m.target = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Guard {
@@ -982,7 +899,6 @@ inline void encode(sa::idl::Writer& w, const Capture& m) {
 
 inline void decode(sa::idl::Reader& r, Capture& m) {
   m.target = r.u32();
-  if (!r.ok()) return;
 }
 
 struct PetIn {
@@ -995,7 +911,6 @@ inline void encode(sa::idl::Writer& w, const PetIn& m) {
 
 inline void decode(sa::idl::Reader& r, PetIn& m) {
   m.pet_slot = r.u32();
-  if (!r.ok()) return;
 }
 
 struct PetOut {
@@ -1021,9 +936,7 @@ inline void encode(sa::idl::Writer& w, const UseItem& m) {
 
 inline void decode(sa::idl::Reader& r, UseItem& m) {
   m.item_slot = r.u32();
-  if (!r.ok()) return;
   m.target = r.u32();
-  if (!r.ok()) return;
 }
 
 struct PetSkill {
@@ -1038,9 +951,7 @@ inline void encode(sa::idl::Writer& w, const PetSkill& m) {
 
 inline void decode(sa::idl::Reader& r, PetSkill& m) {
   m.skill_id = r.u32();
-  if (!r.ok()) return;
   m.target = r.u32();
-  if (!r.ok()) return;
 }
 
 struct ProfSkill {
@@ -1055,9 +966,7 @@ inline void encode(sa::idl::Writer& w, const ProfSkill& m) {
 
 inline void decode(sa::idl::Reader& r, ProfSkill& m) {
   m.skill_id = r.u32();
-  if (!r.ok()) return;
   m.target = r.u32();
-  if (!r.ok()) return;
 }
 
 struct SpellCmd {
@@ -1072,9 +981,7 @@ inline void encode(sa::idl::Writer& w, const SpellCmd& m) {
 
 inline void decode(sa::idl::Reader& r, SpellCmd& m) {
   m.spell_id = r.u32();
-  if (!r.ok()) return;
   m.target = r.u32();
-  if (!r.ok()) return;
 }
 
 struct WaitCmd {
@@ -1167,12 +1074,10 @@ inline void encode(sa::idl::Writer& w, const BattleCommand& m) {
 
 inline void decode(sa::idl::Reader& r, BattleCommand& m) {
   m.battle_id = r.u64();
-  if (!r.ok()) return;
   m.turn = r.u32();
-  if (!r.ok()) return;
   {
+    m.command_kind = BattleCommand::CommandKind::NONE;
     const std::uint16_t tag = r.u16();
-    if (!r.ok()) return;
     switch (tag) {
       case 3:
         decode(r, m.command.attack);
@@ -1219,13 +1124,11 @@ inline void decode(sa::idl::Reader& r, BattleCommand& m) {
         m.command_kind = BattleCommand::CommandKind::WAIT;
         break;
       case 0:
-        m.command_kind = BattleCommand::CommandKind::NONE;
         break;
       default:
         r.fail();
-        return;
+        break;
     }
-    if (!r.ok()) return;
   }
 }
 

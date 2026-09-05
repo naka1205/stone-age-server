@@ -32,9 +32,7 @@ inline void encode(sa::idl::Writer& w, const HandshakeRequest& m) {
 
 inline void decode(sa::idl::Reader& r, HandshakeRequest& m) {
   m.protocol_version = r.u32();
-  if (!r.ok()) return;
   sa::idl::read_str(r, m.client_build);
-  if (!r.ok()) return;
 }
 
 struct HandshakeAccepted {
@@ -49,9 +47,7 @@ inline void encode(sa::idl::Writer& w, const HandshakeAccepted& m) {
 
 inline void decode(sa::idl::Reader& r, HandshakeAccepted& m) {
   m.session_id = r.u64();
-  if (!r.ok()) return;
   m.heartbeat_interval_ms = r.u32();
-  if (!r.ok()) return;
 }
 
 struct HandshakeRejected {
@@ -66,9 +62,7 @@ inline void encode(sa::idl::Writer& w, const HandshakeRejected& m) {
 
 inline void decode(sa::idl::Reader& r, HandshakeRejected& m) {
   m.reason = static_cast<sa::transport::RejectReason>(r.u8());
-  if (!r.ok()) return;
   m.required_protocol_version = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Ping {
@@ -81,7 +75,6 @@ inline void encode(sa::idl::Writer& w, const Ping& m) {
 
 inline void decode(sa::idl::Reader& r, Ping& m) {
   m.client_time_ms = r.u64();
-  if (!r.ok()) return;
 }
 
 struct Pong {
@@ -96,9 +89,7 @@ inline void encode(sa::idl::Writer& w, const Pong& m) {
 
 inline void decode(sa::idl::Reader& r, Pong& m) {
   m.client_time_ms = r.u64();
-  if (!r.ok()) return;
   m.server_time_ms = r.u64();
-  if (!r.ok()) return;
 }
 
 }  // namespace transport

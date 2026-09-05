@@ -226,6 +226,87 @@ int main() {
     assert(!rt.ok());
   }
 
+  // ── ★★ 边界:解码失败 ⇒ 全部字段被写成**零值**,不是"保持原样"(2026-09-06)
+  //
+  // 起因是 GCC 15 在 `-O2` 下报的一条 `-Wmaybe-uninitialized`:生成的 decode
+  // 原先每个字段后跟 `if (!r.ok()) return;` ⇒ 尾部字段在失败路径上**不被写**,
+  // 与 sa_idl_runtime.h 卷首承诺的「解码失败是整条消息作废」相矛盾 ——
+  // 那句承诺的兑现依赖 Reader 短路返回 0,而早退恰好绕过了它。详见 Reader 卷首。
+  //
+  // ⚠️★ 手法上有一处是本段的**全部价值**所在:**被测对象必须先填成非零**。
+  //   上面那两段截断测试用的是 `WindowOpen tmp{}` —— 它已经全零,
+  //   ⇒ 即使 decode 一个字段都不写,`assert(!rt.ok())` 也照样通过。
+  //   那两段挡的是「越界读」,挡不住「字段没被写」。
+  //   本段先把字段填成显眼的非零值:任何一个字段漏写,它就保留那个值 ⇒ 当场红。
+  //   ★ 这也是这条修复能不能被守住的关键 —— 早退若被加回去,clang 与 MSVC
+  //     一个字都不会说,而 GCC 只在恰好存在那种调用点时才报。
+  {
+    // ① 纯标量消息 —— 正是 GCC 点名的那个类型
+    domain::BattleTurnBegin b{};
+    b.battle_id = 0x1111'2222'3333'4444ull;
+    b.turn = 0xABCD;
+    b.ready_mask = 0xFFFF'FFFFu;
+
+    idl::Reader rt(buf, 3);              // 3 字节:连第一个 u64 都读不满
+    decode(rt, b);
+    assert(!rt.ok());
+    assert(b.battle_id == 0);            // 首字段:早退之前就被写,一直成立
+    assert(b.turn == 0);                 // ★★ GCC 点名的正是这一个
+    assert(b.ready_mask == 0);           // ★ 早退最深处的字段
+  }
+  {
+    // ② FixedStr —— len 归零不等于 data 可用
+    transport::HandshakeRequest req{};
+    req.protocol_version = 999;
+    req.client_build.assign("留在这里就是漏写的证据");
+
+    idl::Reader rt(buf, 2);              // 读不满 protocol_version(u32)
+    decode(rt, req);
+    assert(!rt.ok());
+    assert(req.protocol_version == 0);
+    assert(req.client_build.len == 0);
+    // ★ 这一条单独立着:c_str() 直接返回 data,data[0] 不是终止符就是越界读 ——
+    //   比读到一个错的数值更坏。read_str 的三条失败路径原先一条都不写它。
+    assert(req.client_build.c_str()[0] == '\0');
+  }
+  {
+    // ③ ★★ FixedVec —— 本段四条里后果最重的一条
+    domain::BattleEvents ev3{};
+    ev3.battle_id = 7;
+    ev3.turn = 7;
+    domain::BattleEvent filler{};
+    filler.body_kind = domain::BattleEvent::BodyKind::DAMAGE;
+    filler.body.damage.hp_delta = -1;
+    assert(ev3.events.push_back(filler));
+    assert(ev3.events.push_back(filler));
+    assert(ev3.events.size() == 2);
+
+    idl::Reader rt(buf, 4);              // battle_id 是 u64,读不满
+    decode(rt, ev3);
+    assert(!rt.ok());
+    assert(ev3.battle_id == 0);
+    assert(ev3.turn == 0);
+    // ★★ count 不归零时 end() = data + 垃圾长度 ⇒ 一次 range-for 就是越界读,
+    //   而不只是读到错的值。read_vec 的失败路径原先不写 count。
+    assert(ev3.events.empty());
+  }
+  {
+    // ④ oneof 未知 tag ⇒ 作废,且 tag 不留旧值
+    //
+    // ⚠️ 诚实标注:同批把 `default:` 的 `return` 换成了 `break`(让 oneof 之后的
+    //   字段仍被写)。**当前 schema 下这一改行为不可区分** —— 4 个含 oneof 的
+    //   消息(BattleEvent / BattleCommand / WindowOpen / WindowReply)里 oneof
+    //   都排在最后,后面没有字段。⇒ 它防的是将来往 oneof 之后加字段的那一天,
+    //   而那时不会有任何东西报错。本条只能验到 fail + tag 归 NONE 这两样。
+    const std::uint8_t bad[8] = {0xFF, 0xFF, 0, 0, 0, 0, 0, 0};   // tag = 0xFFFF
+    domain::BattleEvent e{};
+    e.body_kind = domain::BattleEvent::BodyKind::DAMAGE;          // 预填有效 kind
+    idl::Reader rt(bad, sizeof(bad));
+    decode(rt, e);
+    assert(!rt.ok());                    // 未知 tag 不静默跳过(DR-CP4)
+    assert(e.body_kind == domain::BattleEvent::BodyKind::NONE);
+  }
+
   // ── 边界:写缓冲不足必须被挡住 ──────────────────────────────
   {
     std::uint8_t tiny[2];

@@ -130,6 +130,16 @@ class Writer {
 // ── 读取器 ────────────────────────────────────────────────────
 // 任一次越界读都会置错误位并返回零值;后续读取全部短路。
 // ⇒ 解码失败是「整条消息作废」,不存在「部分成功」的中间态。
+//
+// ★★ 上面这句是**承诺**,而兑现它需要三方配合 —— 2026-09-06 之前只配合了一方:
+//   ① 本类:失败后每次读返回 0 ✅ 一直成立;
+//   ② 生成的 `decode`:必须**无条件写满所有字段** —— ⚠️ 原先每字段后跟
+//      `if (!r.ok()) return;`,尾部字段因此保持**未初始化**而不是零
+//      (由 GCC 15 的 `-Wmaybe-uninitialized` 在 `-O2` 下抓到,见 cpp.py 的长注释);
+//   ③ `read_str` / `read_vec`:失败路径必须把 len / count 置 0 —— 原先一条都不写。
+//   ⇒ ② 与 ③ 已于同批修复。**「作废」现在的含义是"整条消息读出来全是零值"**,
+//     调用方仍必须检 `ok()` 才能区分"真的全是零"与"解码失败" ——
+//     补零消除的是未定义行为,不是错误检查的必要性。
 class Reader {
  public:
   Reader(const std::uint8_t* buf, std::size_t len) : buf_(buf), len_(len) {}
@@ -201,6 +211,13 @@ inline void write_str(Writer& w, const FixedStr<N>& s) {
 
 template <std::size_t N>
 inline void read_str(Reader& r, FixedStr<N>& s) {
+  // ★ 先置空串。⚠️ 与生成代码去掉早退是同一条修复(2026-09-06):本函数有三条
+  //   失败路径(读长度失败 / 超限 / take 越界),原先一条都不写 s ⇒ 整条消息
+  //   "作废"时 s.len 与 s.data 保持未初始化,而 c_str() 会返回一个**没有终止符**
+  //   的指针 —— 比读到垃圾数值更坏,它是一次越界读。
+  //   ⇒ 代价是 3 个字节的写,失败与成功路径都付得起。
+  s.len = 0;
+  s.data[0] = '\0';
   std::uint16_t n = r.u16();
   if (!r.ok()) return;
   if (n > N) {  // ★ 上限校验:超限即整条消息作废,不截断
@@ -223,6 +240,12 @@ inline void write_vec(Writer& w, const FixedVec<T, N>& v, F write_elem) {
 
 template <typename T, std::size_t N, typename F>
 inline void read_vec(Reader& r, FixedVec<T, N>& v, F read_elem) {
+  // ★★ 先置空。⚠️ 这是三处补零里**最要紧**的一处:count 未初始化时
+  //   end() = data + count ⇒ 一次 range-for 就会拿垃圾长度遍历,
+  //   那是越界读而不只是读到错的值。
+  // ★ 置 0 同时让下面那条早退变得安全:失败时 data[0..n) 里写了一半的元素
+  //   **不可达**(count 仍是 0)⇒ 不必为了"写满"去读完剩下的 256 个元素。
+  v.count = 0;
   std::uint16_t n = r.u16();
   if (!r.ok()) return;
   if (n > N) {  // ★ 上限校验

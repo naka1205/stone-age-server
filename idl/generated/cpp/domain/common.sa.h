@@ -41,9 +41,7 @@ inline void encode(sa::idl::Writer& w, const Vec2& m) {
 
 inline void decode(sa::idl::Reader& r, Vec2& m) {
   m.x = r.i32();
-  if (!r.ok()) return;
   m.y = r.i32();
-  if (!r.ok()) return;
 }
 
 struct EntityRef {
@@ -58,9 +56,7 @@ inline void encode(sa::idl::Writer& w, const EntityRef& m) {
 
 inline void decode(sa::idl::Reader& r, EntityRef& m) {
   m.source = static_cast<sa::domain::EntitySource>(r.u32());
-  if (!r.ok()) return;
   m.entity_id = r.u32();
-  if (!r.ok()) return;
 }
 
 }  // namespace domain

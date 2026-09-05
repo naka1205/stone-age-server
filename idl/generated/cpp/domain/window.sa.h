@@ -67,9 +67,7 @@ inline void encode(sa::idl::Writer& w, const MessageBody& m) {
 inline void decode(sa::idl::Reader& r, MessageBody& m) {
   sa::idl::read_vec(r, m.lines,
       [](sa::idl::Reader& re, sa::idl::FixedStr<255>& e) { sa::idl::read_str(re, e); });
-  if (!r.ok()) return;
   m.wide = r.b();
-  if (!r.ok()) return;
 }
 
 struct LineInputBody {
@@ -88,11 +86,8 @@ inline void encode(sa::idl::Writer& w, const LineInputBody& m) {
 inline void decode(sa::idl::Reader& r, LineInputBody& m) {
   sa::idl::read_vec(r, m.lines,
       [](sa::idl::Reader& re, sa::idl::FixedStr<255>& e) { sa::idl::read_str(re, e); });
-  if (!r.ok()) return;
   m.max_len = r.u32();
-  if (!r.ok()) return;
   m.wide = r.b();
-  if (!r.ok()) return;
 }
 
 struct Choice {
@@ -109,11 +104,8 @@ inline void encode(sa::idl::Writer& w, const Choice& m) {
 
 inline void decode(sa::idl::Reader& r, Choice& m) {
   m.choice_id = r.u32();
-  if (!r.ok()) return;
   sa::idl::read_str(r, m.text);
-  if (!r.ok()) return;
   m.enabled = r.b();
-  if (!r.ok()) return;
 }
 
 struct SelectBody {
@@ -131,10 +123,8 @@ inline void encode(sa::idl::Writer& w, const SelectBody& m) {
 inline void decode(sa::idl::Reader& r, SelectBody& m) {
   sa::idl::read_vec(r, m.lines,
       [](sa::idl::Reader& re, sa::idl::FixedStr<255>& e) { sa::idl::read_str(re, e); });
-  if (!r.ok()) return;
   sa::idl::read_vec(r, m.choices,
       [](sa::idl::Reader& re, sa::domain::Choice& e) { decode(re, e); });
-  if (!r.ok()) return;
 }
 
 struct ShopHeader {
@@ -163,23 +153,14 @@ inline void encode(sa::idl::Writer& w, const ShopHeader& m) {
 
 inline void decode(sa::idl::Reader& r, ShopHeader& m) {
   m.can_buy = r.b();
-  if (!r.ok()) return;
   m.reuse_previous = r.b();
-  if (!r.ok()) return;
   sa::idl::read_str(r, m.shop_name);
-  if (!r.ok()) return;
   sa::idl::read_str(r, m.message);
-  if (!r.ok()) return;
   sa::idl::read_str(r, m.shop_message);
-  if (!r.ok()) return;
   sa::idl::read_str(r, m.count_message);
-  if (!r.ok()) return;
   sa::idl::read_str(r, m.level_low_message);
-  if (!r.ok()) return;
   sa::idl::read_str(r, m.confirm_message);
-  if (!r.ok()) return;
   sa::idl::read_str(r, m.item_full_message);
-  if (!r.ok()) return;
 }
 
 struct ShopEntry {
@@ -202,17 +183,11 @@ inline void encode(sa::idl::Writer& w, const ShopEntry& m) {
 
 inline void decode(sa::idl::Reader& r, ShopEntry& m) {
   m.entry_id = r.u32();
-  if (!r.ok()) return;
   m.item_id = r.u32();
-  if (!r.ok()) return;
   m.image_id = r.u32();
-  if (!r.ok()) return;
   m.level = r.u32();
-  if (!r.ok()) return;
   m.price = r.i32();
-  if (!r.ok()) return;
   m.purchasable = r.b();
-  if (!r.ok()) return;
 }
 
 struct ShopBody {
@@ -228,10 +203,8 @@ inline void encode(sa::idl::Writer& w, const ShopBody& m) {
 
 inline void decode(sa::idl::Reader& r, ShopBody& m) {
   decode(r, m.header);
-  if (!r.ok()) return;
   sa::idl::read_vec(r, m.entries,
       [](sa::idl::Reader& re, sa::domain::ShopEntry& e) { decode(re, e); });
-  if (!r.ok()) return;
 }
 
 struct RawListBody {
@@ -246,7 +219,6 @@ inline void encode(sa::idl::Writer& w, const RawListBody& m) {
 inline void decode(sa::idl::Reader& r, RawListBody& m) {
   sa::idl::read_vec(r, m.rows,
       [](sa::idl::Reader& re, sa::idl::FixedStr<255>& e) { sa::idl::read_str(re, e); });
-  if (!r.ok()) return;
 }
 
 struct WindowOpen {
@@ -302,16 +274,12 @@ inline void encode(sa::idl::Writer& w, const WindowOpen& m) {
 
 inline void decode(sa::idl::Reader& r, WindowOpen& m) {
   m.window_id = r.u32();
-  if (!r.ok()) return;
   m.kind = static_cast<sa::domain::WindowKind>(r.u16());
-  if (!r.ok()) return;
   m.buttons = r.u32();
-  if (!r.ok()) return;
   decode(r, m.source);
-  if (!r.ok()) return;
   {
+    m.body_kind = WindowOpen::BodyKind::NONE;
     const std::uint16_t tag = r.u16();
-    if (!r.ok()) return;
     switch (tag) {
       case 5:
         decode(r, m.body.message);
@@ -334,13 +302,11 @@ inline void decode(sa::idl::Reader& r, WindowOpen& m) {
         m.body_kind = WindowOpen::BodyKind::RAW_LIST;
         break;
       case 0:
-        m.body_kind = WindowOpen::BodyKind::NONE;
         break;
       default:
         r.fail();
-        return;
+        break;
     }
-    if (!r.ok()) return;
   }
 }
 
@@ -385,14 +351,11 @@ inline void encode(sa::idl::Writer& w, const WindowReply& m) {
 
 inline void decode(sa::idl::Reader& r, WindowReply& m) {
   m.window_id = r.u32();
-  if (!r.ok()) return;
   decode(r, m.source);
-  if (!r.ok()) return;
   m.button = r.u32();
-  if (!r.ok()) return;
   {
+    m.result_kind = WindowReply::ResultKind::NONE;
     const std::uint16_t tag = r.u16();
-    if (!r.ok()) return;
     switch (tag) {
       case 4:
         m.result.choice_id = r.u32();
@@ -407,13 +370,11 @@ inline void decode(sa::idl::Reader& r, WindowReply& m) {
         m.result_kind = WindowReply::ResultKind::ENTRY_ID;
         break;
       case 0:
-        m.result_kind = WindowReply::ResultKind::NONE;
         break;
       default:
         r.fail();
-        return;
+        break;
     }
-    if (!r.ok()) return;
   }
 }
 

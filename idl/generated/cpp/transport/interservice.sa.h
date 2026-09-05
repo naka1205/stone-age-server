@@ -29,13 +29,9 @@ inline void encode(sa::idl::Writer& w, const RequestHeader& m) {
 
 inline void decode(sa::idl::Reader& r, RequestHeader& m) {
   m.instance_id = r.u32();
-  if (!r.ok()) return;
   m.generation = r.u32();
-  if (!r.ok()) return;
   m.request_id = r.u64();
-  if (!r.ok()) return;
   m.deadline_ms = r.u32();
-  if (!r.ok()) return;
 }
 
 struct ResponseHeader {
@@ -52,11 +48,8 @@ inline void encode(sa::idl::Writer& w, const ResponseHeader& m) {
 
 inline void decode(sa::idl::Reader& r, ResponseHeader& m) {
   m.request_id = r.u64();
-  if (!r.ok()) return;
   m.status = static_cast<sa::transport::Status>(r.u8());
-  if (!r.ok()) return;
   m.error_code = r.u32();
-  if (!r.ok()) return;
 }
 
 struct Ack {
@@ -69,7 +62,6 @@ inline void encode(sa::idl::Writer& w, const Ack& m) {
 
 inline void decode(sa::idl::Reader& r, Ack& m) {
   m.accepted = r.b();
-  if (!r.ok()) return;
 }
 
 }  // namespace transport

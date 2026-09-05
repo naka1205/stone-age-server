@@ -209,19 +209,45 @@ class CppGen:
         L.append("")
 
         # ── decode ──
+        #
+        # ★★ **decode 无条件写满整个 struct,中途一次也不提前返回**(2026-09-06)。
+        #
+        # 原先每个字段后跟一句 `if (!r.ok()) return;`。⚠️ 那与 sa_idl_runtime.h
+        #   卷首那句承诺**正好相反**:「任一次越界读都会置错误位并返回零值;
+        #   后续读取全部短路 ⇒ 解码失败是整条消息作废,不存在部分成功的中间态」。
+        #   ⇒ 早退让"作废"的消息里**尾部字段保持未初始化**,而不是零 ——
+        #     语义承诺是"全零",生成物的形状给的是"一半真值一半垃圾"。
+        #
+        # ★ 它是怎么被抓到的:GCC 15 在 `-O2 -Wmaybe-uninitialized` 下看穿了
+        #   inline decode 的早退路径,报 `b.turn may be used uninitialized`
+        #   (2026-09-06 CI,三平台里**只有 Linux/GCC 红** —— clang 与 MSVC
+        #   都不报,不是它们对,是它们的数据流分析没走到这一步)。
+        #   ⚠️ 只报第二个字段而不报第一个,恰恰印证了根因:第一个字段在
+        #     首次早退**之前**赋值,必然被写;从第二个起才有"不写"的路径。
+        #
+        # ⇒ 去掉早退后:失败时每次读都短路返回 0 ⇒ **全部标量字段无条件被赋值**。
+        #   ★ 这比给 79 个 struct 加默认初始化器(NSDMI)好三处:
+        #     ① 零内存成本 —— NSDMI 会让每次声明零初始化整个
+        #        `FixedVec<BattleEvent, 256>`(≈10 KB);
+        #     ② `is_trivial` 不变 —— NSDMI 会让默认构造非 trivial,削弱 DR-TS1
+        #        边界 ② 的「纯 POD」;
+        #     ③ 修的是**根因**(早退违背了 runtime 的短路设计),不是给每个消费点补一层。
+        #   ⚠️ 失败路径上会多走完剩余字段的短路读,代价是每字段一个分支;
+        #     repeated 更便宜 —— count 短路读回 0 ⇒ 循环零次(read_vec)。
         L.append(f"inline void decode(sa::idl::Reader& r, {name}& m) {{")
         if not items:
             L.append("  (void)r; (void)m;")
         for kind, item in items:
             if kind == "field":
                 L += self.read_field(item, "m", "  ")
-                L.append("  if (!r.ok()) return;")
             else:
                 o = item
                 ename, tagname, uname = self.oneof_names(o)
                 L.append("  {")
+                # ★ tag 先置 NONE,再按读到的值改写 —— 未知 tag 那条路径
+                #   (default)也就不会留下一个未初始化的 tag。
+                L.append(f"    m.{tagname} = {name}::{ename}::NONE;")
                 L.append("    const std::uint16_t tag = r.u16();")
-                L.append("    if (!r.ok()) return;")
                 L.append("    switch (tag) {")
                 for f in sorted(o.fields, key=lambda x: x.number):
                     L.append(f"      case {f.number}:")
@@ -230,15 +256,21 @@ class CppGen:
                              f"{name}::{ename}::{_snake_to_upper(f.name)};")
                     L.append("        break;")
                 L.append("      case 0:")
-                L.append(f"        m.{tagname} = {name}::{ename}::NONE;")
                 L.append("        break;")
                 L.append("      default:")
                 # ★ 未知 tag 不静默跳过 —— 原版 switch 无 default 导致三个子命令被
                 #   静默丢弃(07 §8.4 / DR-CP4)。这里一律判为解码失败。
+                # ⚠️ `r.fail()` 之后**不再 return** —— 意图由 fail() 兑现(调用方
+                #   检 ok() 得 false),而 return 会让 oneof 之后的字段不被写,
+                #   正是本次要修掉的那个形状。
+                #   ★ 诚实标注:**当前 schema 下这一改行为不可区分** —— 4 个含
+                #     oneof 的消息(BattleEvent / BattleCommand / WindowOpen /
+                #     WindowReply)里 oneof 都排在最后。⇒ 它防的是将来往 oneof
+                #     之后加字段的那一天,而那时不会有任何东西报错
+                #     (idl/tests/smoke.cpp ④ 已把这条标注写在用例里)。
                 L.append("        r.fail();")
-                L.append("        return;")
+                L.append("        break;")
                 L.append("    }")
-                L.append("    if (!r.ok()) return;")
                 L.append("  }")
         L.append("}")
         L.append("")
