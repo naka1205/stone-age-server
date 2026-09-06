@@ -98,10 +98,36 @@ inline constexpr GuardTier kGuardTiers[] = {
     {100,  0.50},   //  5%
 };
 
+// ── 暴击(§3.3,批次 A.3)────────────────────────────────────────
+//
+// ★ [8.0] `BATTLE_CriticalCheckPlayer`(`battle_event.c:1283`)+ `BATTLE_AttackSeq`
+//   的判定阈(`:1592`:`RAND(1,10000) < perCri`)。批次 0.5 曾以「文档缺判定阈」
+//   留空(§9.0.8);2026-09-06 回源码核实,**判定阈在源码里齐全**(文档缺、源码不缺)
+//   ⇒ 本批次实现。取数入口与逐位公式见 `shared/rules/battle.cpp` 的 `RollCritical`。
+//
+// ⚠️★ 与回避(§3.2)用**同一个** dex 字段(原版两者都读 `CHAR_WORKFIXDEX`)⇒
+//   映射到 `Combatant::quick`,不新增字段。
+//
+// gCriticalPara = 0.09(默认 divpara);类型跨界时 divpara 暴增到 10.0(分母 111 倍)。
+inline constexpr double kCriticalPara      = 0.09;  // 默认分母(root=1,取平方根)
+inline constexpr double kCriticalParaCross = 10.0;  // 敌→宠 / 非玩→玩:分母暴增、不取根
+inline constexpr double kCriticalDexModPetVsEnemy  = 0.8;  // 宠→敌:Df_Dex × 0.8
+inline constexpr double kCriticalDexModPlayerCross = 0.6;  // 玩→非玩:Df_Dex × 0.6
+inline constexpr double kCriticalEquipFactor = 0.5;  // per += 装备暴击 × 0.5
+inline constexpr int    kCriticalPerMin   = 1;       // clamp 下限(per<0 → 1)
+inline constexpr int    kCriticalPerMax   = 10000;   // clamp 上限
+inline constexpr int    kCriticalRollMax  = 10000;   // 判定:RAND(1,10000) < per
+// 暴击伤害 = DamageCalc + 守方原始防御 × (LVatt / LVdef) × 0.5。[8.0] `:1419`
+inline constexpr double kCriticalDamageDefFactor = 0.5;
+// ★ 守方免疫暴击 ⇒ per = 0。原版硬编码判据是**图号** 101813/101814(雷尔,`:1349`),
+//   ⚠️ DR-BT11 裁定改数据驱动 ⇒ 判据落在 `CombatModifiers.immune_critical` 标志位,
+//     不比对图号(图号是实现方式不是玩法)。此处保留原图号只作**溯源注释**,代码不用它。
+
 // 反击伤害 = damage × 0.75,下限 1。[8.0] §3.5
 //
-// ⚠️★ **反击本身在批次 0.5 未实现**,这两个常量目前无人调用 —— 见 battle.h
-//    「§3.5 只给了 per 的构成,没给判定阈与取数入口」。常量先留着,不代表已覆盖。
+// ⚠️★ **反击本身仍未实现**:它是一个完整的次级攻击序列且依赖 `BATTLE_GetDamageReact`
+//    (光/镜/守/反弹 = L4 状态系统),输入面远大于暴击 ⇒ 排在状态系统之后。
+//    这两个常量目前无人调用,先留着,不代表已覆盖。
 inline constexpr double kCounterDamageRate = 0.75;
 inline constexpr int    kCounterDamageMin  = 1;
 

@@ -296,6 +296,33 @@ bool RollDodge(const Combatant& attacker,
                const RulesConfig& config,
                IRandom& rng) noexcept;
 
+// 暴击判定(§3.3,批次 A.3)。true = 本次命中为暴击。
+//
+// ⚠️★ 批次 0.5 因「文档缺判定阈」有意留空(§9.0.8);2026-09-06 回源码核实,
+//    `BATTLE_CriticalCheckPlayer`(算 per)+ `BATTLE_AttackSeq`(`:1592` 判定)
+//    在源码里判定阈齐全 ⇒ 本批次实现。是文档缺、不是源码缺。
+//
+// ⚠️ 与 `RollDodge` 同一纪律:**只做概率判定,不写世界态**。原版在暴击命中时嵌了
+//    职业技能升级副作用(`:1601` `PROFESSION_SKILL_WEAPON_FOCUS_LVEVEL_UP`)——
+//    那属四步改造第②步要剥离的世界写,由调用方按事件处理,不进此函数。
+//    ⚠️ 暗月狂狼的 `perCri×1.3` + 攻/敏各 +20% 也是世界写(属宠技,B 批次),不在此。
+//
+// ★ 类型跨界(敌→宠 / 非玩→玩)时分母从 0.09 暴增到 10.0 且不取平方根 ⇒ 暴击率极低。
+bool RollCritical(const Combatant& attacker,
+                  const Combatant& defender,
+                  IRandom& rng) noexcept;
+
+// 暴击伤害:`ComputeDamage + 守方原始防御 × (LVatt / LVdef) × 0.5`。[8.0] `:1419`
+//
+// ⚠️★ **持弓时暴击不吃伤害加成**(`:1594` `gWeponType != ITEM_BOW`)—— 那一路只置
+//    暴击标志、伤害仍走普通 `ComputeDamage`。该分支由调用方按 `mods.wielding_bow`
+//    决定走哪个函数,本函数只算"加成后"的值。
+std::int32_t ComputeCriticalDamage(const BattleField& field,
+                                   const Combatant& attacker,
+                                   const Combatant& defender,
+                                   const RulesConfig& config,
+                                   IRandom& rng) noexcept;
+
 }  // namespace sa::rules
 
 #endif  // SA_SHARED_RULES_BATTLE_H

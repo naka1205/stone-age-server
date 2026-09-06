@@ -424,6 +424,102 @@ bool RollDodge(const Combatant& attacker,
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  暴击(§3.3,批次 A.3)
+// ═══════════════════════════════════════════════════════════════════
+//
+// 1:1 移植 `BATTLE_CriticalCheckPlayer`(`battle_event.c:1283`)的 per 构成
+// + `BATTLE_AttackSeq`(`:1592`)的判定阈 `RAND(1,10000) < perCri`。
+//
+// ⚠️★ 批次 0.5 曾以「文档缺判定阈」有意留空(§9.0.8)。2026-09-06 回源码核实:
+//    判定阈在源码里齐全 —— per 在 `CriticalCheckPlayer` 里已 `*= 100` 并 clamp,
+//    `AttackSeq` 直接 `if (RAND(1,10000) < perCri)`。**是文档缺,不是源码缺** ⇒ 实现。
+//
+// ⚠️★ 与回避(§3.2)一样用 `CHAR_WORKFIXDEX` ⇒ 映射到 `Combatant::quick`,不新增字段。
+//
+// ⚠️ 三处副作用**有意不实现**,均属世界写或别的链路:
+//   ① 暴击命中时的职业技能升级(`:1601`)—— 四步改造第②步剥离,调用方按事件处理;
+//   ② 暗月狂狼 `perCri×1.3` + 攻/敏各 +20%(`:1578`)—— 宠技(B 批次)且是世界写;
+//   ③ `gCriper` 全局暂存(`:1591`)—— g* 隐式传参,本实现无文件级变量。
+bool RollCritical(const Combatant& attacker,
+                  const Combatant& defender,
+                  IRandom& rng) noexcept {
+  // ⚠️★ **全程 f32**,与 `RollCapture`(DR-BT16)同一纪律:源码 `:1287` 声明
+  //    `float per, Work, Big, Small, wari, divpara` ⇒ 逐位按 float 移植,
+  //    不用 double —— 否则中间精度更高、边界不一致,会污染黄金用例集基线。
+  //    唯一例外:`sqrt` 原版是 `(float)sqrt((double)Work)`,先升 double 再降回。
+  f32 at_dex = static_cast<f32>(attacker.quick);
+  f32 df_dex = static_cast<f32>(defender.quick);
+  f32 divpara = static_cast<f32>(kCriticalPara);
+  bool root = true;   // root==1 ⇒ 取平方根
+
+  // ── 类型修正:四条互斥分支(`:1305-1321`,与回避同结构但阈值不同)──
+  //   ⚠️ 分支顺序照源码:pet→enemy 用 `IsEnemy(def)`,其余用 `IsPlayer`。
+  if (attacker.kind == CombatantKind::kPet && defender.IsEnemy()) {
+    df_dex *= static_cast<f32>(kCriticalDexModPetVsEnemy);   // 宠→敌:Df_Dex × 0.8
+  } else if (attacker.IsEnemy() && defender.kind == CombatantKind::kPet) {
+    divpara = static_cast<f32>(kCriticalParaCross); root = false;  // 敌→宠:分母暴增、不取根
+  } else if (!attacker.IsPlayer() && defender.IsPlayer()) {
+    divpara = static_cast<f32>(kCriticalParaCross); root = false;  // 非玩→玩:同上
+  } else if (attacker.IsPlayer() && !defender.IsPlayer()) {
+    df_dex *= static_cast<f32>(kCriticalDexModPlayerCross); // 玩→非玩:Df_Dex × 0.6
+  }
+
+  // ★ At_Luck 只在**攻方是玩家**时取(`:1295`),否则 0。
+  const int at_luck = attacker.IsPlayer() ? attacker.luck : 0;
+
+  f32 big, small, wari;
+  if (at_dex >= df_dex) {
+    big = at_dex; small = df_dex; wari = 1.0f;
+  } else {
+    big = df_dex; small = at_dex;
+    wari = (big <= 0) ? 0.0f : (small / big);
+  }
+
+  f32 work = (big - small) / divpara;
+  if (work <= 0) work = 0;
+
+  f32 per = root ? static_cast<f32>(std::sqrt(static_cast<double>(work))) : work;
+  per += static_cast<f32>(attacker.mods.equip_critical * kCriticalEquipFactor);  // + 装备暴击 × 0.5
+  per *= wari;
+  per += static_cast<f32>(at_luck);
+  per *= 100;
+  if (per < 0) per = static_cast<f32>(kCriticalPerMin);   // ★ 原版 `if(per<0) per=1`
+  if (per > static_cast<f32>(kCriticalPerMax)) per = static_cast<f32>(kCriticalPerMax);
+
+  // ★★ 守方免疫暴击 ⇒ per=0。原版按图号硬编码(雷尔 101813/101814,`:1349`),
+  //   ⚠️ DR-BT11 裁定**改数据驱动**:判据是 `mods.immune_critical` 标志,不比对图号。
+  //   1.5 无敌人数值表 ⇒ 该标志恒 false,免疫分支不可达;L4 建模雷尔模板时置 true。
+  if (defender.mods.immune_critical) {
+    per = 0;
+  }
+
+  // ★ 判定用**严格小于**(`:1592`),与回避的 `<=` 不同 —— 逐位照源码。
+  //   ⚠️ `perCri` 原版是 `(int)per`(先截断再比),不是拿 float 直接比 ⇒ 保留截断。
+  return rng.Rand(1, kCriticalRollMax) < static_cast<int>(per);
+}
+
+std::int32_t ComputeCriticalDamage(const BattleField& field,
+                                   const Combatant& attacker,
+                                   const Combatant& defender,
+                                   const RulesConfig& config,
+                                   IRandom& rng) noexcept {
+  // 暴击伤害 = DamageCalc + 守方**原始**防御 × (LVatt / LVdef) × 0.5。(`:1419`)
+  //
+  // ⚠️★ 这里的守方防御是 `CHAR_WORKDEFENCEPOWER` **原始值** —— 不经 0.70 系数、
+  //    不经骑宠合成(那些在 `DamageCalc` 内部,附加项另算)。⇒ 用 `defender.defense`。
+  // ⚠️★ **顺序即语义**:先取完整 `ComputeDamage`(含它自己的全局系数、相克等),
+  //    再叠加防御附加项 —— 原版 `CriDamageCalc` 也是 `DamageCalc(...)` 之后再 `+=`。
+  const std::int32_t base = ComputeDamage(field, attacker, defender, config, rng);
+
+  // ⚠️ LVdef 由 Combatant::level 保证 ≥ 1(默认值 1)⇒ 不会除零;仍显式记明。
+  const f32 add = static_cast<f32>(defender.defense) *
+                  static_cast<f32>(attacker.level) /
+                  static_cast<f32>(defender.level) *
+                  static_cast<f32>(kCriticalDamageDefFactor);
+  return base + static_cast<std::int32_t>(add);
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  回合调度(批次 0.5)
 // ═══════════════════════════════════════════════════════════════════
 //
@@ -935,8 +1031,23 @@ bool ResolveTurn(const BattleField& field,
         continue;
       }
 
-      // ── 伤害(§3.1 七步 + §3.4 相克)────────────────────────
-      std::int32_t damage = ComputeDamage(field, actor, target, config, rng);
+      // ── 暴击(§3.3,批次 A.3)──────────────────────────────
+      //
+      // ⚠️★ **判定必须在算伤害之前、且无论命中与否都消费同一个 RNG 抽取** ——
+      //    原版 `AttackSeq`(`:1590`)先 `RAND(1,10000)` 判暴击,再据结果选伤害源:
+      //      暴击 + 非弓 → CriDamageCalc(带防御附加);暴击 + 弓 / 未暴击 → DamageCalc。
+      //    ★ 持弓不吃暴击伤害加成(`:1594`),但**仍置暴击标志**(客户端要演"会心")。
+      //    ⇒ 顺序即 RNG 序列的一部分,换位置 ⇒ 同种子给出不同战斗。
+      const bool is_crit = RollCritical(actor, target, rng);
+      std::int32_t damage;
+      if (is_crit && !actor.mods.wielding_bow) {
+        damage = ComputeCriticalDamage(field, actor, target, config, rng);
+      } else {
+        damage = ComputeDamage(field, actor, target, config, rng);
+      }
+      if (is_crit) {
+        d.flags |= static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
+      }
 
       // ── 防御减伤:六档随机(§3.5)────────────────────────────
       //
@@ -945,7 +1056,9 @@ bool ResolveTurn(const BattleField& field,
       if (guarding) {
         damage = static_cast<std::int32_t>(damage * RollGuardFactor(rng));
         d.flags |= static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_GUARD);
-      } else {
+      } else if (!is_crit) {
+        // ★ NORMAL 与 CRITICAL 互斥(原版 `BCF_NORMAL` / `BCF_KAISHIN` 是 switch(iRet)
+        //   的两个分支)⇒ 暴击命中**不**再置 NORMAL。守方防御时置 GUARD(项目自有建模)。
         d.flags |= static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_NORMAL);
       }
       if (damage < 0) damage = 0;

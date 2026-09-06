@@ -72,6 +72,20 @@ struct CombatModifiers {
   // 反击附加(原 WORKCOUNTER),直接加进反击率。§3.5
   int counter_bonus = 0;
 
+  // ★ 攻方装备暴击值(原 `ITEM_getInt(At_SoubiIndex, ITEM_CRITICAL)`,
+  //   `battle_event.c:1302`)—— 进暴击率:`per += equip_critical × 0.5`。§3.3
+  //   ⚠️ 玩家/宠物都读它(暴击函数不分玩家/非玩家,§3.3 已注「两分支调同一函数」);
+  //     1.5 无装备系统 ⇒ 调用方按 0 兜底,实现处不写死默认。
+  int equip_critical = 0;
+
+  // ★★ 守方免疫暴击(原版硬编码判据是**图号** 101813/101814 雷尔,`battle_event.c:1349`)。
+  // ⚠️★ **DR-BT11 裁定:保留行为、改数据驱动 —— 免疫标记进敌人数值表,不写图号。**
+  //    ⇒ 这里建模成一个**标志位**而不是比对 `image_number`:图号是实现方式,不是玩法;
+  //      照抄图号会把"雷尔"这个特定单位焊死进 L3,而免疫的真正语义是"这个单位免暴击"。
+  //    1.5 无敌人数值表(L4)⇒ 一律默认 false;L4 建模时由雷尔模板置 true。
+  //    命中则 `RollCritical` 强制 per=0(与原版图号命中同效)。与 `capturable` 同处、同理由。
+  bool immune_critical = false;
+
   // 攻方武器类,用于反击相性表 CounterTbl。
   WeaponClass weapon = WeaponClass::kNone;
 
@@ -131,7 +145,7 @@ struct Combatant {
   std::uint8_t  slot     = 0;      // 0..9 己方 / 10..19 敌方(kSideOffset)
 
   // ★ 等级 —— 参与两处:空手连击的 `lv < 10` 门槛(§3.9)、
-  //   暴击伤害的 `LV攻 / LV守`(§3.3,批次 0.5 未实现)。
+  //   暴击伤害的 `LV攻 / LV守`(§3.3,批次 A.3 已实现)。
   std::int32_t level = 1;
 
   // ── 生命 ──

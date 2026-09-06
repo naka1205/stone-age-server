@@ -1390,3 +1390,188 @@ TEST_CASE("ResolveTurn:等级门 myLv + 5 < targetLv ⇒ 直接失败(battle_eve
   ResolveTurn(d.field, d.cmds, RulesConfig{}, rng2, ev2);
   CHECK(ev2.events[0].body.capture_act.flags == 1u);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  暴击(§3.3,批次 A.3)—— 判定阈在源码里齐全,批次 0.5 曾误判为"文档缺=不能做"
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 来源:`BATTLE_CriticalCheckPlayer`(battle_event.c:1283,算 per)
+//     + `BATTLE_AttackSeq`(:1592,判定 `RAND(1,10000) < perCri`)。
+// ⚠️ 全程按源码的 `float` 逐位移植(与 RollCapture 同,DR-BT16),不用 double。
+
+TEST_CASE("暴击:per 主公式手算基准(battle_event.c:1283-1352)") {
+  // 玩家攻 dex=100、敌守 dex=0、luck=0、equip=0:
+  //   divpara=0.09 root=1;big=100 small=0 wari=1;work=100/0.09=1111.11;
+  //   per=sqrt(1111.11)=33.33;×wari=33.33;+luck0;×100=3333(截断)。
+  // ⇒ RAND=3333 失败(3333<3333 假)、=3332 成功。★ 严格小于。
+  auto atk = MakeCombatant(CombatantKind::kPlayer, 100, 100, 100);
+  auto def = MakeCombatant(CombatantKind::kEnemy, 100, 100, 0);
+  auto try_crit = [&](int rand_value) {
+    ScriptedRandom rng({rand_value});
+    return RollCritical(atk, def, rng);
+  };
+  CHECK(try_crit(3332) == true);
+  CHECK(try_crit(3333) == false);   // 严格小于 ⇒ 恰好等于 per 判失败
+}
+
+TEST_CASE("暴击:玩家幸运直接加进 per(× wari 之后、× 100 之前,:1348)") {
+  // 同上但 luck=5:per=(33.33)+5=38.33,×100=3833。
+  auto atk = MakeCombatant(CombatantKind::kPlayer, 100, 100, 100);
+  atk.luck = 5;
+  auto def = MakeCombatant(CombatantKind::kEnemy, 100, 100, 0);
+  ScriptedRandom lo({3832}), hi({3833});
+  CHECK(RollCritical(atk, def, lo) == true);
+  CHECK(RollCritical(atk, def, hi) == false);
+}
+
+TEST_CASE("暴击:装备暴击值 × 0.5 加进 sqrt 之后(battle_event.c:1341)") {
+  // equip_critical=10 ⇒ +10*0.5=5,在 sqrt 之后、× wari 之前:
+  //   per=(sqrt(1111.11)+5)*1+0=38.33,×100=3833。与 luck5 同值但入口不同。
+  auto atk = MakeCombatant(CombatantKind::kPlayer, 100, 100, 100);
+  atk.mods.equip_critical = 10;
+  auto def = MakeCombatant(CombatantKind::kEnemy, 100, 100, 0);
+  ScriptedRandom lo({3832}), hi({3833});
+  CHECK(RollCritical(atk, def, lo) == true);
+  CHECK(RollCritical(atk, def, hi) == false);
+}
+
+TEST_CASE("暴击:类型跨界(敌→玩/敌→宠)分母暴增且不取根 ⇒ 暴击率骤降(:1312-1318)") {
+  // 敌攻 dex=100、玩守 dex=0:divpara=10 root=0(不取根)⇒ work=100/10=10,
+  //   per=10(无 sqrt),×wari1,+luck0(敌方非玩不加 luck),×100=1000。
+  // ★ 对比同 dex 差的玩→敌(3333):跨界把 3333 压到 1000,量级骤降正是 divpara 111 倍的效果。
+  auto enemy = MakeCombatant(CombatantKind::kEnemy, 100, 100, 100);
+  auto player = MakeCombatant(CombatantKind::kPlayer, 100, 100, 0);
+  ScriptedRandom lo({999}), hi({1000});
+  CHECK(RollCritical(enemy, player, lo) == true);
+  CHECK(RollCritical(enemy, player, hi) == false);
+}
+
+TEST_CASE("暴击:敌方攻击方不吃 At_Luck(:1295 仅玩家取幸运)") {
+  // 敌→玩,给敌方 luck=99:若错误地加了 luck,per 会从 1000 抬到 10900→clamp 10000。
+  //   正确行为:敌方非玩家 ⇒ At_Luck=0 ⇒ per 仍 1000。
+  auto enemy = MakeCombatant(CombatantKind::kEnemy, 100, 100, 100);
+  enemy.luck = 99;
+  auto player = MakeCombatant(CombatantKind::kPlayer, 100, 100, 0);
+  ScriptedRandom hi({1000});
+  CHECK(RollCritical(enemy, player, hi) == false);   // 仍是 1000,不是 10000
+}
+
+TEST_CASE("暴击:免疫标志(DR-BT11 数据驱动,原图号 101813/101814)⇒ per 强制 0(:1349)") {
+  auto atk = MakeCombatant(CombatantKind::kPlayer, 100, 100, 100000);  // 极高 dex ⇒ per 本会满
+  auto def = MakeCombatant(CombatantKind::kEnemy, 100, 100, 0);
+  // 未免疫:极高 dex 差 ⇒ per 触顶,RAND=1 必暴击。
+  {
+    ScriptedRandom rng({1});
+    CHECK(RollCritical(atk, def, rng) == true);
+  }
+  // ★ DR-BT11:免疫按**标志位**判(不比对图号)⇒ per=0,RAND=1 也不暴击(1<0 假)。
+  {
+    auto ler = def;
+    ler.mods.immune_critical = true;
+    ScriptedRandom rng({1});
+    CHECK(RollCritical(atk, ler, rng) == false);
+  }
+}
+
+TEST_CASE("暴击:可回放 —— 同种子 + 同输入 ⇒ 结果与 rng 消费序列逐位相同") {
+  auto atk = MakeCombatant(CombatantKind::kPlayer, 100, 100, 130);
+  atk.luck = 3;
+  auto def = MakeCombatant(CombatantKind::kEnemy, 100, 100, 70);
+  SeededRandom r1(0xC217), r2(0xC217);
+  const bool a = RollCritical(atk, def, r1);
+  const bool b = RollCritical(atk, def, r2);
+  CHECK(a == b);
+  CHECK(r1.state() == r2.state());
+}
+
+TEST_CASE("暴击伤害:= ComputeDamage + 守方原始防御 × LVatt/LVdef × 0.5(:1419)") {
+  // 附加项 = defense(200) × LVatt(20)/LVdef(10) × 0.5 = 200。
+  //   用 SeededRandom 让两次 ComputeDamage 消费同序列 ⇒ base 相等,差值 == 附加项。
+  auto atk = MakeCombatant(CombatantKind::kPlayer, 1000, 0, 0);
+  atk.level = 20;
+  auto def = MakeCombatant(CombatantKind::kPlayer, 0, 200, 0);  // 非敌人 ⇒ 无 _NPCENEMY 上浮扰动
+  def.level = 10;
+  const BattleField field = MakeField();
+
+  SeededRandom rb(777), rc(777);
+  const std::int32_t base = ComputeDamage(field, atk, def, RulesConfig{}, rb);
+  const std::int32_t crit = ComputeCriticalDamage(field, atk, def, RulesConfig{}, rc);
+  // add = 200 * 20/10 * 0.5 = 200(f32 精确)。
+  CHECK(crit - base == 200);
+  CHECK(rb.state() == rc.state());   // 消费同样多的随机数
+}
+
+// ── ResolveTurn 里的暴击派发 ────────────────────────────────────────────────
+
+TEST_CASE("ResolveTurn:暴击命中 ⇒ Damage 带 CRITICAL 标志,且**不**带 NORMAL(互斥)") {
+  // ScriptedRandom 逐个喂本回合的抽取序列(按 ResolveTurn 的消费顺序):
+  //   ① 行动顺序 dex 抖动(RandMod) ② 回避 RAND(喂 9999 ⇒ 恒不闪)
+  //   ③ 暴击 RAND(喂 1 ⇒ 必暴击,因攻方极高 dex 令 per 触顶)④ 伤害若干。
+  // ⚠️ 攻方用空手 + lv<10 ⇒ 攻击次数恒 1 段,去掉多段自由度。
+  Duel d = MakeDuel(1000, 10);
+  d.field.at(0).quick = 100000;   // ⇒ 暴击 per 触顶
+  d.field.at(0).mods.unarmed = true;
+  d.field.at(0).level = 1;
+  d.field.at(10).quick = 0;
+
+  sa::domain::BattleEvents ev{};
+  ScriptedRandom srng({/*dex抖动*/0, /*回避*/9999, /*暴击*/1, /*伤害*/500, 500, 500, 500});
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, srng, ev));
+
+  const sa::domain::Damage* dmg = nullptr;
+  for (const auto& e : ev.events) {
+    if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) { dmg = &e.body.damage; break; }
+  }
+  REQUIRE(dmg != nullptr);
+  const auto crit_flag = static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
+  const auto norm_flag = static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_NORMAL);
+  CHECK((dmg->flags & crit_flag) != 0u);   // 暴击标志置位
+  CHECK((dmg->flags & norm_flag) == 0u);   // ★ 与 NORMAL 互斥
+}
+
+TEST_CASE("ResolveTurn:未暴击命中 ⇒ NORMAL 标志、无 CRITICAL") {
+  Duel d = MakeDuel(1000, 10);
+  d.field.at(0).quick = 0;   // per=0 ⇒ 不可能暴击
+  d.field.at(10).quick = 0;
+  sa::domain::BattleEvents ev{};
+  ScriptedRandom srng({0, 9999, 5000, 500});  // 暴击抽 5000 也无所谓,per=0
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, srng, ev));
+  const sa::domain::Damage* dmg = nullptr;
+  for (const auto& e : ev.events) {
+    if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) { dmg = &e.body.damage; break; }
+  }
+  REQUIRE(dmg != nullptr);
+  const auto crit_flag = static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
+  const auto norm_flag = static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_NORMAL);
+  CHECK((dmg->flags & norm_flag) != 0u);
+  CHECK((dmg->flags & crit_flag) == 0u);
+}
+
+TEST_CASE("ResolveTurn:持弓暴击 ⇒ 置 CRITICAL 标志但伤害不吃加成(battle_event.c:1594)") {
+  // 两场同种子:唯一差别是 wielding_bow。暴击都命中(标志都在),
+  //   但持弓那场伤害应等于**普通** ComputeDamage(不加防御项)⇒ 伤害更低。
+  auto run = [](bool bow) {
+    Duel d = MakeDuel(1000, 200);   // 守方有防御 ⇒ 暴击附加项非零,差异才可观测
+    d.field.at(0).quick = 100000;   // per 触顶
+    d.field.at(0).level = 5;        // ★ lv<10 ⇒ 空手恒 1 段,不消费攻击次数的 RNG
+    d.field.at(0).mods.unarmed = true;
+    d.field.at(0).mods.wielding_bow = bow;
+    d.field.at(10).quick = 0;
+    d.field.at(10).level = 10;      // 附加项 = 200 × 5/10 × 0.5 = 50,持弓省掉
+    sa::domain::BattleEvents ev{};
+    ScriptedRandom srng({0, 9999, 1, 500, 500, 500, 500});
+    ResolveTurn(d.field, d.cmds, RulesConfig{}, srng, ev);
+    for (const auto& e : ev.events)
+      if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) return e.body.damage;
+    return sa::domain::Damage{};
+  };
+  const auto no_bow = run(false);
+  const auto bow    = run(true);
+  const auto crit_flag = static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
+  // ★ 两者都标 CRITICAL(客户端都要演"会心")。
+  CHECK((no_bow.flags & crit_flag) != 0u);
+  CHECK((bow.flags & crit_flag) != 0u);
+  // ★ 持弓不吃加成 ⇒ 伤害更小(附加项 = 200 × 20/10 × 0.5 = 200 被省掉)。
+  //   hp_delta 是负数,持弓伤害更小 ⇒ 其绝对值更小 ⇒ hp_delta 更大(更接近 0)。
+  CHECK(bow.hp_delta > no_bow.hp_delta);
+}
