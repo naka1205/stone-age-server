@@ -9,8 +9,8 @@
 
 #include "sa_idl_runtime.h"
 
-namespace sa {
-namespace transport {
+namespace SA {
+namespace Transport {
 
 enum class RejectReason : std::uint8_t {
   REJECT_UNSPECIFIED = 0,
@@ -22,17 +22,17 @@ enum class RejectReason : std::uint8_t {
 
 struct HandshakeRequest {
   std::uint32_t protocol_version;
-  sa::idl::FixedStr<63> client_build;
+  SA::IDL::FixedStr<63> client_build;
 };
 
-inline void encode(sa::idl::Writer& w, const HandshakeRequest& m) {
+inline void encode(SA::IDL::Writer& w, const HandshakeRequest& m) {
   w.u32(m.protocol_version);
-  sa::idl::write_str(w, m.client_build);
+  SA::IDL::write_str(w, m.client_build);
 }
 
-inline void decode(sa::idl::Reader& r, HandshakeRequest& m) {
+inline void decode(SA::IDL::Reader& r, HandshakeRequest& m) {
   m.protocol_version = r.u32();
-  sa::idl::read_str(r, m.client_build);
+  SA::IDL::read_str(r, m.client_build);
 }
 
 struct HandshakeAccepted {
@@ -40,28 +40,28 @@ struct HandshakeAccepted {
   std::uint32_t heartbeat_interval_ms;
 };
 
-inline void encode(sa::idl::Writer& w, const HandshakeAccepted& m) {
+inline void encode(SA::IDL::Writer& w, const HandshakeAccepted& m) {
   w.u64(m.session_id);
   w.u32(m.heartbeat_interval_ms);
 }
 
-inline void decode(sa::idl::Reader& r, HandshakeAccepted& m) {
+inline void decode(SA::IDL::Reader& r, HandshakeAccepted& m) {
   m.session_id = r.u64();
   m.heartbeat_interval_ms = r.u32();
 }
 
 struct HandshakeRejected {
-  sa::transport::RejectReason reason;
+  SA::Transport::RejectReason reason;
   std::uint32_t required_protocol_version;
 };
 
-inline void encode(sa::idl::Writer& w, const HandshakeRejected& m) {
+inline void encode(SA::IDL::Writer& w, const HandshakeRejected& m) {
   w.u8(static_cast<std::uint8_t>(m.reason));
   w.u32(m.required_protocol_version);
 }
 
-inline void decode(sa::idl::Reader& r, HandshakeRejected& m) {
-  m.reason = static_cast<sa::transport::RejectReason>(r.u8());
+inline void decode(SA::IDL::Reader& r, HandshakeRejected& m) {
+  m.reason = static_cast<SA::Transport::RejectReason>(r.u8());
   m.required_protocol_version = r.u32();
 }
 
@@ -69,11 +69,11 @@ struct Ping {
   std::uint64_t client_time_ms;
 };
 
-inline void encode(sa::idl::Writer& w, const Ping& m) {
+inline void encode(SA::IDL::Writer& w, const Ping& m) {
   w.u64(m.client_time_ms);
 }
 
-inline void decode(sa::idl::Reader& r, Ping& m) {
+inline void decode(SA::IDL::Reader& r, Ping& m) {
   m.client_time_ms = r.u64();
 }
 
@@ -82,17 +82,17 @@ struct Pong {
   std::uint64_t server_time_ms;
 };
 
-inline void encode(sa::idl::Writer& w, const Pong& m) {
+inline void encode(SA::IDL::Writer& w, const Pong& m) {
   w.u64(m.client_time_ms);
   w.u64(m.server_time_ms);
 }
 
-inline void decode(sa::idl::Reader& r, Pong& m) {
+inline void decode(SA::IDL::Reader& r, Pong& m) {
   m.client_time_ms = r.u64();
   m.server_time_ms = r.u64();
 }
 
-}  // namespace transport
-}  // namespace sa
+}  // namespace Transport
+}  // namespace SA
 
 #endif  // SA_IDL_TRANSPORT_HANDSHAKE_SA_H

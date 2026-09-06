@@ -57,7 +57,7 @@
 #  include <unistd.h>
 #endif
 
-namespace sa::net {
+namespace SA::Net {
 namespace {
 
 // ── 平台差异 1/4:句柄类型与无效值 ────────────────────────────────
@@ -531,4 +531,4 @@ std::size_t TcpTransport::pending_outbound(ConnectionId id) const noexcept {
   return c == nullptr ? 0 : c->outbound.size() - c->out_sent;
 }
 
-}  // namespace sa::net
+}  // namespace SA::Net

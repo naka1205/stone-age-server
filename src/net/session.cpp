@@ -5,7 +5,7 @@
 
 #include "net/api.h"
 
-namespace sa::net {
+namespace SA::Net {
 
 const char* SessionStateName(SessionState s) noexcept {
   switch (s) {
@@ -50,24 +50,24 @@ bool Session::HandleFrame(const std::uint8_t* frame, std::uint32_t len,
   }
   ++frames_handled_;
 
-  const auto id = static_cast<sa::idl::MsgId>(env.msg_id);
+  const auto id = static_cast<SA::IDL::MsgId>(env.msg_id);
 
   // ★★ 握手之前只接受握手。
   //   02 §2.1 已裁定「协议版本不匹配时在握手阶段直接拒绝」——
   //   那要求握手**确实发生在最前面**,否则版本检查可以被绕过去:
   //   先发一条业务消息,服务端按当前版本解析,握手再也不会被检查。
   if (state_ == SessionState::kAnonymous &&
-      id != sa::idl::MsgId::HandshakeRequest) {
+      id != SA::IDL::MsgId::HandshakeRequest) {
     last_reject_msg_id_ = env.msg_id;
     return false;
   }
 
   switch (id) {
-    case sa::idl::MsgId::HandshakeRequest:
+    case SA::IDL::MsgId::HandshakeRequest:
       return HandleHandshake(env, out);
-    case sa::idl::MsgId::Ping:
+    case SA::IDL::MsgId::Ping:
       return HandlePing(env, out);
-    case sa::idl::MsgId::BattleCommand:
+    case SA::IDL::MsgId::BattleCommand:
       return HandleBattleCommand(env);
     default:
       // ⚠️ 未知或方向错的消息 ⇒ 协议违规,关闭连接。
@@ -86,15 +86,15 @@ bool Session::HandleHandshake(const EnvelopeView& env,
     return false;
   }
 
-  sa::idl::Reader r(env.body, env.body_len);
-  sa::transport::HandshakeRequest req;
+  SA::IDL::Reader r(env.body, env.body_len);
+  SA::Transport::HandshakeRequest req;
   decode(r, req);
   if (!r.ok()) return false;
 
   if (req.protocol_version != protocol_version_) {
     // ★ 不做「主版本兼容、次版本忽略」的分支(02 §2.1)。不等即拒。
-    sa::transport::HandshakeRejected rej;
-    rej.reason = sa::transport::RejectReason::REJECT_VERSION_MISMATCH;
+    SA::Transport::HandshakeRejected rej;
+    rej.reason = SA::Transport::RejectReason::REJECT_VERSION_MISMATCH;
     rej.required_protocol_version = protocol_version_;
     // ⚠️ 拒绝也要发出去再关 —— 否则客户端只看到断连,无从提示"请更新"。
     //   corr_id 原样回带,让客户端能把它对上自己那条请求(02 §1.3)。
@@ -104,7 +104,7 @@ bool Session::HandleHandshake(const EnvelopeView& env,
     return false;
   }
 
-  sa::transport::HandshakeAccepted acc;
+  SA::Transport::HandshakeAccepted acc;
   acc.session_id = id_;
   // ★ 心跳间隔由服务端下发,客户端不硬编码(handshake.proto 的原话)。
   acc.heartbeat_interval_ms = heartbeat_interval_ms_;
@@ -117,12 +117,12 @@ bool Session::HandleHandshake(const EnvelopeView& env,
 
 bool Session::HandlePing(const EnvelopeView& env,
                          std::vector<std::uint8_t>& out) {
-  sa::idl::Reader r(env.body, env.body_len);
-  sa::transport::Ping ping;
+  SA::IDL::Reader r(env.body, env.body_len);
+  SA::Transport::Ping ping;
   decode(r, ping);
   if (!r.ok()) return false;
 
-  sa::transport::Pong pong;
+  SA::Transport::Pong pong;
   pong.client_time_ms = ping.client_time_ms;  // 原样回带,客户端据此算 RTT
   // ⚠️ server_time_ms 留 0:本模块**没有时钟** —— 时钟是 platform 的东西,
   //    而 net 依赖 platform 只为了一个时间戳,会把 L1 的依赖面撑大。
@@ -141,17 +141,17 @@ bool Session::HandleBattleCommand(const EnvelopeView& env) {
     return false;
   }
 
-  sa::idl::Reader r(env.body, env.body_len);
-  sa::domain::BattleCommand cmd;
+  SA::IDL::Reader r(env.body, env.body_len);
+  SA::Domain::BattleCommand cmd;
   decode(r, cmd);
   if (!r.ok()) return false;
 
   // ★ 指令的**玩法**合法性(能不能行动、学没学过这个技能)不在这里判 ——
   //   shared/rules/battle.h 明写 L3 的输入是"已通过合法性校验"的指令,
-  //   而 DR-BT5 把「能否行动」统一到 rules::CheckCanAct 这一个真源。
+  //   而 DR-BT5 把「能否行动」统一到 Rules::CheckCanAct 这一个真源。
   //   net 只负责"这条消息在这个状态下允不允许出现"。
   if (host_ != nullptr) host_->OnBattleCommand(id_, cmd);
   return true;
 }
 
-}  // namespace sa::net
+}  // namespace SA::Net

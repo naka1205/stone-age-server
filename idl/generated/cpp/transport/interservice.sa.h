@@ -10,8 +10,8 @@
 #include "sa_idl_runtime.h"
 #include "transport/errors.sa.h"
 
-namespace sa {
-namespace transport {
+namespace SA {
+namespace Transport {
 
 struct RequestHeader {
   std::uint32_t instance_id;
@@ -20,14 +20,14 @@ struct RequestHeader {
   std::uint32_t deadline_ms;
 };
 
-inline void encode(sa::idl::Writer& w, const RequestHeader& m) {
+inline void encode(SA::IDL::Writer& w, const RequestHeader& m) {
   w.u32(m.instance_id);
   w.u32(m.generation);
   w.u64(m.request_id);
   w.u32(m.deadline_ms);
 }
 
-inline void decode(sa::idl::Reader& r, RequestHeader& m) {
+inline void decode(SA::IDL::Reader& r, RequestHeader& m) {
   m.instance_id = r.u32();
   m.generation = r.u32();
   m.request_id = r.u64();
@@ -36,19 +36,19 @@ inline void decode(sa::idl::Reader& r, RequestHeader& m) {
 
 struct ResponseHeader {
   std::uint64_t request_id;
-  sa::transport::Status status;
+  SA::Transport::Status status;
   std::uint32_t error_code;
 };
 
-inline void encode(sa::idl::Writer& w, const ResponseHeader& m) {
+inline void encode(SA::IDL::Writer& w, const ResponseHeader& m) {
   w.u64(m.request_id);
   w.u8(static_cast<std::uint8_t>(m.status));
   w.u32(m.error_code);
 }
 
-inline void decode(sa::idl::Reader& r, ResponseHeader& m) {
+inline void decode(SA::IDL::Reader& r, ResponseHeader& m) {
   m.request_id = r.u64();
-  m.status = static_cast<sa::transport::Status>(r.u8());
+  m.status = static_cast<SA::Transport::Status>(r.u8());
   m.error_code = r.u32();
 }
 
@@ -56,15 +56,15 @@ struct Ack {
   bool accepted;
 };
 
-inline void encode(sa::idl::Writer& w, const Ack& m) {
+inline void encode(SA::IDL::Writer& w, const Ack& m) {
   w.b(m.accepted);
 }
 
-inline void decode(sa::idl::Reader& r, Ack& m) {
+inline void decode(SA::IDL::Reader& r, Ack& m) {
   m.accepted = r.b();
 }
 
-}  // namespace transport
-}  // namespace sa
+}  // namespace Transport
+}  // namespace SA
 
 #endif  // SA_IDL_TRANSPORT_INTERSERVICE_SA_H

@@ -8,8 +8,8 @@
 
 #include <cstdint>
 
-namespace sa {
-namespace idl {
+namespace SA {
+namespace IDL {
 
 enum class MsgId : std::uint32_t {
   HandshakeRequest = 0x0001,
@@ -27,7 +27,7 @@ enum class MsgId : std::uint32_t {
   WindowReply = 0x0602,
 };
 
-// 编译期把消息类型映射到编号：msg_id_of<sa::domain::Foo>()
+// 编译期把消息类型映射到编号：msg_id_of<SA::Domain::Foo>()
 template <typename T>
 struct MsgTraits;
 
@@ -36,95 +36,95 @@ constexpr std::uint32_t msg_id_of() {
   return static_cast<std::uint32_t>(MsgTraits<T>::kId);
 }
 
-}  // namespace idl
-}  // namespace sa
+}  // namespace IDL
+}  // namespace SA
 
 #include "transport/handshake.sa.h"
 #include "domain/battle_events.sa.h"
 #include "domain/window.sa.h"
 
-namespace sa {
-namespace idl {
+namespace SA {
+namespace IDL {
 
 template <>
-struct MsgTraits<sa::transport::HandshakeRequest> {
+struct MsgTraits<SA::Transport::HandshakeRequest> {
   static constexpr MsgId kId = MsgId::HandshakeRequest;
   static constexpr const char* kName = "sa.transport.HandshakeRequest";
 };
 
 template <>
-struct MsgTraits<sa::transport::HandshakeAccepted> {
+struct MsgTraits<SA::Transport::HandshakeAccepted> {
   static constexpr MsgId kId = MsgId::HandshakeAccepted;
   static constexpr const char* kName = "sa.transport.HandshakeAccepted";
 };
 
 template <>
-struct MsgTraits<sa::transport::HandshakeRejected> {
+struct MsgTraits<SA::Transport::HandshakeRejected> {
   static constexpr MsgId kId = MsgId::HandshakeRejected;
   static constexpr const char* kName = "sa.transport.HandshakeRejected";
 };
 
 template <>
-struct MsgTraits<sa::transport::Ping> {
+struct MsgTraits<SA::Transport::Ping> {
   static constexpr MsgId kId = MsgId::Ping;
   static constexpr const char* kName = "sa.transport.Ping";
 };
 
 template <>
-struct MsgTraits<sa::transport::Pong> {
+struct MsgTraits<SA::Transport::Pong> {
   static constexpr MsgId kId = MsgId::Pong;
   static constexpr const char* kName = "sa.transport.Pong";
 };
 
 template <>
-struct MsgTraits<sa::domain::BattleSnapshot> {
+struct MsgTraits<SA::Domain::BattleSnapshot> {
   static constexpr MsgId kId = MsgId::BattleSnapshot;
   static constexpr const char* kName = "sa.domain.BattleSnapshot";
 };
 
 template <>
-struct MsgTraits<sa::domain::BattleTurnBegin> {
+struct MsgTraits<SA::Domain::BattleTurnBegin> {
   static constexpr MsgId kId = MsgId::BattleTurnBegin;
   static constexpr const char* kName = "sa.domain.BattleTurnBegin";
 };
 
 template <>
-struct MsgTraits<sa::domain::BattleSelfInfo> {
+struct MsgTraits<SA::Domain::BattleSelfInfo> {
   static constexpr MsgId kId = MsgId::BattleSelfInfo;
   static constexpr const char* kName = "sa.domain.BattleSelfInfo";
 };
 
 template <>
-struct MsgTraits<sa::domain::BattleLeave> {
+struct MsgTraits<SA::Domain::BattleLeave> {
   static constexpr MsgId kId = MsgId::BattleLeave;
   static constexpr const char* kName = "sa.domain.BattleLeave";
 };
 
 template <>
-struct MsgTraits<sa::domain::BattleEvents> {
+struct MsgTraits<SA::Domain::BattleEvents> {
   static constexpr MsgId kId = MsgId::BattleEvents;
   static constexpr const char* kName = "sa.domain.BattleEvents";
 };
 
 template <>
-struct MsgTraits<sa::domain::BattleCommand> {
+struct MsgTraits<SA::Domain::BattleCommand> {
   static constexpr MsgId kId = MsgId::BattleCommand;
   static constexpr const char* kName = "sa.domain.BattleCommand";
 };
 
 template <>
-struct MsgTraits<sa::domain::WindowOpen> {
+struct MsgTraits<SA::Domain::WindowOpen> {
   static constexpr MsgId kId = MsgId::WindowOpen;
   static constexpr const char* kName = "sa.domain.WindowOpen";
 };
 
 template <>
-struct MsgTraits<sa::domain::WindowReply> {
+struct MsgTraits<SA::Domain::WindowReply> {
   static constexpr MsgId kId = MsgId::WindowReply;
   static constexpr const char* kName = "sa.domain.WindowReply";
 };
 
-}  // namespace idl
-}  // namespace sa
+}  // namespace IDL
+}  // namespace SA
 
 #endif  // SA_IDL_IDS_H

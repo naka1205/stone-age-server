@@ -9,8 +9,8 @@
 
 #include "sa_idl_runtime.h"
 
-namespace sa {
-namespace domain {
+namespace SA {
+namespace Domain {
 
 enum class BattleStatus : std::uint8_t {
   BATTLE_ST_NONE = 0,
@@ -71,7 +71,7 @@ enum class CannotActReason : std::uint8_t {
   CANNOT_ACT_CHARGING = 8,
 };
 
-}  // namespace domain
-}  // namespace sa
+}  // namespace Domain
+}  // namespace SA
 
 #endif  // SA_IDL_DOMAIN_BATTLE_STATUS_SA_H

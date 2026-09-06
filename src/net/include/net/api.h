@@ -36,7 +36,7 @@
 #include "ids.h"
 #include "wire/framing.h"
 
-namespace sa::net {
+namespace SA::Net {
 
 // ── 帧层与信封层:★★ 已于 2026-09-06 移出本模块(DR-TS9 乙案)──────────
 //
@@ -49,8 +49,8 @@ namespace sa::net {
 //   黄金用例集「复用不复制」· DR-BT5 反对双份实现同一条:
 //   **凡双端同一语义的只留一份,让漂移在编译期不可能发生。**
 //
-// ⚠️ 本模块**保留 `sa::net::` 下的类型别名**(见下),不要求调用方改写 ——
-//    `world` / `tests` 的 `sa::net::FrameReader` 一行不用动。
+// ⚠️ 本模块**保留 `SA::Net::` 下的类型别名**(见下),不要求调用方改写 ——
+//    `world` / `tests` 的 `SA::Net::FrameReader` 一行不用动。
 //    ★ 这不是偷懒:重构的验收凭据正是「18 条既有用例断言一个不改、全部仍绿」,
 //      若同时改调用方,就分不清红是搬错了还是改错了。
 //
@@ -58,14 +58,14 @@ namespace sa::net {
 //   ⇒ `shared/wire` 处理**字节与结构**,`src/net` 处理**连接**。
 //     这条切分正是前者能双端共享的原因。
 
-using sa::wire::kMaxFrameBytes;
-using sa::wire::kFrameHeaderBytes;
-using sa::wire::FrameStatus;
-using sa::wire::FrameReader;
-using sa::wire::WriteFrame;
-using sa::wire::EnvelopeView;
-using sa::wire::DecodeEnvelope;
-using sa::wire::EncodeFramed;
+using SA::Wire::kMaxFrameBytes;
+using SA::Wire::kFrameHeaderBytes;
+using SA::Wire::FrameStatus;
+using SA::Wire::FrameReader;
+using SA::Wire::WriteFrame;
+using SA::Wire::EnvelopeView;
+using SA::Wire::DecodeEnvelope;
+using SA::Wire::EncodeFramed;
 
 // ── 传输层 ────────────────────────────────────────────────────
 //
@@ -255,7 +255,7 @@ class ISessionHost {
   virtual void OnSessionReady(SessionId id) = 0;
   // 客户端上行的战斗指令(0x0210)。
   virtual void OnBattleCommand(SessionId id,
-                               const sa::domain::BattleCommand& cmd) = 0;
+                               const SA::Domain::BattleCommand& cmd) = 0;
   virtual void OnSessionClosed(SessionId id) = 0;
 
  protected:
@@ -310,6 +310,6 @@ class Session {
   std::uint32_t last_reject_msg_id_ = 0;
 };
 
-}  // namespace sa::net
+}  // namespace SA::Net
 
 #endif  // SA_NET_API_H

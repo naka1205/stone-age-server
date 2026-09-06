@@ -22,7 +22,7 @@
 #include <string_view>
 #include <vector>
 
-namespace sa::platform::json {
+namespace SA::Platform::json {
 
 class Value;
 
@@ -78,6 +78,6 @@ struct ParseOutcome {
 
 ParseOutcome Parse(std::string_view text);
 
-}  // namespace sa::platform::json
+}  // namespace SA::Platform::json
 
 #endif  // SA_PLATFORM_INTERNAL_JSON_H

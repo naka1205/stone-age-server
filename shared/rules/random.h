@@ -19,7 +19,7 @@
 
 #include <cstdint>
 
-namespace sa::rules {
+namespace SA::Rules {
 
 // 注入式随机源。★ 两个方法对应原版仅有的两个入口。
 class IRandom {
@@ -78,6 +78,6 @@ class SeededRandom final : public IRandom {
   std::uint64_t state_;
 };
 
-}  // namespace sa::rules
+}  // namespace SA::Rules
 
 #endif  // SA_SHARED_RULES_RANDOM_H

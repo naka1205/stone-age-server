@@ -38,7 +38,7 @@
 #include "transport/envelope.sa.h"
 #include "ids.h"
 
-namespace sa::wire {
+namespace SA::Wire {
 
 // ── 帧层:[u32 length][payload] ────────────────────────────────
 //
@@ -116,7 +116,7 @@ bool DecodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
 
 // 把一条 IDL 消息编成「帧 + 信封 + body」并追加到 out。
 //
-// ★ 模板而不是虚接口:msg_id 由 sa::idl::msg_id_of<M>() **编译期**取,
+// ★ 模板而不是虚接口:msg_id 由 SA::IDL::msg_id_of<M>() **编译期**取,
 //   调用点写不出"消息类型与编号对不上"这种错。
 //
 // ★★ 就地编码进 out 的尾部,**不用栈缓冲**:单帧上限是 64 KB,
@@ -124,8 +124,8 @@ bool DecodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
 //    ⇒ 先把 out 撑到最坏情况,编完再缩回实际长度。out 通常是每连接复用的
 //      出站缓冲 ⇒ 容量只涨一次,之后零分配(15 §9.1 的取向)。
 //
-// ⚠️ encode 用**非限定调用**:生成物的 encode 分别在 sa::domain 与
-//    sa::transport 两个命名空间里,靠 ADL 各自找到自己那个。
+// ⚠️ encode 用**非限定调用**:生成物的 encode 分别在 SA::Domain 与
+//    SA::Transport 两个命名空间里,靠 ADL 各自找到自己那个。
 //    写成限定调用就要为两组各写一份重载,那正是"同一语义两份实现"。
 template <typename M>
 bool EncodeFramed(std::uint64_t corr_id, const M& msg,
@@ -133,10 +133,10 @@ bool EncodeFramed(std::uint64_t corr_id, const M& msg,
   const std::size_t start = out.size();
   out.resize(start + kFrameHeaderBytes + kMaxFrameBytes);
 
-  sa::idl::Writer w(out.data() + start + kFrameHeaderBytes, kMaxFrameBytes);
+  SA::IDL::Writer w(out.data() + start + kFrameHeaderBytes, kMaxFrameBytes);
 
-  sa::transport::EnvelopeHeader head;
-  head.msg_id = sa::idl::msg_id_of<M>();
+  SA::Transport::EnvelopeHeader head;
+  head.msg_id = SA::IDL::msg_id_of<M>();
   head.corr_id = corr_id;
   encode(w, head);
   encode(w, msg);
@@ -156,6 +156,6 @@ bool EncodeFramed(std::uint64_t corr_id, const M& msg,
   return true;
 }
 
-}  // namespace sa::wire
+}  // namespace SA::Wire
 
 #endif  // SA_WIRE_FRAMING_H

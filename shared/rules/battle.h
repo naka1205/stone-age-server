@@ -32,7 +32,7 @@
 #include "rules/config.h"
 #include "rules/random.h"
 
-namespace sa::rules {
+namespace SA::Rules {
 
 // 本回合各槽的指令。
 //
@@ -40,7 +40,7 @@ namespace sa::rules {
 //    L3 不做鉴权、不判「这个技能你学过没」—— 那需要读角色的技能表,
 //    会把 L3 的输入面撑大到整个角色模型。
 struct TurnCommands {
-  sa::domain::BattleCommand commands[kSlotCount]{};
+  SA::Domain::BattleCommand commands[kSlotCount]{};
   bool present[kSlotCount]{};   // 该槽本回合是否有指令(敌方由 AI 填,视为齐备)
 };
 
@@ -60,12 +60,12 @@ struct TurnCommands {
 //    正确做法不在"上行拒不拒绝"里选,而是置灰 + 告知原因。
 //
 // 返回 CANNOT_ACT_NONE 表示可行动。
-sa::domain::CannotActReason CheckCanAct(const Combatant& c) noexcept;
+SA::Domain::CannotActReason CheckCanAct(const Combatant& c) noexcept;
 
 // ── 回合结算 ──────────────────────────────────────────────────
 //
 // `out` 由调用方提供并被完全覆写。
-// ★ 用出参而不是返回值:`domain::BattleEvents` 是 7 KB 的 POD,
+// ★ 用出参而不是返回值:`Domain::BattleEvents` 是 7 KB 的 POD,
 //   返回值会带来一次拷贝,与 15 §9.1「运行期零分配」的取向相悖。
 //   调用方通常持有一个每场战斗复用的实例。
 //
@@ -106,7 +106,7 @@ bool ResolveTurn(const BattleField& field,
                  const TurnCommands& commands,
                  const RulesConfig& config,
                  IRandom& rng,
-                 sa::domain::BattleEvents& out) noexcept;
+                 SA::Domain::BattleEvents& out) noexcept;
 
 // ── 调度子步骤(供上层与测试直接调用)──────────────────────────
 
@@ -118,7 +118,7 @@ bool ResolveTurn(const BattleField& field,
 // ⚠️ 批次 0.5 只实现**默认档**(`dex −= RAND(0, 0.1·quick)`)。其余 8 档绑在
 //    尚未接入的指令上,接入时在本函数内按 `kind` 分档,不要散到调用方。
 std::int32_t ComputeActionDex(const Combatant& c,
-                              const sa::domain::BattleCommand& command,
+                              const SA::Domain::BattleCommand& command,
                               IRandom& rng) noexcept;
 
 // 计算本回合行动顺序,把槽号按先后写进 `order`,返回参与行动的单位数。
@@ -350,6 +350,6 @@ KnockbackKind RollKnockback(std::int32_t damage,
                             bool immune_knockback,
                             std::int32_t* out_accumulator) noexcept;
 
-}  // namespace sa::rules
+}  // namespace SA::Rules
 
 #endif  // SA_SHARED_RULES_BATTLE_H

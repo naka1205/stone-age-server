@@ -17,7 +17,7 @@
 #include <sstream>
 #include <string>
 
-namespace sa::platform {
+namespace SA::Platform {
 namespace {
 
 void AddError(ConfigResult& r, std::string path, std::string message) {
@@ -261,9 +261,9 @@ ConfigResult ParseConfig(std::string_view json_text) {
         }
       }
 
-      // 上限 9:己方是 0..9(rules::kSideOffset = 10)。
+      // 上限 9:己方是 0..9(Rules::kSideOffset = 10)。
       // ⚠️ 不写成 19 —— 让玩家落到敌方半场是配置写错,不是一种玩法。
-      //   ★ 这里是 platform,够不着 rules::kSideOffset(L0 不依赖 L3),
+      //   ★ 这里是 platform,够不着 Rules::kSideOffset(L0 不依赖 L3),
       //     ⇒ 数字写死在这里,并由 world 侧一条静态断言钉住两者一致。
       std::uint64_t slot = cfg.demo_battle.slot;
       if (ReadUInt(*db, "demo_battle", "slot", 0, 9, slot, r)) {
@@ -334,4 +334,4 @@ ConfigResult LoadConfigFile(const std::string& path) {
   return ParseConfig(buf.str());
 }
 
-}  // namespace sa::platform
+}  // namespace SA::Platform

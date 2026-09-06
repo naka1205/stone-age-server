@@ -9,7 +9,7 @@
 #include <cstdlib>
 #include <utility>
 
-namespace sa::platform::json {
+namespace SA::Platform::json {
 namespace {
 
 // 真实需求是 2 层。给到 32 是留余量,不是留给"以后可能很深"。
@@ -344,4 +344,4 @@ ParseOutcome Parse(std::string_view text) {
   return p.Run();
 }
 
-}  // namespace sa::platform::json
+}  // namespace SA::Platform::json

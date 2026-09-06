@@ -9,8 +9,8 @@
 
 #include "sa_idl_runtime.h"
 
-namespace sa {
-namespace domain {
+namespace SA {
+namespace Domain {
 
 enum class Direction : std::uint8_t {
   DIR_NORTH = 0,
@@ -34,32 +34,32 @@ struct Vec2 {
   std::int32_t y;
 };
 
-inline void encode(sa::idl::Writer& w, const Vec2& m) {
+inline void encode(SA::IDL::Writer& w, const Vec2& m) {
   w.i32(m.x);
   w.i32(m.y);
 }
 
-inline void decode(sa::idl::Reader& r, Vec2& m) {
+inline void decode(SA::IDL::Reader& r, Vec2& m) {
   m.x = r.i32();
   m.y = r.i32();
 }
 
 struct EntityRef {
-  sa::domain::EntitySource source;
+  SA::Domain::EntitySource source;
   std::uint32_t entity_id;
 };
 
-inline void encode(sa::idl::Writer& w, const EntityRef& m) {
+inline void encode(SA::IDL::Writer& w, const EntityRef& m) {
   w.u32(static_cast<std::uint32_t>(m.source));
   w.u32(m.entity_id);
 }
 
-inline void decode(sa::idl::Reader& r, EntityRef& m) {
-  m.source = static_cast<sa::domain::EntitySource>(r.u32());
+inline void decode(SA::IDL::Reader& r, EntityRef& m) {
+  m.source = static_cast<SA::Domain::EntitySource>(r.u32());
   m.entity_id = r.u32();
 }
 
-}  // namespace domain
-}  // namespace sa
+}  // namespace Domain
+}  // namespace SA
 
 #endif  // SA_IDL_DOMAIN_COMMON_SA_H

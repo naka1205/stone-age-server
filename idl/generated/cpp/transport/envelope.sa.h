@@ -9,25 +9,25 @@
 
 #include "sa_idl_runtime.h"
 
-namespace sa {
-namespace transport {
+namespace SA {
+namespace Transport {
 
 struct EnvelopeHeader {
   std::uint32_t msg_id;
   std::uint64_t corr_id;
 };
 
-inline void encode(sa::idl::Writer& w, const EnvelopeHeader& m) {
+inline void encode(SA::IDL::Writer& w, const EnvelopeHeader& m) {
   w.u32(m.msg_id);
   w.u64(m.corr_id);
 }
 
-inline void decode(sa::idl::Reader& r, EnvelopeHeader& m) {
+inline void decode(SA::IDL::Reader& r, EnvelopeHeader& m) {
   m.msg_id = r.u32();
   m.corr_id = r.u64();
 }
 
-}  // namespace transport
-}  // namespace sa
+}  // namespace Transport
+}  // namespace SA
 
 #endif  // SA_IDL_TRANSPORT_ENVELOPE_SA_H

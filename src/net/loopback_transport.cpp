@@ -11,7 +11,7 @@
 
 #include "net/api.h"
 
-namespace sa::net {
+namespace SA::Net {
 namespace {
 const std::vector<std::uint8_t> kEmpty;
 }
@@ -88,4 +88,4 @@ bool LoopbackTransport::closed(ConnectionId id) const {
   return c == nullptr || c->closed;
 }
 
-}  // namespace sa::net
+}  // namespace SA::Net

@@ -41,7 +41,7 @@
 #  include <unistd.h>
 #endif
 
-using namespace sa::net;
+using namespace SA::Net;
 
 namespace {
 
@@ -230,7 +230,7 @@ std::vector<std::uint8_t> Framed(std::uint64_t corr_id, const M& msg) {
 }
 
 std::vector<std::uint8_t> HandshakeFrame(std::uint32_t version) {
-  sa::transport::HandshakeRequest req{};
+  SA::Transport::HandshakeRequest req{};
   req.protocol_version = version;
   req.client_build.assign("tcp-test");
   return Framed(1, req);
@@ -540,7 +540,7 @@ class SessionBridge final : public ITransportEvents, public ISessionHost {
   void OnDisconnected(ConnectionId) override { session_.reset(); }
 
   void OnSessionReady(SessionId id) override { ready.push_back(id); }
-  void OnBattleCommand(SessionId, const sa::domain::BattleCommand&) override {}
+  void OnBattleCommand(SessionId, const SA::Domain::BattleCommand&) override {}
   void OnSessionClosed(SessionId) override {}
 
   ConnectionId conn() const { return conn_; }
@@ -602,11 +602,11 @@ TEST_CASE("★★ 端到端:真 socket 上握手成功并收到 HandshakeAccepte
   EnvelopeView env{};
   REQUIRE(DecodeEnvelope(payload.data(), len, env));
   CHECK(env.msg_id ==
-        static_cast<std::uint32_t>(sa::idl::MsgId::HandshakeAccepted));
+        static_cast<std::uint32_t>(SA::IDL::MsgId::HandshakeAccepted));
   CHECK(env.corr_id == 1u);   // corr_id 原样回带(02 §1.3)
 
-  sa::idl::Reader rd(env.body, env.body_len);
-  sa::transport::HandshakeAccepted acc{};
+  SA::IDL::Reader rd(env.body, env.body_len);
+  SA::Transport::HandshakeAccepted acc{};
   decode(rd, acc);
   REQUIRE(rd.ok());
   CHECK(acc.heartbeat_interval_ms == kHeartbeat);
@@ -638,6 +638,6 @@ TEST_CASE("★ 端到端:版本不符 ⇒ 拒绝理由先发出去,再断连") {
       (static_cast<std::uint32_t>(got[3]) << 24);
   REQUIRE(DecodeEnvelope(got.data() + kFrameHeaderBytes, len, env));
   CHECK(env.msg_id ==
-        static_cast<std::uint32_t>(sa::idl::MsgId::HandshakeRejected));
+        static_cast<std::uint32_t>(SA::IDL::MsgId::HandshakeRejected));
   CHECK(bridge.ready.empty());
 }

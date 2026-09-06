@@ -7,9 +7,9 @@
 // ⚠️★ 明确认下的三条边界,免得"跑通了"被读成"做完了":
 //   ① **不落盘、无 Redis、单实例**(1.5 不要 storage / lock);
 //   ② **不验证 00 §3.1 的服务边界** —— 1.5 是单模块,那留到阶段 3;
-//   ③ **不做 L2 领域模型** —— 世界里没有"角色",只有战斗里的 rules::Combatant。
-//      ⇒ 因此本批次**不下发 BattleSnapshot**:那需要把 rules::Combatant 映射成
-//        domain::CombatantState,而那是 1.2 L2 实体族的活。
+//   ③ **不做 L2 领域模型** —— 世界里没有"角色",只有战斗里的 Rules::Combatant。
+//      ⇒ 因此本批次**不下发 BattleSnapshot**:那需要把 Rules::Combatant 映射成
+//        Domain::CombatantState,而那是 1.2 L2 实体族的活。
 //        1.4 demo 的验收口径是**事件流端到端一致**(客户端 01 §12.1),
 //        BattleEvents 就是它要的东西。
 
@@ -27,7 +27,7 @@
 #include "rules/config.h"
 #include "rules/random.h"
 
-namespace sa::world {
+namespace SA::World {
 
 using BattleId = std::uint64_t;
 
@@ -53,14 +53,14 @@ struct BattleStats {
   bool finished = false;
 };
 
-class World final : public sa::net::ITransportEvents,
-                    public sa::net::ISessionHost {
+class World final : public SA::Net::ITransportEvents,
+                    public SA::Net::ISessionHost {
  public:
-  World(const sa::platform::ServerConfig& config,
-        sa::platform::IClock& clock,
-        sa::platform::Logger& logger,
-        sa::platform::RandomSource& random,
-        sa::net::ITransport& transport);
+  World(const SA::Platform::ServerConfig& config,
+        SA::Platform::IClock& clock,
+        SA::Platform::Logger& logger,
+        SA::Platform::RandomSource& random,
+        SA::Net::ITransport& transport);
   ~World() override;
 
   World(const World&) = delete;
@@ -69,12 +69,12 @@ class World final : public sa::net::ITransportEvents,
   // 推进一个 tick。⚠️ 01 §2:主线程绝不允许阻塞 ⇒ 本函数不等待任何 I/O。
   void Tick();
 
-  // 开一场战斗。★ 种子由 platform::RandomSource 派发**并落日志** ——
+  // 开一场战斗。★ 种子由 Platform::RandomSource 派发**并落日志** ——
   //   01 §10「战斗事件流 + 注入式随机源 = 可回放」,而可回放的前提是种子留得下来。
-  BattleId StartBattle(const sa::rules::BattleField& field);
+  BattleId StartBattle(const SA::Rules::BattleField& field);
 
   // 把一条会话接进某场战斗的某个槽。1.5 没有选角,槽位由调用方指定。
-  bool JoinBattle(BattleId battle, sa::net::SessionId session,
+  bool JoinBattle(BattleId battle, SA::Net::SessionId session,
                   std::uint8_t slot);
 
   // ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
@@ -82,28 +82,28 @@ class World final : public sa::net::ITransportEvents,
   bool stopped() const noexcept;
 
   // ── ITransportEvents ──
-  void OnConnected(sa::net::ConnectionId id) override;
-  void OnBytes(sa::net::ConnectionId id, const std::uint8_t* data,
+  void OnConnected(SA::Net::ConnectionId id) override;
+  void OnBytes(SA::Net::ConnectionId id, const std::uint8_t* data,
                std::size_t n) override;
-  void OnDisconnected(sa::net::ConnectionId id) override;
+  void OnDisconnected(SA::Net::ConnectionId id) override;
 
   // ── ISessionHost ──
-  void OnSessionReady(sa::net::SessionId id) override;
-  void OnBattleCommand(sa::net::SessionId id,
-                       const sa::domain::BattleCommand& cmd) override;
-  void OnSessionClosed(sa::net::SessionId id) override;
+  void OnSessionReady(SA::Net::SessionId id) override;
+  void OnBattleCommand(SA::Net::SessionId id,
+                       const SA::Domain::BattleCommand& cmd) override;
+  void OnSessionClosed(SA::Net::SessionId id) override;
 
   // ── 观察面(测试与运维)──
   std::uint64_t ticks() const noexcept;
   std::size_t session_count() const noexcept;
   const BattleStats* stats(BattleId id) const;
-  sa::net::SessionState session_state(sa::net::SessionId id) const;
+  SA::Net::SessionState session_state(SA::Net::SessionId id) const;
 
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace sa::world
+}  // namespace SA::World
 
 #endif  // SA_WORLD_API_H

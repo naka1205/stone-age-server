@@ -9,7 +9,7 @@
 
 #include "platform/api.h"
 
-using namespace sa::platform;
+using namespace SA::Platform;
 
 namespace {
 

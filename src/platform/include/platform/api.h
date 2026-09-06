@@ -27,7 +27,7 @@
 #include <string_view>
 #include <vector>
 
-namespace sa::platform {
+namespace SA::Platform {
 
 // ── 单调时钟 ──────────────────────────────────────────────────
 //
@@ -217,7 +217,7 @@ struct TempoConfig {
 //   ⇒ 用 config/demo.json 打开它(仓库内已备),阶段 2 接上选角后整块删掉。
 struct DemoBattleConfig {
   bool enabled = false;
-  // 玩家落在哪个槽。0..9 是己方(rules::kSideOffset 之前)。
+  // 玩家落在哪个槽。0..9 是己方(Rules::kSideOffset 之前)。
   std::uint8_t slot = 0;
 };
 
@@ -283,6 +283,6 @@ class RandomSource {
   std::uint64_t minted_ = 0;
 };
 
-}  // namespace sa::platform
+}  // namespace SA::Platform
 
 #endif  // SA_PLATFORM_API_H

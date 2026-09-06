@@ -19,8 +19,8 @@
 #include <cstdint>
 #include <cstring>
 
-namespace sa {
-namespace idl {
+namespace SA {
+namespace IDL {
 
 // ── 定长字符串 ────────────────────────────────────────────────
 // N = 最大字节数(不含结尾 NUL)。存储多留 1 字节,保证 c_str() 永远可用。
@@ -259,7 +259,7 @@ inline void read_vec(Reader& r, FixedVec<T, N>& v, F read_elem) {
   v.count = n;
 }
 
-}  // namespace idl
-}  // namespace sa
+}  // namespace IDL
+}  // namespace SA
 
 #endif  // SA_IDL_RUNTIME_H

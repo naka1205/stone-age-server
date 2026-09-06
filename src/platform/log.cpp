@@ -13,7 +13,7 @@
 #include <cstdio>
 #include <string>
 
-namespace sa::platform {
+namespace SA::Platform {
 namespace {
 
 const char* LevelName(LogLevel l) noexcept {
@@ -122,4 +122,4 @@ void Logger::Log(LogLevel level, LogEvent event,
   ++emitted_;
 }
 
-}  // namespace sa::platform
+}  // namespace SA::Platform

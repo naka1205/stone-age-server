@@ -13,7 +13,7 @@
 #ifndef SA_SHARED_RULES_CONFIG_H
 #define SA_SHARED_RULES_CONFIG_H
 
-namespace sa::rules {
+namespace SA::Rules {
 
 struct RulesConfig {
   // ── DR-BT1:空手多段连击各段全额 ──────────────────────────────
@@ -59,6 +59,6 @@ struct RulesConfig {
   bool replicate_atoi_truncation = false;
 };
 
-}  // namespace sa::rules
+}  // namespace SA::Rules
 
 #endif  // SA_SHARED_RULES_CONFIG_H

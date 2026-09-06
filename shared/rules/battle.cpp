@@ -37,7 +37,7 @@
 
 #include <cmath>
 
-namespace sa::rules {
+namespace SA::Rules {
 namespace {
 
 // ★ 原版 `attack` / `defense` 是 **float**(`battle_event.c:1164`),不是 double。
@@ -97,9 +97,9 @@ f32 FieldPower(std::uint8_t field_attribute, int att_pow,
 //    源码的判定顺序(魔障在晕眩之前)**不同**。
 //    因 §4.1 全局互斥,同时命中多项的情形只可能出现在
 //    「集气中 + 某状态」或「天罗 + 某状态」上,但顺序仍须固定 —— 否则不可回放。
-sa::domain::CannotActReason CheckCanAct(const Combatant& c) noexcept {
-  using sa::domain::BattleStatus;
-  using sa::domain::CannotActReason;
+SA::Domain::CannotActReason CheckCanAct(const Combatant& c) noexcept {
+  using SA::Domain::BattleStatus;
+  using SA::Domain::CannotActReason;
 
   const auto st = static_cast<BattleStatus>(c.status);
 
@@ -258,8 +258,8 @@ std::int32_t ComputeDamage(const BattleField& field,
   }
 
   // 守方石化 ⇒ 防御翻倍。
-  if (static_cast<sa::domain::BattleStatus>(defender.status) ==
-      sa::domain::BattleStatus::BATTLE_ST_STONE) {
+  if (static_cast<SA::Domain::BattleStatus>(defender.status) ==
+      SA::Domain::BattleStatus::BATTLE_ST_STONE) {
     defense *= 2.0f;
   }
 
@@ -352,11 +352,11 @@ bool RollDodge(const Combatant& attacker,
 
   // ④ 守方不能行动。★ `_PROFESSION_ADDSKILL`(8.0 开)有一处例外:
   //   **集气中仍可闪避**,除非同时处于天罗地网或晕眩(`:779-788`)。
-  if (CheckCanAct(defender) != sa::domain::CannotActReason::CANNOT_ACT_NONE) {
+  if (CheckCanAct(defender) != SA::Domain::CannotActReason::CANNOT_ACT_NONE) {
     const bool charging = defender.charging_turns > 0;
-    const auto st = static_cast<sa::domain::BattleStatus>(defender.status);
-    const bool pinned = (st == sa::domain::BattleStatus::BATTLE_ST_DRAGNET) ||
-                        (st == sa::domain::BattleStatus::BATTLE_ST_DIZZY);
+    const auto st = static_cast<SA::Domain::BattleStatus>(defender.status);
+    const bool pinned = (st == SA::Domain::BattleStatus::BATTLE_ST_DRAGNET) ||
+                        (st == SA::Domain::BattleStatus::BATTLE_ST_DIZZY);
     if (!charging || pinned) return false;
   }
 
@@ -597,7 +597,7 @@ KnockbackKind RollKnockback(std::int32_t damage,
 //   ④ 原版 `RAND()` → `rng`。
 
 std::int32_t ComputeActionDex(const Combatant& c,
-                              const sa::domain::BattleCommand& command,
+                              const SA::Domain::BattleCommand& command,
                               IRandom& rng) noexcept {
   // 基数(`BATTLE_DexCalc`):WORKQUICK + 20。
   std::int32_t dex = c.quick + kDexBase;
@@ -839,29 +839,29 @@ namespace {
 //    由 `ResolveTurn` 返回 false 把它交给调用方分包,绝不静默丢弃。
 class EventSink {
  public:
-  explicit EventSink(sa::domain::BattleEvents& out) noexcept : out_(out) {}
+  explicit EventSink(SA::Domain::BattleEvents& out) noexcept : out_(out) {}
 
   bool overflowed() const noexcept { return overflowed_; }
 
   // 追加一个事件槽并返回它;满了返回 nullptr。
-  sa::domain::BattleEvent* Push(sa::domain::BattleEvent::BodyKind kind) noexcept {
-    sa::domain::BattleEvent* e = out_.events.push_back();
+  SA::Domain::BattleEvent* Push(SA::Domain::BattleEvent::BodyKind kind) noexcept {
+    SA::Domain::BattleEvent* e = out_.events.push_back();
     if (e == nullptr) {
       overflowed_ = true;
       return nullptr;
     }
-    *e = sa::domain::BattleEvent{};
+    *e = SA::Domain::BattleEvent{};
     e->body_kind = kind;
     return e;
   }
 
  private:
-  sa::domain::BattleEvents& out_;
+  SA::Domain::BattleEvents& out_;
   bool overflowed_ = false;
 };
 
-bool IsGuarding(const sa::domain::BattleCommand& cmd) noexcept {
-  return cmd.command_kind == sa::domain::BattleCommand::CommandKind::GUARD;
+bool IsGuarding(const SA::Domain::BattleCommand& cmd) noexcept {
+  return cmd.command_kind == SA::Domain::BattleCommand::CommandKind::GUARD;
 }
 
 // 守方睡眠(捕获 +15,§6.2 `:3859`)。★ 原版读的是 `CHAR_WORKSLEEP > 0`,
@@ -869,15 +869,15 @@ bool IsGuarding(const sa::domain::BattleCommand& cmd) noexcept {
 //   独立 sleep work 字段 ⇒ 暂以状态槽近似。⚠️ 实现处记明:睡眠 work 独立字段
 //   属状态系统细化(§4),届时改读它,不要长期用状态槽代替。
 bool IsAsleep(const Combatant& c) noexcept {
-  return static_cast<sa::domain::BattleStatus>(c.status) ==
-         sa::domain::BattleStatus::BATTLE_ST_SLEEP;
+  return static_cast<SA::Domain::BattleStatus>(c.status) ==
+         SA::Domain::BattleStatus::BATTLE_ST_SLEEP;
 }
 
 // 守方本回合是否在施咒(§3.2:咒术时 kawashi_para 取 0.027,更易被闪)。
 bool IsCastingSpell(const TurnCommands& commands, int slot) noexcept {
   if (!commands.present[slot]) return false;
   return commands.commands[slot].command_kind ==
-         sa::domain::BattleCommand::CommandKind::SPELL;
+         SA::Domain::BattleCommand::CommandKind::SPELL;
 }
 
 // 逃跑的 luck 归档(`battle_event.c:4260-4270`)。★ 放在这里而非 RollEscape:
@@ -924,7 +924,7 @@ bool ResolveTurn(const BattleField& field,
                  const TurnCommands& commands,
                  const RulesConfig& config,
                  IRandom& rng,
-                 sa::domain::BattleEvents& out) noexcept {
+                 SA::Domain::BattleEvents& out) noexcept {
   out.battle_id = field.battle_id;
   out.turn      = field.turn;
   out.events.clear();
@@ -961,9 +961,9 @@ bool ResolveTurn(const BattleField& field,
     // ⚠️ 不产事件:不可行动的原因走 `BattleSelfInfo.cannot_act` 在**指令阶段**下发
     //    (DR-CP7 菜单置灰),而不是等结算完再告诉玩家"你刚才动不了"——
     //    那正是 DR-CP6 反对的假交互。
-    if (CheckCanAct(actor) != sa::domain::CannotActReason::CANNOT_ACT_NONE) continue;
+    if (CheckCanAct(actor) != SA::Domain::CannotActReason::CANNOT_ACT_NONE) continue;
 
-    const sa::domain::BattleCommand& cmd = commands.commands[actor_slot];
+    const SA::Domain::BattleCommand& cmd = commands.commands[actor_slot];
 
     // ── 指令分发 ─────────────────────────────────────────────
     //
@@ -975,7 +975,7 @@ bool ResolveTurn(const BattleField& field,
     //
     // ⚠️★ **宠物不能逃**(`battle.c:9746` 的 `!= CHAR_TYPEPET`)—— 在此拦,
     //    不产事件、不递增计数器。它是**指令语义**的一部分,按 DR-BT5 留在 L3。
-    if (cmd.command_kind == sa::domain::BattleCommand::CommandKind::ESCAPE) {
+    if (cmd.command_kind == SA::Domain::BattleCommand::CommandKind::ESCAPE) {
       if (actor.kind == CombatantKind::kPet) continue;
 
       const EnemyLevelStat es = CollectEnemyLevels(field, dead, actor_slot);
@@ -985,8 +985,8 @@ bool ResolveTurn(const BattleField& field,
       const bool ok = RollEscape(field.is_pvp, EscapeLuckTier(actor), escape_cnt,
                                  actor.level, es.level_sum, es.alive_count, rng);
 
-      sa::domain::BattleEvent* ev =
-          sink.Push(sa::domain::BattleEvent::BodyKind::ESCAPE);
+      SA::Domain::BattleEvent* ev =
+          sink.Push(SA::Domain::BattleEvent::BodyKind::ESCAPE);
       if (ev == nullptr) break;
       ev->body.escape.actor     = static_cast<std::uint32_t>(actor_slot);
       ev->body.escape.succeeded = ok;
@@ -1006,7 +1006,7 @@ bool ResolveTurn(const BattleField& field,
     //    ★ 第 ④ 道(条件道具)读背包,L3 看不到 ⇒ 留调用方,在调本函数之前拦。
     //    任一门不过 ⇒ 产**捕获失败**事件(`flg=0`),不是"什么都不发生" ——
     //    原版 `BATTLE_Capture` 无论成败都发 `BT|a|r|f|`(`:4225`),客户端要演。
-    if (cmd.command_kind == sa::domain::BattleCommand::CommandKind::CAPTURE) {
+    if (cmd.command_kind == SA::Domain::BattleCommand::CommandKind::CAPTURE) {
       const int cap_target = static_cast<int>(cmd.command.capture.target);
       if (cap_target < 0 || cap_target >= kSlotCount) continue;
       const Combatant& tgt = field.at(cap_target);
@@ -1025,8 +1025,8 @@ bool ResolveTurn(const BattleField& field,
                          IsAsleep(tgt), rng);
       }
 
-      sa::domain::BattleEvent* ev =
-          sink.Push(sa::domain::BattleEvent::BodyKind::CAPTURE_ACT);
+      SA::Domain::BattleEvent* ev =
+          sink.Push(SA::Domain::BattleEvent::BodyKind::CAPTURE_ACT);
       if (ev == nullptr) break;
       ev->body.capture_act.actor  = static_cast<std::uint32_t>(actor_slot);
       ev->body.capture_act.target = static_cast<std::uint32_t>(cap_target);
@@ -1037,7 +1037,7 @@ bool ResolveTurn(const BattleField& field,
       continue;
     }
 
-    if (cmd.command_kind != sa::domain::BattleCommand::CommandKind::ATTACK) {
+    if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::ATTACK) {
       // GUARD 与 WAIT 本身不产事件:防御的效果体现在**被攻击时**的减伤(§3.5),
       // 由下方攻击链路读 `IsGuarding` 得到。
       // ⚠️ PET_IN / PET_OUT / USE_ITEM / 技能 / 咒术仍落这里被跳过 ——
@@ -1056,11 +1056,11 @@ bool ResolveTurn(const BattleField& field,
     // ── 攻击次数(§3.9 / DR-BT1)──────────────────────────────
     const int hits = RollAttackCount(actor, config, rng);
 
-    sa::domain::BattleEvent* hit_event =
-        sink.Push(sa::domain::BattleEvent::BodyKind::HIT);
+    SA::Domain::BattleEvent* hit_event =
+        sink.Push(SA::Domain::BattleEvent::BodyKind::HIT);
     if (hit_event == nullptr) break;
     hit_event->body.hit.attacker     = static_cast<std::uint32_t>(actor_slot);
-    hit_event->body.hit.kind         = sa::domain::AttackKind::ATTACK_KIND_MELEE;
+    hit_event->body.hit.kind         = SA::Domain::AttackKind::ATTACK_KIND_MELEE;
     hit_event->body.hit.skill_id     = 0;
     hit_event->body.hit.variant      = 0;
     hit_event->body.hit.target_count = 0;   // ★ 逐段回填,见下
@@ -1075,16 +1075,16 @@ bool ResolveTurn(const BattleField& field,
       // ★ 目标在多段之间可能被打死 ⇒ 剩余段数作废(原版同样逐段查存活)。
       if (dead[target_slot]) break;
 
-      sa::domain::BattleEvent* dmg_event =
-          sink.Push(sa::domain::BattleEvent::BodyKind::DAMAGE);
+      SA::Domain::BattleEvent* dmg_event =
+          sink.Push(SA::Domain::BattleEvent::BodyKind::DAMAGE);
       if (dmg_event == nullptr) break;
-      sa::domain::Damage& d = dmg_event->body.damage;
+      SA::Domain::Damage& d = dmg_event->body.damage;
       d.target          = static_cast<std::uint32_t>(target_slot);
       d.hp_delta        = 0;
       d.pet_hp_delta    = 0;
       d.mp_delta        = 0;
       d.flags           = 0;
-      d.status_applied  = sa::domain::BattleStatus::BATTLE_ST_NONE;
+      d.status_applied  = SA::Domain::BattleStatus::BATTLE_ST_NONE;
       ++emitted;
 
       // ── 回避(§3.2)───────────────────────────────────────
@@ -1093,7 +1093,7 @@ bool ResolveTurn(const BattleField& field,
       //    ★ 而且**必须在这里就产**,不能"闪了就跳过" —— 事件流是演出脚本,
       //      少一条客户端就少一个动作,1.4 的验收口径正是逐条一致。
       if (RollDodge(actor, target, guarding, casting, config, rng)) {
-        d.flags = static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_DODGE);
+        d.flags = static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DODGE);
         continue;
       }
 
@@ -1112,7 +1112,7 @@ bool ResolveTurn(const BattleField& field,
         damage = ComputeDamage(field, actor, target, config, rng);
       }
       if (is_crit) {
-        d.flags |= static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
+        d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
       }
 
       // ── 防御减伤:六档随机(§3.5)────────────────────────────
@@ -1121,11 +1121,11 @@ bool ResolveTurn(const BattleField& field,
       //    两条都在 `guarding` 里,别只判指令。
       if (guarding) {
         damage = static_cast<std::int32_t>(damage * RollGuardFactor(rng));
-        d.flags |= static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_GUARD);
+        d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_GUARD);
       } else if (!is_crit) {
         // ★ NORMAL 与 CRITICAL 互斥(原版 `BCF_NORMAL` / `BCF_KAISHIN` 是 switch(iRet)
         //   的两个分支)⇒ 暴击命中**不**再置 NORMAL。守方防御时置 GUARD(项目自有建模)。
-        d.flags |= static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_NORMAL);
+        d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);
       }
       if (damage < 0) damage = 0;
 
@@ -1165,16 +1165,16 @@ bool ResolveTurn(const BattleField& field,
           damage, overflow, target.max_hp, ult_acc[target_slot],
           target.mods.immune_knockback, &ult_acc[target_slot]);
       if (kb == KnockbackKind::kOneShot) {
-        d.flags |= static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_2);
+        d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_2);
       } else if (kb == KnockbackKind::kAccumulated) {
-        d.flags |= static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_1);
+        d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_1);
       }
       // ★ 累加器**变化时**才回写(单开低频事件,不塞进热路径的 Damage —— 见
       //   battle_events.proto 的 KnockbackState 注记:塞 Damage 会越过 8 KB 零分配红线)。
       //   ⚠️ 累加后的新值由 L3 给,ApplyEvents 直接写、不重算(免疫+一击角落会分叉)。
       if (ult_acc[target_slot] != prev_acc) {
-        sa::domain::BattleEvent* kbev =
-            sink.Push(sa::domain::BattleEvent::BodyKind::KNOCKBACK_STATE);
+        SA::Domain::BattleEvent* kbev =
+            sink.Push(SA::Domain::BattleEvent::BodyKind::KNOCKBACK_STATE);
         if (kbev == nullptr) break;
         kbev->body.knockback_state.target      = static_cast<std::uint32_t>(target_slot);
         kbev->body.knockback_state.accumulator = ult_acc[target_slot];
@@ -1182,7 +1182,7 @@ bool ResolveTurn(const BattleField& field,
 
       if (hp[target_slot] <= 0) {
         dead[target_slot] = true;
-        d.flags |= static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_DEATH);
+        d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DEATH);
       }
 
       // ⚠️ 反击(§3.5)在此处插入 —— 批次 0.5 未实现,理由见 battle.h。
@@ -1196,4 +1196,4 @@ bool ResolveTurn(const BattleField& field,
   return !sink.overflowed();
 }
 
-}  // namespace sa::rules
+}  // namespace SA::Rules

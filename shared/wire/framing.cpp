@@ -7,14 +7,14 @@
 //   传输层   ITransport                   ← 宿主侧,不在本目录
 //
 // ★ 本文件 2026-09-06 从 `src/net/framing.cpp` 原样移入(逻辑一行未改),
-//   仅命名空间 `sa::net` → `sa::wire`。⇒ 18 条既有用例是这次重构的验收凭据:
+//   仅命名空间 `SA::Net` → `SA::Wire`。⇒ 18 条既有用例是这次重构的验收凭据:
 //   **断言一个都不改,全部仍绿**,否则就不是"移动"而是"重写"了。
 
 #include "wire/framing.h"
 
 #include <cstring>
 
-namespace sa::wire {
+namespace SA::Wire {
 namespace {
 
 // 信封头的线上长度:u32 + u64。
@@ -104,8 +104,8 @@ bool DecodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
                     EnvelopeView& out) {
   if (frame == nullptr || len < kEnvelopeHeaderBytes) return false;
 
-  sa::idl::Reader r(frame, len);
-  sa::transport::EnvelopeHeader head;
+  SA::IDL::Reader r(frame, len);
+  SA::Transport::EnvelopeHeader head;
   decode(r, head);
   if (!r.ok()) return false;
 
@@ -116,4 +116,4 @@ bool DecodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
   return true;
 }
 
-}  // namespace sa::wire
+}  // namespace SA::Wire

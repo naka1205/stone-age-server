@@ -22,7 +22,7 @@
 
 #include <cstdint>
 
-namespace sa::model {
+namespace SA::Model {
 
 // 实体句柄。
 //
@@ -44,6 +44,6 @@ struct EntityHandle {
 
 inline constexpr EntityHandle kNullHandle{};
 
-}  // namespace sa::model
+}  // namespace SA::Model
 
 #endif  // SA_SHARED_MODEL_HANDLE_H

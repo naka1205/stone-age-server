@@ -18,7 +18,7 @@
 
 #include <cstdint>
 
-namespace sa::rules {
+namespace SA::Rules {
 
 // ── 伤害与回避的基本系数 ──────────────────────────────────────────
 // 全部 [8/8] —— 05-battle.md §3 卷首:「已跨版本核对 8/8 一致」。
@@ -345,6 +345,6 @@ inline constexpr int    kCaptureDifficultyDefault = 30;
 // ★ 等级门(`:3834`):`myLv + 5 < targetLv` 直接失败。5 是硬编码的等级容差。
 inline constexpr int    kCaptureLevelGate = 5;
 
-}  // namespace sa::rules
+}  // namespace SA::Rules
 
 #endif  // SA_SHARED_RULES_CONSTANTS_H

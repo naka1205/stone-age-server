@@ -22,7 +22,7 @@
 #include <cstring>
 #include <type_traits>
 
-using namespace sa;
+using namespace SA;
 
 // ── ② 相克矩阵重排的回归保护 ──────────────────────────────────
 //
@@ -62,9 +62,9 @@ static constexpr int kElemToDocCol[5] = {
 };
 
 static void CheckElementMatrix() {
-  for (int atk = 0; atk < rules::kElementCount; ++atk) {
-    for (int def = 0; def < rules::kElementCount; ++def) {
-      const double got = rules::kElementMatrix[atk][def];
+  for (int atk = 0; atk < Rules::kElementCount; ++atk) {
+    for (int def = 0; def < Rules::kElementCount; ++def) {
+      const double got = Rules::kElementMatrix[atk][def];
       const double want = kDocMatrix[kElemToDocRow[atk]][kElemToDocCol[def]];
       if (got != want) {
         std::printf("★ 相克矩阵重排错误 [攻%d][守%d]: 得 %.1f 应 %.1f\n",
@@ -74,20 +74,20 @@ static void CheckElementMatrix() {
     }
   }
   // 量纲自洽:全无属性时系数应为 1.0(§3.4「因 Σatk = Σdef = 100」)
-  assert(rules::kElementMatrix[4][4] == 1.0);
+  assert(Rules::kElementMatrix[4][4] == 1.0);
 }
 
 // ── ⑤ M10:句柄带 generation ──────────────────────────────────
-static_assert(std::is_trivially_copyable_v<model::EntityHandle>);
-static_assert(sizeof(model::EntityHandle) == 8);
+static_assert(std::is_trivially_copyable_v<Model::EntityHandle>);
+static_assert(sizeof(Model::EntityHandle) == 8);
 
 static void CheckHandle() {
-  assert(!model::kNullHandle.valid());
+  assert(!Model::kNullHandle.valid());
 
   // 同一个池槽位被复用:index 相同、generation 递增 ⇒ 旧句柄必须不等于新句柄。
   // ★ 这正是 17 §7.2 那个真实故障(fdid 归零后迟到应答命中新连接)的进程内对应物。
-  const model::EntityHandle old_ref{42, 1};
-  const model::EntityHandle reused{42, 2};
+  const Model::EntityHandle old_ref{42, 1};
+  const Model::EntityHandle reused{42, 2};
   assert(old_ref != reused);
   assert(old_ref.valid() && reused.valid());
 }
@@ -95,15 +95,15 @@ static void CheckHandle() {
 // ── ③ 随机源可回放 ───────────────────────────────────────────
 static void CheckReplayable() {
   // 同种子 + 同调用序列 ⇒ 逐位相同。这是黄金用例集成立的前提(05 §1.5)。
-  rules::SeededRandom a(20260831u);
-  rules::SeededRandom b(20260831u);
+  Rules::SeededRandom a(20260831u);
+  Rules::SeededRandom b(20260831u);
   for (int i = 0; i < 1000; ++i) {
     assert(a.Rand(0, 100) == b.Rand(0, 100));
     assert(a.RandMod(37) == b.RandMod(37));
   }
 
   // 不同种子应给出不同序列(否则种子没起作用)。
-  rules::SeededRandom c(1u), d(2u);
+  Rules::SeededRandom c(1u), d(2u);
   bool differs = false;
   for (int i = 0; i < 64 && !differs; ++i) {
     if (c.Rand(0, 1000000) != d.Rand(0, 1000000)) differs = true;
@@ -111,7 +111,7 @@ static void CheckReplayable() {
   assert(differs);
 
   // Rand 是**闭区间** [lo, hi] —— 原版 RAND 语义(§3.1 第三步「只能造成 0 或 1」)。
-  rules::SeededRandom e(7u);
+  Rules::SeededRandom e(7u);
   bool saw_lo = false, saw_hi = false;
   for (int i = 0; i < 512; ++i) {
     const int v = e.Rand(0, 1);
@@ -122,31 +122,31 @@ static void CheckReplayable() {
   assert(saw_lo && saw_hi && "RAND(0,1) 必须能取到两端");
 
   // 退化输入不得越界。
-  rules::SeededRandom f(9u);
+  Rules::SeededRandom f(9u);
   assert(f.Rand(5, 5) == 5);
   assert(f.RandMod(0) == 0);
   assert(f.RandMod(-3) == 0);
 
   // IRandom 是可注入的抽象:通过基类引用调用应得到同样的序列。
-  rules::SeededRandom g(123u);
-  rules::IRandom& via_base = g;
-  rules::SeededRandom h(123u);
+  Rules::SeededRandom g(123u);
+  Rules::IRandom& via_base = g;
+  Rules::SeededRandom h(123u);
   for (int i = 0; i < 100; ++i) assert(via_base.Rand(1, 9) == h.Rand(1, 9));
 }
 
 // ── 战场快照的形状 ───────────────────────────────────────────
 static void CheckBattleField() {
-  static_assert(rules::kSlotCount == 20, "2 side × BATTLE_ENTRY_MAX(10)，== 就绪位图宽度");
-  static_assert(std::is_trivially_copyable_v<rules::Combatant>);
-  static_assert(std::is_trivially_copyable_v<rules::BattleField>);
+  static_assert(Rules::kSlotCount == 20, "2 side × BATTLE_ENTRY_MAX(10)，== 就绪位图宽度");
+  static_assert(std::is_trivially_copyable_v<Rules::Combatant>);
+  static_assert(std::is_trivially_copyable_v<Rules::BattleField>);
 
-  rules::BattleField field{};
+  Rules::BattleField field{};
   field.battle_id = 1;
   field.turn = 1;
 
-  rules::Combatant& me = field.at(0);
+  Rules::Combatant& me = field.at(0);
   me.occupied = true;
-  me.kind = rules::CombatantKind::kPlayer;
+  me.kind = Rules::CombatantKind::kPlayer;
   me.slot = 0;
   me.hp = 300; me.max_hp = 300;
   me.attack = 120; me.defense = 80; me.quick = 40; me.luck = 25;
@@ -154,23 +154,23 @@ static void CheckBattleField() {
   me.elements[0] = 30; me.elements[1] = 10; me.elements[2] = 20; me.elements[3] = 0;
   assert(me.NoneElement() == 40);
 
-  rules::Combatant& foe = field.at(rules::kSideOffset);
+  Rules::Combatant& foe = field.at(Rules::kSideOffset);
   foe.occupied = true;
-  foe.kind = rules::CombatantKind::kEnemy;
-  foe.slot = static_cast<std::uint8_t>(rules::kSideOffset);
+  foe.kind = Rules::CombatantKind::kEnemy;
+  foe.slot = static_cast<std::uint8_t>(Rules::kSideOffset);
   foe.hp = 200; foe.max_hp = 200;
   // 满火属 ⇒ 无属性余量为 0(上限 100)
-  foe.elements[2] = rules::kAttrMax;
+  foe.elements[2] = Rules::kAttrMax;
   assert(foe.NoneElement() == 0);
   assert(foe.IsEnemy() && !foe.IsPlayer());
 
   // 阵营划分:0..9 vs 10..19
-  assert(rules::BattleField::SameSide(0, 9));
-  assert(rules::BattleField::SameSide(10, 19));
-  assert(!rules::BattleField::SameSide(9, 10));
+  assert(Rules::BattleField::SameSide(0, 9));
+  assert(Rules::BattleField::SameSide(10, 19));
+  assert(!Rules::BattleField::SameSide(9, 10));
 
   // 超出四属上限时余量钳到 0,不得为负。
-  rules::Combatant over{};
+  Rules::Combatant over{};
   over.elements[0] = 80; over.elements[1] = 80;
   assert(over.NoneElement() == 0);
 }
@@ -178,38 +178,38 @@ static void CheckBattleField() {
 // ── ④ 与 IDL domain/ 类型的互操作 ────────────────────────────
 static void CheckIdlInterop() {
   // shared/rules 的契约以 IDL 事件类型为输出 —— 这是 D2 的接口面(02 §9)。
-  domain::BattleEvents out{};
+  Domain::BattleEvents out{};
   out.battle_id = 99;
   out.turn = 1;
 
-  domain::BattleEvent e{};
-  e.body_kind = domain::BattleEvent::BodyKind::DAMAGE;
-  e.body.damage.target = static_cast<std::uint32_t>(rules::kSideOffset);
+  Domain::BattleEvent e{};
+  e.body_kind = Domain::BattleEvent::BodyKind::DAMAGE;
+  e.body.damage.target = static_cast<std::uint32_t>(Rules::kSideOffset);
   e.body.damage.hp_delta = -25;
   out.events.push_back(e);
   assert(out.events.size() == 1);
 
   // DR-BT5 的 CannotActReason 来自 IDL,由 shared/rules 的 CheckCanAct 返回。
-  const domain::CannotActReason ok = domain::CannotActReason::CANNOT_ACT_NONE;
-  assert(ok == domain::CannotActReason::CANNOT_ACT_NONE);
+  const Domain::CannotActReason ok = Domain::CannotActReason::CANNOT_ACT_NONE;
+  assert(ok == Domain::CannotActReason::CANNOT_ACT_NONE);
 
   // 状态枚举容量与 constants.h 的记载一致(DR-BT4 补齐到 44)。
-  static_assert(rules::kBattleStatusCount == 44);
-  assert(static_cast<int>(domain::BattleStatus::BATTLE_ST_ICECRACK10) == 43);
+  static_assert(Rules::kBattleStatusCount == 44);
+  assert(static_cast<int>(Domain::BattleStatus::BATTLE_ST_ICECRACK10) == 43);
 
   // TurnCommands 的槽宽与战场一致。
-  rules::TurnCommands cmds{};
+  Rules::TurnCommands cmds{};
   cmds.present[0] = true;
   cmds.commands[0].battle_id = 99;
   cmds.commands[0].turn = 1;
-  cmds.commands[0].command_kind = domain::BattleCommand::CommandKind::ATTACK;
-  cmds.commands[0].command.attack.target = static_cast<std::uint32_t>(rules::kSideOffset);
+  cmds.commands[0].command_kind = Domain::BattleCommand::CommandKind::ATTACK;
+  cmds.commands[0].command.attack.target = static_cast<std::uint32_t>(Rules::kSideOffset);
   assert(cmds.present[0]);
 }
 
 // ── 配置默认值:两个最容易写错的数 ────────────────────────────
 static void CheckConfigDefaults() {
-  const rules::RulesConfig cfg{};
+  const Rules::RulesConfig cfg{};
   // ★★ getDamageCalc() 兜底是 70 不是 100 —— 8.0 投产下全部物理伤害统一乘 0.70。
   //    写成 100 会让全局伤害偏高 43%。
   assert(cfg.damage_calc_percent == 70);

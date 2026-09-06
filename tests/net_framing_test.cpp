@@ -12,7 +12,7 @@
 #include <cstring>
 #include <vector>
 
-using namespace sa::net;
+using namespace SA::Net;
 
 namespace {
 
@@ -22,7 +22,7 @@ class RecordingHost final : public ISessionHost {
   void OnSessionReady(SessionId id) override {
     ready.push_back(id);
   }
-  void OnBattleCommand(SessionId id, const sa::domain::BattleCommand& cmd) override {
+  void OnBattleCommand(SessionId id, const SA::Domain::BattleCommand& cmd) override {
     commands.push_back(cmd);
     last_command_session = id;
   }
@@ -30,7 +30,7 @@ class RecordingHost final : public ISessionHost {
 
   std::vector<SessionId> ready;
   std::vector<SessionId> closed;
-  std::vector<sa::domain::BattleCommand> commands;
+  std::vector<SA::Domain::BattleCommand> commands;
   SessionId last_command_session = 0;
 };
 
@@ -209,18 +209,18 @@ TEST_CASE("负载超限时 WriteFrame 失败而不是截断") {
 
 // ══ 信封层 ═══════════════════════════════════════════════════════
 TEST_CASE("信封往返:msg_id 由类型编译期决定") {
-  sa::transport::Ping ping;
+  SA::Transport::Ping ping;
   ping.client_time_ms = 0xDEADBEEFull;
   const std::vector<std::uint8_t> wire = Framed(42, ping);
 
   EnvelopeView env;
   std::vector<std::uint8_t> body;
   REQUIRE(NthEnvelope(wire, 0, env, body));
-  CHECK(env.msg_id == static_cast<std::uint32_t>(sa::idl::MsgId::Ping));
+  CHECK(env.msg_id == static_cast<std::uint32_t>(SA::IDL::MsgId::Ping));
   CHECK(env.corr_id == 42u);
 
-  sa::idl::Reader rd(env.body, env.body_len);
-  sa::transport::Ping back{};
+  SA::IDL::Reader rd(env.body, env.body_len);
+  SA::Transport::Ping back{};
   decode(rd, back);
   REQUIRE(rd.ok());
   CHECK(back.client_time_ms == 0xDEADBEEFull);
@@ -240,7 +240,7 @@ constexpr std::uint32_t kVersion = 3;
 constexpr std::uint32_t kHeartbeat = 30000;
 
 std::vector<std::uint8_t> HandshakeFrame(std::uint32_t version) {
-  sa::transport::HandshakeRequest req{};
+  SA::Transport::HandshakeRequest req{};
   req.protocol_version = version;
   req.client_build.assign("test");
   return Framed(1, req);
@@ -264,11 +264,11 @@ TEST_CASE("握手通过 ⇒ 已认证,并回 HandshakeAccepted") {
   EnvelopeView env;
   std::vector<std::uint8_t> body;
   REQUIRE(NthEnvelope(out, 0, env, body));
-  CHECK(env.msg_id == static_cast<std::uint32_t>(sa::idl::MsgId::HandshakeAccepted));
+  CHECK(env.msg_id == static_cast<std::uint32_t>(SA::IDL::MsgId::HandshakeAccepted));
   CHECK(env.corr_id == 1u);   // corr_id 原样回带(02 §1.3)
 
-  sa::idl::Reader rd(env.body, env.body_len);
-  sa::transport::HandshakeAccepted acc{};
+  SA::IDL::Reader rd(env.body, env.body_len);
+  SA::Transport::HandshakeAccepted acc{};
   decode(rd, acc);
   REQUIRE(rd.ok());
   CHECK(acc.session_id == 7u);
@@ -289,12 +289,12 @@ TEST_CASE("版本不符 ⇒ 拒绝,但要先把拒绝理由发出去再关") {
   EnvelopeView env;
   std::vector<std::uint8_t> body;
   REQUIRE(NthEnvelope(out, 0, env, body));
-  CHECK(env.msg_id == static_cast<std::uint32_t>(sa::idl::MsgId::HandshakeRejected));
-  sa::idl::Reader rd(env.body, env.body_len);
-  sa::transport::HandshakeRejected rej{};
+  CHECK(env.msg_id == static_cast<std::uint32_t>(SA::IDL::MsgId::HandshakeRejected));
+  SA::IDL::Reader rd(env.body, env.body_len);
+  SA::Transport::HandshakeRejected rej{};
   decode(rd, rej);
   REQUIRE(rd.ok());
-  CHECK(rej.reason == sa::transport::RejectReason::REJECT_VERSION_MISMATCH);
+  CHECK(rej.reason == SA::Transport::RejectReason::REJECT_VERSION_MISMATCH);
   CHECK(rej.required_protocol_version == kVersion);
 }
 
@@ -303,11 +303,11 @@ TEST_CASE("版本不符 ⇒ 拒绝,但要先把拒绝理由发出去再关") {
 TEST_CASE("握手之前的任何其它消息 ⇒ 协议违规") {
   RecordingHost host;
   Session s(7, kVersion, kHeartbeat, &host);
-  sa::transport::Ping ping{};
+  SA::Transport::Ping ping{};
   const std::vector<std::uint8_t> in = Framed(1, ping);
   std::vector<std::uint8_t> out;
   CHECK_FALSE(s.HandleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
-  CHECK(s.last_reject_msg_id() == static_cast<std::uint32_t>(sa::idl::MsgId::Ping));
+  CHECK(s.last_reject_msg_id() == static_cast<std::uint32_t>(SA::IDL::MsgId::Ping));
 }
 
 TEST_CASE("重复握手 ⇒ 协议违规(状态机不许被重放绕过)") {
@@ -327,7 +327,7 @@ TEST_CASE("Ping ⇒ Pong,client_time_ms 原样回带") {
   REQUIRE(s.HandleFrame(hs.data() + 4, static_cast<std::uint32_t>(hs.size() - 4), out));
   out.clear();
 
-  sa::transport::Ping ping{};
+  SA::Transport::Ping ping{};
   ping.client_time_ms = 123456789ull;
   const std::vector<std::uint8_t> in = Framed(99, ping);
   REQUIRE(s.HandleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
@@ -335,10 +335,10 @@ TEST_CASE("Ping ⇒ Pong,client_time_ms 原样回带") {
   EnvelopeView env;
   std::vector<std::uint8_t> body;
   REQUIRE(NthEnvelope(out, 0, env, body));
-  CHECK(env.msg_id == static_cast<std::uint32_t>(sa::idl::MsgId::Pong));
+  CHECK(env.msg_id == static_cast<std::uint32_t>(SA::IDL::MsgId::Pong));
   CHECK(env.corr_id == 99u);
-  sa::idl::Reader rd(env.body, env.body_len);
-  sa::transport::Pong pong{};
+  SA::IDL::Reader rd(env.body, env.body_len);
+  SA::Transport::Pong pong{};
   decode(rd, pong);
   REQUIRE(rd.ok());
   CHECK(pong.client_time_ms == 123456789ull);
@@ -352,10 +352,10 @@ TEST_CASE("战斗指令要求 kOnline") {
   const std::vector<std::uint8_t> hs = HandshakeFrame(kVersion);
   REQUIRE(s.HandleFrame(hs.data() + 4, static_cast<std::uint32_t>(hs.size() - 4), out));
 
-  sa::domain::BattleCommand cmd{};
+  SA::Domain::BattleCommand cmd{};
   cmd.battle_id = 1;
   cmd.turn = 0;
-  cmd.command_kind = sa::domain::BattleCommand::CommandKind::ATTACK;
+  cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
   cmd.command.attack.target = 10;
   const std::vector<std::uint8_t> in = Framed(0, cmd);
 
@@ -432,9 +432,9 @@ TEST_CASE("Loopback:连接、投递、发送、关闭") {
 
 TEST_CASE("多帧编码进同一个出站缓冲") {
   std::vector<std::uint8_t> out;
-  sa::transport::Ping a{};
+  SA::Transport::Ping a{};
   a.client_time_ms = 1;
-  sa::transport::Ping b{};
+  SA::Transport::Ping b{};
   b.client_time_ms = 2;
   REQUIRE(EncodeFramed(0, a, out));
   REQUIRE(EncodeFramed(0, b, out));

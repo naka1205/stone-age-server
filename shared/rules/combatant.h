@@ -5,9 +5,9 @@
 //        resolve_turn(BattleSnapshot, Commands, IRandom&) -> BattleEvents
 //    其中 Commands 与 BattleEvents 已由 IDL 给出,而**输入侧一直没有定义**。
 //
-// ⚠️★ **与 `sa::domain::BattleSnapshot` 同名不同物,不要混用**:
+// ⚠️★ **与 `SA::Domain::BattleSnapshot` 同名不同物,不要混用**:
 //
-//    | | `domain::BattleSnapshot`(IDL) | 本文件的 `BattleField` |
+//    | | `Domain::BattleSnapshot`(IDL) | 本文件的 `BattleField` |
 //    |---|---|---|
 //    | 用途 | **下行显示**快照(原 BC 子命令) | **L3 结算输入** |
 //    | 内容 | 名字 / 等级 / HP / 标志位 / 骑宠显示,13 字段 | 攻防 / 敏捷 / 幸运 / 四属 / 装备修正 |
@@ -31,7 +31,7 @@
 
 #include "rules/constants.h"
 
-namespace sa::rules {
+namespace SA::Rules {
 
 // ── 实体族(M2 的判别键)──────────────────────────────────────
 //
@@ -196,7 +196,7 @@ struct Combatant {
   // ⚠️★ 05 §4.1:状态系统是**单槽状态机 + 43 个候选**,不是多个可并存的计时器。
   //    「目标身上只要有任意一种状态异常,新状态一律施加失败」(职业技能例外)。
   //    ⇒ 这里是**一个** status,不是位图。按位图建模会与原版行为完全不同。
-  std::uint8_t status       = 0;  // 取值见 idl domain::BattleStatus(0 = 正常)
+  std::uint8_t status       = 0;  // 取值见 idl Domain::BattleStatus(0 = 正常)
   std::int32_t status_turns = 0;  // 剩余回合
   // ⚠️ 虚弱 / 魔障期间,**身上所有状态的回合数都不减少**(§4.3)。
   //    又因 §4.1 全局互斥,"所有状态"实际只有虚弱/魔障自己。
@@ -313,6 +313,6 @@ struct BattleField {
   }
 };
 
-}  // namespace sa::rules
+}  // namespace SA::Rules
 
 #endif  // SA_SHARED_RULES_COMBATANT_H

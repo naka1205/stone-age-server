@@ -9,8 +9,8 @@
 
 #include "sa_idl_runtime.h"
 
-namespace sa {
-namespace transport {
+namespace SA {
+namespace Transport {
 
 enum class Status : std::uint8_t {
   STATUS_OK = 0,
@@ -33,7 +33,7 @@ enum class Disposition : std::uint8_t {
   DISPOSITION_ABORT = 3,
 };
 
-}  // namespace transport
-}  // namespace sa
+}  // namespace Transport
+}  // namespace SA
 
 #endif  // SA_IDL_TRANSPORT_ERRORS_SA_H

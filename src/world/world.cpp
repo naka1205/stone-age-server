@@ -14,32 +14,32 @@
 #include <map>
 #include <vector>
 
-namespace sa::world {
+namespace SA::World {
 namespace {
 
 // 战斗事件缓冲。★ 每场战斗**复用一个**:domain::BattleEvents 是 7 KB 的 POD,
 //   每回合新建一个就是每回合一次 7 KB 的拷贝(shared/rules/battle.h 的原话)。
 struct BattleInstance {
   BattleId id = 0;
-  sa::rules::BattleField field{};
-  sa::rules::TurnCommands commands{};
-  sa::rules::SeededRandom rng{1};
-  sa::domain::BattleEvents events{};
+  SA::Rules::BattleField field{};
+  SA::Rules::TurnCommands commands{};
+  SA::Rules::SeededRandom rng{1};
+  SA::Domain::BattleEvents events{};
   std::uint64_t seed = 0;
-  sa::platform::Millis next_turn_at_ms = 0;
+  SA::Platform::Millis next_turn_at_ms = 0;
   BattleStats stats{};
-  std::vector<sa::net::SessionId> members{};   // 订阅事件流的会话
-  std::map<sa::net::SessionId, std::uint8_t> slot_of{};
+  std::vector<SA::Net::SessionId> members{};   // 订阅事件流的会话
+  std::map<SA::Net::SessionId, std::uint8_t> slot_of{};
 };
 
 // 一侧是否已全灭。★ 这是**战斗结束**的判据,不是 L3 的事 ——
 //   L3 只结算一个回合,"还要不要打下一回合"是世界的生命周期问题。
-bool SideWipedOut(const sa::rules::BattleField& field, bool enemy_side) {
+bool SideWipedOut(const SA::Rules::BattleField& field, bool enemy_side) {
   bool any_alive = false;
-  for (int i = 0; i < sa::rules::kSlotCount; ++i) {
-    const sa::rules::Combatant& c = field.at(i);
+  for (int i = 0; i < SA::Rules::kSlotCount; ++i) {
+    const SA::Rules::Combatant& c = field.at(i);
     if (!c.occupied) continue;
-    const bool is_enemy = i >= sa::rules::kSideOffset;
+    const bool is_enemy = i >= SA::Rules::kSideOffset;
     if (is_enemy != enemy_side) continue;
     if (!c.dead && c.hp > 0) any_alive = true;
   }
@@ -58,23 +58,23 @@ bool SideWipedOut(const sa::rules::BattleField& field, bool enemy_side) {
 // ⚠️ 玩家侧**不**在这里补默认指令:L3 已把「无指令 ⇒ 本回合不行动」写死
 //   (battle.cpp 的 BuildActionOrder)。「玩家没提交该怎么办」是收集期与超时的
 //   问题,属阶段 2,且是玩家可感知的玩法口径 ⇒ 须显式裁定,不由实现者定。
-void FillEnemyCommands(const sa::rules::BattleField& field,
-                       sa::rules::TurnCommands& commands) {
+void FillEnemyCommands(const SA::Rules::BattleField& field,
+                       SA::Rules::TurnCommands& commands) {
   // 目标:玩家侧第一个活着的。
   int target = -1;
-  for (int i = 0; i < sa::rules::kSideOffset; ++i) {
-    const sa::rules::Combatant& c = field.at(i);
+  for (int i = 0; i < SA::Rules::kSideOffset; ++i) {
+    const SA::Rules::Combatant& c = field.at(i);
     if (c.occupied && !c.dead && c.hp > 0) { target = i; break; }
   }
   if (target < 0) return;   // 对面全灭 ⇒ 本回合无需行动
 
-  for (int i = sa::rules::kSideOffset; i < sa::rules::kSlotCount; ++i) {
-    const sa::rules::Combatant& c = field.at(i);
+  for (int i = SA::Rules::kSideOffset; i < SA::Rules::kSlotCount; ++i) {
+    const SA::Rules::Combatant& c = field.at(i);
     if (!c.occupied || c.dead || c.hp <= 0) continue;
     if (commands.present[i]) continue;   // 已有指令(如被玩家操控的宠物)不覆盖
 
-    sa::domain::BattleCommand cmd{};
-    cmd.command_kind = sa::domain::BattleCommand::CommandKind::ATTACK;
+    SA::Domain::BattleCommand cmd{};
+    cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
     cmd.command.attack.target = static_cast<std::uint8_t>(target);
     commands.commands[i] = cmd;
     commands.present[i] = true;
@@ -95,15 +95,15 @@ void FillEnemyCommands(const sa::rules::BattleField& field,
 // ⚠️ 1.5 只写 HP 与死亡:状态附加(§4.3)· 打飞(§3.8)· 换装 · 变身
 //    绑在批次 A–D 的链路上,L3 此刻也不产它们的事件。
 //    ⇒ **不猜**,与批次 0.5 对暴击/反击的处置同一条纪律。
-void ApplyEvents(const sa::domain::BattleEvents& events,
-                 sa::rules::BattleField& field) {
+void ApplyEvents(const SA::Domain::BattleEvents& events,
+                 SA::Rules::BattleField& field) {
   for (std::size_t i = 0; i < events.events.size(); ++i) {
-    const sa::domain::BattleEvent& e = events.events[i];
+    const SA::Domain::BattleEvent& e = events.events[i];
     switch (e.body_kind) {
-      case sa::domain::BattleEvent::BodyKind::DAMAGE: {
-        const sa::domain::Damage& d = e.body.damage;
-        if (d.target >= static_cast<std::uint32_t>(sa::rules::kSlotCount)) break;
-        sa::rules::Combatant& c = field.at(static_cast<int>(d.target));
+      case SA::Domain::BattleEvent::BodyKind::DAMAGE: {
+        const SA::Domain::Damage& d = e.body.damage;
+        if (d.target >= static_cast<std::uint32_t>(SA::Rules::kSlotCount)) break;
+        SA::Rules::Combatant& c = field.at(static_cast<int>(d.target));
         if (!c.occupied) break;
         c.hp += d.hp_delta;          // hp_delta 是**负数**(L3 侧的约定)
         c.mp += d.mp_delta;
@@ -113,20 +113,20 @@ void ApplyEvents(const sa::domain::BattleEvents& events,
         if (c.hp <= 0) { c.hp = 0; c.dead = true; }
         break;
       }
-      case sa::domain::BattleEvent::BodyKind::SET_HP: {
-        const sa::domain::SetHp& h = e.body.set_hp;
-        if (h.target >= static_cast<std::uint32_t>(sa::rules::kSlotCount)) break;
-        sa::rules::Combatant& c = field.at(static_cast<int>(h.target));
+      case SA::Domain::BattleEvent::BodyKind::SET_HP: {
+        const SA::Domain::SetHp& h = e.body.set_hp;
+        if (h.target >= static_cast<std::uint32_t>(SA::Rules::kSlotCount)) break;
+        SA::Rules::Combatant& c = field.at(static_cast<int>(h.target));
         if (!c.occupied) break;
         c.hp = h.hp;
         if (c.hp <= 0) { c.hp = 0; c.dead = true; }
         break;
       }
-      case sa::domain::BattleEvent::BodyKind::ESCAPE: {
+      case SA::Domain::BattleEvent::BodyKind::ESCAPE: {
         // 批次 A.1:逃跑事件的世界写回。
-        const sa::domain::Escape& esc = e.body.escape;
-        if (esc.actor >= static_cast<std::uint32_t>(sa::rules::kSlotCount)) break;
-        sa::rules::Combatant& c = field.at(static_cast<int>(esc.actor));
+        const SA::Domain::Escape& esc = e.body.escape;
+        if (esc.actor >= static_cast<std::uint32_t>(SA::Rules::kSlotCount)) break;
+        SA::Rules::Combatant& c = field.at(static_cast<int>(esc.actor));
         if (!c.occupied) break;
         // ★★ 计数器**无论成败都 +1**(源码 BATTLE_Escape:4346 无条件 ++;§6.1
         //    「失败也累积」)。这就是 L3 读 escape_count+2 里的那个 +1 的落地处 ——
@@ -140,23 +140,23 @@ void ApplyEvents(const sa::domain::BattleEvents& events,
         }
         break;
       }
-      case sa::domain::BattleEvent::BodyKind::KNOCKBACK_STATE: {
+      case SA::Domain::BattleEvent::BodyKind::KNOCKBACK_STATE: {
         // 批次 A.4:打飞溢出累加器的世界写回。★ L3 已算好累加后的新值,**直接写**,
         //   不在此重算门槛 —— 重算等于把 RollKnockback 实现第二遍(DR-BT5 反对的双份
         //   实现),且在免疫+一击的角落会分叉(见 battle_events.proto 的 KnockbackState)。
         //   累加(打穿 += 溢出)与清零(命中打飞归 0)的语义都封在 L3,这里只落值。
-        const sa::domain::KnockbackState& ks = e.body.knockback_state;
-        if (ks.target >= static_cast<std::uint32_t>(sa::rules::kSlotCount)) break;
-        sa::rules::Combatant& c = field.at(static_cast<int>(ks.target));
+        const SA::Domain::KnockbackState& ks = e.body.knockback_state;
+        if (ks.target >= static_cast<std::uint32_t>(SA::Rules::kSlotCount)) break;
+        SA::Rules::Combatant& c = field.at(static_cast<int>(ks.target));
         if (!c.occupied) break;
         c.ultimate_accumulator = ks.accumulator;
         break;
       }
-      case sa::domain::BattleEvent::BodyKind::CAPTURE_ACT: {
+      case SA::Domain::BattleEvent::BodyKind::CAPTURE_ACT: {
         // 批次 A.2:捕获事件的世界写回。
-        const sa::domain::CaptureAct& cap = e.body.capture_act;
-        if (cap.target >= static_cast<std::uint32_t>(sa::rules::kSlotCount)) break;
-        sa::rules::Combatant& tgt = field.at(static_cast<int>(cap.target));
+        const SA::Domain::CaptureAct& cap = e.body.capture_act;
+        if (cap.target >= static_cast<std::uint32_t>(SA::Rules::kSlotCount)) break;
+        SA::Rules::Combatant& tgt = field.at(static_cast<int>(cap.target));
         if (!tgt.occupied) break;
         if (cap.flags != 0u) {
           // ★ 捕获成功 ⇒ 被捕目标离场(源码 `BATTLE_Exit`),**不是战死** ——
@@ -191,12 +191,12 @@ void ApplyEvents(const sa::domain::BattleEvents& events,
 //        否则 demo 挂起时分不清是"敌人打不动"还是"事件流断了";
 //     ② 客户端正常出招时,战斗**更快**结束 ⇒ 指令确实被采纳了。
 //        ★ 这一条才是 1.4 真正要证明的东西:上行链路是通的。
-sa::rules::BattleField MakeDemoField() {
-  sa::rules::BattleField f{};
+SA::Rules::BattleField MakeDemoField() {
+  SA::Rules::BattleField f{};
 
-  sa::rules::Combatant& me = f.at(0);
+  SA::Rules::Combatant& me = f.at(0);
   me.occupied = true;
-  me.kind = sa::rules::CombatantKind::kPlayer;
+  me.kind = SA::Rules::CombatantKind::kPlayer;
   me.slot = 0;
   me.level = 20;
   me.hp = 400;
@@ -208,10 +208,10 @@ sa::rules::BattleField MakeDemoField() {
   me.quick = 200;
   me.luck = 10;
 
-  sa::rules::Combatant& foe = f.at(sa::rules::kSideOffset);
+  SA::Rules::Combatant& foe = f.at(SA::Rules::kSideOffset);
   foe.occupied = true;
-  foe.kind = sa::rules::CombatantKind::kEnemy;
-  foe.slot = static_cast<std::uint8_t>(sa::rules::kSideOffset);
+  foe.kind = SA::Rules::CombatantKind::kEnemy;
+  foe.slot = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
   foe.level = 18;
   foe.hp = 260;
   foe.max_hp = 260;
@@ -228,7 +228,7 @@ sa::rules::BattleField MakeDemoField() {
 //    (platform 不依赖 rules,那是分层的硬约束)。⇒ 两处一致性由这里守。
 //    ⚠️ 少了它,某天 kSideOffset 改了、配置校验照旧,表现是玩家被放进敌方半场
 //      而没有任何一处报错 —— 00 §10.4 那类静默错误。
-static_assert(sa::rules::kSideOffset == 10,
+static_assert(SA::Rules::kSideOffset == 10,
               "demo_battle.slot 的配置上限(config.cpp 里的 9)是按 "
               "kSideOffset == 10 写死的;kSideOffset 变了就要同步改那里");
 
@@ -237,39 +237,39 @@ struct World::Impl {
   //   但类型是分开的 —— 01 §5.2 明写两者生命周期不同,
   //   压在一起正是原版 LoginType 的毛病。重连窗口留到阶段 2。
   struct Conn {
-    sa::net::ConnectionId conn_id = 0;
-    sa::net::FrameReader reader{};
-    std::unique_ptr<sa::net::Session> session;
+    SA::Net::ConnectionId conn_id = 0;
+    SA::Net::FrameReader reader{};
+    std::unique_ptr<SA::Net::Session> session;
     std::vector<std::uint8_t> outbound{};
   };
 
-  Impl(const sa::platform::ServerConfig& cfg, sa::platform::IClock& clk,
-       sa::platform::Logger& log, sa::platform::RandomSource& rnd,
-       sa::net::ITransport& tp)
+  Impl(const SA::Platform::ServerConfig& cfg, SA::Platform::IClock& clk,
+       SA::Platform::Logger& log, SA::Platform::RandomSource& rnd,
+       SA::Net::ITransport& tp)
       : config(cfg), clock(clk), logger(log), random(rnd), transport(tp) {}
 
-  sa::platform::ServerConfig config;
-  sa::platform::IClock& clock;
-  sa::platform::Logger& logger;
-  sa::platform::RandomSource& random;
-  sa::net::ITransport& transport;
+  SA::Platform::ServerConfig config;
+  SA::Platform::IClock& clock;
+  SA::Platform::Logger& logger;
+  SA::Platform::RandomSource& random;
+  SA::Net::ITransport& transport;
 
-  std::map<sa::net::ConnectionId, Conn> conns;
+  std::map<SA::Net::ConnectionId, Conn> conns;
   // 1.5 里 SessionId == ConnectionId(见上)。
   std::map<BattleId, BattleInstance> battles;
 
-  sa::rules::RulesConfig rules_config{};
+  SA::Rules::RulesConfig rules_config{};
   BattleId next_battle_id = 1;
   std::uint64_t ticks = 0;
-  sa::platform::Millis now_ms = 0;
+  SA::Platform::Millis now_ms = 0;
   bool shutdown_requested = false;
   bool stopped = false;
 };
 
-World::World(const sa::platform::ServerConfig& config,
-             sa::platform::IClock& clock, sa::platform::Logger& logger,
-             sa::platform::RandomSource& random,
-             sa::net::ITransport& transport)
+World::World(const SA::Platform::ServerConfig& config,
+             SA::Platform::IClock& clock, SA::Platform::Logger& logger,
+             SA::Platform::RandomSource& random,
+             SA::Net::ITransport& transport)
     : impl_(std::make_unique<Impl>(config, clock, logger, random, transport)) {
   transport.SetEvents(this);
 }
@@ -306,12 +306,12 @@ void World::Tick() {
 
       // 结算一个回合。⚠️ 返回 false = 事件超过 256 条被迫截断。
       //   05 §10.4 记着原版无上界 strcat 的教训 ⇒ **必须处理**,不可当没看见。
-      const bool ok = sa::rules::ResolveTurn(b.field, b.commands,
+      const bool ok = SA::Rules::ResolveTurn(b.field, b.commands,
                                              s.rules_config, b.rng, b.events);
       if (!ok) {
         b.stats.truncated_once = true;
-        s.logger.Log(sa::platform::LogLevel::kWarn,
-                     sa::platform::LogEvent::kBattleEventsTruncated,
+        s.logger.Log(SA::Platform::LogLevel::kWarn,
+                     SA::Platform::LogEvent::kBattleEventsTruncated,
                      {{"battle_id", b.id},
                       {"turn", static_cast<std::uint64_t>(b.field.turn)}});
         // ⚠️ 本批次先如实记账并继续 —— 01 §12 的取向是「宁可分包,不可静默截断」,
@@ -327,7 +327,7 @@ void World::Tick() {
       ++b.stats.turns_resolved;
 
       // 下发事件流。★ 这就是 1.4 demo 的验收对象:**事件流端到端一致**。
-      for (const sa::net::SessionId sid : b.members) {
+      for (const SA::Net::SessionId sid : b.members) {
         const auto it = s.conns.find(sid);
         if (it == s.conns.end()) continue;
         Impl::Conn& c = it->second;
@@ -335,18 +335,18 @@ void World::Tick() {
         (void)c.session->Push(b.events, c.outbound);
       }
 
-      s.logger.Log(sa::platform::LogLevel::kDebug,
-                   sa::platform::LogEvent::kBattleTurnResolved,
+      s.logger.Log(SA::Platform::LogLevel::kDebug,
+                   SA::Platform::LogEvent::kBattleTurnResolved,
                    {{"battle_id", b.id},
                     {"turn", static_cast<std::uint64_t>(b.field.turn)},
                     {"events", static_cast<std::uint64_t>(b.events.events.size())}});
 
       // 本回合的指令用完即清 —— 指令是**本回合**的输入,
       // 留着会让下一回合重放上一回合的动作。
-      b.commands = sa::rules::TurnCommands{};
+      b.commands = SA::Rules::TurnCommands{};
       ++b.field.turn;
       b.next_turn_at_ms =
-          s.now_ms + static_cast<sa::platform::Millis>(
+          s.now_ms + static_cast<SA::Platform::Millis>(
                          s.config.tempo.battle_turn_interval_ms);
 
       if (SideWipedOut(b.field, true) || SideWipedOut(b.field, false)) {
@@ -355,11 +355,11 @@ void World::Tick() {
       } else {
         // 下一回合开始 —— ready_mask 留 0:1.5 没有"谁已提交指令"的收集期,
         // 指令一到就存下。收集期与超时是阶段 2 的事。
-        sa::domain::BattleTurnBegin begin;
+        SA::Domain::BattleTurnBegin begin;
         begin.battle_id = b.id;
         begin.turn = b.field.turn;
         begin.ready_mask = 0;
-        for (const sa::net::SessionId sid : b.members) {
+        for (const SA::Net::SessionId sid : b.members) {
           const auto it = s.conns.find(sid);
           if (it == s.conns.end() || it->second.session == nullptr) continue;
           (void)it->second.session->Push(begin, it->second.outbound);
@@ -369,8 +369,8 @@ void World::Tick() {
     for (const BattleId id : finished) {
       const auto it = s.battles.find(id);
       if (it == s.battles.end()) continue;
-      s.logger.Log(sa::platform::LogLevel::kInfo,
-                   sa::platform::LogEvent::kBattleFinished,
+      s.logger.Log(SA::Platform::LogLevel::kInfo,
+                   SA::Platform::LogEvent::kBattleFinished,
                    {{"battle_id", id},
                     {"turns", static_cast<std::uint64_t>(
                                   it->second.stats.turns_resolved)}});
@@ -396,18 +396,18 @@ void World::Tick() {
     // ⚠️ 01 §11.2 的完整停服流程(拒绝新连接 → 广播倒计时 → 逐会话保存
     //    → 等在途请求收敛 → 落盘确认)在 1.5 **做不了也不该做**:
     //    没有 storage、没有跨模块请求。这里只做能做的那部分。
-    s.logger.Log(sa::platform::LogLevel::kInfo,
-                 sa::platform::LogEvent::kServerStopping,
+    s.logger.Log(SA::Platform::LogLevel::kInfo,
+                 SA::Platform::LogEvent::kServerStopping,
                  {{"connections", static_cast<std::uint64_t>(s.conns.size())},
                   {"battles", static_cast<std::uint64_t>(s.battles.size())}});
     // ⚠️★ **不能边遍历 s.conns 边关**:transport.Close() 会**同步**回调
     //    OnDisconnected,而它做的第一件事就是 s.conns.erase(it)
     //    ⇒ 迭代器当场失效。首次运行本用例即 SIGSEGV(2026-09-04)。
     //    ⇒ 先取快照,再逐个关。
-    std::vector<sa::net::ConnectionId> closing;
+    std::vector<SA::Net::ConnectionId> closing;
     closing.reserve(s.conns.size());
     for (const auto& kv : s.conns) closing.push_back(kv.first);
-    for (const sa::net::ConnectionId cid : closing) {
+    for (const SA::Net::ConnectionId cid : closing) {
       const auto it = s.conns.find(cid);
       if (it != s.conns.end() && it->second.session != nullptr) {
         it->second.session->Close();
@@ -419,7 +419,7 @@ void World::Tick() {
 }
 
 // ══ 战斗生命周期 ═════════════════════════════════════════════════
-BattleId World::StartBattle(const sa::rules::BattleField& field) {
+BattleId World::StartBattle(const SA::Rules::BattleField& field) {
   Impl& s = *impl_;
   const BattleId id = s.next_battle_id++;
 
@@ -428,37 +428,37 @@ BattleId World::StartBattle(const sa::rules::BattleField& field) {
   b.field = field;
   b.field.battle_id = id;
   b.seed = s.random.NextSeed();
-  b.rng = sa::rules::SeededRandom(b.seed);
+  b.rng = SA::Rules::SeededRandom(b.seed);
   b.next_turn_at_ms =
       s.now_ms +
-      static_cast<sa::platform::Millis>(s.config.tempo.battle_turn_interval_ms);
+      static_cast<SA::Platform::Millis>(s.config.tempo.battle_turn_interval_ms);
 
   const std::uint64_t seed = b.seed;
   s.battles.emplace(id, std::move(b));
 
-  s.logger.Log(sa::platform::LogLevel::kInfo,
-               sa::platform::LogEvent::kBattleStarted, {{"battle_id", id}});
+  s.logger.Log(SA::Platform::LogLevel::kInfo,
+               SA::Platform::LogEvent::kBattleStarted, {{"battle_id", id}});
   // ★★ 种子单独一条,级别 info:它是可回放的**唯一**凭据。
   //    调低成 debug 就等于在生产上关掉了可回放性。
-  s.logger.Log(sa::platform::LogLevel::kInfo,
-               sa::platform::LogEvent::kBattleSeed,
+  s.logger.Log(SA::Platform::LogLevel::kInfo,
+               SA::Platform::LogEvent::kBattleSeed,
                {{"battle_id", id},
                 {"seed", seed},
                 {"master_seed", s.random.master_seed()}});
   return id;
 }
 
-bool World::JoinBattle(BattleId battle, sa::net::SessionId session,
+bool World::JoinBattle(BattleId battle, SA::Net::SessionId session,
                        std::uint8_t slot) {
   Impl& s = *impl_;
   const auto bit = s.battles.find(battle);
   if (bit == s.battles.end()) return false;
-  if (slot >= sa::rules::kSlotCount) return false;
+  if (slot >= SA::Rules::kSlotCount) return false;
 
   const auto cit = s.conns.find(session);
   if (cit == s.conns.end() || cit->second.session == nullptr) return false;
   // ⚠️ 只有握手过的会话能入场 —— 否则一条没握手的连接就能拿到事件流。
-  if (cit->second.session->state() == sa::net::SessionState::kAnonymous ||
+  if (cit->second.session->state() == SA::Net::SessionState::kAnonymous ||
       cit->second.session->closed()) {
     return false;
   }
@@ -478,19 +478,19 @@ bool World::JoinBattle(BattleId battle, sa::net::SessionId session,
   //
   // ⚠️ 这不是 demo 专用的东西,所以放在 JoinBattle 而不是 OnSessionReady:
   //    任何入场路径(阶段 2 的选角、观战加入)都需要它。
-  sa::domain::BattleSelfInfo self;
+  SA::Domain::BattleSelfInfo self;
   self.battle_id = b.id;
   self.slot = slot;
   self.mp = b.field.at(slot).mp;
   // ⚠️ menu_flags 留 0:菜单构成(观战加入 / 先制 / 宠物菜单开关)属阶段 2 的
   //    UI 契约,此处**不猜** —— 与批次 0.5 对暴击/反击的处置同一条纪律。
   self.menu_flags = 0;
-  // ★ 但 cannot_act **不留 0**:DR-BT5 把「能否行动」定为 rules::CheckCanAct
+  // ★ 但 cannot_act **不留 0**:DR-BT5 把「能否行动」定为 Rules::CheckCanAct
   //   这一个真源,而它已经在 L3 里 ⇒ 照真源填,不是硬编码一个"可以行动"。
-  self.cannot_act = sa::rules::CheckCanAct(b.field.at(slot));
+  self.cannot_act = SA::Rules::CheckCanAct(b.field.at(slot));
   (void)cit->second.session->Push(self, cit->second.outbound);
 
-  sa::domain::BattleTurnBegin begin;
+  SA::Domain::BattleTurnBegin begin;
   begin.battle_id = b.id;
   begin.turn = b.field.turn;
   begin.ready_mask = 0;   // 1.5 没有收集期,理由见 Tick 第 4 步
@@ -498,8 +498,8 @@ bool World::JoinBattle(BattleId battle, sa::net::SessionId session,
 
   // ⚠️ 入场日志放在这里而不是调用方:任何入场路径都该留痕,
   //   而"谁在哪场的哪个槽"是排查战斗问题时第一个要问的东西。
-  s.logger.Log(sa::platform::LogLevel::kInfo,
-               sa::platform::LogEvent::kBattleJoined,
+  s.logger.Log(SA::Platform::LogLevel::kInfo,
+               SA::Platform::LogEvent::kBattleJoined,
                {{"battle_id", b.id},
                 {"session_id", session},
                 {"slot", static_cast<std::uint64_t>(slot)}});
@@ -507,21 +507,21 @@ bool World::JoinBattle(BattleId battle, sa::net::SessionId session,
 }
 
 // ══ ITransportEvents ═════════════════════════════════════════════
-void World::OnConnected(sa::net::ConnectionId id) {
+void World::OnConnected(SA::Net::ConnectionId id) {
   Impl& s = *impl_;
   Impl::Conn c;
   c.conn_id = id;
   // 1.5:SessionId == ConnectionId。⚠️ 阶段 2 加重连窗口时这条要断开 ——
   //    那正是 01 §5.2 把两者分开的理由。
-  c.session = std::make_unique<sa::net::Session>(
+  c.session = std::make_unique<SA::Net::Session>(
       id, s.config.protocol_version, s.config.heartbeat_interval_ms, this);
   s.conns.emplace(id, std::move(c));
 
-  s.logger.Log(sa::platform::LogLevel::kDebug,
-               sa::platform::LogEvent::kConnectionAccepted, {{"conn_id", id}});
+  s.logger.Log(SA::Platform::LogLevel::kDebug,
+               SA::Platform::LogEvent::kConnectionAccepted, {{"conn_id", id}});
 }
 
-void World::OnBytes(sa::net::ConnectionId id, const std::uint8_t* data,
+void World::OnBytes(SA::Net::ConnectionId id, const std::uint8_t* data,
                     std::size_t n) {
   Impl& s = *impl_;
   const auto it = s.conns.find(id);
@@ -529,8 +529,8 @@ void World::OnBytes(sa::net::ConnectionId id, const std::uint8_t* data,
   Impl::Conn& c = it->second;
 
   if (!c.reader.Push(data, n)) {
-    s.logger.Log(sa::platform::LogLevel::kWarn,
-                 sa::platform::LogEvent::kFrameRejected,
+    s.logger.Log(SA::Platform::LogLevel::kWarn,
+                 SA::Platform::LogEvent::kFrameRejected,
                  {{"conn_id", id}, {"reason", std::string_view("buffer_limit")}});
     s.transport.Close(id);
     return;
@@ -539,15 +539,15 @@ void World::OnBytes(sa::net::ConnectionId id, const std::uint8_t* data,
   for (;;) {
     const std::uint8_t* payload = nullptr;
     std::uint32_t len = 0;
-    const sa::net::FrameStatus st = c.reader.Next(&payload, &len);
-    if (st == sa::net::FrameStatus::kNeedMore) break;
-    if (st != sa::net::FrameStatus::kOk) {
+    const SA::Net::FrameStatus st = c.reader.Next(&payload, &len);
+    if (st == SA::Net::FrameStatus::kNeedMore) break;
+    if (st != SA::Net::FrameStatus::kOk) {
       // ⚠️ kTooLarge / kEmpty 不可恢复:字节流已无法对齐(见 net/api.h)。
-      s.logger.Log(sa::platform::LogLevel::kWarn,
-                   sa::platform::LogEvent::kFrameRejected,
+      s.logger.Log(SA::Platform::LogLevel::kWarn,
+                   SA::Platform::LogEvent::kFrameRejected,
                    {{"conn_id", id},
                     {"reason", std::string_view(
-                                   st == sa::net::FrameStatus::kTooLarge
+                                   st == SA::Net::FrameStatus::kTooLarge
                                        ? "frame_too_large"
                                        : "frame_empty")}});
       s.transport.Close(id);
@@ -557,12 +557,12 @@ void World::OnBytes(sa::net::ConnectionId id, const std::uint8_t* data,
     const bool ok = c.session->HandleFrame(payload, len, c.outbound);
     c.reader.Pop();
     if (!ok) {
-      s.logger.Log(sa::platform::LogLevel::kWarn,
-                   sa::platform::LogEvent::kHandshakeRejected,
+      s.logger.Log(SA::Platform::LogLevel::kWarn,
+                   SA::Platform::LogEvent::kHandshakeRejected,
                    {{"conn_id", id},
                     {"msg_id", static_cast<std::uint64_t>(
                                    c.session->last_reject_msg_id())},
-                    {"state", std::string_view(sa::net::SessionStateName(
+                    {"state", std::string_view(SA::Net::SessionStateName(
                                   c.session->state()))}});
       // ★ 先把已生成的出站字节发出去(可能含 HandshakeRejected),再关。
       if (!c.outbound.empty()) {
@@ -575,28 +575,28 @@ void World::OnBytes(sa::net::ConnectionId id, const std::uint8_t* data,
   }
 }
 
-void World::OnDisconnected(sa::net::ConnectionId id) {
+void World::OnDisconnected(SA::Net::ConnectionId id) {
   Impl& s = *impl_;
   const auto it = s.conns.find(id);
   if (it == s.conns.end()) return;
   if (it->second.session != nullptr) it->second.session->Close();
 
   for (auto& kv : s.battles) {
-    std::vector<sa::net::SessionId>& m = kv.second.members;
+    std::vector<SA::Net::SessionId>& m = kv.second.members;
     m.erase(std::remove(m.begin(), m.end(), id), m.end());
     kv.second.slot_of.erase(id);
   }
   s.conns.erase(it);
 
-  s.logger.Log(sa::platform::LogLevel::kDebug,
-               sa::platform::LogEvent::kConnectionClosed, {{"conn_id", id}});
+  s.logger.Log(SA::Platform::LogLevel::kDebug,
+               SA::Platform::LogEvent::kConnectionClosed, {{"conn_id", id}});
 }
 
 // ══ ISessionHost ═════════════════════════════════════════════════
-void World::OnSessionReady(sa::net::SessionId id) {
+void World::OnSessionReady(SA::Net::SessionId id) {
   Impl& s = *impl_;
-  s.logger.Log(sa::platform::LogLevel::kInfo,
-               sa::platform::LogEvent::kHandshakeAccepted,
+  s.logger.Log(SA::Platform::LogLevel::kInfo,
+               SA::Platform::LogEvent::kHandshakeAccepted,
                {{"session_id", id}});
 
   // ── 1.4 demo 的入场装配(默认关,见 platform/api.h 的 DemoBattleConfig)──
@@ -615,22 +615,22 @@ void World::OnSessionReady(sa::net::SessionId id) {
     // ⚠️ 进不去要**报出来**。这条路径上 JoinBattle 的每一个 false 都意味着
     //    上面刚建的战斗成了没人看的孤儿,而客户端会停在"连上了但什么都没发生"
     //    —— 那正是 00 §10.4 说的静默错误。
-    s.logger.Log(sa::platform::LogLevel::kError,
-                 sa::platform::LogEvent::kBattleJoinFailed,
+    s.logger.Log(SA::Platform::LogLevel::kError,
+                 SA::Platform::LogEvent::kBattleJoinFailed,
                  {{"battle_id", battle},
                   {"session_id", id},
                   {"reason", std::string_view("demo_join_failed")}});
     return;
   }
-  s.logger.Log(sa::platform::LogLevel::kDebug,
-               sa::platform::LogEvent::kSessionStateChanged,
+  s.logger.Log(SA::Platform::LogLevel::kDebug,
+               SA::Platform::LogEvent::kSessionStateChanged,
                {{"session_id", id},
                 {"state", std::string_view("online")},
                 {"demo", true}});
 }
 
-void World::OnBattleCommand(sa::net::SessionId id,
-                            const sa::domain::BattleCommand& cmd) {
+void World::OnBattleCommand(SA::Net::SessionId id,
+                            const SA::Domain::BattleCommand& cmd) {
   Impl& s = *impl_;
   const auto bit = s.battles.find(cmd.battle_id);
   if (bit == s.battles.end()) return;
@@ -643,15 +643,15 @@ void World::OnBattleCommand(sa::net::SessionId id,
   const auto sit = b.slot_of.find(id);
   if (sit == b.slot_of.end()) return;
   const std::uint8_t slot = sit->second;
-  if (slot >= sa::rules::kSlotCount) return;
+  if (slot >= SA::Rules::kSlotCount) return;
 
   b.commands.commands[slot] = cmd;
   b.commands.present[slot] = true;
 }
 
-void World::OnSessionClosed(sa::net::SessionId id) {
-  impl_->logger.Log(sa::platform::LogLevel::kDebug,
-                    sa::platform::LogEvent::kSessionStateChanged,
+void World::OnSessionClosed(SA::Net::SessionId id) {
+  impl_->logger.Log(SA::Platform::LogLevel::kDebug,
+                    SA::Platform::LogEvent::kSessionStateChanged,
                     {{"session_id", id},
                      {"state", std::string_view("closed")}});
 }
@@ -672,12 +672,12 @@ const BattleStats* World::stats(BattleId id) const {
   return it == impl_->battles.end() ? nullptr : &it->second.stats;
 }
 
-sa::net::SessionState World::session_state(sa::net::SessionId id) const {
+SA::Net::SessionState World::session_state(SA::Net::SessionId id) const {
   const auto it = impl_->conns.find(id);
   if (it == impl_->conns.end() || it->second.session == nullptr) {
-    return sa::net::SessionState::kClosed;
+    return SA::Net::SessionState::kClosed;
   }
   return it->second.session->state();
 }
 
-}  // namespace sa::world
+}  // namespace SA::World

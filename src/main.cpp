@@ -79,31 +79,31 @@ int main(int argc, char** argv) {
   }
 
   // ── 1. 读配置 + 校验 ──────────────────────────────────────
-  sa::platform::ConfigResult cfg;
+  SA::Platform::ConfigResult cfg;
   if (config_path.empty()) {
-    cfg = sa::platform::ParseConfig("{}");  // 全默认值,仍走同一条校验路径
+    cfg = SA::Platform::ParseConfig("{}");  // 全默认值,仍走同一条校验路径
   } else {
-    cfg = sa::platform::LoadConfigFile(config_path);
+    cfg = SA::Platform::LoadConfigFile(config_path);
   }
 
-  sa::platform::Logger logger(cfg.ok ? cfg.config.log_level
-                                     : sa::platform::LogLevel::kInfo);
+  SA::Platform::Logger logger(cfg.ok ? cfg.config.log_level
+                                     : SA::Platform::LogLevel::kInfo);
 
   if (!cfg.ok) {
     // ★ 一次说完全部错误,然后拒绝启动(见 config.cpp 卷首)。
-    for (const sa::platform::ConfigError& e : cfg.errors) {
-      logger.Log(sa::platform::LogLevel::kError,
-                 sa::platform::LogEvent::kConfigRejected,
+    for (const SA::Platform::ConfigError& e : cfg.errors) {
+      logger.Log(SA::Platform::LogLevel::kError,
+                 SA::Platform::LogEvent::kConfigRejected,
                  {{"path", std::string_view(e.path)},
                   {"reason", std::string_view(e.message)}});
     }
     return 1;
   }
 
-  logger.Log(sa::platform::LogLevel::kInfo,
-             sa::platform::LogEvent::kServerStarting, {});
-  logger.Log(sa::platform::LogLevel::kInfo,
-             sa::platform::LogEvent::kConfigLoaded,
+  logger.Log(SA::Platform::LogLevel::kInfo,
+             SA::Platform::LogEvent::kServerStarting, {});
+  logger.Log(SA::Platform::LogLevel::kInfo,
+             SA::Platform::LogEvent::kConfigLoaded,
              {{"bind_addr", std::string_view(cfg.config.bind_addr)},
               {"listen_port", static_cast<std::uint64_t>(cfg.config.listen_port)},
               {"protocol_version",
@@ -117,16 +117,16 @@ int main(int argc, char** argv) {
   // ⚠️ 配置阶段已经拒掉了未实现的模块名(见 config.cpp),所以这里
   //    不会出现"配置写着 social 而实际没装"的静默不一致。
   for (const std::string& m : cfg.config.modules) {
-    logger.Log(sa::platform::LogLevel::kInfo,
-               sa::platform::LogEvent::kModuleLoaded,
+    logger.Log(SA::Platform::LogLevel::kInfo,
+               SA::Platform::LogEvent::kModuleLoaded,
                {{"module", std::string_view(m)}});
   }
 
-  sa::platform::MonotonicClock clock;
-  sa::platform::RandomSource random(cfg.config.rng_seed);
+  SA::Platform::MonotonicClock clock;
+  SA::Platform::RandomSource random(cfg.config.rng_seed);
   // ★ 主随机种子必须落日志:没有它,"可回放"只是一句话(见 random.cpp)。
-  logger.Log(sa::platform::LogLevel::kInfo,
-             sa::platform::LogEvent::kBattleSeed,
+  logger.Log(SA::Platform::LogLevel::kInfo,
+             SA::Platform::LogEvent::kBattleSeed,
              {{"master_seed", random.master_seed()},
               {"from_config", cfg.config.rng_seed != 0}});
 
@@ -134,26 +134,26 @@ int main(int argc, char** argv) {
   // ★ 传输层**先于** World 构造 ⇒ 后于 World 析构(C++ 的构造/析构顺序保证)。
   //   World 的 Tick 第 8 步与析构都会经 transport 关连接,它那时必须还活着;
   //   反向没有悬垂问题 —— TcpTransport 的析构**不回调**(tcp_transport.cpp)。
-  sa::net::TcpTransport transport;
+  SA::Net::TcpTransport transport;
   const std::uint16_t port =
       self_test ? std::uint16_t{0} : cfg.config.listen_port;
   if (!transport.Listen(cfg.config.bind_addr.c_str(), port)) {
-    logger.Log(sa::platform::LogLevel::kError,
-               sa::platform::LogEvent::kListenFailed,
+    logger.Log(SA::Platform::LogLevel::kError,
+               SA::Platform::LogEvent::kListenFailed,
                {{"bind_addr", std::string_view(cfg.config.bind_addr)},
                 {"port", static_cast<std::uint64_t>(port)},
                 {"reason", std::string_view(transport.last_error())}});
     return 1;
   }
 
-  sa::world::World world(cfg.config, clock, logger, random, transport);
+  SA::World::World world(cfg.config, clock, logger, random, transport);
 
   // 信号在 World 就位之后才挂:此前收到信号直接被默认动作杀掉即可,没有东西需要收尾。
   std::signal(SIGINT, OnStopSignal);
   std::signal(SIGTERM, OnStopSignal);
 
-  logger.Log(sa::platform::LogLevel::kInfo,
-             sa::platform::LogEvent::kServerReady,
+  logger.Log(SA::Platform::LogLevel::kInfo,
+             SA::Platform::LogEvent::kServerReady,
              {{"bind_addr", std::string_view(cfg.config.bind_addr)},
               // ★ 打的是**实际**监听到的端口,不是配置值 —— self-test 下两者不同。
               {"listen_port", static_cast<std::uint64_t>(transport.listen_port())},
@@ -166,7 +166,7 @@ int main(int argc, char** argv) {
       static_cast<std::uint64_t>(hz) *
       (cfg.config.tempo.battle_turn_interval_ms / 1000 + 1);
 
-  const sa::platform::Millis t0 = clock.NowMs();
+  const SA::Platform::Millis t0 = clock.NowMs();
   std::uint64_t ticks = 0;
   bool shutting_down = false;
   while (!world.stopped()) {
@@ -174,8 +174,8 @@ int main(int argc, char** argv) {
         (g_stop_signal != 0 || (self_test && ticks >= budget))) {
       shutting_down = true;
       if (g_stop_signal != 0) {
-        logger.Log(sa::platform::LogLevel::kInfo,
-                   sa::platform::LogEvent::kShutdownSignal,
+        logger.Log(SA::Platform::LogLevel::kInfo,
+                   SA::Platform::LogEvent::kShutdownSignal,
                    {{"signal", static_cast<std::int64_t>(g_stop_signal)}});
       }
       // 本 tick 的第 8 步执行关闭(关全部连接),之后 stopped() 为真。
@@ -190,9 +190,9 @@ int main(int argc, char** argv) {
     //   后者会把每次 Tick 的耗时累积成漂移,tick 数与墙上时间慢慢脱钩。
     //   ⚠️ 取时间只经 IClock(platform/api.h:「全仓唯一允许取真实时间的地方」),
     //     sleep_for 只是等,不读钟。
-    const sa::platform::Millis due =
-        t0 + static_cast<sa::platform::Millis>((ticks * 1000u) / hz);
-    const sa::platform::Millis now = clock.NowMs();
+    const SA::Platform::Millis due =
+        t0 + static_cast<SA::Platform::Millis>((ticks * 1000u) / hz);
+    const SA::Platform::Millis now = clock.NowMs();
     if (due > now) {
       std::this_thread::sleep_for(std::chrono::milliseconds(due - now));
     }

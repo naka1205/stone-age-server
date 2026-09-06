@@ -24,35 +24,35 @@
 #include <cstring>
 #include <type_traits>
 
-using namespace sa;
+using namespace SA;
 
 // ── ① POD 约束(DR-TS1 边界 ②)──────────────────────────────────
-static_assert(std::is_trivially_copyable_v<transport::HandshakeRequest>);
-static_assert(std::is_trivially_copyable_v<transport::RequestHeader>);
-static_assert(std::is_trivially_copyable_v<domain::EntityRef>);
-static_assert(std::is_trivially_copyable_v<domain::BattleEvent>);
-static_assert(std::is_trivially_copyable_v<domain::BattleEvents>);
-static_assert(std::is_trivially_copyable_v<domain::BattleSnapshot>);
-static_assert(std::is_trivially_copyable_v<domain::WindowOpen>);
-static_assert(std::is_standard_layout_v<domain::BattleEvents>);
-static_assert(std::is_standard_layout_v<domain::WindowOpen>);
+static_assert(std::is_trivially_copyable_v<Transport::HandshakeRequest>);
+static_assert(std::is_trivially_copyable_v<Transport::RequestHeader>);
+static_assert(std::is_trivially_copyable_v<Domain::EntityRef>);
+static_assert(std::is_trivially_copyable_v<Domain::BattleEvent>);
+static_assert(std::is_trivially_copyable_v<Domain::BattleEvents>);
+static_assert(std::is_trivially_copyable_v<Domain::BattleSnapshot>);
+static_assert(std::is_trivially_copyable_v<Domain::WindowOpen>);
+static_assert(std::is_standard_layout_v<Domain::BattleEvents>);
+static_assert(std::is_standard_layout_v<Domain::WindowOpen>);
 
 // ── ② (sg.width) 的窄化生效 ───────────────────────────────────
-static_assert(sizeof(transport::RejectReason) == 1);
-static_assert(sizeof(transport::Status) == 1);
-static_assert(sizeof(domain::Direction) == 1);
-static_assert(sizeof(domain::BattleStatus) == 1);
-static_assert(sizeof(domain::CannotActReason) == 1);
-static_assert(sizeof(domain::WindowKind) == 2);
-static_assert(sizeof(domain::DamageFlag) == 4);
+static_assert(sizeof(Transport::RejectReason) == 1);
+static_assert(sizeof(Transport::Status) == 1);
+static_assert(sizeof(Domain::Direction) == 1);
+static_assert(sizeof(Domain::BattleStatus) == 1);
+static_assert(sizeof(Domain::CannotActReason) == 1);
+static_assert(sizeof(Domain::WindowKind) == 2);
+static_assert(sizeof(Domain::DamageFlag) == 4);
 
 // ── ③ msg_id 编译期映射 ──────────────────────────────────────
-static_assert(idl::msg_id_of<transport::HandshakeRequest>() == 0x0001);
-static_assert(idl::msg_id_of<domain::BattleSnapshot>()      == 0x0201);
-static_assert(idl::msg_id_of<domain::BattleEvents>()        == 0x0205);
-static_assert(idl::msg_id_of<domain::BattleCommand>()       == 0x0210);
-static_assert(idl::msg_id_of<domain::WindowOpen>()          == 0x0601);
-static_assert(idl::msg_id_of<domain::WindowReply>()         == 0x0602);
+static_assert(IDL::msg_id_of<Transport::HandshakeRequest>() == 0x0001);
+static_assert(IDL::msg_id_of<Domain::BattleSnapshot>()      == 0x0201);
+static_assert(IDL::msg_id_of<Domain::BattleEvents>()        == 0x0205);
+static_assert(IDL::msg_id_of<Domain::BattleCommand>()       == 0x0210);
+static_assert(IDL::msg_id_of<Domain::WindowOpen>()          == 0x0601);
+static_assert(IDL::msg_id_of<Domain::WindowReply>()         == 0x0602);
 
 // ── ⑤ 体积回归 ───────────────────────────────────────────────
 //
@@ -62,54 +62,54 @@ static_assert(idl::msg_id_of<domain::WindowReply>()         == 0x0602);
 //   它把 union 从 24 B 撑到 160 B,使每回合事件缓冲 7 KB → 41 KB(5.7×)。
 //   改成参数 ID 化(DR-CP5 的精神)后归零。
 //   ⇒ 这类回归静默且昂贵,必须由断言而不是 code review 来挡。
-static_assert(sizeof(domain::BattleEvent) <= 32,
+static_assert(sizeof(Domain::BattleEvent) <= 32,
               "BattleEvent 的 union 变大了：检查是否有变体引入了定长字符串/数组。"
               "它会乘以 max_count=256 计入每回合事件缓冲。");
-static_assert(sizeof(domain::BattleEvents) <= 8 * 1024,
+static_assert(sizeof(Domain::BattleEvents) <= 8 * 1024,
               "每回合事件缓冲超过 8 KB —— 见上一条。");
-static_assert(sizeof(domain::CombatantState) <= 512);
-static_assert(sizeof(domain::BattleCommand) <= 32);
+static_assert(sizeof(Domain::CombatantState) <= 512);
+static_assert(sizeof(Domain::BattleCommand) <= 32);
 
 int main() {
   std::uint8_t buf[64 * 1024];
 
   // ── 往返 1:定长字符串 ──────────────────────────────────────
-  transport::HandshakeRequest in{};
+  Transport::HandshakeRequest in{};
   in.protocol_version = 7;
   in.client_build.assign("sa-client-8.0.0-rc1");
 
-  idl::Writer w(buf, sizeof(buf));
+  IDL::Writer w(buf, sizeof(buf));
   encode(w, in);
   assert(w.ok());
 
-  transport::HandshakeRequest out{};
-  idl::Reader r(buf, w.size());
+  Transport::HandshakeRequest out{};
+  IDL::Reader r(buf, w.size());
   decode(r, out);
   assert(r.ok());
   assert(out.protocol_version == 7);
   assert(std::strcmp(out.client_build.c_str(), "sa-client-8.0.0-rc1") == 0);
 
   // ── 往返 2:窄化枚举 ────────────────────────────────────────
-  transport::HandshakeRejected rej{};
-  rej.reason = transport::RejectReason::REJECT_VERSION_MISMATCH;
+  Transport::HandshakeRejected rej{};
+  rej.reason = Transport::RejectReason::REJECT_VERSION_MISMATCH;
   rej.required_protocol_version = 9;
-  idl::Writer w2(buf, sizeof(buf));
+  IDL::Writer w2(buf, sizeof(buf));
   encode(w2, rej);
-  transport::HandshakeRejected rej2{};
-  idl::Reader r2(buf, w2.size());
+  Transport::HandshakeRejected rej2{};
+  IDL::Reader r2(buf, w2.size());
   decode(r2, rej2);
   assert(r2.ok());
-  assert(rej2.reason == transport::RejectReason::REJECT_VERSION_MISMATCH);
+  assert(rej2.reason == Transport::RejectReason::REJECT_VERSION_MISMATCH);
   assert(rej2.required_protocol_version == 9);
 
   // ── 往返 3:嵌套 message ───────────────────────────────────
-  domain::EntityRef ref{};
-  ref.source = domain::EntitySource::ENTITY_SOURCE_ENTITY;
+  Domain::EntityRef ref{};
+  ref.source = Domain::EntitySource::ENTITY_SOURCE_ENTITY;
   ref.entity_id = 4242;
-  idl::Writer w3(buf, sizeof(buf));
+  IDL::Writer w3(buf, sizeof(buf));
   encode(w3, ref);
-  domain::EntityRef ref2{};
-  idl::Reader r3(buf, w3.size());
+  Domain::EntityRef ref2{};
+  IDL::Reader r3(buf, w3.size());
   decode(r3, ref2);
   assert(r3.ok());
   assert(ref2.entity_id == 4242);
@@ -118,110 +118,110 @@ int main() {
   //
   // 构造一个「近战命中 2 个目标」的回合,验证 02 §6.2 改变 1 的形状:
   // 原版靠 FF| 终止符表达变长目标列表,新形状是 Hit.target_count + 后续 Damage。
-  domain::BattleEvents ev{};
+  Domain::BattleEvents ev{};
   ev.battle_id = 0xDEAD'BEEFull;
   ev.turn = 3;
 
-  domain::BattleEvent e0{};
-  e0.body_kind = domain::BattleEvent::BodyKind::HIT;
+  Domain::BattleEvent e0{};
+  e0.body_kind = Domain::BattleEvent::BodyKind::HIT;
   e0.body.hit.attacker = 2;
-  e0.body.hit.kind = domain::AttackKind::ATTACK_KIND_MELEE;
+  e0.body.hit.kind = Domain::AttackKind::ATTACK_KIND_MELEE;
   e0.body.hit.skill_id = 0;          // MELEE 无技能 id
   e0.body.hit.target_count = 2;      // ★ 其后紧跟 2 个 Damage
   ev.events.push_back(e0);
 
   for (std::uint32_t t = 0; t < 2; ++t) {
-    domain::BattleEvent d{};
-    d.body_kind = domain::BattleEvent::BodyKind::DAMAGE;
+    Domain::BattleEvent d{};
+    d.body_kind = Domain::BattleEvent::BodyKind::DAMAGE;
     d.body.damage.target = 10 + t;   // 10.. 为敌方侧(SIDE_OFFSET = 10)
     d.body.damage.hp_delta = -37;
     d.body.damage.pet_hp_delta = 0;
     d.body.damage.flags =
-        static_cast<std::uint32_t>(domain::DamageFlag::DAMAGE_FLAG_NORMAL) |
-        static_cast<std::uint32_t>(domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
-    d.body.damage.status_applied = domain::BattleStatus::BATTLE_ST_NONE;
+        static_cast<std::uint32_t>(Domain::DamageFlag::DAMAGE_FLAG_NORMAL) |
+        static_cast<std::uint32_t>(Domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
+    d.body.damage.status_applied = Domain::BattleStatus::BATTLE_ST_NONE;
     ev.events.push_back(d);
   }
 
-  domain::BattleEvent e3{};
-  e3.body_kind = domain::BattleEvent::BodyKind::STATUS_CHANGE;
+  Domain::BattleEvent e3{};
+  e3.body_kind = Domain::BattleEvent::BodyKind::STATUS_CHANGE;
   e3.body.status_change.target = 11;
   // ★ DR-BT4 修正区的状态(31..43):原版三张表都停在它之前 ⇒ 无法被抵抗。
   //   这里断言它在 schema 里是**一等成员**,不是越界值。
-  e3.body.status_change.status = domain::BattleStatus::BATTLE_ST_ICECRACK5;
+  e3.body.status_change.status = Domain::BattleStatus::BATTLE_ST_ICECRACK5;
   e3.body.status_change.applied = true;
   ev.events.push_back(e3);
 
-  idl::Writer w4(buf, sizeof(buf));
+  IDL::Writer w4(buf, sizeof(buf));
   encode(w4, ev);
   assert(w4.ok());
 
-  domain::BattleEvents ev2{};
-  idl::Reader r4(buf, w4.size());
+  Domain::BattleEvents ev2{};
+  IDL::Reader r4(buf, w4.size());
   decode(r4, ev2);
   assert(r4.ok());
   assert(ev2.battle_id == 0xDEAD'BEEFull);
   assert(ev2.turn == 3);
   assert(ev2.events.size() == 4);
-  assert(ev2.events[0].body_kind == domain::BattleEvent::BodyKind::HIT);
+  assert(ev2.events[0].body_kind == Domain::BattleEvent::BodyKind::HIT);
   assert(ev2.events[0].body.hit.target_count == 2);
   assert(ev2.events[1].body.damage.hp_delta == -37);
   assert(ev2.events[2].body.damage.target == 11);
   assert(ev2.events[3].body.status_change.status ==
-         domain::BattleStatus::BATTLE_ST_ICECRACK5);
+         Domain::BattleStatus::BATTLE_ST_ICECRACK5);
 
   // ── 往返 5:窗口(oneof + repeated string + 显式 choice_id)──
-  domain::WindowOpen win{};
+  Domain::WindowOpen win{};
   win.window_id = 77;
-  win.kind = domain::WindowKind::WINDOW_KIND_SELECT;
-  win.buttons = static_cast<std::uint32_t>(domain::ButtonFlag::BUTTON_FLAG_OK) |
-                static_cast<std::uint32_t>(domain::ButtonFlag::BUTTON_FLAG_CANCEL);
-  win.source.source = domain::EntitySource::ENTITY_SOURCE_ENTITY;
+  win.kind = Domain::WindowKind::WINDOW_KIND_SELECT;
+  win.buttons = static_cast<std::uint32_t>(Domain::ButtonFlag::BUTTON_FLAG_OK) |
+                static_cast<std::uint32_t>(Domain::ButtonFlag::BUTTON_FLAG_CANCEL);
+  win.source.source = Domain::EntitySource::ENTITY_SOURCE_ENTITY;
   win.source.entity_id = 1234;
-  win.body_kind = domain::WindowOpen::BodyKind::SELECT;
+  win.body_kind = Domain::WindowOpen::BodyKind::SELECT;
   {
-    idl::FixedStr<255> line{};
+    IDL::FixedStr<255> line{};
     line.assign("你要买点什么？");
     win.body.select.lines.push_back(line);
 
-    domain::Choice c0{};
+    Domain::Choice c0{};
     c0.choice_id = 100;              // ★ 显式 id,不是位置序号(DR-PR1)
     c0.text.assign("买东西");
     c0.enabled = true;
     win.body.select.choices.push_back(c0);
 
-    domain::Choice c1{};
+    Domain::Choice c1{};
     c1.choice_id = 200;
     c1.text.assign("离开");
     c1.enabled = true;
     win.body.select.choices.push_back(c1);
   }
 
-  idl::Writer w5(buf, sizeof(buf));
+  IDL::Writer w5(buf, sizeof(buf));
   encode(w5, win);
   assert(w5.ok());
 
-  domain::WindowOpen win2{};
-  idl::Reader r5(buf, w5.size());
+  Domain::WindowOpen win2{};
+  IDL::Reader r5(buf, w5.size());
   decode(r5, win2);
   assert(r5.ok());
   assert(win2.window_id == 77);
-  assert(win2.kind == domain::WindowKind::WINDOW_KIND_SELECT);
-  assert(win2.body_kind == domain::WindowOpen::BodyKind::SELECT);
+  assert(win2.kind == Domain::WindowKind::WINDOW_KIND_SELECT);
+  assert(win2.body_kind == Domain::WindowOpen::BodyKind::SELECT);
   assert(win2.body.select.choices.size() == 2);
   assert(win2.body.select.choices[1].choice_id == 200);
   assert(std::strcmp(win2.body.select.choices[0].text.c_str(), "买东西") == 0);
 
   // ── 边界:截断输入必须被挡住,不得越界读 ─────────────────────
   {
-    idl::Reader rt(buf, 1);
-    domain::WindowOpen tmp{};
+    IDL::Reader rt(buf, 1);
+    Domain::WindowOpen tmp{};
     decode(rt, tmp);
     assert(!rt.ok());
   }
   {
-    idl::Reader rt(buf, w5.size() / 2);   // 半个包
-    domain::WindowOpen tmp{};
+    IDL::Reader rt(buf, w5.size() / 2);   // 半个包
+    Domain::WindowOpen tmp{};
     decode(rt, tmp);
     assert(!rt.ok());
   }
@@ -242,12 +242,12 @@ int main() {
   //     一个字都不会说,而 GCC 只在恰好存在那种调用点时才报。
   {
     // ① 纯标量消息 —— 正是 GCC 点名的那个类型
-    domain::BattleTurnBegin b{};
+    Domain::BattleTurnBegin b{};
     b.battle_id = 0x1111'2222'3333'4444ull;
     b.turn = 0xABCD;
     b.ready_mask = 0xFFFF'FFFFu;
 
-    idl::Reader rt(buf, 3);              // 3 字节:连第一个 u64 都读不满
+    IDL::Reader rt(buf, 3);              // 3 字节:连第一个 u64 都读不满
     decode(rt, b);
     assert(!rt.ok());
     assert(b.battle_id == 0);            // 首字段:早退之前就被写,一直成立
@@ -256,11 +256,11 @@ int main() {
   }
   {
     // ② FixedStr —— len 归零不等于 data 可用
-    transport::HandshakeRequest req{};
+    Transport::HandshakeRequest req{};
     req.protocol_version = 999;
     req.client_build.assign("留在这里就是漏写的证据");
 
-    idl::Reader rt(buf, 2);              // 读不满 protocol_version(u32)
+    IDL::Reader rt(buf, 2);              // 读不满 protocol_version(u32)
     decode(rt, req);
     assert(!rt.ok());
     assert(req.protocol_version == 0);
@@ -271,17 +271,17 @@ int main() {
   }
   {
     // ③ ★★ FixedVec —— 本段四条里后果最重的一条
-    domain::BattleEvents ev3{};
+    Domain::BattleEvents ev3{};
     ev3.battle_id = 7;
     ev3.turn = 7;
-    domain::BattleEvent filler{};
-    filler.body_kind = domain::BattleEvent::BodyKind::DAMAGE;
+    Domain::BattleEvent filler{};
+    filler.body_kind = Domain::BattleEvent::BodyKind::DAMAGE;
     filler.body.damage.hp_delta = -1;
     assert(ev3.events.push_back(filler));
     assert(ev3.events.push_back(filler));
     assert(ev3.events.size() == 2);
 
-    idl::Reader rt(buf, 4);              // battle_id 是 u64,读不满
+    IDL::Reader rt(buf, 4);              // battle_id 是 u64,读不满
     decode(rt, ev3);
     assert(!rt.ok());
     assert(ev3.battle_id == 0);
@@ -299,25 +299,25 @@ int main() {
     //   都排在最后,后面没有字段。⇒ 它防的是将来往 oneof 之后加字段的那一天,
     //   而那时不会有任何东西报错。本条只能验到 fail + tag 归 NONE 这两样。
     const std::uint8_t bad[8] = {0xFF, 0xFF, 0, 0, 0, 0, 0, 0};   // tag = 0xFFFF
-    domain::BattleEvent e{};
-    e.body_kind = domain::BattleEvent::BodyKind::DAMAGE;          // 预填有效 kind
-    idl::Reader rt(bad, sizeof(bad));
+    Domain::BattleEvent e{};
+    e.body_kind = Domain::BattleEvent::BodyKind::DAMAGE;          // 预填有效 kind
+    IDL::Reader rt(bad, sizeof(bad));
     decode(rt, e);
     assert(!rt.ok());                    // 未知 tag 不静默跳过(DR-CP4)
-    assert(e.body_kind == domain::BattleEvent::BodyKind::NONE);
+    assert(e.body_kind == Domain::BattleEvent::BodyKind::NONE);
   }
 
   // ── 边界:写缓冲不足必须被挡住 ──────────────────────────────
   {
     std::uint8_t tiny[2];
-    idl::Writer wt(tiny, sizeof(tiny));
+    IDL::Writer wt(tiny, sizeof(tiny));
     encode(wt, ev);
     assert(!wt.ok());
   }
 
   std::printf(
       "OK  BattleEvent=%zu  BattleEvents=%zu  BattleSnapshot=%zu  WindowOpen=%zu\n",
-      sizeof(domain::BattleEvent), sizeof(domain::BattleEvents),
-      sizeof(domain::BattleSnapshot), sizeof(domain::WindowOpen));
+      sizeof(Domain::BattleEvent), sizeof(Domain::BattleEvents),
+      sizeof(Domain::BattleSnapshot), sizeof(Domain::WindowOpen));
   return 0;
 }

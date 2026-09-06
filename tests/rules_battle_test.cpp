@@ -33,9 +33,9 @@
 #include <utility>
 #include <vector>
 
-using namespace sa::rules;
-using sa::domain::BattleStatus;
-using sa::domain::CannotActReason;
+using namespace SA::Rules;
+using SA::Domain::BattleStatus;
+using SA::Domain::CannotActReason;
 
 namespace {
 
@@ -608,20 +608,20 @@ TurnCommands NoCommands() { return TurnCommands{}; }
 
 void SetAttack(TurnCommands& tc, int slot, int target) {
   tc.present[slot] = true;
-  tc.commands[slot] = sa::domain::BattleCommand{};
-  tc.commands[slot].command_kind = sa::domain::BattleCommand::CommandKind::ATTACK;
+  tc.commands[slot] = SA::Domain::BattleCommand{};
+  tc.commands[slot].command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
   tc.commands[slot].command.attack.target = static_cast<std::uint32_t>(target);
 }
 
 void SetKind(TurnCommands& tc, int slot,
-             sa::domain::BattleCommand::CommandKind kind) {
+             SA::Domain::BattleCommand::CommandKind kind) {
   tc.present[slot] = true;
-  tc.commands[slot] = sa::domain::BattleCommand{};
+  tc.commands[slot] = SA::Domain::BattleCommand{};
   tc.commands[slot].command_kind = kind;
 }
 
-std::size_t CountKind(const sa::domain::BattleEvents& ev,
-                      sa::domain::BattleEvent::BodyKind kind) {
+std::size_t CountKind(const SA::Domain::BattleEvents& ev,
+                      SA::Domain::BattleEvent::BodyKind kind) {
   std::size_t n = 0;
   for (std::size_t i = 0; i < ev.events.size(); ++i)
     if (ev.events[i].body_kind == kind) ++n;
@@ -636,8 +636,8 @@ TEST_CASE("行动顺序:排序键 = quick + 20 + sequence,且不夹下限") {
   // `BATTLE_DexCalc` 基数 = WORKQUICK + 20(05 §2.5)。
   // quick == 0 ⇒ 抖动项 RAND(0, 0) == 0 ⇒ dex 恒等于基数,可以精确断言。
   auto c = MakeCombatant(CombatantKind::kPlayer, 100, 100, /*quick=*/0);
-  sa::domain::BattleCommand cmd{};
-  cmd.command_kind = sa::domain::BattleCommand::CommandKind::ATTACK;
+  SA::Domain::BattleCommand cmd{};
+  cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
 
   SeededRandom rng(1);
   CHECK(ComputeActionDex(c, cmd, rng) == kDexBase);
@@ -662,7 +662,7 @@ TEST_CASE("行动顺序:同速按入场位次(DR-BT8)") {
   for (int i = 0; i < kSlotCount; ++i) {
     f.at(i) = MakeCombatant(CombatantKind::kPlayer, 100, 100, /*quick=*/0);
     f.at(i).slot = static_cast<std::uint8_t>(i);
-    SetKind(tc, i, sa::domain::BattleCommand::CommandKind::WAIT);
+    SetKind(tc, i, SA::Domain::BattleCommand::CommandKind::WAIT);
   }
 
   std::uint8_t order[kSlotCount] = {};
@@ -683,9 +683,9 @@ TEST_CASE("行动顺序:快的先动;无指令 / 已死 / 空槽不入列") {
   f.at(1).mods.sequence = 50;   // 用 sequence 制造确定的速度差(quick=0 ⇒ 无抖动)
   f.at(2).dead = true;          // 已死不入列
   // slot 3 有单位但**不给指令** ⇒ 不入列(05 §2.2 第 1 步:敌方由 AI 填齐)
-  SetKind(tc, 0, sa::domain::BattleCommand::CommandKind::WAIT);
-  SetKind(tc, 1, sa::domain::BattleCommand::CommandKind::WAIT);
-  SetKind(tc, 2, sa::domain::BattleCommand::CommandKind::WAIT);
+  SetKind(tc, 0, SA::Domain::BattleCommand::CommandKind::WAIT);
+  SetKind(tc, 1, SA::Domain::BattleCommand::CommandKind::WAIT);
+  SetKind(tc, 2, SA::Domain::BattleCommand::CommandKind::WAIT);
 
   std::uint8_t order[kSlotCount] = {};
   SeededRandom rng(7);
@@ -840,7 +840,7 @@ Duel MakeDuel(int atk = 1000, int def = 10) {
 
 TEST_CASE("ResolveTurn:一次普攻 ⇒ Hit + Damage,且 target_count 与 Damage 数一致") {
   Duel d = MakeDuel();
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   MaxRandom rng;
 
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
@@ -848,22 +848,22 @@ TEST_CASE("ResolveTurn:一次普攻 ⇒ Hit + Damage,且 target_count 与 Damage
   CHECK(ev.turn == d.field.turn);
 
   REQUIRE(ev.events.size() == 2);
-  REQUIRE(ev.events[0].body_kind == sa::domain::BattleEvent::BodyKind::HIT);
-  const sa::domain::Hit& hit = ev.events[0].body.hit;
+  REQUIRE(ev.events[0].body_kind == SA::Domain::BattleEvent::BodyKind::HIT);
+  const SA::Domain::Hit& hit = ev.events[0].body.hit;
   CHECK(hit.attacker == 0u);
-  CHECK(hit.kind == sa::domain::AttackKind::ATTACK_KIND_MELEE);
+  CHECK(hit.kind == SA::Domain::AttackKind::ATTACK_KIND_MELEE);
   CHECK(hit.skill_id == 0u);
   // ★ 变长目标列表的新形状(IDL 注释):Hit 声明 target_count,其后紧跟同样多个 Damage。
   //   ⚠️ 这条关系一旦对不上,客户端就会把下一个 Hit 当成本次的目标读进来。
   CHECK(hit.target_count == 1u);
-  CHECK(CountKind(ev, sa::domain::BattleEvent::BodyKind::DAMAGE) == hit.target_count);
+  CHECK(CountKind(ev, SA::Domain::BattleEvent::BodyKind::DAMAGE) == hit.target_count);
 
-  REQUIRE(ev.events[1].body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE);
-  const sa::domain::Damage& dmg = ev.events[1].body.damage;
+  REQUIRE(ev.events[1].body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE);
+  const SA::Domain::Damage& dmg = ev.events[1].body.damage;
   CHECK(dmg.target == 10u);
   CHECK(dmg.hp_delta < 0);
   CHECK((dmg.flags &
-         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_NORMAL)) != 0u);
+         static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL)) != 0u);
 }
 
 TEST_CASE("ResolveTurn:L3 不写世界状态 —— field 逐字节不变") {
@@ -873,7 +873,7 @@ TEST_CASE("ResolveTurn:L3 不写世界状态 —— field 逐字节不变") {
   //     "将来有人把 const 去掉"这种回归。)
   Duel d = MakeDuel();
   const BattleField before = d.field;
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   SeededRandom rng(99);
   ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev);
   CHECK(std::memcmp(&before, &d.field, sizeof(BattleField)) == 0);
@@ -885,14 +885,14 @@ TEST_CASE("ResolveTurn:回避产事件而不是被跳过(DODGE 标志)") {
   Duel d = MakeDuel();
   d.field.at(10).mods.always_dodge = true;   // ⑦ 必闪(_PETSKILL_SETDUCK,8.0 开)
 
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   SeededRandom rng(5);
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
   REQUIRE(ev.events.size() == 2);
-  const sa::domain::Damage& dmg = ev.events[1].body.damage;
+  const SA::Domain::Damage& dmg = ev.events[1].body.damage;
   CHECK((dmg.flags &
-         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_DODGE)) != 0u);
+         static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DODGE)) != 0u);
   CHECK(dmg.hp_delta == 0);
   CHECK(ev.events[0].body.hit.target_count == 1u);
 }
@@ -904,14 +904,14 @@ TEST_CASE("ResolveTurn:致死置 DEATH,且同回合剩余段数作废") {
 
   // 脚本:段数档(1 ⇒ 首档)· 段数(10)· 其后一律取上界。
   ScriptedRandom rng({1, 10, 10000});
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
   // ★ 10 段只打出 1 条 Damage ⇒ 剩余 9 段作废(原版同样逐段查存活)。
-  CHECK(CountKind(ev, sa::domain::BattleEvent::BodyKind::DAMAGE) == 1);
+  CHECK(CountKind(ev, SA::Domain::BattleEvent::BodyKind::DAMAGE) == 1);
   CHECK(ev.events[0].body.hit.target_count == 1u);
   CHECK((ev.events[1].body.damage.flags &
-         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_DEATH)) != 0u);
+         static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DEATH)) != 0u);
 }
 
 TEST_CASE("ResolveTurn:不可行动者不产事件(DR-BT5)") {
@@ -922,7 +922,7 @@ TEST_CASE("ResolveTurn:不可行动者不产事件(DR-BT5)") {
                         BattleStatus::BATTLE_ST_SLEEP}) {
     Duel d = MakeDuel();
     d.field.at(0).status = static_cast<std::uint8_t>(st);
-    sa::domain::BattleEvents ev{};
+    SA::Domain::BattleEvents ev{};
     MaxRandom rng;
     REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
     CHECK(ev.events.size() == 0);
@@ -940,12 +940,12 @@ TEST_CASE("ResolveTurn:批次 0.5 未接入的指令一律跳过,不产事件") 
   //    目标才产事件**;此表用的 Duel 里 slot 10 默认 `capturable=false`,若不移除,
   //    这里的 CAPTURE 恰好因前置门①而落"不产事件"——那是**巧合命中**,不是覆盖边界,
   //    留着会掩盖"捕获对可捕目标应产事件"。
-  using K = sa::domain::BattleCommand::CommandKind;
+  using K = SA::Domain::BattleCommand::CommandKind;
   for (const auto k : {K::GUARD, K::WAIT, K::PET_IN,
                        K::PET_OUT, K::USE_ITEM, K::PET_SKILL, K::PROF_SKILL, K::SPELL}) {
     Duel d = MakeDuel();
     SetKind(d.cmds, 0, k);
-    sa::domain::BattleEvents ev{};
+    SA::Domain::BattleEvents ev{};
     MaxRandom rng;
     REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
     CHECK(ev.events.size() == 0);
@@ -959,8 +959,8 @@ TEST_CASE("ResolveTurn:守方防御 ⇒ 减伤且置 GUARD;混乱值 > 0 时不�
     Duel d = MakeDuel(/*atk=*/100000, /*def=*/1);
     d.field.at(10).confusion = confusion;
     d.field.at(10).hp = d.field.at(10).max_hp = 100000000;
-    SetKind(d.cmds, 10, sa::domain::BattleCommand::CommandKind::GUARD);
-    sa::domain::BattleEvents ev{};
+    SetKind(d.cmds, 10, SA::Domain::BattleCommand::CommandKind::GUARD);
+    SA::Domain::BattleEvents ev{};
     MaxRandom rng;   // 防御减伤抽到 RAND(1,100) == 100 ⇒ 系数 0.50(最弱一档)
     ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev);
     REQUIRE(ev.events.size() >= 2);
@@ -973,9 +973,9 @@ TEST_CASE("ResolveTurn:守方防御 ⇒ 减伤且置 GUARD;混乱值 > 0 时不�
   const std::int32_t confused = run(/*confusion=*/1, &confused_flags);
 
   CHECK((guard_flags &
-         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_GUARD)) != 0u);
+         static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_GUARD)) != 0u);
   CHECK((confused_flags &
-         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_GUARD)) == 0u);
+         static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_GUARD)) == 0u);
   CHECK(guarded > confused);   // hp_delta 是负数 ⇒ 掉血更少 = 值更大
 }
 
@@ -988,11 +988,11 @@ TEST_CASE("ResolveTurn:骑宠分摊写进 hp_delta / pet_hp_delta") {
   d.field.at(10).ride_defense = 100;
   d.field.at(10).hp = d.field.at(10).max_hp = 100000000;
 
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   MaxRandom rng;
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
   REQUIRE(ev.events.size() == 2);
-  const sa::domain::Damage& dmg = ev.events[1].body.damage;
+  const SA::Domain::Damage& dmg = ev.events[1].body.damage;
 
   CHECK(dmg.hp_delta < 0);
   CHECK(dmg.pet_hp_delta < 0);
@@ -1019,7 +1019,7 @@ TEST_CASE("ResolveTurn:事件溢出返回 false,不静默截断") {
     SetAttack(tc, i, (i + 1) % kSlotCount);
   }
 
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   MaxRandom rng;
   CHECK(ResolveTurn(f, tc, RulesConfig{}, rng, ev) == false);
   CHECK(ev.events.size() == ev.events.capacity());
@@ -1035,7 +1035,7 @@ TEST_CASE("ResolveTurn:可回放 —— 同种子 + 同输入 ⇒ 事件流逐�
   SetAttack(b.cmds, 10, 0);
   a.field.at(0).level = b.field.at(0).level = 30;   // ⇒ 空手可多段,序列更长
 
-  sa::domain::BattleEvents ev1{}, ev2{};
+  SA::Domain::BattleEvents ev1{}, ev2{};
   SeededRandom r1(0xC0FFEE), r2(0xC0FFEE);
   const bool ok1 = ResolveTurn(a.field, a.cmds, RulesConfig{}, r1, ev1);
   const bool ok2 = ResolveTurn(b.field, b.cmds, RulesConfig{}, r2, ev2);
@@ -1044,7 +1044,7 @@ TEST_CASE("ResolveTurn:可回放 —— 同种子 + 同输入 ⇒ 事件流逐�
   REQUIRE(ev1.events.size() == ev2.events.size());
   CHECK(ev1.events.size() > 0);
   // 逐位比较:生成物是 POD(sa_idl_runtime.h 的 ② 条)⇒ 可直接 memcmp。
-  CHECK(std::memcmp(&ev1, &ev2, sizeof(sa::domain::BattleEvents)) == 0);
+  CHECK(std::memcmp(&ev1, &ev2, sizeof(SA::Domain::BattleEvents)) == 0);
   CHECK(r1.state() == r2.state());   // ★ 随机源的消费序列也必须一致
 }
 
@@ -1091,14 +1091,14 @@ TEST_CASE("逃跑:首次尝试 escape_cnt=2(DR-BT15 照抄源码的双重计数)
   Duel d = MakeDuel();
   d.field.at(0).luck = 5;
   d.field.at(0).escape_count = 0;
-  SetKind(d.cmds, 0, sa::domain::BattleCommand::CommandKind::ESCAPE);
+  SetKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::ESCAPE);
   d.cmds.present[10] = false;   // 敌方不行动,只看逃跑
 
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   MaxRandom rng;   // RAND(1,100)=100;190>100 ⇒ 即便取最大值也成功
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
   REQUIRE(ev.events.size() == 1);
-  REQUIRE(ev.events[0].body_kind == sa::domain::BattleEvent::BodyKind::ESCAPE);
+  REQUIRE(ev.events[0].body_kind == SA::Domain::BattleEvent::BodyKind::ESCAPE);
   CHECK(ev.events[0].body.escape.actor == 0u);
   CHECK(ev.events[0].body.escape.succeeded == true);
   CHECK(ev.events[0].body.escape.vanish == true);
@@ -1163,10 +1163,10 @@ TEST_CASE("逃跑:宠物不能逃(battle.c:9746)⇒ 不产事件") {
   // ★ 宠物发逃跑指令 ⇒ ResolveTurn 在分发处拦掉,什么都不发生。
   Duel d = MakeDuel();
   d.field.at(0).kind = CombatantKind::kPet;   // 把 0 号改成宠物
-  SetKind(d.cmds, 0, sa::domain::BattleCommand::CommandKind::ESCAPE);
+  SetKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::ESCAPE);
   d.cmds.present[10] = false;
 
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   MaxRandom rng;
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
   CHECK(ev.events.size() == 0);
@@ -1308,8 +1308,8 @@ TEST_CASE("捕获:可回放 —— 同种子 + 同输入 ⇒ 结果逐位相同"
 namespace {
 void SetCapture(TurnCommands& tc, int slot, int target) {
   tc.present[slot] = true;
-  tc.commands[slot] = sa::domain::BattleCommand{};
-  tc.commands[slot].command_kind = sa::domain::BattleCommand::CommandKind::CAPTURE;
+  tc.commands[slot] = SA::Domain::BattleCommand{};
+  tc.commands[slot].command_kind = SA::Domain::BattleCommand::CommandKind::CAPTURE;
   tc.commands[slot].command.capture.target = static_cast<std::uint32_t>(target);
 }
 }  // namespace
@@ -1326,11 +1326,11 @@ TEST_CASE("ResolveTurn:捕获成功 ⇒ CaptureAct(flags=1),敌人可捕、等�
   SetCapture(d.cmds, 0, 10);
   d.cmds.present[10] = false;     // 敌方不行动,只看捕获
 
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   ScriptedRandom rng({1});        // RAND(1,100)=1,远小于 WorkGet ⇒ 成功
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
   REQUIRE(ev.events.size() == 1);
-  REQUIRE(ev.events[0].body_kind == sa::domain::BattleEvent::BodyKind::CAPTURE_ACT);
+  REQUIRE(ev.events[0].body_kind == SA::Domain::BattleEvent::BodyKind::CAPTURE_ACT);
   CHECK(ev.events[0].body.capture_act.actor == 0u);
   CHECK(ev.events[0].body.capture_act.target == 10u);
   CHECK(ev.events[0].body.capture_act.flags == 1u);
@@ -1351,11 +1351,11 @@ TEST_CASE("ResolveTurn:前置门任一不过 ⇒ 仍产 CaptureAct 但 flags=0(�
     mut(d.field.at(10));            // 逐条破坏一道门 / 或改攻方
     SetCapture(d.cmds, 0, 10);
     d.cmds.present[10] = false;
-    sa::domain::BattleEvents ev{};
+    SA::Domain::BattleEvents ev{};
     ScriptedRandom rng({1});
     ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev);
     REQUIRE(ev.events.size() == 1);
-    REQUIRE(ev.events[0].body_kind == sa::domain::BattleEvent::BodyKind::CAPTURE_ACT);
+    REQUIRE(ev.events[0].body_kind == SA::Domain::BattleEvent::BodyKind::CAPTURE_ACT);
     return ev.events[0].body.capture_act.flags;
   };
 
@@ -1377,7 +1377,7 @@ TEST_CASE("ResolveTurn:等级门 myLv + 5 < targetLv ⇒ 直接失败(battle_eve
   SetCapture(d.cmds, 0, 10);
   d.cmds.present[10] = false;
 
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   ScriptedRandom rng({1});
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
   REQUIRE(ev.events.size() == 1);
@@ -1385,7 +1385,7 @@ TEST_CASE("ResolveTurn:等级门 myLv + 5 < targetLv ⇒ 直接失败(battle_eve
 
   // 边界:恰好 myLv + 5 == targetLv ⇒ **不**触发失败(严格小于)。
   d.field.at(0).level = 15;       // 15 + 5 = 20,不小于 20 ⇒ 通过
-  sa::domain::BattleEvents ev2{};
+  SA::Domain::BattleEvents ev2{};
   ScriptedRandom rng2({1});
   ResolveTurn(d.field, d.cmds, RulesConfig{}, rng2, ev2);
   CHECK(ev2.events[0].body.capture_act.flags == 1u);
@@ -1514,17 +1514,17 @@ TEST_CASE("ResolveTurn:暴击命中 ⇒ Damage 带 CRITICAL 标志,且**不**带
   d.field.at(0).level = 1;
   d.field.at(10).quick = 0;
 
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   ScriptedRandom srng({/*dex抖动*/0, /*回避*/9999, /*暴击*/1, /*伤害*/500, 500, 500, 500});
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, srng, ev));
 
-  const sa::domain::Damage* dmg = nullptr;
+  const SA::Domain::Damage* dmg = nullptr;
   for (const auto& e : ev.events) {
-    if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) { dmg = &e.body.damage; break; }
+    if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE) { dmg = &e.body.damage; break; }
   }
   REQUIRE(dmg != nullptr);
-  const auto crit_flag = static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
-  const auto norm_flag = static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_NORMAL);
+  const auto crit_flag = static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
+  const auto norm_flag = static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);
   CHECK((dmg->flags & crit_flag) != 0u);   // 暴击标志置位
   CHECK((dmg->flags & norm_flag) == 0u);   // ★ 与 NORMAL 互斥
 }
@@ -1533,16 +1533,16 @@ TEST_CASE("ResolveTurn:未暴击命中 ⇒ NORMAL 标志、无 CRITICAL") {
   Duel d = MakeDuel(1000, 10);
   d.field.at(0).quick = 0;   // per=0 ⇒ 不可能暴击
   d.field.at(10).quick = 0;
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   ScriptedRandom srng({0, 9999, 5000, 500});  // 暴击抽 5000 也无所谓,per=0
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, srng, ev));
-  const sa::domain::Damage* dmg = nullptr;
+  const SA::Domain::Damage* dmg = nullptr;
   for (const auto& e : ev.events) {
-    if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) { dmg = &e.body.damage; break; }
+    if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE) { dmg = &e.body.damage; break; }
   }
   REQUIRE(dmg != nullptr);
-  const auto crit_flag = static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
-  const auto norm_flag = static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_NORMAL);
+  const auto crit_flag = static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
+  const auto norm_flag = static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);
   CHECK((dmg->flags & norm_flag) != 0u);
   CHECK((dmg->flags & crit_flag) == 0u);
 }
@@ -1558,16 +1558,16 @@ TEST_CASE("ResolveTurn:持弓暴击 ⇒ 置 CRITICAL 标志但伤害不吃加成
     d.field.at(0).mods.wielding_bow = bow;
     d.field.at(10).quick = 0;
     d.field.at(10).level = 10;      // 附加项 = 200 × 5/10 × 0.5 = 50,持弓省掉
-    sa::domain::BattleEvents ev{};
+    SA::Domain::BattleEvents ev{};
     ScriptedRandom srng({0, 9999, 1, 500, 500, 500, 500});
     ResolveTurn(d.field, d.cmds, RulesConfig{}, srng, ev);
     for (const auto& e : ev.events)
-      if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) return e.body.damage;
-    return sa::domain::Damage{};
+      if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE) return e.body.damage;
+    return SA::Domain::Damage{};
   };
   const auto no_bow = run(false);
   const auto bow    = run(true);
-  const auto crit_flag = static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
+  const auto crit_flag = static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
   // ★ 两者都标 CRITICAL(客户端都要演"会心")。
   CHECK((no_bow.flags & crit_flag) != 0u);
   CHECK((bow.flags & crit_flag) != 0u);
@@ -1658,27 +1658,27 @@ TEST_CASE("ResolveTurn:一击打飞 ⇒ Damage 置 ULTIMATE_2,KnockbackState 回
   d.field.at(10).max_hp = 100;      // 门槛 = 140
   d.field.at(10).hp     = 100;
   d.field.at(10).ultimate_accumulator = 99;   // 命中后应被清零
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   ScriptedRandom rng({1, 10, 1});   // dex 抖动 / 段数 / per(不暴击)
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
-  const sa::domain::Damage* dmg = nullptr;
-  const sa::domain::KnockbackState* ks = nullptr;
+  const SA::Domain::Damage* dmg = nullptr;
+  const SA::Domain::KnockbackState* ks = nullptr;
   for (const auto& e : ev.events) {
-    if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) dmg = &e.body.damage;
-    if (e.body_kind == sa::domain::BattleEvent::BodyKind::KNOCKBACK_STATE)
+    if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE) dmg = &e.body.damage;
+    if (e.body_kind == SA::Domain::BattleEvent::BodyKind::KNOCKBACK_STATE)
       ks = &e.body.knockback_state;
   }
   REQUIRE(dmg != nullptr);
   CHECK((dmg->flags &
-         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_2)) != 0u);
+         static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_2)) != 0u);
   // ★ 一击打飞命中 ⇒ 累加器清零(99→0,变化),单开 KnockbackState 回填。
   REQUIRE(ks != nullptr);
   CHECK(ks->target == 10u);
   CHECK(ks->accumulator == 0);
   // 一击致死且打飞可并存(§3.8:打飞判定在死亡标记之前)。
   CHECK((dmg->flags &
-         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_DEATH)) != 0u);
+         static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DEATH)) != 0u);
 }
 
 TEST_CASE("ResolveTurn:免疫单位不置打飞标志(DR-BT11 数据驱动,不比对图号)") {
@@ -1688,17 +1688,17 @@ TEST_CASE("ResolveTurn:免疫单位不置打飞标志(DR-BT11 数据驱动,不�
   d.field.at(10).max_hp = 100;
   d.field.at(10).hp     = 100;
   d.field.at(10).mods.immune_knockback = true;   // ★ 标志位,非图号
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   ScriptedRandom rng({1, 10, 1});
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
-  const sa::domain::Damage* dmg = nullptr;
+  const SA::Domain::Damage* dmg = nullptr;
   for (const auto& e : ev.events)
-    if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) dmg = &e.body.damage;
+    if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE) dmg = &e.body.damage;
   REQUIRE(dmg != nullptr);
   const std::uint32_t ult =
-      static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_1) |
-      static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_2);
+      static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_1) |
+      static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_2);
   CHECK((dmg->flags & ult) == 0u);   // ★ 免疫 ⇒ 无打飞标志
 }
 
@@ -1712,20 +1712,20 @@ TEST_CASE("ResolveTurn:打穿未过门槛 ⇒ 不打飞但 KnockbackState 记录
   d.field.at(10).max_hp = 100000;
   d.field.at(10).hp     = 1;         // 打穿(damage-1)的溢出,远小于 120020
   d.field.at(10).ultimate_accumulator = 0;
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   ScriptedRandom rng({1, 10, 1});
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
-  const sa::domain::Damage* dmg = nullptr;
-  const sa::domain::KnockbackState* ks = nullptr;
+  const SA::Domain::Damage* dmg = nullptr;
+  const SA::Domain::KnockbackState* ks = nullptr;
   for (const auto& e : ev.events) {
-    if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) dmg = &e.body.damage;
-    if (e.body_kind == sa::domain::BattleEvent::BodyKind::KNOCKBACK_STATE)
+    if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE) dmg = &e.body.damage;
+    if (e.body_kind == SA::Domain::BattleEvent::BodyKind::KNOCKBACK_STATE)
       ks = &e.body.knockback_state;
   }
   REQUIRE(dmg != nullptr);
   const std::uint32_t ult1 =
-      static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_1);
+      static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_1);
   CHECK((dmg->flags & ult1) == 0u);       // 未过门槛 ⇒ 不打飞
   // ★ 累加器 0→正(变化)⇒ 单开 KnockbackState 记录,accumulator > 0 且未清零。
   REQUIRE(ks != nullptr);
@@ -1740,9 +1740,9 @@ TEST_CASE("ResolveTurn:不打穿(有剩血)⇒ 累加器不变,不产 KnockbackS
   d.field.at(10).max_hp = 100000;
   d.field.at(10).hp     = 100000;   // 血远高于单段伤害 ⇒ 不打穿
   d.field.at(10).ultimate_accumulator = 0;
-  sa::domain::BattleEvents ev{};
+  SA::Domain::BattleEvents ev{};
   ScriptedRandom rng({1, 10, 1});
   REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
-  CHECK(CountKind(ev, sa::domain::BattleEvent::BodyKind::KNOCKBACK_STATE) == 0u);
+  CHECK(CountKind(ev, SA::Domain::BattleEvent::BodyKind::KNOCKBACK_STATE) == 0u);
 }

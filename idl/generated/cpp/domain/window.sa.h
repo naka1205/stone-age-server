@@ -10,8 +10,8 @@
 #include "sa_idl_runtime.h"
 #include "domain/common.sa.h"
 
-namespace sa {
-namespace domain {
+namespace SA {
+namespace Domain {
 
 enum class WindowKind : std::uint16_t {
   WINDOW_KIND_INVALID = 0,
@@ -54,113 +54,113 @@ enum class ButtonFlag : std::uint8_t {
 };
 
 struct MessageBody {
-  sa::idl::FixedVec<sa::idl::FixedStr<255>, 16> lines;
+  SA::IDL::FixedVec<SA::IDL::FixedStr<255>, 16> lines;
   bool wide;
 };
 
-inline void encode(sa::idl::Writer& w, const MessageBody& m) {
-  sa::idl::write_vec(w, m.lines,
-      [](sa::idl::Writer& we, const sa::idl::FixedStr<255>& e) { sa::idl::write_str(we, e); });
+inline void encode(SA::IDL::Writer& w, const MessageBody& m) {
+  SA::IDL::write_vec(w, m.lines,
+      [](SA::IDL::Writer& we, const SA::IDL::FixedStr<255>& e) { SA::IDL::write_str(we, e); });
   w.b(m.wide);
 }
 
-inline void decode(sa::idl::Reader& r, MessageBody& m) {
-  sa::idl::read_vec(r, m.lines,
-      [](sa::idl::Reader& re, sa::idl::FixedStr<255>& e) { sa::idl::read_str(re, e); });
+inline void decode(SA::IDL::Reader& r, MessageBody& m) {
+  SA::IDL::read_vec(r, m.lines,
+      [](SA::IDL::Reader& re, SA::IDL::FixedStr<255>& e) { SA::IDL::read_str(re, e); });
   m.wide = r.b();
 }
 
 struct LineInputBody {
-  sa::idl::FixedVec<sa::idl::FixedStr<255>, 16> lines;
+  SA::IDL::FixedVec<SA::IDL::FixedStr<255>, 16> lines;
   std::uint32_t max_len;
   bool wide;
 };
 
-inline void encode(sa::idl::Writer& w, const LineInputBody& m) {
-  sa::idl::write_vec(w, m.lines,
-      [](sa::idl::Writer& we, const sa::idl::FixedStr<255>& e) { sa::idl::write_str(we, e); });
+inline void encode(SA::IDL::Writer& w, const LineInputBody& m) {
+  SA::IDL::write_vec(w, m.lines,
+      [](SA::IDL::Writer& we, const SA::IDL::FixedStr<255>& e) { SA::IDL::write_str(we, e); });
   w.u32(m.max_len);
   w.b(m.wide);
 }
 
-inline void decode(sa::idl::Reader& r, LineInputBody& m) {
-  sa::idl::read_vec(r, m.lines,
-      [](sa::idl::Reader& re, sa::idl::FixedStr<255>& e) { sa::idl::read_str(re, e); });
+inline void decode(SA::IDL::Reader& r, LineInputBody& m) {
+  SA::IDL::read_vec(r, m.lines,
+      [](SA::IDL::Reader& re, SA::IDL::FixedStr<255>& e) { SA::IDL::read_str(re, e); });
   m.max_len = r.u32();
   m.wide = r.b();
 }
 
 struct Choice {
   std::uint32_t choice_id;
-  sa::idl::FixedStr<255> text;
+  SA::IDL::FixedStr<255> text;
   bool enabled;
 };
 
-inline void encode(sa::idl::Writer& w, const Choice& m) {
+inline void encode(SA::IDL::Writer& w, const Choice& m) {
   w.u32(m.choice_id);
-  sa::idl::write_str(w, m.text);
+  SA::IDL::write_str(w, m.text);
   w.b(m.enabled);
 }
 
-inline void decode(sa::idl::Reader& r, Choice& m) {
+inline void decode(SA::IDL::Reader& r, Choice& m) {
   m.choice_id = r.u32();
-  sa::idl::read_str(r, m.text);
+  SA::IDL::read_str(r, m.text);
   m.enabled = r.b();
 }
 
 struct SelectBody {
-  sa::idl::FixedVec<sa::idl::FixedStr<255>, 16> lines;
-  sa::idl::FixedVec<sa::domain::Choice, 32> choices;
+  SA::IDL::FixedVec<SA::IDL::FixedStr<255>, 16> lines;
+  SA::IDL::FixedVec<SA::Domain::Choice, 32> choices;
 };
 
-inline void encode(sa::idl::Writer& w, const SelectBody& m) {
-  sa::idl::write_vec(w, m.lines,
-      [](sa::idl::Writer& we, const sa::idl::FixedStr<255>& e) { sa::idl::write_str(we, e); });
-  sa::idl::write_vec(w, m.choices,
-      [](sa::idl::Writer& we, const sa::domain::Choice& e) { encode(we, e); });
+inline void encode(SA::IDL::Writer& w, const SelectBody& m) {
+  SA::IDL::write_vec(w, m.lines,
+      [](SA::IDL::Writer& we, const SA::IDL::FixedStr<255>& e) { SA::IDL::write_str(we, e); });
+  SA::IDL::write_vec(w, m.choices,
+      [](SA::IDL::Writer& we, const SA::Domain::Choice& e) { encode(we, e); });
 }
 
-inline void decode(sa::idl::Reader& r, SelectBody& m) {
-  sa::idl::read_vec(r, m.lines,
-      [](sa::idl::Reader& re, sa::idl::FixedStr<255>& e) { sa::idl::read_str(re, e); });
-  sa::idl::read_vec(r, m.choices,
-      [](sa::idl::Reader& re, sa::domain::Choice& e) { decode(re, e); });
+inline void decode(SA::IDL::Reader& r, SelectBody& m) {
+  SA::IDL::read_vec(r, m.lines,
+      [](SA::IDL::Reader& re, SA::IDL::FixedStr<255>& e) { SA::IDL::read_str(re, e); });
+  SA::IDL::read_vec(r, m.choices,
+      [](SA::IDL::Reader& re, SA::Domain::Choice& e) { decode(re, e); });
 }
 
 struct ShopHeader {
   bool can_buy;
   bool reuse_previous;
-  sa::idl::FixedStr<63> shop_name;
-  sa::idl::FixedStr<255> message;
-  sa::idl::FixedStr<255> shop_message;
-  sa::idl::FixedStr<255> count_message;
-  sa::idl::FixedStr<255> level_low_message;
-  sa::idl::FixedStr<255> confirm_message;
-  sa::idl::FixedStr<255> item_full_message;
+  SA::IDL::FixedStr<63> shop_name;
+  SA::IDL::FixedStr<255> message;
+  SA::IDL::FixedStr<255> shop_message;
+  SA::IDL::FixedStr<255> count_message;
+  SA::IDL::FixedStr<255> level_low_message;
+  SA::IDL::FixedStr<255> confirm_message;
+  SA::IDL::FixedStr<255> item_full_message;
 };
 
-inline void encode(sa::idl::Writer& w, const ShopHeader& m) {
+inline void encode(SA::IDL::Writer& w, const ShopHeader& m) {
   w.b(m.can_buy);
   w.b(m.reuse_previous);
-  sa::idl::write_str(w, m.shop_name);
-  sa::idl::write_str(w, m.message);
-  sa::idl::write_str(w, m.shop_message);
-  sa::idl::write_str(w, m.count_message);
-  sa::idl::write_str(w, m.level_low_message);
-  sa::idl::write_str(w, m.confirm_message);
-  sa::idl::write_str(w, m.item_full_message);
+  SA::IDL::write_str(w, m.shop_name);
+  SA::IDL::write_str(w, m.message);
+  SA::IDL::write_str(w, m.shop_message);
+  SA::IDL::write_str(w, m.count_message);
+  SA::IDL::write_str(w, m.level_low_message);
+  SA::IDL::write_str(w, m.confirm_message);
+  SA::IDL::write_str(w, m.item_full_message);
 }
 
-inline void decode(sa::idl::Reader& r, ShopHeader& m) {
+inline void decode(SA::IDL::Reader& r, ShopHeader& m) {
   m.can_buy = r.b();
   m.reuse_previous = r.b();
-  sa::idl::read_str(r, m.shop_name);
-  sa::idl::read_str(r, m.message);
-  sa::idl::read_str(r, m.shop_message);
-  sa::idl::read_str(r, m.count_message);
-  sa::idl::read_str(r, m.level_low_message);
-  sa::idl::read_str(r, m.confirm_message);
-  sa::idl::read_str(r, m.item_full_message);
+  SA::IDL::read_str(r, m.shop_name);
+  SA::IDL::read_str(r, m.message);
+  SA::IDL::read_str(r, m.shop_message);
+  SA::IDL::read_str(r, m.count_message);
+  SA::IDL::read_str(r, m.level_low_message);
+  SA::IDL::read_str(r, m.confirm_message);
+  SA::IDL::read_str(r, m.item_full_message);
 }
 
 struct ShopEntry {
@@ -172,7 +172,7 @@ struct ShopEntry {
   bool purchasable;
 };
 
-inline void encode(sa::idl::Writer& w, const ShopEntry& m) {
+inline void encode(SA::IDL::Writer& w, const ShopEntry& m) {
   w.u32(m.entry_id);
   w.u32(m.item_id);
   w.u32(m.image_id);
@@ -181,7 +181,7 @@ inline void encode(sa::idl::Writer& w, const ShopEntry& m) {
   w.b(m.purchasable);
 }
 
-inline void decode(sa::idl::Reader& r, ShopEntry& m) {
+inline void decode(SA::IDL::Reader& r, ShopEntry& m) {
   m.entry_id = r.u32();
   m.item_id = r.u32();
   m.image_id = r.u32();
@@ -191,41 +191,41 @@ inline void decode(sa::idl::Reader& r, ShopEntry& m) {
 }
 
 struct ShopBody {
-  sa::domain::ShopHeader header;
-  sa::idl::FixedVec<sa::domain::ShopEntry, 32> entries;
+  SA::Domain::ShopHeader header;
+  SA::IDL::FixedVec<SA::Domain::ShopEntry, 32> entries;
 };
 
-inline void encode(sa::idl::Writer& w, const ShopBody& m) {
+inline void encode(SA::IDL::Writer& w, const ShopBody& m) {
   encode(w, m.header);
-  sa::idl::write_vec(w, m.entries,
-      [](sa::idl::Writer& we, const sa::domain::ShopEntry& e) { encode(we, e); });
+  SA::IDL::write_vec(w, m.entries,
+      [](SA::IDL::Writer& we, const SA::Domain::ShopEntry& e) { encode(we, e); });
 }
 
-inline void decode(sa::idl::Reader& r, ShopBody& m) {
+inline void decode(SA::IDL::Reader& r, ShopBody& m) {
   decode(r, m.header);
-  sa::idl::read_vec(r, m.entries,
-      [](sa::idl::Reader& re, sa::domain::ShopEntry& e) { decode(re, e); });
+  SA::IDL::read_vec(r, m.entries,
+      [](SA::IDL::Reader& re, SA::Domain::ShopEntry& e) { decode(re, e); });
 }
 
 struct RawListBody {
-  sa::idl::FixedVec<sa::idl::FixedStr<255>, 32> rows;
+  SA::IDL::FixedVec<SA::IDL::FixedStr<255>, 32> rows;
 };
 
-inline void encode(sa::idl::Writer& w, const RawListBody& m) {
-  sa::idl::write_vec(w, m.rows,
-      [](sa::idl::Writer& we, const sa::idl::FixedStr<255>& e) { sa::idl::write_str(we, e); });
+inline void encode(SA::IDL::Writer& w, const RawListBody& m) {
+  SA::IDL::write_vec(w, m.rows,
+      [](SA::IDL::Writer& we, const SA::IDL::FixedStr<255>& e) { SA::IDL::write_str(we, e); });
 }
 
-inline void decode(sa::idl::Reader& r, RawListBody& m) {
-  sa::idl::read_vec(r, m.rows,
-      [](sa::idl::Reader& re, sa::idl::FixedStr<255>& e) { sa::idl::read_str(re, e); });
+inline void decode(SA::IDL::Reader& r, RawListBody& m) {
+  SA::IDL::read_vec(r, m.rows,
+      [](SA::IDL::Reader& re, SA::IDL::FixedStr<255>& e) { SA::IDL::read_str(re, e); });
 }
 
 struct WindowOpen {
   std::uint32_t window_id;
-  sa::domain::WindowKind kind;
+  SA::Domain::WindowKind kind;
   std::uint32_t buttons;
-  sa::domain::EntityRef source;
+  SA::Domain::EntityRef source;
   enum class BodyKind : std::uint16_t {
     NONE = 0,
     MESSAGE = 5,
@@ -236,15 +236,15 @@ struct WindowOpen {
   };
   BodyKind body_kind;
   union BodyUnion {
-    sa::domain::MessageBody message;
-    sa::domain::LineInputBody line_input;
-    sa::domain::SelectBody select;
-    sa::domain::ShopBody shop;
-    sa::domain::RawListBody raw_list;
+    SA::Domain::MessageBody message;
+    SA::Domain::LineInputBody line_input;
+    SA::Domain::SelectBody select;
+    SA::Domain::ShopBody shop;
+    SA::Domain::RawListBody raw_list;
   } body;
 };
 
-inline void encode(sa::idl::Writer& w, const WindowOpen& m) {
+inline void encode(SA::IDL::Writer& w, const WindowOpen& m) {
   w.u32(m.window_id);
   w.u16(static_cast<std::uint16_t>(m.kind));
   w.u32(m.buttons);
@@ -272,9 +272,9 @@ inline void encode(sa::idl::Writer& w, const WindowOpen& m) {
   }
 }
 
-inline void decode(sa::idl::Reader& r, WindowOpen& m) {
+inline void decode(SA::IDL::Reader& r, WindowOpen& m) {
   m.window_id = r.u32();
-  m.kind = static_cast<sa::domain::WindowKind>(r.u16());
+  m.kind = static_cast<SA::Domain::WindowKind>(r.u16());
   m.buttons = r.u32();
   decode(r, m.source);
   {
@@ -312,7 +312,7 @@ inline void decode(sa::idl::Reader& r, WindowOpen& m) {
 
 struct WindowReply {
   std::uint32_t window_id;
-  sa::domain::EntityRef source;
+  SA::Domain::EntityRef source;
   std::uint32_t button;
   enum class ResultKind : std::uint16_t {
     NONE = 0,
@@ -323,12 +323,12 @@ struct WindowReply {
   ResultKind result_kind;
   union ResultUnion {
     std::uint32_t choice_id;
-    sa::idl::FixedStr<255> text;
+    SA::IDL::FixedStr<255> text;
     std::uint32_t entry_id;
   } result;
 };
 
-inline void encode(sa::idl::Writer& w, const WindowReply& m) {
+inline void encode(SA::IDL::Writer& w, const WindowReply& m) {
   w.u32(m.window_id);
   encode(w, m.source);
   w.u32(m.button);
@@ -338,7 +338,7 @@ inline void encode(sa::idl::Writer& w, const WindowReply& m) {
       w.u32(m.result.choice_id);
       break;
     case WindowReply::ResultKind::TEXT:
-      sa::idl::write_str(w, m.result.text);
+      SA::IDL::write_str(w, m.result.text);
       break;
     case WindowReply::ResultKind::ENTRY_ID:
       w.u32(m.result.entry_id);
@@ -349,7 +349,7 @@ inline void encode(sa::idl::Writer& w, const WindowReply& m) {
   }
 }
 
-inline void decode(sa::idl::Reader& r, WindowReply& m) {
+inline void decode(SA::IDL::Reader& r, WindowReply& m) {
   m.window_id = r.u32();
   decode(r, m.source);
   m.button = r.u32();
@@ -362,7 +362,7 @@ inline void decode(sa::idl::Reader& r, WindowReply& m) {
         m.result_kind = WindowReply::ResultKind::CHOICE_ID;
         break;
       case 5:
-        sa::idl::read_str(r, m.result.text);
+        SA::IDL::read_str(r, m.result.text);
         m.result_kind = WindowReply::ResultKind::TEXT;
         break;
       case 6:
@@ -378,7 +378,7 @@ inline void decode(sa::idl::Reader& r, WindowReply& m) {
   }
 }
 
-}  // namespace domain
-}  // namespace sa
+}  // namespace Domain
+}  // namespace SA
 
 #endif  // SA_IDL_DOMAIN_WINDOW_SA_H

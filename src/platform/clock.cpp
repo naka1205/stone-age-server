@@ -11,7 +11,7 @@
 
 #include <chrono>
 
-namespace sa::platform {
+namespace SA::Platform {
 
 namespace {
 std::int64_t SteadyNanos() noexcept {
@@ -30,4 +30,4 @@ Millis MonotonicClock::NowMs() const noexcept {
   return (SteadyNanos() - origin_ns_) / 1000000;
 }
 
-}  // namespace sa::platform
+}  // namespace SA::Platform

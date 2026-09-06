@@ -13,7 +13,7 @@
 
 #include <chrono>
 
-namespace sa::platform {
+namespace SA::Platform {
 
 namespace {
 
@@ -54,4 +54,4 @@ std::uint64_t RandomSource::NextSeed() noexcept {
   return s != 0 ? s : 0x9E3779B97F4A7C15ull;
 }
 
-}  // namespace sa::platform
+}  // namespace SA::Platform
