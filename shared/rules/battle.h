@@ -162,6 +162,34 @@ RideSplit SplitRideDamage(std::int32_t damage,
                           std::int32_t my_defense,
                           std::int32_t pet_defense) noexcept;
 
+// 逃跑判定(§6.1)。1:1 移植 `BATTLE_EscapeCheck`(`battle_event.c:4236`)。
+// true = 逃跑成功。
+//
+// ★ 与 `RollGuardFactor` 同一纪律:**本函数只做判定,不碰持久计数器、不判"谁能逃"**。
+//   ⇒ `escape_cnt` 由调用方传入,已含 DR-BT15 的双重计数口径(= escape_count + 1,
+//     且 escape_count 在喂快照前已 ++)⇒ **首次尝试 escape_cnt = 2**(constants.h)。
+//   ⇒ luck 归档(敌人按 rare 0→1/1→3/else→5,玩家 clamp(幸运,1,5),`:4260-4270`)
+//     也在调用方:它要读 kind/rare/幸运,放进来会撑大 L3 的输入面。
+//   ⇒ 宠物不能逃(`battle.c:9746` 的 `!= CHAR_TYPEPET`)同理在调用方拦,不进 L3。
+//
+// 入参:
+//   is_pvp            —— PvP 直接成功(`:4252`)。
+//   attacker_luck_tier—— 已归档的 luck(1..5)。
+//   escape_cnt        —— = escape_count + 1(见上)。
+//   my_level          —— 攻方等级。
+//   enemy_level_sum   —— 敌方存活单位的等级和,★ **已含 ABIO 单位 −100**
+//                        (`:4281-4282`,constants.h kEscapeAbioLevelPenalty);调用方算好。
+//   enemy_alive_count —— 敌方存活数;0 ⇒ Esc=100(`:4289-4291`)。
+//   out_percent       —— 回填判定用的 Esc 百分比(供展示/调试;可传 nullptr)。
+bool RollEscape(bool is_pvp,
+                int attacker_luck_tier,
+                int escape_cnt,
+                int my_level,
+                int enemy_level_sum,
+                int enemy_alive_count,
+                IRandom& rng,
+                int* out_percent = nullptr) noexcept;
+
 // ── 供上层与测试直接调用的子步骤 ──────────────────────────────
 //
 // ★ 单独暴露不是为了"方便",是因为 07 §11.3 判据 ① 实测

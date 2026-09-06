@@ -933,8 +933,10 @@ TEST_CASE("ResolveTurn:批次 0.5 未接入的指令一律跳过,不产事件") 
   // ⚠️ 本用例把**覆盖边界**钉住:逃跑 / 捕获 / 道具 / 换宠 / 宠技 / 职技 / 咒术
   //    在批次 0.5 里必须是"什么都不发生",而不是"发生了一半"。
   //    ⇒ 接入任一指令时本用例会失败,那正是提醒去更新 battle.h 的覆盖边界表。
+  // ⚠️★ ESCAPE 已于批次 A.1 接入(产 Escape 事件)⇒ **从本表移除**。
+  //    它现在的行为由下面「逃跑」系列用例钉住,不再是"什么都不发生"。
   using K = sa::domain::BattleCommand::CommandKind;
-  for (const auto k : {K::GUARD, K::WAIT, K::ESCAPE, K::CAPTURE, K::PET_IN,
+  for (const auto k : {K::GUARD, K::WAIT, K::CAPTURE, K::PET_IN,
                        K::PET_OUT, K::USE_ITEM, K::PET_SKILL, K::PROF_SKILL, K::SPELL}) {
     Duel d = MakeDuel();
     SetKind(d.cmds, 0, k);
@@ -1039,4 +1041,138 @@ TEST_CASE("ResolveTurn:可回放 —— 同种子 + 同输入 ⇒ 事件流逐�
   // 逐位比较:生成物是 POD(sa_idl_runtime.h 的 ② 条)⇒ 可直接 memcmp。
   CHECK(std::memcmp(&ev1, &ev2, sizeof(sa::domain::BattleEvents)) == 0);
   CHECK(r1.state() == r2.state());   // ★ 随机源的消费序列也必须一致
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  逃跑(批次 A.1)—— 对 battle_event.c:4236-4322 逐项核对
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ★ 判定阈 `RAND(1,100) < Esc`(`:4317`)是**严格小于**:Esc==N 时,
+//   RAND 取到 N 才失败、取到 N−1 成功。用 ScriptedRandom 精确卡边界,
+//   而不是撞概率 —— 与 §3.5/§3.9 分档用例同一手法。
+
+TEST_CASE("逃跑:luck 五档的 Esc 公式(battle_event.c:4294-4310)") {
+  // enemy_level_sum=100, alive=1, my_level=10 ⇒ enemy_avg=100, ΔLv=90, 2ΔLv=180。
+  // escape_cnt=2(首次口径,见下条)。
+  auto esc_of = [](int luck_tier) {
+    int pct = -1;
+    MaxRandom rng;   // RAND(1,100)=100 ⇒ 除非 Esc>100 否则失败,只借它拿 out_percent
+    RollEscape(/*is_pvp=*/false, luck_tier, /*escape_cnt=*/2, /*my_level=*/10,
+               /*enemy_level_sum=*/100, /*enemy_alive_count=*/1, rng, &pct);
+    return pct;
+  };
+  CHECK(esc_of(5) == 95 * 2);              // 190,高档不减 ΔLv
+  CHECK(esc_of(4) == 1);                   // 60*2-180 = -60 ⇒ 下限钳到 1(:4313)
+  CHECK(esc_of(3) == 1);                   // 50*2-180 = -80 ⇒ 钳 1
+  // 用一个 ΔLv=0 的场景验中低档系数本身(避免全被钳到 1)。
+  auto coef = [](int luck_tier) {
+    int pct = -1;
+    MaxRandom rng;
+    RollEscape(false, luck_tier, /*escape_cnt=*/1, /*my_level=*/50,
+               /*enemy_level_sum=*/50, /*enemy_alive_count=*/1, rng, &pct);
+    return pct;   // ΔLv=0 ⇒ Esc = 系数 × 1
+  };
+  CHECK(coef(4) == 60);
+  CHECK(coef(3) == 50);
+  CHECK(coef(2) == 40);
+  CHECK(coef(1) == 30);
+}
+
+TEST_CASE("逃跑:首次尝试 escape_cnt=2(DR-BT15 照抄源码的双重计数)") {
+  // ★★ 源码 BATTLE_Escape:4346 先 escape++,EscapeCheck:4275 再读 escape+1
+  //    ⇒ 首次判定 escape_cnt=2,不是 05 §6.1 原文的 1。ResolveTurn 传的是
+  //      actor.escape_count + 2。本用例钉住这个口径,防回归改回 +1。
+  // 构造:luck=5, escape_count=0 ⇒ escape_cnt=2 ⇒ Esc=95*2=190 > 100 ⇒ **必逃**。
+  Duel d = MakeDuel();
+  d.field.at(0).luck = 5;
+  d.field.at(0).escape_count = 0;
+  SetKind(d.cmds, 0, sa::domain::BattleCommand::CommandKind::ESCAPE);
+  d.cmds.present[10] = false;   // 敌方不行动,只看逃跑
+
+  sa::domain::BattleEvents ev{};
+  MaxRandom rng;   // RAND(1,100)=100;190>100 ⇒ 即便取最大值也成功
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+  REQUIRE(ev.events.size() == 1);
+  REQUIRE(ev.events[0].body_kind == sa::domain::BattleEvent::BodyKind::ESCAPE);
+  CHECK(ev.events[0].body.escape.actor == 0u);
+  CHECK(ev.events[0].body.escape.succeeded == true);
+  CHECK(ev.events[0].body.escape.vanish == true);
+}
+
+TEST_CASE("逃跑:判定阈是严格小于(RAND < Esc,battle_event.c:4317)") {
+  // Esc=50(luck=5, cnt=... 反推:95*cnt 不好凑 50,改用低档 ΔLv=0)。
+  // luck=1, escape_cnt=1, ΔLv=0 ⇒ Esc = 30。RAND=29 成功、=30 失败。
+  auto try_escape = [](int rand_value) {
+    ScriptedRandom rng({rand_value});
+    return RollEscape(/*is_pvp=*/false, /*luck=*/1, /*escape_cnt=*/1,
+                      /*my_level=*/50, /*enemy_level_sum=*/50,
+                      /*enemy_alive_count=*/1, rng, nullptr);
+  };
+  CHECK(try_escape(29) == true);    // 29 < 30
+  CHECK(try_escape(30) == false);   // 30 < 30 为假 ⇒ 严格小于
+}
+
+TEST_CASE("逃跑:ABIO 敌人拉低平均敌方等级(battle_event.c:4281-4282)") {
+  // 两个敌人:等级各 100。无 ABIO ⇒ sum=200, avg=100。
+  // 一个带 ABIO ⇒ sum = 200 - 100 = 100, avg=50 ⇒ ΔLv 减半 ⇒ Esc 更高。
+  // 用 luck=4(会吃 ΔLv),my_level=0,escape_cnt=1:
+  //   无 ABIO:Esc = 60 - 2*(100-0) = -140 ⇒ 钳 1
+  //   有 ABIO:Esc = 60 - 2*(50-0)  = -40  ⇒ 钳 1  —— 都被钳,换小 ΔLv 场景
+  // 改 my_level=95:
+  //   无 ABIO:Esc = 60 - 2*(100-95) = 60-10 = 50
+  //   有 ABIO:Esc = 60 - 2*(50-95)  = 60+90 = 150
+  auto esc = [](int enemy_level_sum, int alive) {
+    int pct = -1;
+    MaxRandom rng;
+    RollEscape(false, /*luck=*/4, /*escape_cnt=*/1, /*my_level=*/95,
+               enemy_level_sum, alive, rng, &pct);
+    return pct;
+  };
+  CHECK(esc(/*sum=*/200, /*alive=*/2) == 50);    // 无 ABIO
+  CHECK(esc(/*sum=*/100, /*alive=*/2) == 150);   // 一个 ABIO(sum 已被调用方 −100)
+}
+
+TEST_CASE("逃跑:敌方无存活 ⇒ Esc=100;Esc<1 钳到 1") {
+  int pct = -1;
+  MaxRandom rng;
+  // 敌方无存活(:4289-4291)⇒ Esc=100,不看 luck/等级。
+  RollEscape(false, /*luck=*/1, /*escape_cnt=*/1, /*my_level=*/1,
+             /*enemy_level_sum=*/0, /*enemy_alive_count=*/0, rng, &pct);
+  CHECK(pct == 100);
+  // 下限:luck=1, escape_cnt=1, 巨大 ΔLv ⇒ 负值 ⇒ 钳 1(:4313)。
+  RollEscape(false, /*luck=*/1, /*escape_cnt=*/1, /*my_level=*/1,
+             /*enemy_level_sum=*/1000, /*enemy_alive_count=*/1, rng, &pct);
+  CHECK(pct == 1);
+}
+
+TEST_CASE("逃跑:PvP 直接成功(battle_event.c:4252)") {
+  // is_pvp ⇒ 先于一切公式返回 true,即便 RAND 取最大值。
+  MaxRandom rng;
+  int pct = -1;
+  CHECK(RollEscape(/*is_pvp=*/true, /*luck=*/1, /*escape_cnt=*/1, /*my_level=*/1,
+                   /*enemy_level_sum=*/9999, /*enemy_alive_count=*/1, rng, &pct) == true);
+  CHECK(pct == 100);
+}
+
+TEST_CASE("逃跑:宠物不能逃(battle.c:9746)⇒ 不产事件") {
+  // ★ 宠物发逃跑指令 ⇒ ResolveTurn 在分发处拦掉,什么都不发生。
+  Duel d = MakeDuel();
+  d.field.at(0).kind = CombatantKind::kPet;   // 把 0 号改成宠物
+  SetKind(d.cmds, 0, sa::domain::BattleCommand::CommandKind::ESCAPE);
+  d.cmds.present[10] = false;
+
+  sa::domain::BattleEvents ev{};
+  MaxRandom rng;
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+  CHECK(ev.events.size() == 0);
+}
+
+TEST_CASE("逃跑:可回放 —— 同种子 + 同输入 ⇒ 结果逐位相同") {
+  SeededRandom r1(0xE5CAFE), r2(0xE5CAFE);
+  int p1 = -1, p2 = -2;
+  const bool ok1 = RollEscape(false, 2, 3, 40, 120, 3, r1, &p1);
+  const bool ok2 = RollEscape(false, 2, 3, 40, 120, 3, r2, &p2);
+  CHECK(ok1 == ok2);
+  CHECK(p1 == p2);
+  CHECK(r1.state() == r2.state());
 }

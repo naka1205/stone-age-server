@@ -184,6 +184,15 @@ struct Combatant {
   //   且伤害走 §3.7 的六种反应类型分支。
   int damage_react = 0;
 
+  // ★ 逃跑累计次数(原 `BATTLE_ENTRY.escape`)—— **持久、跨回合累积,失败也累积**(§6.1)。
+  //
+  // ⚠️★ **这是调用方所有的持久态,不是 L3 的输入语义**(与 hp/attack 那类"本回合已算好
+  //    的快照值"不同)。L3 的 `RollEscape` 不读它,只吃调用方传入的 `escape_cnt`;
+  //    递增由调用方在喂快照前做(源码 `BATTLE_Escape:4346` 先 ++,`EscapeCheck:4275`
+  //    再读 `escape+1` ⇒ 首次判定 escape_cnt=2,见 DR-BT15 与 constants.h)。
+  //    放在 `Combatant` 里是因为本仓 field 就地 mutate、不逐回合重建,持久态有落脚点。
+  std::int32_t escape_count = 0;
+
   // ── 骑宠 ──
   //
   // 有骑宠时攻击力按 kRideMelee* / kRideThrow* 合成(§3.1 第 1 步),
@@ -216,6 +225,11 @@ struct Combatant {
 struct BattleField {
   std::uint64_t battle_id = 0;
   std::uint32_t turn      = 0;
+
+  // ★ 战斗类型是否 PvP —— 逃跑在 PvP 中必定成功(§6.1,`battle_event.c:4252`)。
+  //   ⚠️ 这是**结算真正读到**的快照字段,不是表现:逃跑公式的第一道分支就依赖它。
+  //   1.4/1.5 的 demo 均为 PvE ⇒ 默认 false;PvP 战斗类型的落位属阶段 2。
+  bool is_pvp = false;
 
   // 场地属性。§3.4:power = 0.5 或 0.5 + 该属值·att_pow·0.0001·0.5,
   // 最终 damage × (At_FieldPow / Df_FieldPow)。★ 分母最小 0.5,不会除零。

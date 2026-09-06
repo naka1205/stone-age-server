@@ -554,6 +554,65 @@ RideSplit SplitRideDamage(std::int32_t damage,
   return split;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  逃跑(批次 A.1)
+// ═══════════════════════════════════════════════════════════════════
+//
+// 1:1 移植 `BATTLE_EscapeCheck`(`battle_event.c:4236`)。
+//
+// ⚠️★ **移植期两处文档出入(2026-09-06 对源码复核,以本注记为准)**:
+//   ① DR-BT15:escape_cnt 的双重计数 ⇒ 首次尝试 = 2,不是 05 §6.1 的 1。
+//      本函数不管递增,调用方传入的 escape_cnt 已含此口径(constants.h)。
+//   ② ABIO 敌人贡献 `level − 100` 到等级和(`:4281-4282`)⇒ 05 §6.1 的 `−2ΔLv` 漏记。
+//      本函数吃调用方算好的 enemy_level_sum,ABIO 扣减在调用方(它才有逐个敌人的标志位)。
+bool RollEscape(bool is_pvp,
+                int attacker_luck_tier,
+                int escape_cnt,
+                int my_level,
+                int enemy_level_sum,
+                int enemy_alive_count,
+                IRandom& rng,
+                int* out_percent) noexcept {
+  // PvP 中必定逃脱(`:4252`)—— 先于一切公式。
+  if (is_pvp) {
+    if (out_percent != nullptr) *out_percent = kEscapeNoEnemyRate;
+    return true;
+  }
+
+  int esc;
+  if (enemy_alive_count <= 0) {
+    // 敌方无存活 ⇒ Esc = 100(`:4289-4291`)。
+    esc = kEscapeNoEnemyRate;
+  } else {
+    // ★ 整数除法取平均敌方等级(`:4293 enemylevel /= enemycnt`)——
+    //   enemy_level_sum 已含 ABIO 的 −100,可能为负,平均后亦然,照原样不夹。
+    const int enemy_avg_level = enemy_level_sum / enemy_alive_count;
+    const int delta = kEscapeLevelPenalty * (enemy_avg_level - my_level);
+
+    // luck 分档(`:4294-4310`)。★ `>= 5` 与 `else`(luck ≤ 0)都走 95×cnt ——
+    //   源码 `:4308-4310` 的 else 分支与 `>=5` 同式,照抄。
+    if (attacker_luck_tier >= 5) {
+      esc = kEscapeCoefLuck5 * escape_cnt;
+    } else if (attacker_luck_tier >= 4) {
+      esc = kEscapeCoefLuck4 * escape_cnt - delta;
+    } else if (attacker_luck_tier >= 3) {
+      esc = kEscapeCoefLuck3 * escape_cnt - delta;
+    } else if (attacker_luck_tier >= 2) {
+      esc = kEscapeCoefLuck2 * escape_cnt - delta;
+    } else if (attacker_luck_tier >= 1) {
+      esc = kEscapeCoefLuck1 * escape_cnt - delta;
+    } else {
+      esc = kEscapeCoefLuck5 * escape_cnt;
+    }
+  }
+
+  if (esc < kEscapeMinRate) esc = kEscapeMinRate;  // `:4313`
+  if (out_percent != nullptr) *out_percent = esc;
+
+  // ★ 判定阈:`RAND(1,100) < Esc`(`:4317`)—— 严格小于,不是 ≤。
+  return rng.Rand(1, 100) < esc;
+}
+
 namespace {
 
 // 事件缓冲的追加器。★ 只有它能写 `out.events`,截断判定收在一处。
@@ -593,6 +652,44 @@ bool IsCastingSpell(const TurnCommands& commands, int slot) noexcept {
   if (!commands.present[slot]) return false;
   return commands.commands[slot].command_kind ==
          sa::domain::BattleCommand::CommandKind::SPELL;
+}
+
+// 逃跑的 luck 归档(`battle_event.c:4260-4270`)。★ 放在这里而非 RollEscape:
+//   它读 kind/rare/幸运,属输入准备。⚠️ 敌人的 rare 尚未进 `Combatant` 输入面
+//   (它属 L2 敌人模型),1.5 无敌方逃跑 ⇒ 敌人暂按 rare=default(luck=5)处理,
+//   在实现处记明;玩家走 clamp(幸运, 1, 5)。
+int EscapeLuckTier(const Combatant& c) noexcept {
+  if (c.IsEnemy()) {
+    // ⚠️ rare 未建模 ⇒ 走 default 档(luck=5)。敌方主动逃跑属批次后续 NPC 行为,
+    //    届时补 rare 字段并按 0→1/1→3/else→5 归档。此处不猜一个"看起来对"的值。
+    return 5;
+  }
+  int luck = c.luck;
+  if (luck > 5) luck = 5;   // min(5, WORKFIXLUCK)
+  if (luck < 1) luck = 1;   // max(1, ...)
+  return luck;
+}
+
+// 敌方(相对逃跑者而言的对面)存活单位的等级和 + 存活数,★ 含 ABIO 单位 −100。
+//
+// `battle_event.c:4277-4293`:遍历对面 Entry,ABIO 单位先给等级和 −100,再累加其等级。
+struct EnemyLevelStat { int level_sum = 0; int alive_count = 0; };
+
+EnemyLevelStat CollectEnemyLevels(const BattleField& field,
+                                  const bool (&dead)[kSlotCount],
+                                  int actor_slot) noexcept {
+  EnemyLevelStat stat;
+  const bool actor_is_enemy = actor_slot >= kSideOffset;
+  for (int i = 0; i < kSlotCount; ++i) {
+    const bool i_is_enemy = i >= kSideOffset;
+    if (i_is_enemy == actor_is_enemy) continue;   // 只数对面
+    const Combatant& c = field.at(i);
+    if (!c.occupied || dead[i]) continue;
+    if (c.mods.abio) stat.level_sum -= kEscapeAbioLevelPenalty;  // ★ :4281-4282
+    stat.level_sum += c.level;
+    ++stat.alive_count;
+  }
+  return stat;
 }
 
 }  // namespace
@@ -644,9 +741,38 @@ bool ResolveTurn(const BattleField& field,
     //    并被跳过 —— 不是"忘了写",是它们各自绑着未移植的链路(见 battle.h 的表)。
     //    ⇒ 接入时在这里补 case,**不要**在调用方拦截:那会让 L3 之外出现第二处
     //      指令语义,与 DR-BT5「唯一真源」同类的错误。
+    // ── 逃跑(§6.1,批次 A.1)──────────────────────────────────
+    //
+    // ⚠️★ **宠物不能逃**(`battle.c:9746` 的 `!= CHAR_TYPEPET`)—— 在此拦,
+    //    不产事件、不递增计数器。它是**指令语义**的一部分,按 DR-BT5 留在 L3。
+    if (cmd.command_kind == sa::domain::BattleCommand::CommandKind::ESCAPE) {
+      if (actor.kind == CombatantKind::kPet) continue;
+
+      const EnemyLevelStat es = CollectEnemyLevels(field, dead, actor_slot);
+      // ★ DR-BT15:escape_cnt = escape_count + 2 —— 源码 BATTLE_Escape 先 ++
+      //   (→ escape_count+1),EscapeCheck 再读 +1(→ escape_count+2)。首次即 2。
+      const int escape_cnt = actor.escape_count + 2;
+      const bool ok = RollEscape(field.is_pvp, EscapeLuckTier(actor), escape_cnt,
+                                 actor.level, es.level_sum, es.alive_count, rng);
+
+      sa::domain::BattleEvent* ev =
+          sink.Push(sa::domain::BattleEvent::BodyKind::ESCAPE);
+      if (ev == nullptr) break;
+      ev->body.escape.actor     = static_cast<std::uint32_t>(actor_slot);
+      ev->body.escape.succeeded = ok;
+      // vanish:成功逃跑者本回合从战场消失(客户端演淡出)。失败则留场。
+      ev->body.escape.vanish    = ok;
+      // ★ 计数器的递增(无论成败)与移出战场由调用方按事件执行 ——
+      //   L3 不写世界态(field 是 const)。见 world.cpp 的 ApplyEvents。
+      if (sink.overflowed()) break;
+      continue;
+    }
+
     if (cmd.command_kind != sa::domain::BattleCommand::CommandKind::ATTACK) {
       // GUARD 与 WAIT 本身不产事件:防御的效果体现在**被攻击时**的减伤(§3.5),
       // 由下方攻击链路读 `IsGuarding` 得到。
+      // ⚠️ CAPTURE / PET_IN / PET_OUT / USE_ITEM / 技能 / 咒术仍落这里被跳过 ——
+      //    绑在批次 A.2+ / B / C 的链路上(见 battle.h 的表)。
       continue;
     }
 

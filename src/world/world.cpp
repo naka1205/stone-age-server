@@ -122,6 +122,24 @@ void ApplyEvents(const sa::domain::BattleEvents& events,
         if (c.hp <= 0) { c.hp = 0; c.dead = true; }
         break;
       }
+      case sa::domain::BattleEvent::BodyKind::ESCAPE: {
+        // 批次 A.1:逃跑事件的世界写回。
+        const sa::domain::Escape& esc = e.body.escape;
+        if (esc.actor >= static_cast<std::uint32_t>(sa::rules::kSlotCount)) break;
+        sa::rules::Combatant& c = field.at(static_cast<int>(esc.actor));
+        if (!c.occupied) break;
+        // ★★ 计数器**无论成败都 +1**(源码 BATTLE_Escape:4346 无条件 ++;§6.1
+        //    「失败也累积」)。这就是 L3 读 escape_count+2 里的那个 +1 的落地处 ——
+        //    下一回合再逃时基数已抬高,DR-BT15 的线性放大器由此生效。
+        ++c.escape_count;
+        if (esc.succeeded) {
+          // ★ 逃跑成功 ⇒ 移出战场,**不是战死**:置 occupied=false 让 SideWipedOut
+          //   把它当作"已不在场"。⚠️ 不置 dead=true —— 逃跑者没被击败,
+          //   把它记成阵亡会污染战果/经验结算(阶段 2)。
+          c.occupied = false;
+        }
+        break;
+      }
       default:
         // 其余事件是**表现**(HIT / TEXT_BOX / …)或未移植链路的占位,
         // 对世界状态无影响 ⇒ 显式落到这里,不是遗漏。

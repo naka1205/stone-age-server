@@ -233,6 +233,36 @@ inline constexpr int kBattleStatusCount = 44;
 // [8.0] 超时。05-battle.md §2.2 步骤 3。
 inline constexpr int kBattleTimeLimitSeconds = 3600;
 
+// ── 逃跑(§6.1)──────────────────────────────────────────────────
+//
+// [8.0] 1:1 移植 `BATTLE_EscapeCheck`(`battle_event.c:4236`)。
+//
+// ★ luck 分档的基础系数(`:4294-4310`)。escape_cnt 是**线性放大器**:
+//   Esc = 系数 × escape_cnt(高档)或 系数 × escape_cnt − 2·ΔLv(中低档)。
+//
+// ⚠️★ **逃跑计数照抄源码的双重计数(DR-BT15)**:原版 `BATTLE_Escape:4346`
+//    先 `escape++`,`BATTLE_EscapeCheck:4275` 再读 `escape+1` ⇒ **首次尝试
+//    escape_cnt = 2**,不是 05 §6.1 原文所说的 1。高幸运下 `95×2 > 100` 首次必逃。
+//    ⇒ 调用方传入的 escape_cnt 必须已含这一口径(= escape_count + 1,而 escape_count
+//      在喂快照前已 ++)。用例「逃跑:首次尝试 escape_cnt=2」钉住它。
+inline constexpr int kEscapeCoefLuck5 = 95;  // luck ≥ 5(:4295)
+inline constexpr int kEscapeCoefLuck4 = 60;  // luck = 4(:4298)
+inline constexpr int kEscapeCoefLuck3 = 50;  // luck = 3(:4301)
+inline constexpr int kEscapeCoefLuck2 = 40;  // luck = 2(:4304)
+inline constexpr int kEscapeCoefLuck1 = 30;  // luck = 1(:4307)
+
+// ΔLv 惩罚系数:中低档 Esc −= kEscapeLevelPenalty × (enemyAvgLevel − myLevel)(:4298)。
+inline constexpr int kEscapeLevelPenalty = 2;
+
+// ★ ABIO 敌人对等级和的贡献是 `level − 100`(`battle_event.c:4281-4282`)⇒ 拉低平均
+//   敌方等级、使逃跑更易。⚠️ 05 §6.1 的 `−2ΔLv` **漏记了这一项**(2026-09-06 移植期发现)。
+//   本常量供调用方在算 enemy_level_sum 时对每个 ABIO 单位扣减。
+inline constexpr int kEscapeAbioLevelPenalty = 100;
+
+// Esc 的下限与上限:`if(Esc<1)Esc=1`(:4313);敌方无存活 ⇒ Esc=100(:4291)。
+inline constexpr int kEscapeMinRate = 1;
+inline constexpr int kEscapeNoEnemyRate = 100;
+
 }  // namespace sa::rules
 
 #endif  // SA_SHARED_RULES_CONSTANTS_H
