@@ -772,12 +772,21 @@ luck = 3 → 50 · cnt − 2ΔLv;  = 2 → 40 · cnt − 2ΔLv;  = 1 → 30 · c
 
 ```
 Df_HpPer = 10 − (HP · HP) / MaxHP          ★ 二次式:HP 越低值越大
-Df_Level = myLv/2 − targetLv/2             (整数除法)
-Df_Dex   = myDex/15 − targetDex/15
+Df_Level = myLv/2 − targetLv/2             ★★ 浮点除法(见下更正,非整数)
+Df_Dex   = myDex/15 − targetDex/15         ★★ 浮点除法
 WorkGet  = (Df_HpPer + Df_Level + Df_Dex + (捕获难度 + 攻方幸运)) × 攻方魅力 / 50
 WorkGet += 捕获率提升;  目标睡眠 +15;  min(WorkGet, 99)     ★ 上限 99%
-成功:RAND(1,100) < WorkGet
+成功:RAND(1,100) < WorkGet                  ★ 严格小于(同逃跑)
 ```
+
+⚠️★ **移植期更正(2026-09-06,批次 A.2,DR-BT16)**:本节原把 `Df_Level` / `Df_Dex`
+标注为「整数除法」——**不成立**。`BATTLE_CaptureCheck` 的 `At_Level` / `Df_Level` /
+`At_Dex` / `Df_Dex` 在源码 `battle_event.c:3812-3819` **全部声明为 `float`**,
+故 `myLv/2`、`myDex/15` 等都是**浮点除法**。照原文写成整数除法会引入原版没有的截断
+(例:myLv=11、targetLv=10 ⇒ 浮点 `5.5−5.0=0.5`,整数 `5−5=0`,直接改变捕获率)。
+这是继「三分段无窄缝」「逃跑 escape_cnt 双重计数」之后**第三次**同族更正:文档看着完整、
+源码里不是。实现按 float 逐位移植(`shared/rules/battle.cpp` 的 `RollCapture`),
+回归断言「捕获:级差是浮点除法而非整数」并做过反向验证。
 
 ★ **魅力是乘性主因子**(`/50` ⇒ 魅力 50 时系数为 1)。
 ★ **`Df_HpPer` 是二次的** ⇒ 满血几乎抓不到。

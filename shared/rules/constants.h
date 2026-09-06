@@ -263,6 +263,38 @@ inline constexpr int kEscapeAbioLevelPenalty = 100;
 inline constexpr int kEscapeMinRate = 1;
 inline constexpr int kEscapeNoEnemyRate = 100;
 
+// ── 捕获(§6.2)──────────────────────────────────────────────────
+//
+// [8.0] 1:1 移植 `BATTLE_CaptureCheck`(`battle_event.c:3806-3872`)。
+//
+// ★★ **移植期文档更正(2026-09-06 对源码复核,以本注记为准)—— 与逃跑/伤害同族**:
+//   `05` §6.2 把 `Df_Level = myLv/2 − targetLv/2`、`Df_Dex = myDex/15 − targetDex/15`
+//   标注为「整数除法」。**不成立**:`BATTLE_CaptureCheck` 的 `At_Level`/`Df_Level`/
+//   `At_Dex`/`Df_Dex` 全部声明为 **float**(`:3812-3819`)⇒ 这几处是**浮点除法**。
+//   照文档写成整数除法会引入原版没有的截断(如 myLv=11,targetLv=10 ⇒
+//   浮点 0.5 vs 整数 0,直接改变捕获率)。这是继逃跑 escape_cnt、伤害"窄缝"之后
+//   第三次「文档看着完整、源码里不是」。
+//
+// ★ 公式(全程 float,`:3852-3863`):
+//     Df_HpPer = 10 − (HP·HP)/MaxHp                    ★ 二次式,满血几乎抓不到
+//     Df_Level = myLv/2 − targetLv/2                   ★ 浮点除法
+//     Df_Dex   = myDex/15 − targetDex/15               ★ 浮点除法
+//     WorkGet  = (Df_HpPer + Df_Level + Df_Dex + (难度 + 攻方幸运)) × 攻方魅力 / 50
+//     WorkGet += 捕获率提升;  目标睡眠 +15;  min(WorkGet, 99)
+//     成功:RAND(1,100) < WorkGet                       ★ 严格小于,同逃跑
+inline constexpr double kCaptureCharmDivisor = 50.0;  // 魅力 50 ⇒ 系数 1(:3852)
+inline constexpr double kCaptureLevelDivisor = 2.0;   // ★ 浮点,不是整数(见上)
+inline constexpr double kCaptureDexDivisor   = 15.0;  // ★ 浮点,不是整数
+inline constexpr double kCaptureHpBase       = 10.0;  // Df_HpPer 的常数项(:3852)
+inline constexpr int    kCaptureSleepBonus   = 15;    // 目标睡眠 +15(:3859-3861)
+inline constexpr int    kCaptureMaxRate      = 99;    // 上限 99%(:3863)
+// ★ `Df_Ge` 的兜底初值(:3819 `Df_Ge = 30`)—— 仅当敌人模板读不到难度时用。
+//   1.5 无敌人模板 ⇒ 调用方按此兜底(见 world.cpp)。
+inline constexpr int    kCaptureDifficultyDefault = 30;
+
+// ★ 等级门(`:3834`):`myLv + 5 < targetLv` 直接失败。5 是硬编码的等级容差。
+inline constexpr int    kCaptureLevelGate = 5;
+
 }  // namespace sa::rules
 
 #endif  // SA_SHARED_RULES_CONSTANTS_H

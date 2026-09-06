@@ -190,6 +190,43 @@ bool RollEscape(bool is_pvp,
                 IRandom& rng,
                 int* out_percent = nullptr) noexcept;
 
+// 捕获判定(§6.2)。1:1 移植 `BATTLE_CaptureCheck`(`battle_event.c:3806`)。
+// true = 捕获成功。
+//
+// ★ 与 `RollEscape` 同一纪律:**本函数只做概率判定,不碰前置门与世界写**。
+//   ⇒ 三道**前置门**都在调用方,不进 L3 输入面:
+//     ① 目标是敌人(`:3826`)—— `kind == kEnemy`,类型层面已分;
+//     ② 目标带可捕获标记(`:3830` `CHAR_WORK_PETFLG`)—— `mods.capturable`;
+//     ③ ★ 等级门 `myLv + 5 < targetLv ⇒ 直接失败`(`:3834`,除非 `PickAllPet`)——
+//        它读攻方的"全收"特殊标记,属技能链路;
+//     ④ 条件道具检查(`BATTLE_CaptureItemCheck`)—— 读背包,是**道具系统**的活。
+//   ⇒ 这四道任一不过,调用方**根本不调本函数**,直接产捕获失败事件。
+//   ★ 捕获成功后的世界写(生成宠物 `PET_createPetFromCharaIndex` · 目标离场
+//     `BATTLE_Exit` · 删条件道具 DR-BT10 · 攻方 `capture_bonus` 清零)全在调用方。
+//
+// ⚠️★ **`WORKMODCAPTURE`(capture_bonus)是判定的一部分,进本函数**;而它的**清零**
+//    是世界写、留在调用方 —— 判定读它、世界改它,分工同逃跑计数器。
+//
+// 入参(★ 全程 float 语义,见 constants.h 的移植更正:级差/敏捷差是浮点除法):
+//   my_level / target_level        —— 攻守等级。
+//   my_dex / target_dex            —— 攻守敏捷(原 WORKFIXDEX)。
+//   my_charm                       —— 攻方魅力(乘性主因子,`× charm / 50`)。
+//   my_luck                        —— 攻方幸运(原 WORKFIXLUCK)。
+//   target_hp / target_max_hp      —— 守方当前/最大 HP(★ 二次式,满血几乎抓不到)。
+//   capture_difficulty             —— 守方捕获难度基数(原 WORKMODCAPTUREDEFAULT)。
+//   capture_bonus                  —— 攻方捕获率提升(原 WORKMODCAPTURE)。
+//   target_asleep                  —— 守方睡眠 ⇒ +15(原 WORKSLEEP > 0)。
+//   out_percent                    —— 回填 WorkGet 百分比(可传 nullptr)。
+bool RollCapture(int my_level, int target_level,
+                 int my_dex, int target_dex,
+                 int my_charm, int my_luck,
+                 int target_hp, int target_max_hp,
+                 int capture_difficulty,
+                 int capture_bonus,
+                 bool target_asleep,
+                 IRandom& rng,
+                 int* out_percent = nullptr) noexcept;
+
 // ── 供上层与测试直接调用的子步骤 ──────────────────────────────
 //
 // ★ 单独暴露不是为了"方便",是因为 07 §11.3 判据 ① 实测

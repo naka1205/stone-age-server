@@ -100,6 +100,27 @@ struct CombatModifiers {
   //   ⚠️ 与 `other_status_nums` 是两件事:前者决定**是否**加成,后者是加成**基数**。
   //   原版只有 `MAGICSUPERWALL > 0` 时才读 `OTHERSTATUSNUMS`。
   bool super_wall = false;
+
+  // ── 捕获(§6.2,批次 A.2)────────────────────────────────────
+  //
+  // ⚠️★ 这四个都只在**守方为敌人**时才有意义,但字段落在通用 `CombatModifiers`
+  //    里而不是单开一个敌人结构 —— 与 `abio` / `no_duck` 同处,理由一致:
+  //    输入面越集中,黄金用例集越可控。玩家侧一律取默认值。
+
+  // 守方带「可捕获标记」(原 `CHAR_WORK_PETFLG != 0`,`battle_event.c:3830`)。
+  // ⚠️ 与 `kind == kEnemy` 是两件事:并非所有敌人都可捕(BOSS / 事件怪不带此标记)。
+  bool capturable = false;
+
+  // 守方的「捕获难度」基数(原 `CHAR_WORKMODCAPTUREDEFAULT`,`:3845`)。
+  // ★ 源码里这个变量初值 30,但**立即被 `CHAR_getWorkInt` 覆盖**为敌人模板值
+  //   ⇒ 30 只是"读不到时的兜底",不是通用默认。敌人数值表(L4)给真值,
+  //     1.5 无敌人模板 ⇒ 调用方按 30 兜底并在实现处记明,不写死在这。
+  std::int32_t capture_difficulty = 0;
+
+  // 攻方的「捕获率提升」(原 `CHAR_WORKMODCAPTURE`,`:3857`,直接加进 WorkGet)。
+  // ⚠️ 原版在 `BATTLE_Capture` 里用完即清零(`:4121`)—— 那是**一次性道具/技能**
+  //    的效果。清零是世界写,属调用方(与逃跑计数器 ++ 同一分工),不进 L3。
+  std::int32_t capture_bonus = 0;
 };
 
 // ── 一个战斗单位 ──────────────────────────────────────────────
@@ -132,6 +153,10 @@ struct Combatant {
   std::int32_t defense = 0;
   std::int32_t quick   = 0;   // 敏捷,回避与行动顺序都用它
   std::int32_t luck    = 0;   // ★ 上限 25(DR-BT1 的量化前提)
+
+  // ★ 魅力(原 `CHAR_WORKFIXCHARM`)—— 捕获的**乘性主因子**(§6.2:`× charm / 50`
+  //   ⇒ 魅力 50 时系数为 1)。⚠️ 只在捕获判定里用,不参与伤害/回避 ⇒ 默认 0。
+  std::int32_t charm = 0;
 
   // 「舍己」时防御直接取此值(**忽略装备**)。原 WORKFIXTOUGH。§3.1 第 2 步
   std::int32_t fix_tough = 0;

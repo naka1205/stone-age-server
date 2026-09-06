@@ -935,8 +935,13 @@ TEST_CASE("ResolveTurn:批次 0.5 未接入的指令一律跳过,不产事件") 
   //    ⇒ 接入任一指令时本用例会失败,那正是提醒去更新 battle.h 的覆盖边界表。
   // ⚠️★ ESCAPE 已于批次 A.1 接入(产 Escape 事件)⇒ **从本表移除**。
   //    它现在的行为由下面「逃跑」系列用例钉住,不再是"什么都不发生"。
+  // ⚠️★ CAPTURE 已于批次 A.2 接入(产 CaptureAct 事件,成败都产)⇒ **从本表移除**。
+  //    它的行为由下面「捕获」系列用例钉住。⚠️ 但 CAPTURE **只有带可捕获标记的敌人
+  //    目标才产事件**;此表用的 Duel 里 slot 10 默认 `capturable=false`,若不移除,
+  //    这里的 CAPTURE 恰好因前置门①而落"不产事件"——那是**巧合命中**,不是覆盖边界,
+  //    留着会掩盖"捕获对可捕目标应产事件"。
   using K = sa::domain::BattleCommand::CommandKind;
-  for (const auto k : {K::GUARD, K::WAIT, K::CAPTURE, K::PET_IN,
+  for (const auto k : {K::GUARD, K::WAIT, K::PET_IN,
                        K::PET_OUT, K::USE_ITEM, K::PET_SKILL, K::PROF_SKILL, K::SPELL}) {
     Duel d = MakeDuel();
     SetKind(d.cmds, 0, k);
@@ -1175,4 +1180,213 @@ TEST_CASE("逃跑:可回放 —— 同种子 + 同输入 ⇒ 结果逐位相同"
   CHECK(ok1 == ok2);
   CHECK(p1 == p2);
   CHECK(r1.state() == r2.state());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  捕获(批次 A.2)—— 对 battle_event.c:3806-3872 逐项核对
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ★ 判定阈 `RAND(1,100) < WorkGet`(`:3867`)与逃跑同为**严格小于**,用 ScriptedRandom
+//   精确卡边界。★★ 全程 float:级差/敏捷差是**浮点除法**(constants.h 移植更正),
+//   这里的手算基准据此给出,若有人改回整数除法,下面的边界用例会红。
+
+TEST_CASE("捕获:WorkGet 主公式手算基准(battle_event.c:3852-3855)") {
+  // 取一组能整除、便于手算的输入:
+  //   my_lv=20 target_lv=10 ⇒ Df_Level = 20/2 − 10/2 = 5(浮点,恰好整)
+  //   my_dex=150 target_dex=15 ⇒ Df_Dex = 150/15 − 15/15 = 10 − 1 = 9
+  //   target_hp=0 max_hp=100 ⇒ Df_HpPer = 10 − 0 = 10
+  //   难度=30 幸运=5 ⇒ (30+5)=35
+  //   Σ = 10 + 5 + 9 + 35 = 59;× charm/50,charm=50 ⇒ ×1 ⇒ 59
+  //   + capture_bonus(0);未睡眠 ⇒ WorkGet = 59
+  int pct = -1;
+  MaxRandom rng;   // RAND(1,100)=100 ⇒ 只借它取 out_percent(59<100 必失败,不看返回)
+  RollCapture(/*my_level=*/20, /*target_level=*/10, /*my_dex=*/150, /*target_dex=*/15,
+              /*my_charm=*/50, /*my_luck=*/5, /*target_hp=*/0, /*target_max_hp=*/100,
+              /*capture_difficulty=*/30, /*capture_bonus=*/0,
+              /*target_asleep=*/false, rng, &pct);
+  CHECK(pct == 59);
+}
+
+TEST_CASE("捕获:级差是浮点除法而非整数(constants.h 移植更正)") {
+  // ★★ 这条钉住"文档说整数除法、源码是浮点"这一更正。
+  //   my_lv=11 target_lv=10:浮点 ⇒ Df_Level = 5.5 − 5.0 = 0.5;整数 ⇒ 5 − 5 = 0。
+  //   把其余项清零(dex 差 0、HpPer 用满血压低、难度+幸运 0),让 Df_Level 单独决定小数位。
+  //   为放大到可观测:charm=100 ⇒ ×2。
+  //     其余:my_dex=target_dex=0 ⇒ Df_Dex=0;target_hp=max_hp=10 ⇒ Df_HpPer=10−10=0。
+  //   Σ(浮点) = 0.5 ⇒ ×charm/50 = ×2 ⇒ 1.0 ⇒ int 截断 1。
+  //   Σ(整数) = 0   ⇒ 0。
+  int pct = -1;
+  MaxRandom rng;
+  RollCapture(/*my_level=*/11, /*target_level=*/10, /*my_dex=*/0, /*target_dex=*/0,
+              /*my_charm=*/100, /*my_luck=*/0, /*target_hp=*/10, /*target_max_hp=*/10,
+              /*capture_difficulty=*/0, /*capture_bonus=*/0,
+              /*target_asleep=*/false, rng, &pct);
+  CHECK(pct == 1);   // ★ 浮点 ⇒ 1;若实现改成整数除法这里会是 0
+}
+
+TEST_CASE("捕获:Df_HpPer 是二次式,满血几乎抓不到(battle_event.c:3852)") {
+  // Df_HpPer = 10 − HP²/MaxHp。满血(HP=MaxHp=100)⇒ 10 − 100 = −90。
+  //   其余项:级差 0、敏捷差 0、难度 30、幸运 0 ⇒ Σ = −90 + 30 = −60,charm=50 ⇒ ×1。
+  //   ⇒ WorkGet = −60(无下限钳位,照抄)⇒ 必失败。
+  auto pct_for = [](int hp, int max_hp) {
+    int pct = -1;
+    MaxRandom rng;
+    RollCapture(/*my_level=*/10, /*target_level=*/10, /*my_dex=*/0, /*target_dex=*/0,
+                /*my_charm=*/50, /*my_luck=*/0, hp, max_hp,
+                /*capture_difficulty=*/30, /*capture_bonus=*/0,
+                /*target_asleep=*/false, rng, &pct);
+    return pct;
+  };
+  CHECK(pct_for(100, 100) == -60);   // 满血 ⇒ 深负
+  // 残血(HP=10, MaxHp=100)⇒ Df_HpPer = 10 − 1 = 9 ⇒ Σ = 9 + 30 = 39。
+  CHECK(pct_for(10, 100) == 39);
+  // ★ 二次式:HP 减半(50/100)⇒ Df_HpPer = 10 − 25 = −15,远低于线性预期的 5 ——
+  //   证明它是二次不是线性。
+  CHECK(pct_for(50, 100) == (-15 + 30));
+}
+
+TEST_CASE("捕获:魅力是乘性主因子,× charm / 50(battle_event.c:3855)") {
+  // 固定其余项 Σ=40(残血 Df_HpPer=9 略,改用干净构造):
+  //   级差 0 敏捷差 0 HpPer=10(hp=0) 难度 30 幸运 0 ⇒ Σ=40。
+  //   charm=50 ⇒ ×1 ⇒ 40;charm=100 ⇒ ×2 ⇒ 80;charm=25 ⇒ ×0.5 ⇒ 20。
+  auto pct_for = [](int charm) {
+    int pct = -1;
+    MaxRandom rng;
+    RollCapture(10, 10, 0, 0, charm, 0, /*hp=*/0, /*max_hp=*/100,
+                /*difficulty=*/30, /*bonus=*/0, false, rng, &pct);
+    return pct;
+  };
+  CHECK(pct_for(50) == 40);
+  CHECK(pct_for(100) == 80);
+  CHECK(pct_for(25) == 20);
+  CHECK(pct_for(0) == 0);   // 魅力 0 ⇒ 系数 0 ⇒ 必失败
+}
+
+TEST_CASE("捕获:睡眠 +15、捕获率提升相加、上限 99") {
+  auto pct_for = [](int bonus, bool asleep) {
+    int pct = -1;
+    MaxRandom rng;
+    // 基础 Σ=40(同上),charm=50 ⇒ 40。
+    RollCapture(10, 10, 0, 0, 50, 0, /*hp=*/0, /*max_hp=*/100,
+                /*difficulty=*/30, bonus, asleep, rng, &pct);
+    return pct;
+  };
+  CHECK(pct_for(0, false) == 40);
+  CHECK(pct_for(0, true) == 55);      // + 睡眠 15
+  CHECK(pct_for(20, false) == 60);    // + 捕获率提升 20(在魅力乘之后相加)
+  CHECK(pct_for(20, true) == 75);     // 两者叠加
+  // 上限 99:构造一个超 99 的组合(难度 200 ⇒ Σ 巨大)。
+  int pct = -1;
+  MaxRandom rng;
+  RollCapture(10, 10, 0, 0, 50, 0, 0, 100, /*difficulty=*/200, 0, true, rng, &pct);
+  CHECK(pct == 99);
+}
+
+TEST_CASE("捕获:判定阈严格小于(RAND < WorkGet,battle_event.c:3867)") {
+  // WorkGet = 40(charm=50, Σ=40)。RAND=39 成功、=40 失败。
+  auto try_capture = [](int rand_value) {
+    ScriptedRandom rng({rand_value});
+    return RollCapture(10, 10, 0, 0, 50, 0, /*hp=*/0, /*max_hp=*/100,
+                       /*difficulty=*/30, /*bonus=*/0, false, rng, nullptr);
+  };
+  CHECK(try_capture(39) == true);    // 39 < 40
+  CHECK(try_capture(40) == false);   // 40 < 40 为假 ⇒ 严格小于
+}
+
+TEST_CASE("捕获:可回放 —— 同种子 + 同输入 ⇒ 结果逐位相同") {
+  SeededRandom r1(0xCAB1E), r2(0xCAB1E);
+  int p1 = -1, p2 = -2;
+  const bool ok1 = RollCapture(30, 20, 120, 60, 60, 8, 50, 300, 30, 5, true, r1, &p1);
+  const bool ok2 = RollCapture(30, 20, 120, 60, 60, 8, 50, 300, 30, 5, true, r2, &p2);
+  CHECK(ok1 == ok2);
+  CHECK(p1 == p2);
+  CHECK(r1.state() == r2.state());
+}
+
+// ── ResolveTurn 里的捕获派发 ────────────────────────────────────────────────
+
+namespace {
+void SetCapture(TurnCommands& tc, int slot, int target) {
+  tc.present[slot] = true;
+  tc.commands[slot] = sa::domain::BattleCommand{};
+  tc.commands[slot].command_kind = sa::domain::BattleCommand::CommandKind::CAPTURE;
+  tc.commands[slot].command.capture.target = static_cast<std::uint32_t>(target);
+}
+}  // namespace
+
+TEST_CASE("ResolveTurn:捕获成功 ⇒ CaptureAct(flags=1),敌人可捕、等级门通过") {
+  Duel d = MakeDuel();
+  d.field.at(0).charm = 100;      // 高魅力 ⇒ 乘性放大
+  d.field.at(0).level = 50;
+  d.field.at(10).level = 10;      // 等级门:50+5 < 10 为假 ⇒ 通过
+  d.field.at(10).hp = 0;          // 残血 ⇒ Df_HpPer 高
+  d.field.at(10).max_hp = 100;
+  d.field.at(10).mods.capturable = true;
+  d.field.at(10).mods.capture_difficulty = 30;
+  SetCapture(d.cmds, 0, 10);
+  d.cmds.present[10] = false;     // 敌方不行动,只看捕获
+
+  sa::domain::BattleEvents ev{};
+  ScriptedRandom rng({1});        // RAND(1,100)=1,远小于 WorkGet ⇒ 成功
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+  REQUIRE(ev.events.size() == 1);
+  REQUIRE(ev.events[0].body_kind == sa::domain::BattleEvent::BodyKind::CAPTURE_ACT);
+  CHECK(ev.events[0].body.capture_act.actor == 0u);
+  CHECK(ev.events[0].body.capture_act.target == 10u);
+  CHECK(ev.events[0].body.capture_act.flags == 1u);
+}
+
+TEST_CASE("ResolveTurn:前置门任一不过 ⇒ 仍产 CaptureAct 但 flags=0(不是无事件)") {
+  // ★ 与"批次未接入指令什么都不发生"不同:捕获无论成败都发 BT(原版 :4225),
+  //   客户端要演"抓失败"。三道门逐条验其失败仍产事件、flags=0。
+  auto flags_for = [](void (*mut)(Combatant&)) {
+    Duel d = MakeDuel();
+    d.field.at(0).charm = 100;
+    d.field.at(0).level = 50;
+    d.field.at(10).level = 10;
+    d.field.at(10).hp = 0;
+    d.field.at(10).max_hp = 100;
+    d.field.at(10).mods.capturable = true;
+    d.field.at(10).mods.capture_difficulty = 30;
+    mut(d.field.at(10));            // 逐条破坏一道门 / 或改攻方
+    SetCapture(d.cmds, 0, 10);
+    d.cmds.present[10] = false;
+    sa::domain::BattleEvents ev{};
+    ScriptedRandom rng({1});
+    ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev);
+    REQUIRE(ev.events.size() == 1);
+    REQUIRE(ev.events[0].body_kind == sa::domain::BattleEvent::BodyKind::CAPTURE_ACT);
+    return ev.events[0].body.capture_act.flags;
+  };
+
+  // ① 目标不带可捕获标记 ⇒ flags=0。
+  CHECK(flags_for([](Combatant& t){ t.mods.capturable = false; }) == 0u);
+  // ② 目标不是敌人(改成宠物)⇒ flags=0。
+  CHECK(flags_for([](Combatant& t){ t.kind = CombatantKind::kPet; }) == 0u);
+}
+
+TEST_CASE("ResolveTurn:等级门 myLv + 5 < targetLv ⇒ 直接失败(battle_event.c:3834)") {
+  Duel d = MakeDuel();
+  d.field.at(0).charm = 100;
+  d.field.at(0).level = 10;
+  d.field.at(10).level = 20;      // 10 + 5 = 15 < 20 ⇒ 等级门失败
+  d.field.at(10).hp = 0;
+  d.field.at(10).max_hp = 100;
+  d.field.at(10).mods.capturable = true;
+  d.field.at(10).mods.capture_difficulty = 30;
+  SetCapture(d.cmds, 0, 10);
+  d.cmds.present[10] = false;
+
+  sa::domain::BattleEvents ev{};
+  ScriptedRandom rng({1});
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+  REQUIRE(ev.events.size() == 1);
+  CHECK(ev.events[0].body.capture_act.flags == 0u);   // 等级门挡下,RollCapture 未被调
+
+  // 边界:恰好 myLv + 5 == targetLv ⇒ **不**触发失败(严格小于)。
+  d.field.at(0).level = 15;       // 15 + 5 = 20,不小于 20 ⇒ 通过
+  sa::domain::BattleEvents ev2{};
+  ScriptedRandom rng2({1});
+  ResolveTurn(d.field, d.cmds, RulesConfig{}, rng2, ev2);
+  CHECK(ev2.events[0].body.capture_act.flags == 1u);
 }

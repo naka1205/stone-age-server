@@ -140,6 +140,27 @@ void ApplyEvents(const sa::domain::BattleEvents& events,
         }
         break;
       }
+      case sa::domain::BattleEvent::BodyKind::CAPTURE_ACT: {
+        // 批次 A.2:捕获事件的世界写回。
+        const sa::domain::CaptureAct& cap = e.body.capture_act;
+        if (cap.target >= static_cast<std::uint32_t>(sa::rules::kSlotCount)) break;
+        sa::rules::Combatant& tgt = field.at(static_cast<int>(cap.target));
+        if (!tgt.occupied) break;
+        if (cap.flags != 0u) {
+          // ★ 捕获成功 ⇒ 被捕目标离场(源码 `BATTLE_Exit`),**不是战死** ——
+          //   置 occupied=false 让 SideWipedOut 视其"已不在场"。同逃跑,不置 dead。
+          // ⚠️★ **1.5 有意不做的三件世界写,均非遗漏,而是缺落脚点**:
+          //   ① 生成宠物入攻方队伍(`PET_createPetFromCharaIndex`)—— 要 L2 宠物模型
+          //      与角色背包(1.2 / 阶段 2);
+          //   ② 删除条件捕获道具(DR-BT10「全删」)—— 要道具系统(阶段 2);
+          //   ③ 攻方 `capture_bonus` 清零(源码 :4121)—— 1.5 的 field 就地 mutate,
+          //      按理应清,但 capture_bonus 属 mods、当前无路径设置它 ⇒ 记在此,
+          //      待道具/技能能设置它时一并落地,不提前写一处无人触发的清零。
+          tgt.occupied = false;
+        }
+        // 失败 ⇒ 无世界写(目标留场),事件仅供客户端演出。
+        break;
+      }
       default:
         // 其余事件是**表现**(HIT / TEXT_BOX / …)或未移植链路的占位,
         // 对世界状态无影响 ⇒ 显式落到这里,不是遗漏。

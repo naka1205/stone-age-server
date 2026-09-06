@@ -613,6 +613,65 @@ bool RollEscape(bool is_pvp,
   return rng.Rand(1, 100) < esc;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  捕获(批次 A.2)
+// ═══════════════════════════════════════════════════════════════════
+//
+// 1:1 移植 `BATTLE_CaptureCheck`(`battle_event.c:3806`)。
+//
+// ⚠️★ **全程 float**(源码 `:3812-3819` 逐个变量声明 float)。与逃跑/伤害同族:
+//   `05` §6.2 把级差/敏捷差标注为「整数除法」是**错的** —— 这几处是浮点除法,
+//   照文档写会引入原版没有的截断。见 constants.h 的移植更正。
+//   本实现用 `f32`(与 ComputeDamage 同一别名)保留原类型语义,让边界比较逐位一致。
+bool RollCapture(int my_level, int target_level,
+                 int my_dex, int target_dex,
+                 int my_charm, int my_luck,
+                 int target_hp, int target_max_hp,
+                 int capture_difficulty,
+                 int capture_bonus,
+                 bool target_asleep,
+                 IRandom& rng,
+                 int* out_percent) noexcept {
+  // ★ MaxHp 兜底(`:3849 if(Df_MaxHp<=0)Df_MaxHp=1`)—— 防二次式除零。
+  f32 max_hp = static_cast<f32>(target_max_hp);
+  if (max_hp <= 0) max_hp = 1;
+
+  // Df_HpPer = 10 − (HP·HP)/MaxHp(`:3852`)★ 二次式:满血 ⇒ 10−MaxHp,深负 ⇒ 几乎抓不到。
+  const f32 hp = static_cast<f32>(target_hp);
+  const f32 df_hp_per =
+      static_cast<f32>(kCaptureHpBase) - (hp * hp) / max_hp;
+
+  // ★ 级差 / 敏捷差:**浮点除法**(见卷首)。
+  const f32 df_level = static_cast<f32>(my_level) / static_cast<f32>(kCaptureLevelDivisor) -
+                       static_cast<f32>(target_level) / static_cast<f32>(kCaptureLevelDivisor);
+  const f32 df_dex = static_cast<f32>(my_dex) / static_cast<f32>(kCaptureDexDivisor) -
+                     static_cast<f32>(target_dex) / static_cast<f32>(kCaptureDexDivisor);
+
+  // WorkGet = (Df_HpPer + Df_Level + Df_Dex + (难度 + 幸运)) × 魅力 / 50(`:3855`)。
+  f32 work = (df_hp_per + df_level + df_dex +
+              (static_cast<f32>(capture_difficulty) + static_cast<f32>(my_luck))) *
+             static_cast<f32>(my_charm) / static_cast<f32>(kCaptureCharmDivisor);
+
+  // += 捕获率提升(`:3857`)。★ 清零是世界写,在调用方,不在此。
+  work += static_cast<f32>(capture_bonus);
+
+  // 目标睡眠 ⇒ +15(`:3859-3861`)。
+  if (target_asleep) work += static_cast<f32>(kCaptureSleepBonus);
+
+  // min(WorkGet, 99)(`:3863`)。★ 无下限钳位 —— 原版没有 `if(WorkGet<0)`,
+  //   负值直接进 `RAND(1,100) < WorkGet` ⇒ 必失败。照抄,不补下限。
+  if (work > static_cast<f32>(kCaptureMaxRate)) work = static_cast<f32>(kCaptureMaxRate);
+
+  // ★ `*pPer = WorkGet`(`:3865`)—— 原版回填的是**未取整的 float**;
+  //   out_percent 是 int 视图,按截断给(展示/调试用,不参与判定)。
+  if (out_percent != nullptr) *out_percent = static_cast<int>(work);
+
+  // ★ 判定阈:`RAND(1,100) < WorkGet`(`:3867`)—— 严格小于,同逃跑。
+  //   ⚠️ 比较是 `int < float`:C 把 int 提升为 float 再比。保留该语义,
+  //     不要先把 work 截成 int —— 那会改变 `WorkGet` 有小数时的边界。
+  return static_cast<f32>(rng.Rand(1, 100)) < work;
+}
+
 namespace {
 
 // 事件缓冲的追加器。★ 只有它能写 `out.events`,截断判定收在一处。
@@ -645,6 +704,15 @@ class EventSink {
 
 bool IsGuarding(const sa::domain::BattleCommand& cmd) noexcept {
   return cmd.command_kind == sa::domain::BattleCommand::CommandKind::GUARD;
+}
+
+// 守方睡眠(捕获 +15,§6.2 `:3859`)。★ 原版读的是 `CHAR_WORKSLEEP > 0`,
+//   与状态槽 `BATTLE_ST_SLEEP` 是两个来源(同 drunk/confusion 那族),但 1.5 尚无
+//   独立 sleep work 字段 ⇒ 暂以状态槽近似。⚠️ 实现处记明:睡眠 work 独立字段
+//   属状态系统细化(§4),届时改读它,不要长期用状态槽代替。
+bool IsAsleep(const Combatant& c) noexcept {
+  return static_cast<sa::domain::BattleStatus>(c.status) ==
+         sa::domain::BattleStatus::BATTLE_ST_SLEEP;
 }
 
 // 守方本回合是否在施咒(§3.2:咒术时 kawashi_para 取 0.027,更易被闪)。
@@ -768,11 +836,53 @@ bool ResolveTurn(const BattleField& field,
       continue;
     }
 
+    // ── 捕获(§6.2,批次 A.2)──────────────────────────────────
+    //
+    // ⚠️★ 三道**可在快照里判定**的前置门在此拦(与逃跑「宠物不能逃」同处):
+    //    ① 目标是敌人(`:3826`)· ② 目标带可捕获标记(`:3830`)·
+    //    ③ 等级门 `myLv + 5 < targetLv`(`:3834`)。
+    //    ★ 第 ④ 道(条件道具)读背包,L3 看不到 ⇒ 留调用方,在调本函数之前拦。
+    //    任一门不过 ⇒ 产**捕获失败**事件(`flg=0`),不是"什么都不发生" ——
+    //    原版 `BATTLE_Capture` 无论成败都发 `BT|a|r|f|`(`:4225`),客户端要演。
+    if (cmd.command_kind == sa::domain::BattleCommand::CommandKind::CAPTURE) {
+      const int cap_target = static_cast<int>(cmd.command.capture.target);
+      if (cap_target < 0 || cap_target >= kSlotCount) continue;
+      const Combatant& tgt = field.at(cap_target);
+      if (!tgt.occupied || dead[cap_target]) continue;
+
+      bool ok = false;
+      // 前置门 ①②③(§6.2)。★ 等级门:`myLv + 5 < targetLv` 直接失败。
+      //   ⚠️ 原版有 `PickAllPet`(全收特殊技)可跳过等级门,属技能链路(B 批次)
+      //     ⇒ 本批次不接,在此按"无该技"处理,实现处记明、不猜。
+      if (tgt.IsEnemy() && tgt.mods.capturable &&
+          !(actor.level + kCaptureLevelGate < tgt.level)) {
+        ok = RollCapture(actor.level, tgt.level, actor.quick, tgt.quick,
+                         actor.charm, actor.luck, hp[cap_target],
+                         tgt.max_hp, tgt.mods.capture_difficulty,
+                         actor.mods.capture_bonus,
+                         IsAsleep(tgt), rng);
+      }
+
+      sa::domain::BattleEvent* ev =
+          sink.Push(sa::domain::BattleEvent::BodyKind::CAPTURE_ACT);
+      if (ev == nullptr) break;
+      ev->body.capture_act.actor  = static_cast<std::uint32_t>(actor_slot);
+      ev->body.capture_act.target = static_cast<std::uint32_t>(cap_target);
+      ev->body.capture_act.flags  = ok ? 1u : 0u;   // 原 `f%X`:成功=1
+      // ★ 成功后的世界写(生成宠物 / 目标离场 / 删条件道具 DR-BT10 /
+      //   capture_bonus 清零)由调用方按事件执行 —— L3 不写世界态。
+      if (sink.overflowed()) break;
+      continue;
+    }
+
     if (cmd.command_kind != sa::domain::BattleCommand::CommandKind::ATTACK) {
       // GUARD 与 WAIT 本身不产事件:防御的效果体现在**被攻击时**的减伤(§3.5),
       // 由下方攻击链路读 `IsGuarding` 得到。
-      // ⚠️ CAPTURE / PET_IN / PET_OUT / USE_ITEM / 技能 / 咒术仍落这里被跳过 ——
-      //    绑在批次 A.2+ / B / C 的链路上(见 battle.h 的表)。
+      // ⚠️ PET_IN / PET_OUT / USE_ITEM / 技能 / 咒术仍落这里被跳过 ——
+      //    绑在批次 A.3+ / B / C 的链路上(见 battle.h 的表)。
+      //    ★ 换宠(PET_IN/OUT)**不在 A.2** —— 它无判定阈,真实成本是把宠物建模成
+      //      独立战斗槽单位入场(BATTLE_PetDefaultEntry),属 L2 实体族(1.2),
+      //      1.5 的 Combatant 只有 has_ride 骑乘、没有槽位宠 ⇒ 排在 L2 之后。
       continue;
     }
 
