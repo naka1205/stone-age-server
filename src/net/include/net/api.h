@@ -110,7 +110,7 @@ class Transport {
 // 进程内传输。测试用,同时是 01 §5.1 里 InProcTransport 的雏形。
 class LoopbackTransport final : public Transport {
  public:
-  void SetEvents(TransportEvents* events) override { events_ = events; }
+  void SetEvents(TransportEvents* events) override { _events = events; }
   bool Send(ConnectionId id, const std::uint8_t* data,
             std::size_t n) override;
   void Close(ConnectionId id) override;
@@ -134,9 +134,9 @@ class LoopbackTransport final : public Transport {
   Conn* Get(ConnectionId id);
   const Conn* Get(ConnectionId id) const;
 
-  TransportEvents* events_ = nullptr;
-  std::vector<Conn> conns_;
-  ConnectionId next_id_ = 1;
+  TransportEvents* _events = nullptr;
+  std::vector<Conn> _conns;
+  ConnectionId _nextId = 1;
 };
 
 // ── TCP 传输(2026-09-04,1.5 收尾项)─────────────────────────────
@@ -209,7 +209,7 @@ class TcpTransport final : public Transport {
 
  private:
   struct Impl;
-  std::unique_ptr<Impl> impl_;
+  std::unique_ptr<Impl> _impl;
 };
 
 // ── 会话(01 §5.2)──────────────────────────────────────────────
@@ -270,9 +270,9 @@ class Session {
   Session(SessionId id, std::uint32_t protocol_version,
           std::uint32_t heartbeat_interval_ms, SessionHost* host) noexcept;
 
-  SessionId id() const noexcept { return id_; }
-  SessionState state() const noexcept { return state_; }
-  bool closed() const noexcept { return state_ == SessionState::kClosed; }
+  SessionId id() const noexcept { return _id; }
+  SessionState state() const noexcept { return _state; }
+  bool closed() const noexcept { return _state == SessionState::kClosed; }
 
   // 处理一条已成帧的消息。
   //
@@ -293,21 +293,21 @@ class Session {
   void Close() noexcept;
 
   // ── 供测试与运维观察 ──
-  std::uint64_t frames_handled() const noexcept { return frames_handled_; }
-  std::uint32_t last_reject_msg_id() const noexcept { return last_reject_msg_id_; }
+  std::uint64_t frames_handled() const noexcept { return _framesHandled; }
+  std::uint32_t last_reject_msg_id() const noexcept { return _lastRejectMsgId; }
 
  private:
   bool HandleHandshake(const EnvelopeView& env, std::vector<std::uint8_t>& out);
   bool HandlePing(const EnvelopeView& env, std::vector<std::uint8_t>& out);
   bool HandleBattleCommand(const EnvelopeView& env);
 
-  SessionId id_;
-  std::uint32_t protocol_version_;
-  std::uint32_t heartbeat_interval_ms_;
-  SessionHost* host_;
-  SessionState state_ = SessionState::kAnonymous;
-  std::uint64_t frames_handled_ = 0;
-  std::uint32_t last_reject_msg_id_ = 0;
+  SessionId _id;
+  std::uint32_t _protocolVersion;
+  std::uint32_t _heartbeatIntervalMs;
+  SessionHost* _host;
+  SessionState _state = SessionState::kAnonymous;
+  std::uint64_t _framesHandled = 0;
+  std::uint32_t _lastRejectMsgId = 0;
 };
 
 }  // namespace SA::Net

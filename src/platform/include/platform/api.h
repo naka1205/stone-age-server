@@ -58,19 +58,19 @@ class MonotonicClock final : public Clock {
   Millis NowMs() const noexcept override;
 
  private:
-  std::int64_t origin_ns_;
+  std::int64_t _originNs;
 };
 
 // 测试实现:时间由调用方推。
 class ManualClock final : public Clock {
  public:
-  explicit ManualClock(Millis start = 0) noexcept : now_(start) {}
-  Millis NowMs() const noexcept override { return now_; }
-  void Advance(Millis delta) noexcept { now_ += delta; }
-  void SetNow(Millis t) noexcept { now_ = t; }
+  explicit ManualClock(Millis start = 0) noexcept : _now(start) {}
+  Millis NowMs() const noexcept override { return _now; }
+  void Advance(Millis delta) noexcept { _now += delta; }
+  void SetNow(Millis t) noexcept { _now = t; }
 
  private:
-  Millis now_;
+  Millis _now;
 };
 
 // ── 结构化日志 ────────────────────────────────────────────────
@@ -145,48 +145,48 @@ class LogField {
   enum class Kind : std::uint8_t { kInt, kUInt, kStr, kBool };
 
   LogField(const char* k, std::int64_t v) noexcept
-      : key_(k), kind_(Kind::kInt), i_(v) {}
+      : _key(k), _kind(Kind::kInt), _i(v) {}
   LogField(const char* k, std::uint64_t v) noexcept
-      : key_(k), kind_(Kind::kUInt), u_(v) {}
+      : _key(k), _kind(Kind::kUInt), _u(v) {}
   LogField(const char* k, std::string_view v) noexcept
-      : key_(k), kind_(Kind::kStr), s_(v) {}
+      : _key(k), _kind(Kind::kStr), _s(v) {}
   LogField(const char* k, bool v) noexcept
-      : key_(k), kind_(Kind::kBool), b_(v) {}
+      : _key(k), _kind(Kind::kBool), _b(v) {}
 
-  const char* key() const noexcept { return key_; }
-  Kind kind() const noexcept { return kind_; }
-  std::int64_t as_int() const noexcept { return i_; }
-  std::uint64_t as_uint() const noexcept { return u_; }
-  std::string_view as_str() const noexcept { return s_; }
-  bool as_bool() const noexcept { return b_; }
+  const char* key() const noexcept { return _key; }
+  Kind kind() const noexcept { return _kind; }
+  std::int64_t as_int() const noexcept { return _i; }
+  std::uint64_t as_uint() const noexcept { return _u; }
+  std::string_view as_str() const noexcept { return _s; }
+  bool as_bool() const noexcept { return _b; }
 
  private:
-  const char* key_;
-  Kind kind_;
-  std::int64_t i_ = 0;
-  std::uint64_t u_ = 0;
-  std::string_view s_{};
-  bool b_ = false;
+  const char* _key;
+  Kind _kind;
+  std::int64_t _i = 0;
+  std::uint64_t _u = 0;
+  std::string_view _s{};
+  bool _b = false;
 };
 
 class Logger {
  public:
   explicit Logger(LogLevel min_level = LogLevel::kInfo) noexcept
-      : min_level_(min_level) {}
+      : _minLevel(min_level) {}
 
-  void set_min_level(LogLevel l) noexcept { min_level_ = l; }
-  LogLevel min_level() const noexcept { return min_level_; }
-  bool Enabled(LogLevel l) const noexcept { return l >= min_level_; }
+  void set_min_level(LogLevel l) noexcept { _minLevel = l; }
+  LogLevel min_level() const noexcept { return _minLevel; }
+  bool Enabled(LogLevel l) const noexcept { return l >= _minLevel; }
 
   void Log(LogLevel level, LogEvent event,
            std::initializer_list<LogField> fields = {}) const;
 
   // 已产出的行数 —— 测试用,免得为了断言"记了这条日志"去解析 stderr。
-  std::uint64_t emitted() const noexcept { return emitted_; }
+  std::uint64_t emitted() const noexcept { return _emitted; }
 
  private:
-  LogLevel min_level_;
-  mutable std::uint64_t emitted_ = 0;
+  LogLevel _minLevel;
+  mutable std::uint64_t _emitted = 0;
 };
 
 // ── 配置 ──────────────────────────────────────────────────────
@@ -269,18 +269,18 @@ class RandomSource {
   // master_seed == 0 ⇒ 从启动时刻派生一个,并由调用方打进日志。
   explicit RandomSource(std::uint64_t master_seed) noexcept;
 
-  std::uint64_t master_seed() const noexcept { return master_seed_; }
+  std::uint64_t master_seed() const noexcept { return _masterSeed; }
 
   // 每场战斗取一个。★ 序列由 master_seed 完全决定
   //   ⇒ 记下 master_seed + 第几场,就能重放任意一场。
   std::uint64_t NextSeed() noexcept;
 
-  std::uint64_t minted() const noexcept { return minted_; }
+  std::uint64_t minted() const noexcept { return _minted; }
 
  private:
-  std::uint64_t master_seed_;
-  std::uint64_t state_;
-  std::uint64_t minted_ = 0;
+  std::uint64_t _masterSeed;
+  std::uint64_t _state;
+  std::uint64_t _minted = 0;
 };
 
 }  // namespace SA::Platform

@@ -839,15 +839,15 @@ namespace {
 //    由 `ResolveTurn` 返回 false 把它交给调用方分包,绝不静默丢弃。
 class EventSink {
  public:
-  explicit EventSink(SA::Domain::BattleEvents& out) noexcept : out_(out) {}
+  explicit EventSink(SA::Domain::BattleEvents& out) noexcept : _out(out) {}
 
-  bool overflowed() const noexcept { return overflowed_; }
+  bool overflowed() const noexcept { return _overflowed; }
 
   // 追加一个事件槽并返回它;满了返回 nullptr。
   SA::Domain::BattleEvent* Push(SA::Domain::BattleEvent::BodyKind kind) noexcept {
-    SA::Domain::BattleEvent* e = out_.events.push_back();
+    SA::Domain::BattleEvent* e = _out.events.push_back();
     if (e == nullptr) {
-      overflowed_ = true;
+      _overflowed = true;
       return nullptr;
     }
     *e = SA::Domain::BattleEvent{};
@@ -856,8 +856,8 @@ class EventSink {
   }
 
  private:
-  SA::Domain::BattleEvents& out_;
-  bool overflowed_ = false;
+  SA::Domain::BattleEvents& _out;
+  bool _overflowed = false;
 };
 
 bool IsGuarding(const SA::Domain::BattleCommand& cmd) noexcept {

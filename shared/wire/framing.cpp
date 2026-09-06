@@ -30,13 +30,13 @@ std::uint32_t ReadU32LE(const std::uint8_t* p) noexcept {
 }  // namespace
 
 bool FrameReader::Push(const std::uint8_t* data, std::size_t n) {
-  if (failed_) return false;
+  if (_failed) return false;
 
   // 已消费的前缀攒够一半就回收,避免缓冲无限前移。
   // ⚠️ 不是每次都 erase:那会把成帧变成 O(n²)。
-  if (read_ > 0 && read_ * 2 >= buf_.size()) {
-    buf_.erase(buf_.begin(), buf_.begin() + static_cast<std::ptrdiff_t>(read_));
-    read_ = 0;
+  if (_read > 0 && _read * 2 >= _buf.size()) {
+    _buf.erase(_buf.begin(), _buf.begin() + static_cast<std::ptrdiff_t>(_read));
+    _read = 0;
   }
 
   // ★ 累积上限 = 单帧上限 + 头 + 一帧余量。超过说明对端在灌垃圾
@@ -45,45 +45,45 @@ bool FrameReader::Push(const std::uint8_t* data, std::size_t n) {
   const std::size_t limit =
       static_cast<std::size_t>(kMaxFrameBytes) * 2 + kFrameHeaderBytes;
   if (buffered() + n > limit) {
-    failed_ = true;
+    _failed = true;
     return false;
   }
 
-  buf_.insert(buf_.end(), data, data + n);
+  _buf.insert(_buf.end(), data, data + n);
   return true;
 }
 
 FrameStatus FrameReader::Next(const std::uint8_t** payload,
                               std::uint32_t* len) {
-  if (failed_) return FrameStatus::kTooLarge;
+  if (_failed) return FrameStatus::kTooLarge;
 
   const std::size_t avail = buffered();
   if (avail < kFrameHeaderBytes) return FrameStatus::kNeedMore;
 
-  const std::uint32_t declared = ReadU32LE(buf_.data() + read_);
+  const std::uint32_t declared = ReadU32LE(_buf.data() + _read);
 
   // ⚠️★ 这两种失败是**粘性**的:长度字段一旦不可信,字节流就再也无法对齐,
   //    "跳过这一帧"是没有意义的 —— 我们并不知道这一帧到哪结束。
   if (declared == 0) {
-    failed_ = true;
+    _failed = true;
     return FrameStatus::kEmpty;
   }
   if (declared > kMaxFrameBytes) {
-    failed_ = true;
+    _failed = true;
     return FrameStatus::kTooLarge;
   }
 
   if (avail < kFrameHeaderBytes + declared) return FrameStatus::kNeedMore;
 
-  *payload = buf_.data() + read_ + kFrameHeaderBytes;
+  *payload = _buf.data() + _read + kFrameHeaderBytes;
   *len = declared;
-  pending_ = declared + static_cast<std::uint32_t>(kFrameHeaderBytes);
+  _pending = declared + static_cast<std::uint32_t>(kFrameHeaderBytes);
   return FrameStatus::kOk;
 }
 
 void FrameReader::Pop() {
-  read_ += pending_;
-  pending_ = 0;
+  _read += _pending;
+  _pending = 0;
 }
 
 bool WriteFrame(const std::uint8_t* payload, std::uint32_t len,

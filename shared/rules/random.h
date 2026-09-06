@@ -52,7 +52,7 @@ class Random {
 class SeededRandom final : public Random {
  public:
   explicit SeededRandom(std::uint64_t seed) noexcept
-      : state_(seed ? seed : 0x9E3779B97F4A7C15ull) {}
+      : _state(seed ? seed : 0x9E3779B97F4A7C15ull) {}
 
   int Rand(int lo, int hi) noexcept override {
     if (hi <= lo) return lo;
@@ -65,17 +65,17 @@ class SeededRandom final : public Random {
     return static_cast<int>(Next() % static_cast<std::uint64_t>(n));
   }
 
-  std::uint64_t state() const noexcept { return state_; }
+  std::uint64_t state() const noexcept { return _state; }
 
  private:
   std::uint64_t Next() noexcept {
-    state_ ^= state_ >> 12;
-    state_ ^= state_ << 25;
-    state_ ^= state_ >> 27;
-    return state_ * 0x2545F4914F6CDD1Dull;
+    _state ^= _state >> 12;
+    _state ^= _state << 25;
+    _state ^= _state >> 27;
+    return _state * 0x2545F4914F6CDD1Dull;
   }
 
-  std::uint64_t state_;
+  std::uint64_t _state;
 };
 
 }  // namespace SA::Rules

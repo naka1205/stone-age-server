@@ -570,7 +570,7 @@ namespace {
 //   分布用例挡不住"档位表抄错一格"这种最常见的移植错误。
 class ScriptedRandom final : public Random {
  public:
-  explicit ScriptedRandom(std::vector<int> script) : script_(std::move(script)) {}
+  explicit ScriptedRandom(std::vector<int> script) : _script(std::move(script)) {}
 
   int Rand(int lo, int hi) override {
     const int v = Next();
@@ -586,14 +586,14 @@ class ScriptedRandom final : public Random {
 
  private:
   int Next() {
-    if (script_.empty()) return 0;
+    if (_script.empty()) return 0;
     // ★ 用尽后**重复最后一个值**,不回卷:回卷会让"多消费了一次随机数"这种
     //   偏差在长序列里自愈,从而掩盖 rng 消费序列的变化。
-    if (cursor_ >= script_.size()) return script_.back();
-    return script_[cursor_++];
+    if (_cursor >= _script.size()) return _script.back();
+    return _script[_cursor++];
   }
-  std::vector<int> script_;
-  std::size_t cursor_ = 0;
+  std::vector<int> _script;
+  std::size_t _cursor = 0;
 };
 
 // 恒取上界的随机源。★ 回避判定是 `RAND(1,10000) <= per` 而 per 硬上限 7500

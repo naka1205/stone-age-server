@@ -119,7 +119,7 @@ void Logger::Log(LogLevel level, LogEvent event,
   // ⚠️ 这在 1.5 是对的(单进程、低频事件);真正上量时要换成异步 Sink,
   //    否则日志会成为 01 §2「主线程绝不允许阻塞」的破口。
   std::fwrite(line.data(), 1, line.size(), stderr);
-  ++emitted_;
+  ++_emitted;
 }
 
 }  // namespace SA::Platform

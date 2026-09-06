@@ -83,15 +83,15 @@ class TestClient {
   //     于是对端能往这条连接灌多少字节就有了一个**已知上界** —— 大负载用例靠它制造背压。
   //   ⚠️ 必须在 connect 之前:窗口缩放因子在 SYN 里协商,之后再改不影响对端看到的窗口。
   bool Connect(std::uint16_t port, int rcvbuf_bytes = 0) {
-    fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (fd_ == kBad) return false;
+    _fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (_fd == kBad) return false;
     if (rcvbuf_bytes > 0) {
 #if defined(_WIN32)
       ::setsockopt(fd_, SOL_SOCKET, SO_RCVBUF,
                    reinterpret_cast<const char*>(&rcvbuf_bytes),
                    sizeof(rcvbuf_bytes));
 #else
-      ::setsockopt(fd_, SOL_SOCKET, SO_RCVBUF, &rcvbuf_bytes,
+      ::setsockopt(_fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf_bytes,
                    sizeof(rcvbuf_bytes));
 #endif
     }
@@ -99,9 +99,9 @@ class TestClient {
     a.sin_family = AF_INET;
     a.sin_port = htons(port);
     ::inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
-    if (::connect(fd_, reinterpret_cast<const sockaddr*>(&a), sizeof(a)) != 0) {
-      RawClose(fd_);
-      fd_ = kBad;
+    if (::connect(_fd, reinterpret_cast<const sockaddr*>(&a), sizeof(a)) != 0) {
+      RawClose(_fd);
+      _fd = kBad;
       return false;
     }
 #if defined(_WIN32)
@@ -111,7 +111,7 @@ class TestClient {
 #else
     timeval tv{};
     tv.tv_sec = 2;
-    ::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ::setsockopt(_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
     return true;
   }
@@ -123,7 +123,7 @@ class TestClient {
       const int r = ::send(fd_, reinterpret_cast<const char*>(p) + sent,
                            static_cast<int>(n - sent), 0);
 #else
-      const ssize_t r = ::send(fd_, p + sent, n - sent, 0);
+      const ssize_t r = ::send(_fd, p + sent, n - sent, 0);
 #endif
       if (r <= 0) return false;
       sent += static_cast<std::size_t>(r);
@@ -144,7 +144,7 @@ class TestClient {
       const int n = ::recv(fd_, reinterpret_cast<char*>(buf),
                            static_cast<int>(sizeof(buf)), 0);
 #else
-      const ssize_t n = ::recv(fd_, buf, sizeof(buf), 0);
+      const ssize_t n = ::recv(_fd, buf, sizeof(buf), 0);
 #endif
       if (n <= 0) break;  // 超时 / 对端关闭
       out.insert(out.end(), buf, buf + n);
@@ -161,7 +161,7 @@ class TestClient {
       const int n = ::recv(fd_, reinterpret_cast<char*>(buf),
                            static_cast<int>(sizeof(buf)), 0);
 #else
-      const ssize_t n = ::recv(fd_, buf, sizeof(buf), 0);
+      const ssize_t n = ::recv(_fd, buf, sizeof(buf), 0);
 #endif
       if (n <= 0) break;
       out.insert(out.end(), buf, buf + n);
@@ -170,15 +170,15 @@ class TestClient {
   }
 
   void Close() {
-    if (fd_ != kBad) {
-      RawClose(fd_);
-      fd_ = kBad;
+    if (_fd != kBad) {
+      RawClose(_fd);
+      _fd = kBad;
     }
   }
   ~TestClient() { Close(); }
 
  private:
-  RawSocket fd_ = kBad;
+  RawSocket _fd = kBad;
 };
 
 // 记录传输层回调。★ 字节**存下来**,不是数个数 ——
@@ -513,45 +513,45 @@ namespace {
 // ★ 这就是 world 在做的事(world.cpp),这里用最小复刻验证接线本身。
 class SessionBridge final : public TransportEvents, public SessionHost {
  public:
-  SessionBridge(TcpTransport& t) : t_(t) {}
+  SessionBridge(TcpTransport& t) : _t(t) {}
 
   void OnConnected(ConnectionId id) override {
-    conn_ = id;
-    session_ = std::make_unique<Session>(id, kVersion, kHeartbeat, this);
+    _conn = id;
+    _session = std::make_unique<Session>(id, kVersion, kHeartbeat, this);
   }
   void OnBytes(ConnectionId, const std::uint8_t* data,
                std::size_t n) override {
-    if (session_ == nullptr) return;
-    reader_.Push(data, n);
+    if (_session == nullptr) return;
+    _reader.Push(data, n);
     for (;;) {
       const std::uint8_t* p = nullptr;
       std::uint32_t len = 0;
-      if (reader_.Next(&p, &len) != FrameStatus::kOk) break;
+      if (_reader.Next(&p, &len) != FrameStatus::kOk) break;
       std::vector<std::uint8_t> out;
-      const bool ok = session_->HandleFrame(p, len, out);
-      reader_.Pop();
-      if (!out.empty()) t_.Send(conn_, out.data(), out.size());
+      const bool ok = _session->HandleFrame(p, len, out);
+      _reader.Pop();
+      if (!out.empty()) _t.Send(_conn, out.data(), out.size());
       if (!ok) {
-        t_.Close(conn_);  // ★ 协议违规 ⇒ 关连接(02 §5.5),但理由先发出去
+        _t.Close(_conn);  // ★ 协议违规 ⇒ 关连接(02 §5.5),但理由先发出去
         break;
       }
     }
   }
-  void OnDisconnected(ConnectionId) override { session_.reset(); }
+  void OnDisconnected(ConnectionId) override { _session.reset(); }
 
   void OnSessionReady(SessionId id) override { ready.push_back(id); }
   void OnBattleCommand(SessionId, const SA::Domain::BattleCommand&) override {}
   void OnSessionClosed(SessionId) override {}
 
-  ConnectionId conn() const { return conn_; }
+  ConnectionId conn() const { return _conn; }
 
   std::vector<SessionId> ready;
 
  private:
-  TcpTransport& t_;
-  FrameReader reader_;
-  std::unique_ptr<Session> session_;
-  ConnectionId conn_ = 0;
+  TcpTransport& _t;
+  FrameReader _reader;
+  std::unique_ptr<Session> _session;
+  ConnectionId _conn = 0;
 };
 
 }  // namespace

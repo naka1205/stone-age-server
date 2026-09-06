@@ -270,7 +270,7 @@ World::World(const SA::Platform::ServerConfig& config,
              SA::Platform::Clock& clock, SA::Platform::Logger& logger,
              SA::Platform::RandomSource& random,
              SA::Net::Transport& transport)
-    : impl_(std::make_unique<Impl>(config, clock, logger, random, transport)) {
+    : _impl(std::make_unique<Impl>(config, clock, logger, random, transport)) {
   transport.SetEvents(this);
 }
 
@@ -278,7 +278,7 @@ World::~World() = default;
 
 // ══ tick(01 §3.1)═══════════════════════════════════════════════
 void World::Tick() {
-  Impl& s = *impl_;
+  Impl& s = *_impl;
   if (s.stopped) return;
   ++s.ticks;
 
@@ -420,7 +420,7 @@ void World::Tick() {
 
 // ══ 战斗生命周期 ═════════════════════════════════════════════════
 BattleId World::StartBattle(const SA::Rules::BattleField& field) {
-  Impl& s = *impl_;
+  Impl& s = *_impl;
   const BattleId id = s.next_battle_id++;
 
   BattleInstance b;
@@ -450,7 +450,7 @@ BattleId World::StartBattle(const SA::Rules::BattleField& field) {
 
 bool World::JoinBattle(BattleId battle, SA::Net::SessionId session,
                        std::uint8_t slot) {
-  Impl& s = *impl_;
+  Impl& s = *_impl;
   const auto bit = s.battles.find(battle);
   if (bit == s.battles.end()) return false;
   if (slot >= SA::Rules::kSlotCount) return false;
@@ -508,7 +508,7 @@ bool World::JoinBattle(BattleId battle, SA::Net::SessionId session,
 
 // ══ TransportEvents ═════════════════════════════════════════════
 void World::OnConnected(SA::Net::ConnectionId id) {
-  Impl& s = *impl_;
+  Impl& s = *_impl;
   Impl::Conn c;
   c.conn_id = id;
   // 1.5:SessionId == ConnectionId。⚠️ 阶段 2 加重连窗口时这条要断开 ——
@@ -523,7 +523,7 @@ void World::OnConnected(SA::Net::ConnectionId id) {
 
 void World::OnBytes(SA::Net::ConnectionId id, const std::uint8_t* data,
                     std::size_t n) {
-  Impl& s = *impl_;
+  Impl& s = *_impl;
   const auto it = s.conns.find(id);
   if (it == s.conns.end()) return;
   Impl::Conn& c = it->second;
@@ -576,7 +576,7 @@ void World::OnBytes(SA::Net::ConnectionId id, const std::uint8_t* data,
 }
 
 void World::OnDisconnected(SA::Net::ConnectionId id) {
-  Impl& s = *impl_;
+  Impl& s = *_impl;
   const auto it = s.conns.find(id);
   if (it == s.conns.end()) return;
   if (it->second.session != nullptr) it->second.session->Close();
@@ -594,7 +594,7 @@ void World::OnDisconnected(SA::Net::ConnectionId id) {
 
 // ══ SessionHost ═════════════════════════════════════════════════
 void World::OnSessionReady(SA::Net::SessionId id) {
-  Impl& s = *impl_;
+  Impl& s = *_impl;
   s.logger.Log(SA::Platform::LogLevel::kInfo,
                SA::Platform::LogEvent::kHandshakeAccepted,
                {{"session_id", id}});
@@ -631,7 +631,7 @@ void World::OnSessionReady(SA::Net::SessionId id) {
 
 void World::OnBattleCommand(SA::Net::SessionId id,
                             const SA::Domain::BattleCommand& cmd) {
-  Impl& s = *impl_;
+  Impl& s = *_impl;
   const auto bit = s.battles.find(cmd.battle_id);
   if (bit == s.battles.end()) return;
   BattleInstance& b = bit->second;
@@ -650,31 +650,31 @@ void World::OnBattleCommand(SA::Net::SessionId id,
 }
 
 void World::OnSessionClosed(SA::Net::SessionId id) {
-  impl_->logger.Log(SA::Platform::LogLevel::kDebug,
+  _impl->logger.Log(SA::Platform::LogLevel::kDebug,
                     SA::Platform::LogEvent::kSessionStateChanged,
                     {{"session_id", id},
                      {"state", std::string_view("closed")}});
 }
 
 // ══ 观察面 ═══════════════════════════════════════════════════════
-void World::RequestShutdown() noexcept { impl_->shutdown_requested = true; }
+void World::RequestShutdown() noexcept { _impl->shutdown_requested = true; }
 
-bool World::stopped() const noexcept { return impl_->stopped; }
+bool World::stopped() const noexcept { return _impl->stopped; }
 
-std::uint64_t World::ticks() const noexcept { return impl_->ticks; }
+std::uint64_t World::ticks() const noexcept { return _impl->ticks; }
 
 std::size_t World::session_count() const noexcept {
-  return impl_->conns.size();
+  return _impl->conns.size();
 }
 
 const BattleStats* World::stats(BattleId id) const {
-  const auto it = impl_->battles.find(id);
-  return it == impl_->battles.end() ? nullptr : &it->second.stats;
+  const auto it = _impl->battles.find(id);
+  return it == _impl->battles.end() ? nullptr : &it->second.stats;
 }
 
 SA::Net::SessionState World::session_state(SA::Net::SessionId id) const {
-  const auto it = impl_->conns.find(id);
-  if (it == impl_->conns.end() || it->second.session == nullptr) {
+  const auto it = _impl->conns.find(id);
+  if (it == _impl->conns.end() || it->second.session == nullptr) {
     return SA::Net::SessionState::kClosed;
   }
   return it->second.session->state();

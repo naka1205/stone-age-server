@@ -234,20 +234,20 @@ struct TcpTransport::Impl {
   }
 };
 
-TcpTransport::TcpTransport() : impl_(new Impl) {}
+TcpTransport::TcpTransport() : _impl(new Impl) {}
 
 TcpTransport::~TcpTransport() {
   // ⚠️ 析构里**不回调** OnDisconnected:宿主可能已经先于传输层销毁,
   //    那正是"析构顺序依赖"这类错的温床。要通知就显式调 Stop()。
-  for (Impl::Conn& c : impl_->conns) {
+  for (Impl::Conn& c : _impl->conns) {
     if (c.fd != kInvalidSocket) CloseSocket(c.fd);
   }
-  if (impl_->listener != kInvalidSocket) CloseSocket(impl_->listener);
-  if (impl_->lib_ready) SocketLibrary::Release();
+  if (_impl->listener != kInvalidSocket) CloseSocket(_impl->listener);
+  if (_impl->lib_ready) SocketLibrary::Release();
 }
 
 bool TcpTransport::Listen(const char* bind_addr, std::uint16_t port) {
-  Impl& d = *impl_;
+  Impl& d = *_impl;
   if (d.listener != kInvalidSocket) {
     d.error = "已经在监听了 —— 重复 Listen 是调用方的逻辑错,不是可恢复状态";
     return false;
@@ -329,15 +329,15 @@ bool TcpTransport::Listen(const char* bind_addr, std::uint16_t port) {
 }
 
 std::uint16_t TcpTransport::listen_port() const noexcept {
-  return impl_->port;
+  return _impl->port;
 }
 
 const char* TcpTransport::last_error() const noexcept {
-  return impl_->error.c_str();
+  return _impl->error.c_str();
 }
 
 void TcpTransport::Stop() {
-  Impl& d = *impl_;
+  Impl& d = *_impl;
   if (d.listener != kInvalidSocket) {
     CloseSocket(d.listener);
     d.listener = kInvalidSocket;
@@ -353,12 +353,12 @@ void TcpTransport::Stop() {
 }
 
 void TcpTransport::SetEvents(TransportEvents* events) {
-  impl_->events = events;
+  _impl->events = events;
 }
 
 bool TcpTransport::Send(ConnectionId id, const std::uint8_t* data,
                         std::size_t n) {
-  Impl& d = *impl_;
+  Impl& d = *_impl;
   Impl::Conn* c = d.Get(id);
   if (c == nullptr || c->want_close) return false;
 
@@ -379,7 +379,7 @@ bool TcpTransport::Send(ConnectionId id, const std::uint8_t* data,
 }
 
 void TcpTransport::Close(ConnectionId id) {
-  Impl& d = *impl_;
+  Impl& d = *_impl;
   Impl::Conn* c = d.Get(id);
   if (c == nullptr || c->want_close) return;
   // ★ 优雅关闭:标记后先把出站排空,Poll() 再真正关掉并回调。
@@ -389,7 +389,7 @@ void TcpTransport::Close(ConnectionId id) {
 }
 
 void TcpTransport::Poll() {
-  Impl& d = *impl_;
+  Impl& d = *_impl;
 
   // ── 1. accept:一轮吃干净,不留到下一 tick ──────────────────────
   if (d.listener != kInvalidSocket) {
@@ -520,14 +520,14 @@ void TcpTransport::Poll() {
 
 std::size_t TcpTransport::connection_count() const noexcept {
   std::size_t n = 0;
-  for (const Impl::Conn& c : impl_->conns) {
+  for (const Impl::Conn& c : _impl->conns) {
     if (!c.dead) ++n;
   }
   return n;
 }
 
 std::size_t TcpTransport::pending_outbound(ConnectionId id) const noexcept {
-  const Impl::Conn* c = impl_->Get(id);
+  const Impl::Conn* c = _impl->Get(id);
   return c == nullptr ? 0 : c->outbound.size() - c->out_sent;
 }
 

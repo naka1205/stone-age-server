@@ -41,31 +41,31 @@ class Value {
   static Value Obj(Object v);
   static Value Arr(Array v);
 
-  Type type() const noexcept { return type_; }
-  bool is_null() const noexcept { return type_ == Type::kNull; }
-  bool is_bool() const noexcept { return type_ == Type::kBool; }
-  bool is_number() const noexcept { return type_ == Type::kNumber; }
-  bool is_string() const noexcept { return type_ == Type::kString; }
-  bool is_object() const noexcept { return type_ == Type::kObject; }
-  bool is_array() const noexcept { return type_ == Type::kArray; }
+  Type type() const noexcept { return _type; }
+  bool is_null() const noexcept { return _type == Type::kNull; }
+  bool is_bool() const noexcept { return _type == Type::kBool; }
+  bool is_number() const noexcept { return _type == Type::kNumber; }
+  bool is_string() const noexcept { return _type == Type::kString; }
+  bool is_object() const noexcept { return _type == Type::kObject; }
+  bool is_array() const noexcept { return _type == Type::kArray; }
 
-  bool as_bool() const noexcept { return bool_; }
-  double as_number() const noexcept { return number_; }
-  const std::string& as_string() const noexcept { return string_; }
-  const Object& as_object() const noexcept { return object_; }
-  const Array& as_array() const noexcept { return array_; }
+  bool as_bool() const noexcept { return _bool; }
+  double as_number() const noexcept { return _number; }
+  const std::string& as_string() const noexcept { return _string; }
+  const Object& as_object() const noexcept { return _object; }
+  const Array& as_array() const noexcept { return _array; }
 
   // 找不到返回 nullptr。★ 不提供「找不到给默认值」的重载 ——
   //   那会让「键写错了」和「键没写」变成同一件事,而前者是配置错误。
   const Value* Find(std::string_view key) const;
 
  private:
-  Type type_ = Type::kNull;
-  bool bool_ = false;
-  double number_ = 0.0;
-  std::string string_;
-  Object object_;
-  Array array_;
+  Type _type = Type::kNull;
+  bool _bool = false;
+  double _number = 0.0;
+  std::string _string;
+  Object _object;
+  Array _array;
 };
 
 struct ParseOutcome {

@@ -43,12 +43,12 @@ std::uint64_t DeriveBootSeed() noexcept {
 }  // namespace
 
 RandomSource::RandomSource(std::uint64_t master_seed) noexcept
-    : master_seed_(master_seed != 0 ? master_seed : DeriveBootSeed()),
-      state_(master_seed_) {}
+    : _masterSeed(master_seed != 0 ? master_seed : DeriveBootSeed()),
+      _state(_masterSeed) {}
 
 std::uint64_t RandomSource::NextSeed() noexcept {
-  ++minted_;
-  const std::uint64_t s = SplitMix64(state_);
+  ++_minted;
+  const std::uint64_t s = SplitMix64(_state);
   // ★ 0 是 SeededRandom 的哨兵(它会替换成一个固定常数)⇒ 让 0 永远不出现,
   //   否则"第 N 场战斗"与"某场种子恰为 0 的战斗"会共用同一条序列。
   return s != 0 ? s : 0x9E3779B97F4A7C15ull;

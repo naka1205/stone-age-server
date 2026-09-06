@@ -17,14 +17,14 @@ const std::vector<std::uint8_t> kEmpty;
 }
 
 LoopbackTransport::Conn* LoopbackTransport::Get(ConnectionId id) {
-  for (Conn& c : conns_) {
+  for (Conn& c : _conns) {
     if (c.id == id) return &c;
   }
   return nullptr;
 }
 
 const LoopbackTransport::Conn* LoopbackTransport::Get(ConnectionId id) const {
-  for (const Conn& c : conns_) {
+  for (const Conn& c : _conns) {
     if (c.id == id) return &c;
   }
   return nullptr;
@@ -32,10 +32,10 @@ const LoopbackTransport::Conn* LoopbackTransport::Get(ConnectionId id) const {
 
 ConnectionId LoopbackTransport::Connect() {
   Conn c;
-  c.id = next_id_++;
-  conns_.push_back(std::move(c));
-  if (events_ != nullptr) events_->OnConnected(conns_.back().id);
-  return conns_.back().id;
+  c.id = _nextId++;
+  _conns.push_back(std::move(c));
+  if (_events != nullptr) _events->OnConnected(_conns.back().id);
+  return _conns.back().id;
 }
 
 bool LoopbackTransport::Send(ConnectionId id, const std::uint8_t* data,
@@ -50,7 +50,7 @@ void LoopbackTransport::Close(ConnectionId id) {
   Conn* c = Get(id);
   if (c == nullptr || c->closed) return;
   c->closed = true;
-  if (events_ != nullptr) events_->OnDisconnected(id);
+  if (_events != nullptr) _events->OnDisconnected(id);
 }
 
 void LoopbackTransport::Deliver(ConnectionId id, const std::uint8_t* data,
@@ -61,14 +61,14 @@ void LoopbackTransport::Deliver(ConnectionId id, const std::uint8_t* data,
 }
 
 void LoopbackTransport::Poll() {
-  if (events_ == nullptr) return;
+  if (_events == nullptr) return;
   // ★ 按连接逐条交付,且**一次交完** —— 真 TCP 会把它切成任意大小的片段,
   //   那正是 FrameReader 存在的理由;测试里要分片就自己分多次 Deliver。
-  for (Conn& c : conns_) {
+  for (Conn& c : _conns) {
     if (c.closed || c.inbound.empty()) continue;
     std::vector<std::uint8_t> batch;
     batch.swap(c.inbound);
-    events_->OnBytes(c.id, batch.data(), batch.size());
+    _events->OnBytes(c.id, batch.data(), batch.size());
   }
 }
 

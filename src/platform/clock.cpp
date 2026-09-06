@@ -21,13 +21,13 @@ std::int64_t SteadyNanos() noexcept {
 }
 }  // namespace
 
-MonotonicClock::MonotonicClock() noexcept : origin_ns_(SteadyNanos()) {}
+MonotonicClock::MonotonicClock() noexcept : _originNs(SteadyNanos()) {}
 
 Millis MonotonicClock::NowMs() const noexcept {
   // ★ 从构造时刻起算而不是直接返回 epoch 毫秒:
   //   steady_clock 的 epoch 由实现定义(某些平台是开机时刻,某些是 1970),
   //   直接暴露它会让日志里的时间戳在不同平台上量级完全不同。
-  return (SteadyNanos() - origin_ns_) / 1000000;
+  return (SteadyNanos() - _originNs) / 1000000;
 }
 
 }  // namespace SA::Platform

@@ -84,14 +84,14 @@ class FrameReader {
   //   可以零拷贝地处理帧内容,处理完再推进。
   void Pop();
 
-  bool failed() const noexcept { return failed_; }
-  std::size_t buffered() const noexcept { return buf_.size() - read_; }
+  bool failed() const noexcept { return _failed; }
+  std::size_t buffered() const noexcept { return _buf.size() - _read; }
 
  private:
-  std::vector<std::uint8_t> buf_;
-  std::size_t read_ = 0;        // 已消费的前缀长度
-  std::uint32_t pending_ = 0;   // 刚由 Next() 交出的帧长(含头)
-  bool failed_ = false;
+  std::vector<std::uint8_t> _buf;
+  std::size_t _read = 0;        // 已消费的前缀长度
+  std::uint32_t _pending = 0;   // 刚由 Next() 交出的帧长(含头)
+  bool _failed = false;
 };
 
 // 把一段负载写成一帧,追加到 out。负载超限返回 false(**不截断**)。

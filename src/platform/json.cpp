@@ -17,15 +17,15 @@ constexpr int kMaxDepth = 32;
 
 class Parser {
  public:
-  explicit Parser(std::string_view text) : text_(text) {}
+  explicit Parser(std::string_view text) : _text(text) {}
 
   ParseOutcome Run() {
     SkipWs();
     Value v;
     if (!ParseValue(v, 0)) return Fail();
     SkipWs();
-    if (pos_ != text_.size()) {
-      error_ = "顶层值之后还有多余内容";
+    if (_pos != _text.size()) {
+      _error = "顶层值之后还有多余内容";
       return Fail();
     }
     ParseOutcome out;
@@ -38,33 +38,33 @@ class Parser {
   ParseOutcome Fail() {
     ParseOutcome out;
     out.ok = false;
-    out.error = error_.empty() ? std::string("解析失败") : error_;
-    out.offset = pos_;
-    out.line = LineAt(pos_);
+    out.error = _error.empty() ? std::string("解析失败") : _error;
+    out.offset = _pos;
+    out.line = LineAt(_pos);
     return out;
   }
 
   int LineAt(std::size_t off) const {
     int line = 1;
-    const std::size_t n = off < text_.size() ? off : text_.size();
+    const std::size_t n = off < _text.size() ? off : _text.size();
     for (std::size_t i = 0; i < n; ++i) {
-      if (text_[i] == '\n') ++line;
+      if (_text[i] == '\n') ++line;
     }
     return line;
   }
 
-  bool Eof() const { return pos_ >= text_.size(); }
-  char Peek() const { return text_[pos_]; }
+  bool Eof() const { return _pos >= _text.size(); }
+  char Peek() const { return _text[_pos]; }
 
   void SkipWs() {
     while (!Eof()) {
       const char c = Peek();
       if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-        ++pos_;
+        ++_pos;
       } else if (c == '/') {
         // ★ 明确拒绝而不是跳过:JSON 没有注释,静默容忍会让人以为它是标准的,
         //   然后某天换一个解析器就全线报错。
-        error_ = "JSON 不支持注释";
+        _error = "JSON 不支持注释";
         return;
       } else {
         return;
@@ -73,19 +73,19 @@ class Parser {
   }
 
   bool Literal(std::string_view lit) {
-    if (text_.size() - pos_ < lit.size()) return false;
-    if (text_.compare(pos_, lit.size(), lit) != 0) return false;
-    pos_ += lit.size();
+    if (_text.size() - _pos < lit.size()) return false;
+    if (_text.compare(_pos, lit.size(), lit) != 0) return false;
+    _pos += lit.size();
     return true;
   }
 
   bool ParseValue(Value& out, int depth) {
     if (depth > kMaxDepth) {
-      error_ = "嵌套层数超过上限";
+      _error = "嵌套层数超过上限";
       return false;
     }
     if (Eof()) {
-      error_ = "内容意外结束";
+      _error = "内容意外结束";
       return false;
     }
     switch (Peek()) {
@@ -98,15 +98,15 @@ class Parser {
         return true;
       }
       case 't':
-        if (!Literal("true")) { error_ = "无法识别的字面量"; return false; }
+        if (!Literal("true")) { _error = "无法识别的字面量"; return false; }
         out = Value::Bool(true);
         return true;
       case 'f':
-        if (!Literal("false")) { error_ = "无法识别的字面量"; return false; }
+        if (!Literal("false")) { _error = "无法识别的字面量"; return false; }
         out = Value::Bool(false);
         return true;
       case 'n':
-        if (!Literal("null")) { error_ = "无法识别的字面量"; return false; }
+        if (!Literal("null")) { _error = "无法识别的字面量"; return false; }
         out = Value();
         return true;
       default: return ParseNumber(out);
@@ -114,107 +114,107 @@ class Parser {
   }
 
   bool ParseObject(Value& out, int depth) {
-    ++pos_;  // '{'
+    ++_pos;  // '{'
     Object obj;
     SkipWs();
-    if (!error_.empty()) return false;
+    if (!_error.empty()) return false;
     if (!Eof() && Peek() == '}') {
-      ++pos_;
+      ++_pos;
       out = Value::Obj(std::move(obj));
       return true;
     }
     for (;;) {
       SkipWs();
-      if (!error_.empty()) return false;
+      if (!_error.empty()) return false;
       if (Eof() || Peek() != '"') {
-        error_ = "对象的键必须是字符串";
+        _error = "对象的键必须是字符串";
         return false;
       }
       std::string key;
       if (!ParseString(key)) return false;
       SkipWs();
-      if (!error_.empty()) return false;
+      if (!_error.empty()) return false;
       if (Eof() || Peek() != ':') {
-        error_ = "键之后缺少冒号";
+        _error = "键之后缺少冒号";
         return false;
       }
-      ++pos_;
+      ++_pos;
       SkipWs();
-      if (!error_.empty()) return false;
+      if (!_error.empty()) return false;
       Value v;
       if (!ParseValue(v, depth + 1)) return false;
       // ★ 重复键报错,不是"后者覆盖前者"。配置文件里写重了两次
       //   listen_port 是人为错误,静默取其一正是 00 §10.4 那类静默错误。
       if (obj.find(key) != obj.end()) {
-        error_ = "重复的键:" + key;
+        _error = "重复的键:" + key;
         return false;
       }
       obj.emplace(std::move(key), std::move(v));
       SkipWs();
-      if (!error_.empty()) return false;
+      if (!_error.empty()) return false;
       if (Eof()) {
-        error_ = "对象未闭合";
+        _error = "对象未闭合";
         return false;
       }
       if (Peek() == ',') {
-        ++pos_;
+        ++_pos;
         continue;
       }
       if (Peek() == '}') {
-        ++pos_;
+        ++_pos;
         out = Value::Obj(std::move(obj));
         return true;
       }
-      error_ = "对象里缺少逗号或右花括号";
+      _error = "对象里缺少逗号或右花括号";
       return false;
     }
   }
 
   bool ParseArray(Value& out, int depth) {
-    ++pos_;  // '['
+    ++_pos;  // '['
     Array arr;
     SkipWs();
-    if (!error_.empty()) return false;
+    if (!_error.empty()) return false;
     if (!Eof() && Peek() == ']') {
-      ++pos_;
+      ++_pos;
       out = Value::Arr(std::move(arr));
       return true;
     }
     for (;;) {
       SkipWs();
-      if (!error_.empty()) return false;
+      if (!_error.empty()) return false;
       Value v;
       if (!ParseValue(v, depth + 1)) return false;
       arr.push_back(std::move(v));
       SkipWs();
-      if (!error_.empty()) return false;
+      if (!_error.empty()) return false;
       if (Eof()) {
-        error_ = "数组未闭合";
+        _error = "数组未闭合";
         return false;
       }
       if (Peek() == ',') {
-        ++pos_;
+        ++_pos;
         continue;
       }
       if (Peek() == ']') {
-        ++pos_;
+        ++_pos;
         out = Value::Arr(std::move(arr));
         return true;
       }
-      error_ = "数组里缺少逗号或右方括号";
+      _error = "数组里缺少逗号或右方括号";
       return false;
     }
   }
 
   bool ParseString(std::string& out) {
-    ++pos_;  // 开头的引号
+    ++_pos;  // 开头的引号
     std::string s;
     for (;;) {
       if (Eof()) {
-        error_ = "字符串未闭合";
+        _error = "字符串未闭合";
         return false;
       }
-      const char c = text_[pos_++];
+      const char c = _text[_pos++];
       if (c == '"') {
         out = std::move(s);
         return true;
@@ -223,17 +223,17 @@ class Parser {
         // 控制字符按 JSON 规范必须转义。放行会让配置里一个误入的换行
         // 变成"看起来正常但值不对"。
         if (static_cast<unsigned char>(c) < 0x20) {
-          error_ = "字符串里出现未转义的控制字符";
+          _error = "字符串里出现未转义的控制字符";
           return false;
         }
         s.push_back(c);
         continue;
       }
       if (Eof()) {
-        error_ = "转义符之后内容结束";
+        _error = "转义符之后内容结束";
         return false;
       }
-      const char e = text_[pos_++];
+      const char e = _text[_pos++];
       switch (e) {
         case '"': s.push_back('"'); break;
         case '\\': s.push_back('\\'); break;
@@ -245,98 +245,98 @@ class Parser {
         case 't': s.push_back('\t'); break;
         case 'u':
           // 见头文件:有意不支持。报错优于解错。
-          error_ = "不支持 \\u 转义";
+          _error = "不支持 \\u 转义";
           return false;
         default:
-          error_ = "无法识别的转义";
+          _error = "无法识别的转义";
           return false;
       }
     }
   }
 
   bool ParseNumber(Value& out) {
-    const std::size_t start = pos_;
-    if (!Eof() && Peek() == '-') ++pos_;
+    const std::size_t start = _pos;
+    if (!Eof() && Peek() == '-') ++_pos;
     std::size_t digits = 0;
     while (!Eof() && Peek() >= '0' && Peek() <= '9') {
-      ++pos_;
+      ++_pos;
       ++digits;
     }
     if (digits == 0) {
-      error_ = "不是合法的值";
+      _error = "不是合法的值";
       return false;
     }
     bool fractional = false;
     if (!Eof() && Peek() == '.') {
       fractional = true;
-      ++pos_;
+      ++_pos;
       std::size_t frac = 0;
       while (!Eof() && Peek() >= '0' && Peek() <= '9') {
-        ++pos_;
+        ++_pos;
         ++frac;
       }
       if (frac == 0) {
-        error_ = "小数点后缺少数字";
+        _error = "小数点后缺少数字";
         return false;
       }
     }
     if (!Eof() && (Peek() == 'e' || Peek() == 'E')) {
       // 见头文件:有意不支持。
-      error_ = "不支持指数写法";
+      _error = "不支持指数写法";
       return false;
     }
     (void)fractional;
-    const std::string token(text_.substr(start, pos_ - start));
+    const std::string token(_text.substr(start, _pos - start));
     out = Value::Number(std::strtod(token.c_str(), nullptr));
     return true;
   }
 
-  std::string_view text_;
-  std::size_t pos_ = 0;
-  std::string error_;
+  std::string_view _text;
+  std::size_t _pos = 0;
+  std::string _error;
 };
 
 }  // namespace
 
 Value Value::Bool(bool v) {
   Value out;
-  out.type_ = Type::kBool;
-  out.bool_ = v;
+  out._type = Type::kBool;
+  out._bool = v;
   return out;
 }
 
 Value Value::Number(double v) {
   Value out;
-  out.type_ = Type::kNumber;
-  out.number_ = v;
+  out._type = Type::kNumber;
+  out._number = v;
   return out;
 }
 
 Value Value::Str(std::string v) {
   Value out;
-  out.type_ = Type::kString;
-  out.string_ = std::move(v);
+  out._type = Type::kString;
+  out._string = std::move(v);
   return out;
 }
 
 Value Value::Obj(Object v) {
   Value out;
-  out.type_ = Type::kObject;
-  out.object_ = std::move(v);
+  out._type = Type::kObject;
+  out._object = std::move(v);
   return out;
 }
 
 Value Value::Arr(Array v) {
   Value out;
-  out.type_ = Type::kArray;
-  out.array_ = std::move(v);
+  out._type = Type::kArray;
+  out._array = std::move(v);
   return out;
 }
 
 const Value* Value::Find(std::string_view key) const {
-  if (type_ != Type::kObject) return nullptr;
-  const auto it = object_.find(std::string(key));
-  return it == object_.end() ? nullptr : &it->second;
+  if (_type != Type::kObject) return nullptr;
+  const auto it = _object.find(std::string(key));
+  return it == _object.end() ? nullptr : &it->second;
 }
 
 ParseOutcome Parse(std::string_view text) {

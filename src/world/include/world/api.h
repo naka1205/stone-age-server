@@ -101,7 +101,7 @@ class World final : public SA::Net::TransportEvents,
 
  private:
   struct Impl;
-  std::unique_ptr<Impl> impl_;
+  std::unique_ptr<Impl> _impl;
 };
 
 }  // namespace SA::World
