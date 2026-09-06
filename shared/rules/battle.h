@@ -323,6 +323,33 @@ std::int32_t ComputeCriticalDamage(const BattleField& field,
                                    const RulesConfig& config,
                                    IRandom& rng) noexcept;
 
+// 打飞判定(§3.8,批次 A.4)。1:1 移植 `BATTLE_DamageSub` 的打飞段(`:2060-2081`)。
+//
+// ★ 两条独立判定,同一门槛 `maxhp × 1.2 + 20`(★ float 运算,不是整数近似):
+//     一击打飞:本段 `damage >= 门槛`            ⇒ kOneShot
+//     累积打飞:**未**一击打飞、且本段有溢出时,`累加器 + 溢出 >= 门槛` ⇒ kAccumulated
+//   `overflow` = 本段打穿守方的负血绝对值(调用方按"打前 HP − 伤害 < 0"算出,`:2040`)。
+//
+// ⚠️★ 与 `RollCritical` 同一纪律:**只判定,不写世界态**。累加器的**累加与清零**
+//    是世界写,留调用方(同逃跑计数器)——本函数把"累加后的新值"经 `out_accumulator`
+//    回给调用方,由 ApplyEvents 落地;命中打飞时调用方负责清零。
+//
+// ⚠️ 免疫打飞(`mods.immune_knockback`,DR-BT11 数据驱动,不比对图号)⇒ 恒 kNone
+//    且不动累加器(原版 `:2076` 命中即 `IsUltimate=0`,在累加之后覆盖结果)。
+//    ★ 但**累加仍要发生**(原版是先累加、再按图号清零 IsUltimate),
+//      故 out_accumulator 仍返回累加后的值 —— 逐位照源码顺序。
+enum class KnockbackKind : std::uint8_t {
+  kNone        = 0,   // 未打飞
+  kAccumulated = 1,   // 累积打飞(原 IsUltimate=1)
+  kOneShot     = 2,   // 一击打飞(原 IsUltimate=2)
+};
+KnockbackKind RollKnockback(std::int32_t damage,
+                            std::int32_t overflow,
+                            std::int32_t max_hp,
+                            std::int32_t accumulator,
+                            bool immune_knockback,
+                            std::int32_t* out_accumulator) noexcept;
+
 }  // namespace sa::rules
 
 #endif  // SA_SHARED_RULES_BATTLE_H

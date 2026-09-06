@@ -131,6 +131,30 @@ inline constexpr double kCriticalDamageDefFactor = 0.5;
 inline constexpr double kCounterDamageRate = 0.75;
 inline constexpr int    kCounterDamageMin  = 1;
 
+// ── 打飞 / 究极一击(§3.8,批次 A.4)──────────────────────────────
+//
+// [8.0] `BATTLE_DamageSub`(`battle_event.c:2060-2071`)。两条独立判定阈,同一门槛:
+//     一击打飞 (IsUltimate=2):本段 `damage >= maxhp × 1.2 + 20`
+//     累积打飞 (IsUltimate=1):仅当**未**一击打飞、且本段有溢出(打穿的负血)时,
+//                              `WORKULTIMATE += 溢出`,累加后 `>= maxhp × 1.2 + 20`
+//   ★ 门槛用 **float** 运算(`:1164` `float` 声明域内)⇒ `maxhp*1.2+20`,不是整数近似。
+//
+// ⚠️★ **打飞不是"更强的伤害"**:原版命中后置 `BENT_FLG_ULTIMATE`(`:1973/:2081`)。
+//   该标志的**回合内**后果是令 `BATTLE_Index2No`(`battle.c:930`)对该槽返回 −1 ⇒
+//   被打飞者在本回合剩余派发中从目标/连击掉出;它在**下一回合开头**先于建表清除
+//   (`battle.c:8571`)⇒ **下一回合照常行动,不是跨回合行动剥夺**。
+//   ⇒ A.4 只落**判定 + 累加器 + 表现标志**;回合内目标排除依赖未移植的多目标/连击派发,
+//     阵亡时的额外战果(`BATTLE_UltimateExtra`,`:6020`)属阶段 2 ⇒ 均显式推迟。
+//     详见 combatant.h 的 `ultimate_accumulator` 注记。判定在 L3、世界写在调用方,同 A.1–A.3。
+//
+// ★ 溢出累加器(原 `CHAR_WORKULTIMATE`):**持久、跨回合累积**,打飞命中即清零
+//   (`:2081`)。落 `Combatant::ultimate_accumulator`,由 ApplyEvents 维护。
+inline constexpr double kKnockbackHpMultiplier = 1.2;  // maxhp × 1.2
+inline constexpr int    kKnockbackHpBonus      = 20;    // + 20
+// ★ 免疫打飞:原版硬编码雷尔图号 101813/101814(`:2076`)⇒ IsUltimate=0。
+//   ⚠️ DR-BT11 裁定改数据驱动 ⇒ 判据落 `CombatModifiers.immune_knockback` 标志,
+//     不比对图号(与 immune_critical 同处、同理由)。此处图号仅作溯源注释,代码不用。
+
 // ── 行动顺序 ────────────────────────────────────────────────────
 //
 // [8.0] 05-battle.md §2.5:`排序键 = dex + sequence`,

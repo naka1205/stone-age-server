@@ -140,6 +140,18 @@ void ApplyEvents(const sa::domain::BattleEvents& events,
         }
         break;
       }
+      case sa::domain::BattleEvent::BodyKind::KNOCKBACK_STATE: {
+        // 批次 A.4:打飞溢出累加器的世界写回。★ L3 已算好累加后的新值,**直接写**,
+        //   不在此重算门槛 —— 重算等于把 RollKnockback 实现第二遍(DR-BT5 反对的双份
+        //   实现),且在免疫+一击的角落会分叉(见 battle_events.proto 的 KnockbackState)。
+        //   累加(打穿 += 溢出)与清零(命中打飞归 0)的语义都封在 L3,这里只落值。
+        const sa::domain::KnockbackState& ks = e.body.knockback_state;
+        if (ks.target >= static_cast<std::uint32_t>(sa::rules::kSlotCount)) break;
+        sa::rules::Combatant& c = field.at(static_cast<int>(ks.target));
+        if (!c.occupied) break;
+        c.ultimate_accumulator = ks.accumulator;
+        break;
+      }
       case sa::domain::BattleEvent::BodyKind::CAPTURE_ACT: {
         // 批次 A.2:捕获事件的世界写回。
         const sa::domain::CaptureAct& cap = e.body.capture_act;

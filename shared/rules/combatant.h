@@ -86,6 +86,13 @@ struct CombatModifiers {
   //    命中则 `RollCritical` 强制 per=0(与原版图号命中同效)。与 `capturable` 同处、同理由。
   bool immune_critical = false;
 
+  // ★★ 守方免疫打飞(§3.8,批次 A.4)。原版同样硬编码雷尔图号(101813/101814,
+  //   `battle_event.c:2076`)⇒ IsUltimate=0。⚠️ DR-BT11 同一裁定 ⇒ 数据驱动标志、
+  //   不写图号,与 `immune_critical` 同处、同理由。1.5 恒 false;L4 由雷尔模板置 true。
+  //   ⚠️ 与 `immune_critical` 是**两件事**:雷尔在原版两处都免,但语义独立
+  //     (一个免会心、一个免击飞)⇒ 分两个标志,不合并成一个"雷尔标志"。
+  bool immune_knockback = false;
+
   // 攻方武器类,用于反击相性表 CounterTbl。
   WeaponClass weapon = WeaponClass::kNone;
 
@@ -231,6 +238,27 @@ struct Combatant {
   //    再读 `escape+1` ⇒ 首次判定 escape_cnt=2,见 DR-BT15 与 constants.h)。
   //    放在 `Combatant` 里是因为本仓 field 就地 mutate、不逐回合重建,持久态有落脚点。
   std::int32_t escape_count = 0;
+
+  // ★ 打飞溢出累加器(原 `CHAR_WORKULTIMATE`,§3.8,批次 A.4)—— **持久、跨回合累积**。
+  //
+  // ⚠️★ 与 `escape_count` 同族:**调用方所有的持久态,不是 L3 的快照输入**。
+  //    每次攻击若把守方打穿(负血),溢出量累加到这里;累加后 `>= maxhp*1.2+20`
+  //    即触发**累积打飞**。打飞命中(一击或累积)后**清零**(源码 `:2081`)。
+  //    L3 的 `RollKnockback` 只做判定并**返回**新的累加值;累加与清零由调用方
+  //    在 ApplyEvents 落地(读 Damage.hp_delta 溢出量 + Damage 的打飞标志)。
+  //
+  // ⚠️★ **打飞的其余下游后果有意不在 A.4 落地,均非遗漏**(2026-09-06 回源码核实,
+  //    以下每条都指到行号):
+  //    ① 原 `BENT_FLG_ULTIMATE` 令 `BATTLE_Index2No` 返回 −1(`battle.c:930`)⇒
+  //       被打飞者**在本回合剩余的派发中**从目标/连击里掉出去。⚠️★ 这是**回合内的
+  //       目标排除**,不是"下回合不能动" —— 该 flg 在下一回合开头(`battle.c:8571`
+  //       `flg &= ~BENT_FLG_ULTIMATE`)先于建表清除 ⇒ **下一回合照常行动**。
+  //       它依赖尚未移植的多目标 / 连击派发(那需要 L3 之外的目标解析)⇒ 排在其后。
+  //    ② 被打飞者若阵亡,走 `BATTLE_UltimateExtra` 而非 `NormalDeadExtra`
+  //       (`battle.c:6020/6057`)⇒ 额外战利品 / DP —— 属**战果结算**(阶段 2),不在此。
+  //    ⇒ A.4 只交付**判定 + 累加器 + 表现标志**,与 A.1–A.3「判定进 L3、世界写留调用方」
+  //      同一分工;①② 因依赖未移植子系统而显式推迟,不猜一个"看起来对"的行动剥夺模型。
+  std::int32_t ultimate_accumulator = 0;
 
   // ── 骑宠 ──
   //

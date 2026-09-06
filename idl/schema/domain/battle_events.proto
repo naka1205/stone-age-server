@@ -281,6 +281,24 @@ message Damage {
   BattleStatus status_applied = 6;  // 附带状态;无则 BATTLE_ST_NONE
 }
 
+// ★ 打飞溢出累加器的状态回写(原 `CHAR_WORKULTIMATE`,§3.8,批次 A.4)。
+//
+// ⚠️★ **为什么单开一个事件、不塞进 Damage**:累加器是**服务端权威态**,客户端
+//    不需要(它靠 Damage 的 ULTIMATE flag 演打飞)。而 Damage 是最高频子命令、
+//    在事件缓冲里 ×256 —— 给它加一个 int32 会把 `BattleEvent` 的 union 从 28→32B、
+//    整个缓冲从 7,184→8,208B,越过 `idl/tests/smoke.cpp` 的 8 KB 零分配红线
+//    (那条断言正是为了挡这类"一个字段被 oneof 所有变体买单"的静默膨胀)。
+//    ⇒ 单开一个 8B 的低频事件:只在累加器**变化时**产出,不进热路径的 union 最大值。
+//
+// ⚠️★ **也不在 ApplyEvents 侧重算**:重算等于把 RollKnockback 的门槛逻辑实现第二遍
+//    (DR-BT5「双份实现必漂移」),且在**免疫+一击**的角落真的分叉 —— 源码一击走 if
+//    分支不累加,而"无 flag ⇒ 累加"的重算会误加。1.5 免疫恒 false 不可达,但写下就是
+//    等 L4 打开免疫时引爆的定时炸弹 ⇒ 由 L3 显式回填,调用方直接写。
+message KnockbackState {
+  uint32 target      = 1;  // slot
+  int32  accumulator = 2;  // 累加后的新值(命中打飞时为 0)
+}
+
 // 状态异常变更(原 BM)。
 message StatusChange {
   uint32 target       = 1;
@@ -382,6 +400,7 @@ message BattleEvent {
     Boundary       boundary        = 21;
     PetBattleModel pet_battle_model = 22;
     FireHunt       fire_hunt       = 23;
+    KnockbackState knockback_state = 24;  // §3.8 A.4:打飞累加器回写(权威态,不演出)
   }
 }
 

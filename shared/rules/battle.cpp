@@ -520,6 +520,68 @@ std::int32_t ComputeCriticalDamage(const BattleField& field,
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  打飞 / 究极一击(批次 A.4)
+// ═══════════════════════════════════════════════════════════════════
+//
+// 1:1 移植 `BATTLE_DamageSub` 的打飞段(`battle_event.c:2060-2081`):
+//
+//     if( damage >= maxhp * 1.2 + 20 ) {          // 一击打飞
+//         IsUltimate = 2;
+//     } else if( addpoint > 0 ) {                 // addpoint = 打穿的溢出量
+//         addpoint += CHAR_getWorkInt(def, WORKULTIMATE);
+//         CHAR_setWorkInt(def, WORKULTIMATE, addpoint);
+//         if( addpoint >= maxhp * 1.2 + 20 ) IsUltimate = 1;   // 累积打飞
+//     }
+//     if(雷尔图号) IsUltimate = 0;                // ★ 在累加之后
+//     if( IsUltimate ) CHAR_setWorkInt(def, WORKULTIMATE, 0);
+//
+// ⚠️★ **门槛用 float**:源码 `maxhp` 处于 `float` 声明域(`:1164`),`maxhp*1.2+20`
+//    是浮点运算。用 `static_cast<double>` 算门槛再与 int 比,保留原版语义。
+KnockbackKind RollKnockback(std::int32_t damage,
+                            std::int32_t overflow,
+                            std::int32_t max_hp,
+                            std::int32_t accumulator,
+                            bool immune_knockback,
+                            std::int32_t* out_accumulator) noexcept {
+  // 门槛 = maxhp × 1.2 + 20(float 语义,与源码一致)。
+  const double threshold =
+      static_cast<double>(max_hp) * kKnockbackHpMultiplier + kKnockbackHpBonus;
+
+  KnockbackKind kind = KnockbackKind::kNone;
+  std::int32_t acc = accumulator;
+
+  if (static_cast<double>(damage) >= threshold) {
+    // 一击打飞(原 IsUltimate=2)。★ 此路**不动累加器** —— 源码里
+    //   一击打飞走 if 分支,addpoint 累加只在 else 分支。
+    kind = KnockbackKind::kOneShot;
+  } else if (overflow > 0) {
+    // 累积打飞(原 IsUltimate=1)。溢出先累加进持久累加器,再判门槛。
+    acc += overflow;
+    if (static_cast<double>(acc) >= threshold) {
+      kind = KnockbackKind::kAccumulated;
+    }
+  }
+
+  // ★★ 免疫打飞:原版按图号硬编码(雷尔 101813/101814,`:2076`)⇒ IsUltimate=0,
+  //   ⚠️ DR-BT11 裁定改数据驱动 ⇒ 判据是 `immune_knockback` 标志,不比对图号。
+  //   ★ **在累加之后覆盖**:原版顺序是先 addpoint 累加(else 分支已写回 WORKULTIMATE)、
+  //     再按图号把 IsUltimate 清 0 ⇒ 累加器仍留着累加后的值,只是这一次不判为打飞。
+  //     逐位照源码顺序:此处不回滚 acc。
+  if (immune_knockback) {
+    kind = KnockbackKind::kNone;
+  }
+
+  // 命中打飞(一击或累积)⇒ 累加器清零(源码 `:2079-2081` `if(IsUltimate) ...=0`)。
+  //   ⚠️ 免疫已把 kind 归 kNone ⇒ 不清零(与原版一致:免疫时 IsUltimate=0,不进清零分支)。
+  if (kind != KnockbackKind::kNone) {
+    acc = 0;
+  }
+
+  if (out_accumulator != nullptr) *out_accumulator = acc;
+  return kind;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  回合调度(批次 0.5)
 // ═══════════════════════════════════════════════════════════════════
 //
@@ -875,10 +937,14 @@ bool ResolveTurn(const BattleField& field,
   std::int32_t hp[kSlotCount];
   std::int32_t pet_hp[kSlotCount];
   bool dead[kSlotCount];
+  // ★ 打飞累加器的**本地**镜像(同 hp[]):判定要读它、多段之间要看到累加,
+  //   但世界写(持久化 + 命中清零)由调用方按事件在 ApplyEvents 做。
+  std::int32_t ult_acc[kSlotCount];
   for (int i = 0; i < kSlotCount; ++i) {
     hp[i]     = field.at(i).hp;
     pet_hp[i] = field.at(i).ride_hp;
     dead[i]   = field.at(i).dead;
+    ult_acc[i] = field.at(i).ultimate_accumulator;
   }
 
   std::uint8_t order[kSlotCount] = {};
@@ -1073,6 +1139,13 @@ bool ResolveTurn(const BattleField& field,
         to_pet    = split.pet;
       }
 
+      // ★ 溢出量(原 `addpoint`,`:2040`):打前 HP 减伤害若为负,取其绝对值。
+      //   ⚠️★ 打飞看的是**主人 HP** 的溢出(`BATTLE_DamageSub` 里 `hp` 是守方本体),
+      //     不是骑宠;骑宠分摊只改 to_player 的数值 ⇒ 用打到主人身上的 to_player 算。
+      const std::int32_t hp_before = hp[target_slot];
+      const std::int32_t overflow =
+          (hp_before - to_player < 0) ? (to_player - hp_before) : 0;
+
       hp[target_slot]     -= to_player;
       pet_hp[target_slot] -= to_pet;
       d.hp_delta     = -to_player;
@@ -1081,6 +1154,31 @@ bool ResolveTurn(const BattleField& field,
       // ★ 骑宠死亡的连带(§3.6:解除骑乘 + 换回原图 + 置落马标记)在**表现侧**,
       //   由调用方按 `pet_hp_delta` 打完后的 HP 判定并下发 BattleSnapshot。
       //   ⇒ L3 不产 RideState —— 那是快照字段,不是事件。
+
+      // ── 打飞判定(§3.8,批次 A.4)────────────────────────────
+      //
+      // ⚠️★ **必须在死亡标记之前**:原版 `BATTLE_DamageSub` 先算 IsUltimate、再由外层
+      //    据 HP<=0 判死并按打飞标志分流战果 ⇒ 打飞与死亡可同回合并存(一击致死且打飞)。
+      //    ★ 判定进 L3,累加器的持久化与清零走事件由调用方在 ApplyEvents 落地。
+      const std::int32_t prev_acc = ult_acc[target_slot];
+      const KnockbackKind kb = RollKnockback(
+          damage, overflow, target.max_hp, ult_acc[target_slot],
+          target.mods.immune_knockback, &ult_acc[target_slot]);
+      if (kb == KnockbackKind::kOneShot) {
+        d.flags |= static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_2);
+      } else if (kb == KnockbackKind::kAccumulated) {
+        d.flags |= static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_1);
+      }
+      // ★ 累加器**变化时**才回写(单开低频事件,不塞进热路径的 Damage —— 见
+      //   battle_events.proto 的 KnockbackState 注记:塞 Damage 会越过 8 KB 零分配红线)。
+      //   ⚠️ 累加后的新值由 L3 给,ApplyEvents 直接写、不重算(免疫+一击角落会分叉)。
+      if (ult_acc[target_slot] != prev_acc) {
+        sa::domain::BattleEvent* kbev =
+            sink.Push(sa::domain::BattleEvent::BodyKind::KNOCKBACK_STATE);
+        if (kbev == nullptr) break;
+        kbev->body.knockback_state.target      = static_cast<std::uint32_t>(target_slot);
+        kbev->body.knockback_state.accumulator = ult_acc[target_slot];
+      }
 
       if (hp[target_slot] <= 0) {
         dead[target_slot] = true;

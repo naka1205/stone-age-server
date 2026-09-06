@@ -1575,3 +1575,174 @@ TEST_CASE("ResolveTurn:持弓暴击 ⇒ 置 CRITICAL 标志但伤害不吃加成
   //   hp_delta 是负数,持弓伤害更小 ⇒ 其绝对值更小 ⇒ hp_delta 更大(更接近 0)。
   CHECK(bow.hp_delta > no_bow.hp_delta);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  打飞 / 究极一击(§3.8,批次 A.4)—— RollKnockback 直接判定
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 全部锚定 `battle_event.c:2060-2081`。门槛 `maxhp × 1.2 + 20`(float 语义)。
+
+TEST_CASE("打飞:一击打飞 = 本段 damage ≥ maxhp×1.2+20(battle_event.c:2062)") {
+  // maxhp=100 ⇒ 门槛 = 100×1.2+20 = 140。
+  std::int32_t acc = 0;
+  // damage=140 恰达门槛(≥,严格达到即触发)⇒ 一击打飞,累加器不动、且清零(命中)。
+  CHECK(RollKnockback(140, /*overflow=*/0, /*max_hp=*/100, /*acc=*/50, false, &acc) ==
+        KnockbackKind::kOneShot);
+  CHECK(acc == 0);   // ★ 命中 ⇒ 清零(:2081)
+
+  // damage=139 差 1 ⇒ 不触发一击;overflow=0 ⇒ 也不进累积分支。
+  acc = 50;
+  CHECK(RollKnockback(139, 0, 100, 50, false, &acc) == KnockbackKind::kNone);
+  CHECK(acc == 50);  // ★ 未命中且无溢出 ⇒ 累加器原样
+}
+
+TEST_CASE("打飞:一击路径不累加(源码 if 分支,addpoint 只在 else,battle_event.c:2062-2069)") {
+  // ★ 即便本段有溢出,只要够一击打飞就走 if 分支,**不碰累加器**(除了命中清零)。
+  std::int32_t acc = 30;
+  CHECK(RollKnockback(200, /*overflow=*/60, 100, 30, false, &acc) ==
+        KnockbackKind::kOneShot);
+  CHECK(acc == 0);   // 清零,而不是 30+60
+}
+
+TEST_CASE("打飞:累积打飞 = 未一击且累加器+溢出 ≥ 门槛(battle_event.c:2065-2068)") {
+  // 门槛 140。damage=50(<140,不一击),overflow=30。
+  std::int32_t acc = 100;
+  // 100 + 30 = 130 < 140 ⇒ 仅累加,不触发。
+  CHECK(RollKnockback(50, 30, 100, 100, false, &acc) == KnockbackKind::kNone);
+  CHECK(acc == 130);   // ★ 累加后写回(:2067),未命中 ⇒ 不清零
+
+  // 再来一段:110 + 30 = 140 ≥ 140 ⇒ 累积打飞,命中清零。
+  CHECK(RollKnockback(50, 30, 100, 110, false, &acc) == KnockbackKind::kAccumulated);
+  CHECK(acc == 0);
+}
+
+TEST_CASE("打飞:无溢出则不进累积分支(addpoint > 0 门槛,battle_event.c:2065)") {
+  // overflow=0 ⇒ 即便累加器已很大也不判、不动它(原版 `if(addpoint>0)`)。
+  std::int32_t acc = 1000;
+  CHECK(RollKnockback(50, 0, 100, 1000, false, &acc) == KnockbackKind::kNone);
+  CHECK(acc == 1000);  // ★ 一动不动:不累加(溢出为 0)、不清零(未命中)
+}
+
+TEST_CASE("打飞:免疫 ⇒ 恒 kNone,但累加仍发生(battle_event.c:2076 在累加之后)") {
+  // ★★ 逐位照源码顺序:先 addpoint 累加并写回 WORKULTIMATE,再按图号把 IsUltimate 清 0。
+  //   ⇒ 免疫单位的累加器**照常累加**,只是这次不判为打飞、也不清零。
+  std::int32_t acc = 200;
+  // 200 + 30 = 230 ≥ 140 本应累积打飞,但免疫 ⇒ kNone;累加器留 230(累加了、没清零)。
+  CHECK(RollKnockback(50, 30, 100, 200, /*immune=*/true, &acc) == KnockbackKind::kNone);
+  CHECK(acc == 230);
+
+  // 一击路径 + 免疫:一击 if 分支不累加,免疫把结果归 kNone ⇒ 累加器原样(未清零)。
+  acc = 55;
+  CHECK(RollKnockback(200, 60, 100, 55, true, &acc) == KnockbackKind::kNone);
+  CHECK(acc == 55);
+}
+
+TEST_CASE("打飞:门槛是 float 运算而非整数(battle_event.c:2062)") {
+  // maxhp=25 ⇒ 门槛 = 25×1.2+20 = 50.0(float)。整数近似 25*12/10+20 = 50 恰好同值,
+  //   换 maxhp=21:21×1.2+20 = 45.2。damage=45 < 45.2 ⇒ 不触发;damage=46 ≥ ⇒ 触发。
+  //   ★ 若误用整数 21*1.2 会先把 1.2 截成 1 ⇒ 门槛塌成 41,45 就会误判为打飞。
+  std::int32_t acc = 0;
+  CHECK(RollKnockback(45, 0, 21, 0, false, &acc) == KnockbackKind::kNone);
+  CHECK(RollKnockback(46, 0, 21, 0, false, &acc) == KnockbackKind::kOneShot);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  打飞 —— ResolveTurn 接入
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("ResolveTurn:一击打飞 ⇒ Damage 置 ULTIMATE_2,KnockbackState 回填清零") {
+  // 高攻低防、目标低血 ⇒ 一段就打穿且过门槛。
+  Duel d = MakeDuel(/*atk=*/100000, /*def=*/1);
+  d.field.at(0).level = 5;          // lv<10 ⇒ 空手恒 1 段
+  d.field.at(0).mods.unarmed = true;
+  d.field.at(10).max_hp = 100;      // 门槛 = 140
+  d.field.at(10).hp     = 100;
+  d.field.at(10).ultimate_accumulator = 99;   // 命中后应被清零
+  sa::domain::BattleEvents ev{};
+  ScriptedRandom rng({1, 10, 1});   // dex 抖动 / 段数 / per(不暴击)
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+  const sa::domain::Damage* dmg = nullptr;
+  const sa::domain::KnockbackState* ks = nullptr;
+  for (const auto& e : ev.events) {
+    if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) dmg = &e.body.damage;
+    if (e.body_kind == sa::domain::BattleEvent::BodyKind::KNOCKBACK_STATE)
+      ks = &e.body.knockback_state;
+  }
+  REQUIRE(dmg != nullptr);
+  CHECK((dmg->flags &
+         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_2)) != 0u);
+  // ★ 一击打飞命中 ⇒ 累加器清零(99→0,变化),单开 KnockbackState 回填。
+  REQUIRE(ks != nullptr);
+  CHECK(ks->target == 10u);
+  CHECK(ks->accumulator == 0);
+  // 一击致死且打飞可并存(§3.8:打飞判定在死亡标记之前)。
+  CHECK((dmg->flags &
+         static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_DEATH)) != 0u);
+}
+
+TEST_CASE("ResolveTurn:免疫单位不置打飞标志(DR-BT11 数据驱动,不比对图号)") {
+  Duel d = MakeDuel(/*atk=*/100000, /*def=*/1);
+  d.field.at(0).level = 5;
+  d.field.at(0).mods.unarmed = true;
+  d.field.at(10).max_hp = 100;
+  d.field.at(10).hp     = 100;
+  d.field.at(10).mods.immune_knockback = true;   // ★ 标志位,非图号
+  sa::domain::BattleEvents ev{};
+  ScriptedRandom rng({1, 10, 1});
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+  const sa::domain::Damage* dmg = nullptr;
+  for (const auto& e : ev.events)
+    if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) dmg = &e.body.damage;
+  REQUIRE(dmg != nullptr);
+  const std::uint32_t ult =
+      static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_1) |
+      static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_2);
+  CHECK((dmg->flags & ult) == 0u);   // ★ 免疫 ⇒ 无打飞标志
+}
+
+TEST_CASE("ResolveTurn:打穿未过门槛 ⇒ 不打飞但 KnockbackState 记录累加") {
+  // ★ 要走**累积**路径需 damage < 门槛(否则一击打飞、且清零 ⇒ 累加器不变、不产事件)。
+  //   ⇒ 门槛抬高:max_hp=100000 ⇒ 门槛 120020;damage(atk=1000)远小于它,但把 hp=1
+  //     打穿 ⇒ overflow>0 ⇒ 累加进累加器却不过门槛 ⇒ kNone + 累加器增长。
+  Duel d = MakeDuel(/*atk=*/1000, /*def=*/1);
+  d.field.at(0).level = 5;
+  d.field.at(0).mods.unarmed = true;
+  d.field.at(10).max_hp = 100000;
+  d.field.at(10).hp     = 1;         // 打穿(damage-1)的溢出,远小于 120020
+  d.field.at(10).ultimate_accumulator = 0;
+  sa::domain::BattleEvents ev{};
+  ScriptedRandom rng({1, 10, 1});
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+  const sa::domain::Damage* dmg = nullptr;
+  const sa::domain::KnockbackState* ks = nullptr;
+  for (const auto& e : ev.events) {
+    if (e.body_kind == sa::domain::BattleEvent::BodyKind::DAMAGE) dmg = &e.body.damage;
+    if (e.body_kind == sa::domain::BattleEvent::BodyKind::KNOCKBACK_STATE)
+      ks = &e.body.knockback_state;
+  }
+  REQUIRE(dmg != nullptr);
+  const std::uint32_t ult1 =
+      static_cast<std::uint32_t>(sa::domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_1);
+  CHECK((dmg->flags & ult1) == 0u);       // 未过门槛 ⇒ 不打飞
+  // ★ 累加器 0→正(变化)⇒ 单开 KnockbackState 记录,accumulator > 0 且未清零。
+  REQUIRE(ks != nullptr);
+  CHECK(ks->accumulator > 0);
+}
+
+TEST_CASE("ResolveTurn:不打穿(有剩血)⇒ 累加器不变,不产 KnockbackState") {
+  // 目标血厚、伤害咬不动到打穿 ⇒ overflow=0 ⇒ 累加器一动不动 ⇒ 不产该事件(变化才产)。
+  Duel d = MakeDuel(/*atk=*/1000, /*def=*/500);
+  d.field.at(0).level = 5;
+  d.field.at(0).mods.unarmed = true;
+  d.field.at(10).max_hp = 100000;
+  d.field.at(10).hp     = 100000;   // 血远高于单段伤害 ⇒ 不打穿
+  d.field.at(10).ultimate_accumulator = 0;
+  sa::domain::BattleEvents ev{};
+  ScriptedRandom rng({1, 10, 1});
+  REQUIRE(ResolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+  CHECK(CountKind(ev, sa::domain::BattleEvent::BodyKind::KNOCKBACK_STATE) == 0u);
+}
