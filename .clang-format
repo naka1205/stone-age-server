@@ -1,0 +1,15 @@
+# 与 GameStudio(sg_create/template)逐字一致 —— 三仓统一命名/格式基线。
+#
+# ★ 2026-09-07 用户裁定「全盘对齐 GameStudio 风格」后,服务端从原来的 4 空格风
+#   迁到引擎款(Tab 缩进 / Allman / 右指针)。此前服务端故意与客户端分歧的理由已作废:
+#   现在三仓(server / shared / client)是单一命名与格式体系。
+#
+# ★ 本文件对 `shared/` 同样生效 —— shared/ 是本仓源码;客户端经 FetchContent 消费时
+#   它进构建目录、不进客户端源码树,由客户端侧的同款 .clang-format 覆盖(内容一致,无分歧)。
+BasedOnStyle: LLVM
+UseTab: ForIndentation
+IndentWidth: 4
+TabWidth: 4
+BreakBeforeBraces: Allman
+PointerAlignment: Right
+ColumnLimit: 0

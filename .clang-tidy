@@ -1,0 +1,42 @@
+# 石器时代命名规范 —— 对齐 GameStudio(cocos2d-x 派)。2026-09-07 用户裁定。
+#
+# 用途:P3(成员 x_ -> _x)、P4(方法 PascalCase -> camelCase)的自动改名抓手,
+#       以及日后 CI 的命名守卫。运行:
+#         /opt/homebrew/opt/llvm/bin/clang-tidy --fix -p <build> <file>
+#
+# ⚠️ 能表达的:大小写 + 前缀/后缀。不能表达的(需脚本 + 编译器定位):
+#   · 去 `I` 前缀(IRandom -> Random)是语义改名,不是风格规则 —— 见计划 P2。
+#   · 聚合头 api.h 保留不拆、文件名例外 —— 见计划 P5。
+#   · 命名空间大驼峰:段 = 目录名转 PascalCase(sa->SA、domain->Domain、idl->IDL…),
+#     目录物理名不改(仍小写)。readability-identifier-naming 无法表达「按目录名逐段
+#     映射 + 缩略词全大写」这种规则,P1 用带映射表的精确文本替换处理;
+#     这里不设 NamespaceCase 以免对既有段误报。
+#
+# ⚠️ IDL 生成物(idl/generated/**)与生成 struct 公开字段:不适用本规则(数据契约 POD,
+#    公开字段保持 snake_case)。对 generated/ 目录另行 .clang-tidy 忽略或排除路径。
+Checks: >
+  -*,
+  readability-identifier-naming
+CheckOptions:
+  # 类型:PascalCase,去 I 前缀由脚本处理(此处不设 IgnoredRegexp 以便复核期能扫出残留 I*)
+  - { key: readability-identifier-naming.ClassCase,            value: CamelCase }
+  - { key: readability-identifier-naming.StructCase,           value: CamelCase }
+  - { key: readability-identifier-naming.EnumCase,             value: CamelCase }
+  - { key: readability-identifier-naming.EnumConstantCase,     value: CamelCase }
+  - { key: readability-identifier-naming.TypeAliasCase,        value: CamelCase }
+  # 方法 / 函数:camelCase(引擎:getX/setX/isX/create/getInstance)
+  - { key: readability-identifier-naming.FunctionCase,         value: camelBack }
+  - { key: readability-identifier-naming.MethodCase,           value: camelBack }
+  # 成员变量:前导下划线 + camelCase(_camelCase)
+  - { key: readability-identifier-naming.PrivateMemberCase,    value: camelBack }
+  - { key: readability-identifier-naming.PrivateMemberPrefix,  value: '_'       }
+  - { key: readability-identifier-naming.ProtectedMemberCase,  value: camelBack }
+  - { key: readability-identifier-naming.ProtectedMemberPrefix,value: '_'       }
+  # 局部变量 / 参数:camelCase,无前缀
+  - { key: readability-identifier-naming.VariableCase,         value: camelBack }
+  - { key: readability-identifier-naming.ParameterCase,        value: camelBack }
+  # 常量:k + PascalCase(引擎 kCamelCase;本项目保留 kPascalCase,见计划待定项 —— 暂不强制)
+  - { key: readability-identifier-naming.ConstexprVariableCase,value: CamelCase }
+  - { key: readability-identifier-naming.ConstexprVariablePrefix, value: 'k'    }
+  # 宏:SA_ 全大写
+  - { key: readability-identifier-naming.MacroDefinitionCase,  value: UPPER_CASE }

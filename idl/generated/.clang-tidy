@@ -1,0 +1,8 @@
+# IDL 生成物 —— 关闭所有 clang-tidy 检查。
+#
+# 生成物是数据契约 POD(纯 memcpy-able,DR-TS1),命名由 codegen 决定:
+#   · 公开字段保持 snake_case(数据契约,不套用 _camelCase 成员规则)
+#   · 枚举值 SCREAMING_SNAKE(镜像 proto)
+# 命名规范的真源是 codegen 模板 idl/codegen/saidl/cpp.py,不是这里的产物。
+# 对生成目录跑 readability-identifier-naming 会误报并试图改坏契约,故全关。
+Checks: '-*'
