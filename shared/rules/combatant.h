@@ -2,7 +2,7 @@
 //
 // ★★ 本文件回答的是 0.1 四步改造的**前置问题**:
 //    05-battle.md §1.5 的契约是
-//        resolve_turn(BattleSnapshot, Commands, IRandom&) -> BattleEvents
+//        resolve_turn(BattleSnapshot, Commands, Random&) -> BattleEvents
 //    其中 Commands 与 BattleEvents 已由 IDL 给出,而**输入侧一直没有定义**。
 //
 // ⚠️★ **与 `SA::Domain::BattleSnapshot` 同名不同物,不要混用**:

@@ -3,7 +3,7 @@
 // ★★ 与 platform 同理:模块只暴露这一个头(00 §3.1)。
 //
 // ── 阶段 1.5 的切面(00 §9.0.4)──────────────────────────────
-//   ✅ 要:ITransport · ★ 长度前缀成帧 · IDL 编解码接入 · 握手会话
+//   ✅ 要:Transport · ★ 长度前缀成帧 · IDL 编解码接入 · 握手会话
 //   ⬜ 不要:WsTransport(D4 冻着)· 限流 · 重连窗口
 //
 // ⚠️★ ~~本批次**没有** TcpTransport —— 这是有意切分,不是漏了。~~
@@ -69,14 +69,14 @@ using SA::Wire::EncodeFramed;
 
 // ── 传输层 ────────────────────────────────────────────────────
 //
-// 01 §5.1:ITransport ├─ TcpTransport ├─ InProcTransport └─ WsTransport(D4)
+// 01 §5.1:Transport ├─ TcpTransport ├─ InProcTransport └─ WsTransport(D4)
 // ⚠️ 本批次只有 Loopback;TcpTransport 见本文件卷首的切分说明。
 
 using ConnectionId = std::uint64_t;
 
-class ITransportEvents {
+class TransportEvents {
  public:
-  virtual ~ITransportEvents() = default;
+  virtual ~TransportEvents() = default;
   virtual void OnConnected(ConnectionId id) = 0;
   // ⚠️ 给的是**原始字节**,不保证帧对齐 —— 成帧是上层的事(FrameReader)。
   //    这正是 TCP 与 WS 的差别被吸收掉的地方。
@@ -85,15 +85,15 @@ class ITransportEvents {
   virtual void OnDisconnected(ConnectionId id) = 0;
 
  protected:
-  ITransportEvents() = default;
-  ITransportEvents(const ITransportEvents&) = default;
-  ITransportEvents& operator=(const ITransportEvents&) = default;
+  TransportEvents() = default;
+  TransportEvents(const TransportEvents&) = default;
+  TransportEvents& operator=(const TransportEvents&) = default;
 };
 
-class ITransport {
+class Transport {
  public:
-  virtual ~ITransport() = default;
-  virtual void SetEvents(ITransportEvents* events) = 0;
+  virtual ~Transport() = default;
+  virtual void SetEvents(TransportEvents* events) = 0;
   virtual bool Send(ConnectionId id, const std::uint8_t* data,
                     std::size_t n) = 0;
   virtual void Close(ConnectionId id) = 0;
@@ -102,15 +102,15 @@ class ITransport {
   virtual void Poll() = 0;
 
  protected:
-  ITransport() = default;
-  ITransport(const ITransport&) = default;
-  ITransport& operator=(const ITransport&) = default;
+  Transport() = default;
+  Transport(const Transport&) = default;
+  Transport& operator=(const Transport&) = default;
 };
 
 // 进程内传输。测试用,同时是 01 §5.1 里 InProcTransport 的雏形。
-class LoopbackTransport final : public ITransport {
+class LoopbackTransport final : public Transport {
  public:
-  void SetEvents(ITransportEvents* events) override { events_ = events; }
+  void SetEvents(TransportEvents* events) override { events_ = events; }
   bool Send(ConnectionId id, const std::uint8_t* data,
             std::size_t n) override;
   void Close(ConnectionId id) override;
@@ -134,7 +134,7 @@ class LoopbackTransport final : public ITransport {
   Conn* Get(ConnectionId id);
   const Conn* Get(ConnectionId id) const;
 
-  ITransportEvents* events_ = nullptr;
+  TransportEvents* events_ = nullptr;
   std::vector<Conn> conns_;
   ConnectionId next_id_ = 1;
 };
@@ -144,14 +144,14 @@ class LoopbackTransport final : public ITransport {
 // ★★ 选型与 01 §12 那张技术栈表的字面偏离,**由用户于 2026-09-04 裁定**:
 //    §12 写的是「网络 = asio + C++20 协程」,本实现走**原生 socket + poll(2)**。
 //    三条理由,按分量排:
-//    ① ★ `ITransport::Poll()` 的契约(主线程 tick 第 2 步调用、不得阻塞)
+//    ① ★ `Transport::Poll()` 的契约(主线程 tick 第 2 步调用、不得阻塞)
 //       **本来就是 reactor**。asio 协程的价值在这个接口下发挥不出来 ——
 //       要么改接口让 io_context 独占一个线程(那推翻的是 01 §2 的线程模型),
 //       要么退化成 `io_context.poll()`,那只是把下面这段 poll 包了一层。
 //    ② 它会是服务端 `src/` 的**第一个运行时第三方依赖**(doctest 只进 tests/)
 //       ⇒ FetchContent + 三平台 CI 是一笔独立的引入成本。
 //    ③ ★ 与 `platform/api.h` §日志 那处偏离**同一条先例**:接口先立死、库延后引,
-//       因为 `ITransport` 已经把替换成本压到局部 —— 换 asio 不动上层一行。
+//       因为 `Transport` 已经把替换成本压到局部 —— 换 asio 不动上层一行。
 //    ⚠️ 认下的代价:poll(2) 是 O(连接数)。⇒ 上规模时要换 epoll/kqueue/IOCP,
 //       **但那不是本批次的事**,且 §5.1 批的是原版「每连接一次 select」
 //       (1000 连接 = 1000 次系统调用),poll 一次调用传整个数组已经不同量级。
@@ -172,7 +172,7 @@ class LoopbackTransport final : public ITransport {
 //   那是一条不需要任何攻击技巧的内存耗尽路径。⇒ 超限即断连,不是等待。
 inline constexpr std::size_t kMaxOutboundBytes = 4u * 1024u * 1024u;
 
-class TcpTransport final : public ITransport {
+class TcpTransport final : public Transport {
  public:
   TcpTransport();
   ~TcpTransport() override;
@@ -195,8 +195,8 @@ class TcpTransport final : public ITransport {
   // 停止监听并关闭全部连接。⚠️ 会为每条连接回调 OnDisconnected。
   void Stop();
 
-  // ── ITransport ──
-  void SetEvents(ITransportEvents* events) override;
+  // ── Transport ──
+  void SetEvents(TransportEvents* events) override;
   bool Send(ConnectionId id, const std::uint8_t* data, std::size_t n) override;
   void Close(ConnectionId id) override;
   // ⚠️ 非阻塞:poll 超时为 0。01 §2「主线程绝不允许阻塞」。
@@ -247,9 +247,9 @@ using SessionId = std::uint64_t;
 
 // 会话把「该做什么」交给宿主。★ net **不认识** world ——
 //   这正是 00 §3.1「各模块互相不可见,只暴露接口头,链接期换实现」的落点。
-class ISessionHost {
+class SessionHost {
  public:
-  virtual ~ISessionHost() = default;
+  virtual ~SessionHost() = default;
 
   // 握手通过。宿主可据此登记会话。
   virtual void OnSessionReady(SessionId id) = 0;
@@ -259,16 +259,16 @@ class ISessionHost {
   virtual void OnSessionClosed(SessionId id) = 0;
 
  protected:
-  ISessionHost() = default;
-  ISessionHost(const ISessionHost&) = default;
-  ISessionHost& operator=(const ISessionHost&) = default;
+  SessionHost() = default;
+  SessionHost(const SessionHost&) = default;
+  SessionHost& operator=(const SessionHost&) = default;
 };
 
 // 单条会话。⚠️ 不持有 socket —— 出站字节交给调用方发。
 class Session {
  public:
   Session(SessionId id, std::uint32_t protocol_version,
-          std::uint32_t heartbeat_interval_ms, ISessionHost* host) noexcept;
+          std::uint32_t heartbeat_interval_ms, SessionHost* host) noexcept;
 
   SessionId id() const noexcept { return id_; }
   SessionState state() const noexcept { return state_; }
@@ -278,7 +278,7 @@ class Session {
   //
   // 返回 false ⇒ **必须关闭连接**。02 §5.5 的取向:回执侧的强校验必须保留,
   //   校验不过就是协议违规,不是"忽略这一条继续"。
-  // 出站字节追加进 out(已成帧,可直接交给 ITransport::Send)。
+  // 出站字节追加进 out(已成帧,可直接交给 Transport::Send)。
   bool HandleFrame(const std::uint8_t* frame, std::uint32_t len,
                    std::vector<std::uint8_t>& out);
 
@@ -304,7 +304,7 @@ class Session {
   SessionId id_;
   std::uint32_t protocol_version_;
   std::uint32_t heartbeat_interval_ms_;
-  ISessionHost* host_;
+  SessionHost* host_;
   SessionState state_ = SessionState::kAnonymous;
   std::uint64_t frames_handled_ = 0;
   std::uint32_t last_reject_msg_id_ = 0;

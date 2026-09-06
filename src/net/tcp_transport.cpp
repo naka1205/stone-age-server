@@ -149,7 +149,7 @@ struct TcpTransport::Impl {
     bool dead = false;                   // 本轮末尾清理
   };
 
-  ITransportEvents* events = nullptr;
+  TransportEvents* events = nullptr;
   SocketHandle listener = kInvalidSocket;
   std::uint16_t port = 0;
   std::string error;
@@ -352,7 +352,7 @@ void TcpTransport::Stop() {
   d.conns.clear();
 }
 
-void TcpTransport::SetEvents(ITransportEvents* events) {
+void TcpTransport::SetEvents(TransportEvents* events) {
   impl_->events = events;
 }
 

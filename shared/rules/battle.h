@@ -4,7 +4,7 @@
 //    编译同一份源码**(客户端经 CMake FetchContent + 锁定 tag 引用,DR-TS3)。
 //
 // 契约(05-battle.md §1.5):
-//     resolve_turn(BattleSnapshot, Commands, IRandom&) -> BattleEvents
+//     resolve_turn(BattleSnapshot, Commands, Random&) -> BattleEvents
 //
 // ── 四条不可违反的性质 ────────────────────────────────────────
 //   ① **纯函数**:除 `out` 与 `rng` 外不写任何东西。不读全局、不读时钟、不做 I/O。
@@ -105,7 +105,7 @@ SA::Domain::CannotActReason CheckCanAct(const Combatant& c) noexcept;
 bool ResolveTurn(const BattleField& field,
                  const TurnCommands& commands,
                  const RulesConfig& config,
-                 IRandom& rng,
+                 Random& rng,
                  SA::Domain::BattleEvents& out) noexcept;
 
 // ── 调度子步骤(供上层与测试直接调用)──────────────────────────
@@ -119,7 +119,7 @@ bool ResolveTurn(const BattleField& field,
 //    尚未接入的指令上,接入时在本函数内按 `kind` 分档,不要散到调用方。
 std::int32_t ComputeActionDex(const Combatant& c,
                               const SA::Domain::BattleCommand& command,
-                              IRandom& rng) noexcept;
+                              Random& rng) noexcept;
 
 // 计算本回合行动顺序,把槽号按先后写进 `order`,返回参与行动的单位数。
 //
@@ -130,7 +130,7 @@ std::int32_t ComputeActionDex(const Combatant& c,
 //      同键时保持槽号升序。⚠️ 不可换成 `std::sort` —— 它不保证稳定。
 int BuildActionOrder(const BattleField& field,
                      const TurnCommands& commands,
-                     IRandom& rng,
+                     Random& rng,
                      std::uint8_t (&order)[kSlotCount]) noexcept;
 
 // 本次攻击的段数(§3.9)。★ DR-BT1:空手多段**各段全额**(`gDamageDiv` 保持 1.0)。
@@ -138,14 +138,14 @@ int BuildActionOrder(const BattleField& field,
 // ⚠️ 空手分档的两道前置缺一不可:**等级 ≥ 10** 且 **是玩家**,否则恒为 1 段。
 int RollAttackCount(const Combatant& attacker,
                     const RulesConfig& config,
-                    IRandom& rng) noexcept;
+                    Random& rng) noexcept;
 
 // 防御减伤系数(§3.5)。★ **不是固定系数,是 RAND(1,100) 分六档**,
 // 期望 ≈ 0.155 且 **25% 概率完全免伤**。
 //
 // ⚠️ 调用方须自行确认触发条件(守方指令 = 防御 **且** 混乱值 ≤ 0);
 //    本函数只负责抽档,不判条件 —— 判条件要读指令,会把它的入参撑大。
-double RollGuardFactor(IRandom& rng) noexcept;
+double RollGuardFactor(Random& rng) noexcept;
 
 // 骑宠伤害分摊(§3.6)。★ **DR-BT2 = 修正**,不是照抄。
 //
@@ -187,7 +187,7 @@ bool RollEscape(bool is_pvp,
                 int my_level,
                 int enemy_level_sum,
                 int enemy_alive_count,
-                IRandom& rng,
+                Random& rng,
                 int* out_percent = nullptr) noexcept;
 
 // 捕获判定(§6.2)。1:1 移植 `BATTLE_CaptureCheck`(`battle_event.c:3806`)。
@@ -224,7 +224,7 @@ bool RollCapture(int my_level, int target_level,
                  int capture_difficulty,
                  int capture_bonus,
                  bool target_asleep,
-                 IRandom& rng,
+                 Random& rng,
                  int* out_percent = nullptr) noexcept;
 
 // ── 供上层与测试直接调用的子步骤 ──────────────────────────────
@@ -277,7 +277,7 @@ std::int32_t ComputeDamage(const BattleField& field,
                            const Combatant& attacker,
                            const Combatant& defender,
                            const RulesConfig& config,
-                           IRandom& rng) noexcept;
+                           Random& rng) noexcept;
 
 // 回避判定。true = 已闪避。
 //
@@ -294,7 +294,7 @@ bool RollDodge(const Combatant& attacker,
                bool defender_guarding,
                bool defender_casting_spell,
                const RulesConfig& config,
-               IRandom& rng) noexcept;
+               Random& rng) noexcept;
 
 // 暴击判定(§3.3,批次 A.3)。true = 本次命中为暴击。
 //
@@ -310,7 +310,7 @@ bool RollDodge(const Combatant& attacker,
 // ★ 类型跨界(敌→宠 / 非玩→玩)时分母从 0.09 暴增到 10.0 且不取平方根 ⇒ 暴击率极低。
 bool RollCritical(const Combatant& attacker,
                   const Combatant& defender,
-                  IRandom& rng) noexcept;
+                  Random& rng) noexcept;
 
 // 暴击伤害:`ComputeDamage + 守方原始防御 × (LVatt / LVdef) × 0.5`。[8.0] `:1419`
 //
@@ -321,7 +321,7 @@ std::int32_t ComputeCriticalDamage(const BattleField& field,
                                    const Combatant& attacker,
                                    const Combatant& defender,
                                    const RulesConfig& config,
-                                   IRandom& rng) noexcept;
+                                   Random& rng) noexcept;
 
 // 打飞判定(§3.8,批次 A.4)。1:1 移植 `BATTLE_DamageSub` 的打飞段(`:2060-2081`)。
 //

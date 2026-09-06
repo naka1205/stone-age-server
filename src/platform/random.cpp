@@ -1,6 +1,6 @@
 // src/platform/random.cpp —— 随机源的服务端侧
 //
-// ★ L3 的 IRandom 接口与确定性实现在 shared/rules/random.h(必须双端共享)。
+// ★ L3 的 Random 接口与确定性实现在 shared/rules/random.h(必须双端共享)。
 //   本文件只负责一件事:**种子从哪来,以及它有没有被记下来**。
 //
 // ⚠️★ 为什么这件事值得单独一个类:

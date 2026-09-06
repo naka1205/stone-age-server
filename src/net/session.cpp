@@ -22,7 +22,7 @@ const char* SessionStateName(SessionState s) noexcept {
 
 Session::Session(SessionId id, std::uint32_t protocol_version,
                  std::uint32_t heartbeat_interval_ms,
-                 ISessionHost* host) noexcept
+                 SessionHost* host) noexcept
     : id_(id),
       protocol_version_(protocol_version),
       heartbeat_interval_ms_(heartbeat_interval_ms),

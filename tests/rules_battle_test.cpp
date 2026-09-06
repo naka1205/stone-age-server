@@ -568,7 +568,7 @@ namespace {
 // ★ 为什么不用 SeededRandom 撞运气:分档边界(§3.5 的 25/50/70/85/95/100、
 //   §3.9 的 10/30/70)必须**逐个边界值**验,而不是"跑一万次看分布像不像"。
 //   分布用例挡不住"档位表抄错一格"这种最常见的移植错误。
-class ScriptedRandom final : public IRandom {
+class ScriptedRandom final : public Random {
  public:
   explicit ScriptedRandom(std::vector<int> script) : script_(std::move(script)) {}
 
@@ -598,7 +598,7 @@ class ScriptedRandom final : public IRandom {
 
 // 恒取上界的随机源。★ 回避判定是 `RAND(1,10000) <= per` 而 per 硬上限 7500
 //   ⇒ 取 10000 时**必不闪避**,把回避这个自由度从调度用例里摘出去。
-class MaxRandom final : public IRandom {
+class MaxRandom final : public Random {
  public:
   int Rand(int lo, int hi) override { return hi > lo ? hi : lo; }
   int RandMod(int n) override { return n > 0 ? n - 1 : 0; }

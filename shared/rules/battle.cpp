@@ -7,7 +7,7 @@
 //      ① 原版靠 10 个 `g*` 隐式传参的量 → 显式参数(`RulesConfig` / 函数入参)
 //      ② 原版 `CHAR_set*` 写世界状态   → 追加事件,由调用方应用
 //      ③ 原版拼串 + 发包               → 追加事件,序列化留给调用方
-//      ④ 原版 `RAND()` / `rand()`      → 注入的 `IRandom&`
+//      ④ 原版 `RAND()` / `rand()`      → 注入的 `Random&`
 //
 // ⚠️ **四步都不动公式**(05-battle.md §1.2)。本文件里每一处与原版的数值差异
 //    都必须有一条 DR 或一条实测注记撑着 —— 没有的一律照原样。
@@ -205,7 +205,7 @@ std::int32_t ComputeDamage(const BattleField& field,
                            const Combatant& attacker,
                            const Combatant& defender,
                            const RulesConfig& config,
-                           IRandom& rng) noexcept {
+                           Random& rng) noexcept {
   // ── 第 1 步:取攻防 ──────────────────────────────────────────
   //
   // 骑宠合成(§3.1)。⚠️ 近战 0.8/0.8、投掷 1.0/0.4 —— 投掷判据是武器类。
@@ -337,7 +337,7 @@ bool RollDodge(const Combatant& attacker,
                bool defender_guarding,
                bool defender_casting_spell,
                const RulesConfig& config,
-               IRandom& rng) noexcept {
+               Random& rng) noexcept {
   // ── 六道前置否决 + 一道必闪 ─────────────────────────────────
   //
   // ⚠️ 05 §3.2 的清单**漏了 ABIO**(见 combatant.h 的 mods.abio)。实际是:
@@ -442,7 +442,7 @@ bool RollDodge(const Combatant& attacker,
 //   ③ `gCriper` 全局暂存(`:1591`)—— g* 隐式传参,本实现无文件级变量。
 bool RollCritical(const Combatant& attacker,
                   const Combatant& defender,
-                  IRandom& rng) noexcept {
+                  Random& rng) noexcept {
   // ⚠️★ **全程 f32**,与 `RollCapture`(DR-BT16)同一纪律:源码 `:1287` 声明
   //    `float per, Work, Big, Small, wari, divpara` ⇒ 逐位按 float 移植,
   //    不用 double —— 否则中间精度更高、边界不一致,会污染黄金用例集基线。
@@ -502,7 +502,7 @@ std::int32_t ComputeCriticalDamage(const BattleField& field,
                                    const Combatant& attacker,
                                    const Combatant& defender,
                                    const RulesConfig& config,
-                                   IRandom& rng) noexcept {
+                                   Random& rng) noexcept {
   // 暴击伤害 = DamageCalc + 守方**原始**防御 × (LVatt / LVdef) × 0.5。(`:1419`)
   //
   // ⚠️★ 这里的守方防御是 `CHAR_WORKDEFENCEPOWER` **原始值** —— 不经 0.70 系数、
@@ -598,7 +598,7 @@ KnockbackKind RollKnockback(std::int32_t damage,
 
 std::int32_t ComputeActionDex(const Combatant& c,
                               const SA::Domain::BattleCommand& command,
-                              IRandom& rng) noexcept {
+                              Random& rng) noexcept {
   // 基数(`BATTLE_DexCalc`):WORKQUICK + 20。
   std::int32_t dex = c.quick + kDexBase;
 
@@ -613,7 +613,7 @@ std::int32_t ComputeActionDex(const Combatant& c,
 
 int BuildActionOrder(const BattleField& field,
                      const TurnCommands& commands,
-                     IRandom& rng,
+                     Random& rng,
                      std::uint8_t (&order)[kSlotCount]) noexcept {
   std::int32_t keys[kSlotCount] = {};
   int count = 0;
@@ -655,7 +655,7 @@ int BuildActionOrder(const BattleField& field,
 
 int RollAttackCount(const Combatant& attacker,
                     const RulesConfig& config,
-                    IRandom& rng) noexcept {
+                    Random& rng) noexcept {
   // ── 有武器:RAND(min, max),≤0 则 1 ────────────────────────────
   if (!attacker.mods.unarmed) {
     const int n = rng.Rand(attacker.mods.attack_num_min, attacker.mods.attack_num_max);
@@ -682,7 +682,7 @@ int RollAttackCount(const Combatant& attacker,
   return 1;
 }
 
-double RollGuardFactor(IRandom& rng) noexcept {
+double RollGuardFactor(Random& rng) noexcept {
   const int roll = rng.Rand(1, 100);
   for (const GuardTier& tier : kGuardTiers) {
     if (roll <= tier.upper_bound) return tier.factor;
@@ -729,7 +729,7 @@ bool RollEscape(bool is_pvp,
                 int my_level,
                 int enemy_level_sum,
                 int enemy_alive_count,
-                IRandom& rng,
+                Random& rng,
                 int* out_percent) noexcept {
   // PvP 中必定逃脱(`:4252`)—— 先于一切公式。
   if (is_pvp) {
@@ -788,7 +788,7 @@ bool RollCapture(int my_level, int target_level,
                  int capture_difficulty,
                  int capture_bonus,
                  bool target_asleep,
-                 IRandom& rng,
+                 Random& rng,
                  int* out_percent) noexcept {
   // ★ MaxHp 兜底(`:3849 if(Df_MaxHp<=0)Df_MaxHp=1`)—— 防二次式除零。
   f32 max_hp = static_cast<f32>(target_max_hp);
@@ -923,7 +923,7 @@ EnemyLevelStat CollectEnemyLevels(const BattleField& field,
 bool ResolveTurn(const BattleField& field,
                  const TurnCommands& commands,
                  const RulesConfig& config,
-                 IRandom& rng,
+                 Random& rng,
                  SA::Domain::BattleEvents& out) noexcept {
   out.battle_id = field.battle_id;
   out.turn      = field.turn;

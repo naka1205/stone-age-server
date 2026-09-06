@@ -17,7 +17,7 @@ using namespace SA::Net;
 namespace {
 
 // 记录会话回调,免得用"有没有发出某条消息"去间接推断状态。
-class RecordingHost final : public ISessionHost {
+class RecordingHost final : public SessionHost {
  public:
   void OnSessionReady(SessionId id) override {
     ready.push_back(id);
@@ -390,7 +390,7 @@ TEST_CASE("未知 msg_id ⇒ 协议违规,不是「忽略并继续」") {
 // ══ LoopbackTransport ════════════════════════════════════════════
 namespace {
 
-class ByteSink final : public ITransportEvents {
+class ByteSink final : public TransportEvents {
  public:
   void OnConnected(ConnectionId id) override { connected.push_back(id); }
   void OnBytes(ConnectionId id, const std::uint8_t* d, std::size_t n) override {

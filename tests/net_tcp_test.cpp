@@ -183,7 +183,7 @@ class TestClient {
 
 // 记录传输层回调。★ 字节**存下来**,不是数个数 ——
 //   "收到了 N 字节"与"收到的是那 N 个字节"是两件事。
-class RecordingEvents final : public ITransportEvents {
+class RecordingEvents final : public TransportEvents {
  public:
   void OnConnected(ConnectionId id) override {
     connected.push_back(id);
@@ -511,7 +511,7 @@ namespace {
 
 // 把传输层收到的字节喂给 Session,并把 Session 的出站发回去。
 // ★ 这就是 world 在做的事(world.cpp),这里用最小复刻验证接线本身。
-class SessionBridge final : public ITransportEvents, public ISessionHost {
+class SessionBridge final : public TransportEvents, public SessionHost {
  public:
   SessionBridge(TcpTransport& t) : t_(t) {}
 

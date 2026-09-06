@@ -5,7 +5,7 @@
 //   否则 01 §4「shared/ 只依赖标准库」就破了。本文件因此只 import domain/。
 //
 // L3 契约(05-battle.md §1.5):
-//     resolve_turn(BattleSnapshot, Commands, IRandom&) -> BattleEvents
+//     resolve_turn(BattleSnapshot, Commands, Random&) -> BattleEvents
 //   ★ BattleEvents 是**返回值,不是副作用** —— 这正是 0.1 四步改造第②③步的目标形态。
 //   ★ 事件流 + 注入式随机源 = 可回放 ⇒ 同种子 + 同输入必须逐位相同,
 //     这是 00 §0 中 ③ 层「不可自证」唯一的补偿手段(黄金用例集)。

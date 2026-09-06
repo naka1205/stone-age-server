@@ -2,7 +2,7 @@
 //
 // ★★ 这是全仓**唯一**允许取真实时间的地方。
 //    · L3(shared/)由 tools/check_shared_purity.py 禁 <chrono>:读时钟即破坏可回放性;
-//    · L1/L2 一律经 IClock 注入,否则 world 的 tick 无法被测试。
+//    · L1/L2 一律经 Clock 注入,否则 world 的 tick 无法被测试。
 //
 // ⚠️ steady_clock 而不是 system_clock:01 §3.1 明写「不用墙钟做逻辑判断」。
 //    墙钟会被 NTP 往回拨,而"时间往回走"会让一切基于差值的节拍判断出现负数。

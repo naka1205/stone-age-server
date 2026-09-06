@@ -22,9 +22,9 @@
 namespace SA::Rules {
 
 // 注入式随机源。★ 两个方法对应原版仅有的两个入口。
-class IRandom {
+class Random {
  public:
-  virtual ~IRandom() = default;
+  virtual ~Random() = default;
 
   // 对应原版 `RAND(lo, hi)` —— **闭区间 [lo, hi]**。
   // ⚠️ 原版语义就是闭区间(`RAND(0,1)` 会取到 0 或 1,见 §3.1 第三步第一分支
@@ -38,9 +38,9 @@ class IRandom {
   virtual int RandMod(int n) = 0;
 
  protected:
-  IRandom() = default;
-  IRandom(const IRandom&) = default;
-  IRandom& operator=(const IRandom&) = default;
+  Random() = default;
+  Random(const Random&) = default;
+  Random& operator=(const Random&) = default;
 };
 
 // 确定性实现:同种子 + 同调用序列 ⇒ 同结果。用于黄金用例集与回放。
@@ -49,7 +49,7 @@ class IRandom {
 //   但 std::uniform_int_distribution 的取数方式**不由标准规定**,
 //   跨标准库实现会给出不同序列 ⇒ 黄金用例集在另一个平台上会整批失败。
 //   这里自己算,序列跨平台逐位一致。
-class SeededRandom final : public IRandom {
+class SeededRandom final : public Random {
  public:
   explicit SeededRandom(std::uint64_t seed) noexcept
       : state_(seed ? seed : 0x9E3779B97F4A7C15ull) {}

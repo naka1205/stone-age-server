@@ -7,7 +7,7 @@
 //      ⇒ 让「读不到」成为编译期事实,而不是评审时的口头纪律。
 //
 // ── 阶段 1.5 的切面(00 §9.0.4)──────────────────────────────
-//   ✅ 要:配置装载 · 结构化日志 · 单调时钟 · IRandom 的服务端实现
+//   ✅ 要:配置装载 · 结构化日志 · 单调时钟 · Random 的服务端实现
 //   ⬜ 不要:指标端点(prometheus-cpp)· 热重载
 //
 // ⚠️★ 一处与 01 §9 的**有意偏离**,已经用户裁定(2026-09-03):
@@ -39,20 +39,20 @@ namespace SA::Platform {
 //      (测试要的是「把时间推到第 3000 毫秒」,不是「睡 3 秒」)。
 using Millis = std::int64_t;
 
-class IClock {
+class Clock {
  public:
-  virtual ~IClock() = default;
+  virtual ~Clock() = default;
   // 单调递增的毫秒数。起点无意义,只有差值有意义。
   virtual Millis NowMs() const noexcept = 0;
 
  protected:
-  IClock() = default;
-  IClock(const IClock&) = default;
-  IClock& operator=(const IClock&) = default;
+  Clock() = default;
+  Clock(const Clock&) = default;
+  Clock& operator=(const Clock&) = default;
 };
 
 // 生产实现:std::chrono::steady_clock。★ 全仓唯一允许取真实时间的地方。
-class MonotonicClock final : public IClock {
+class MonotonicClock final : public Clock {
  public:
   MonotonicClock() noexcept;
   Millis NowMs() const noexcept override;
@@ -62,7 +62,7 @@ class MonotonicClock final : public IClock {
 };
 
 // 测试实现:时间由调用方推。
-class ManualClock final : public IClock {
+class ManualClock final : public Clock {
  public:
   explicit ManualClock(Millis start = 0) noexcept : now_(start) {}
   Millis NowMs() const noexcept override { return now_; }
@@ -260,7 +260,7 @@ ConfigResult LoadConfigFile(const std::string& path);
 
 // ── 随机源的服务端侧 ──────────────────────────────────────────
 //
-// ★ L3 的 IRandom 与确定性实现在 shared/rules/random.h(它必须双端共享)。
+// ★ L3 的 Random 与确定性实现在 shared/rules/random.h(它必须双端共享)。
 //   **服务端这一侧要负责的是种子从哪来、以及它有没有被记下来** ——
 //   01 §10:「同一随机种子 + 同一输入,结果必须逐位相同」。
 //   ⇒ 种子丢了,可回放性就只是一句话。

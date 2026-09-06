@@ -53,14 +53,14 @@ struct BattleStats {
   bool finished = false;
 };
 
-class World final : public SA::Net::ITransportEvents,
-                    public SA::Net::ISessionHost {
+class World final : public SA::Net::TransportEvents,
+                    public SA::Net::SessionHost {
  public:
   World(const SA::Platform::ServerConfig& config,
-        SA::Platform::IClock& clock,
+        SA::Platform::Clock& clock,
         SA::Platform::Logger& logger,
         SA::Platform::RandomSource& random,
-        SA::Net::ITransport& transport);
+        SA::Net::Transport& transport);
   ~World() override;
 
   World(const World&) = delete;
@@ -81,13 +81,13 @@ class World final : public SA::Net::ITransportEvents,
   void RequestShutdown() noexcept;
   bool stopped() const noexcept;
 
-  // ── ITransportEvents ──
+  // ── TransportEvents ──
   void OnConnected(SA::Net::ConnectionId id) override;
   void OnBytes(SA::Net::ConnectionId id, const std::uint8_t* data,
                std::size_t n) override;
   void OnDisconnected(SA::Net::ConnectionId id) override;
 
-  // ── ISessionHost ──
+  // ── SessionHost ──
   void OnSessionReady(SA::Net::SessionId id) override;
   void OnBattleCommand(SA::Net::SessionId id,
                        const SA::Domain::BattleCommand& cmd) override;

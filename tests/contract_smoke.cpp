@@ -127,9 +127,9 @@ static void CheckReplayable() {
   assert(f.RandMod(0) == 0);
   assert(f.RandMod(-3) == 0);
 
-  // IRandom 是可注入的抽象:通过基类引用调用应得到同样的序列。
+  // Random 是可注入的抽象:通过基类引用调用应得到同样的序列。
   Rules::SeededRandom g(123u);
-  Rules::IRandom& via_base = g;
+  Rules::Random& via_base = g;
   Rules::SeededRandom h(123u);
   for (int i = 0; i < 100; ++i) assert(via_base.Rand(1, 9) == h.Rand(1, 9));
 }

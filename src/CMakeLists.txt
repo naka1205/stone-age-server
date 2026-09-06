@@ -12,7 +12,7 @@
 #
 # ── 已建 / 未建(01 §4)────────────────────────────────────────────
 #   ✅ platform   1.5:配置 · 日志 · 单调时钟 · 随机源
-#   ✅ net        1.5:ITransport · 长度前缀成帧 · IDL 编解码 · 握手会话 · ★ TcpTransport
+#   ✅ net        1.5:Transport · 长度前缀成帧 · IDL 编解码 · 握手会话 · ★ TcpTransport
 #   ✅ world      1.5:最小 tick · 一场战斗的生命周期
 #   ⬜ storage · lock · gateway · session_storage · social —— 阶段 2
 
@@ -23,7 +23,7 @@ add_subdirectory(world)
 add_executable(stone_age_server main.cpp)
 # ⚠️ 只链 sa_world:它已 PUBLIC 依赖 sa_platform,再显式写一遍会让链接器
 #    报 "ignoring duplicate libraries" —— 而本仓把「0 告警」当凭据用(00 §9.0.9 ③)。
-#    sa_net 也经 sa_world 的 PUBLIC 依赖带进来(world/api.h 暴露 ITransport&)。
+#    sa_net 也经 sa_world 的 PUBLIC 依赖带进来(world/api.h 暴露 Transport&)。
 # ★ Threads:入口的 tick 循环用 std::this_thread::sleep_for(<thread>)。
 #    与 tests/CMakeLists.txt 那条同理 —— mac 上不链也能过,Linux 老 glibc 上是链接期错;
 #    「在一套工具链上验过 ≠ 三套都成立」(00 §9.0.6)。

@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
 
     // 节拍:睡到 t0 + ticks/hz 这个**绝对期限**,不是「Tick 完再睡一个周期」——
     //   后者会把每次 Tick 的耗时累积成漂移,tick 数与墙上时间慢慢脱钩。
-    //   ⚠️ 取时间只经 IClock(platform/api.h:「全仓唯一允许取真实时间的地方」),
+    //   ⚠️ 取时间只经 Clock(platform/api.h:「全仓唯一允许取真实时间的地方」),
     //     sleep_for 只是等,不读钟。
     const SA::Platform::Millis due =
         t0 + static_cast<SA::Platform::Millis>((ticks * 1000u) / hz);

@@ -243,16 +243,16 @@ struct World::Impl {
     std::vector<std::uint8_t> outbound{};
   };
 
-  Impl(const SA::Platform::ServerConfig& cfg, SA::Platform::IClock& clk,
+  Impl(const SA::Platform::ServerConfig& cfg, SA::Platform::Clock& clk,
        SA::Platform::Logger& log, SA::Platform::RandomSource& rnd,
-       SA::Net::ITransport& tp)
+       SA::Net::Transport& tp)
       : config(cfg), clock(clk), logger(log), random(rnd), transport(tp) {}
 
   SA::Platform::ServerConfig config;
-  SA::Platform::IClock& clock;
+  SA::Platform::Clock& clock;
   SA::Platform::Logger& logger;
   SA::Platform::RandomSource& random;
-  SA::Net::ITransport& transport;
+  SA::Net::Transport& transport;
 
   std::map<SA::Net::ConnectionId, Conn> conns;
   // 1.5 里 SessionId == ConnectionId(见上)。
@@ -267,9 +267,9 @@ struct World::Impl {
 };
 
 World::World(const SA::Platform::ServerConfig& config,
-             SA::Platform::IClock& clock, SA::Platform::Logger& logger,
+             SA::Platform::Clock& clock, SA::Platform::Logger& logger,
              SA::Platform::RandomSource& random,
-             SA::Net::ITransport& transport)
+             SA::Net::Transport& transport)
     : impl_(std::make_unique<Impl>(config, clock, logger, random, transport)) {
   transport.SetEvents(this);
 }
@@ -506,7 +506,7 @@ bool World::JoinBattle(BattleId battle, SA::Net::SessionId session,
   return true;
 }
 
-// ══ ITransportEvents ═════════════════════════════════════════════
+// ══ TransportEvents ═════════════════════════════════════════════
 void World::OnConnected(SA::Net::ConnectionId id) {
   Impl& s = *impl_;
   Impl::Conn c;
@@ -592,7 +592,7 @@ void World::OnDisconnected(SA::Net::ConnectionId id) {
                SA::Platform::LogEvent::kConnectionClosed, {{"conn_id", id}});
 }
 
-// ══ ISessionHost ═════════════════════════════════════════════════
+// ══ SessionHost ═════════════════════════════════════════════════
 void World::OnSessionReady(SA::Net::SessionId id) {
   Impl& s = *impl_;
   s.logger.Log(SA::Platform::LogLevel::kInfo,
