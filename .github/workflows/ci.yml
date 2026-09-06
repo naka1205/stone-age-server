@@ -28,10 +28,18 @@ name: CI
 on:
   push:
     branches: [master]
-    tags: ['shared-v*']
   pull_request:
     branches: [master]
   workflow_dispatch:
+
+# ⚠️★ **本仓 CI 不监听 `shared-v*` tag(2026-09-06 裁定)** ——
+#   tag 前推的时机永远是「L3 落地并 commit 到 master 之后」,那个 commit 推 master
+#   时**已经跑过一遍本 CI**;tag 指向同一个 commit ⇒ tag 触发只会对**同一份代码**
+#   再跑一遍完全相同的三平台验证。它换不到任何新结论,只是多一次抽中基建抖动
+#   (第三方 setup-ninja / apt / brew / choco 的网络抖动)把绿读成红的机会 ——
+#   `shared-v0.5.0` 首推时就撞上了这个:master 那遍全绿,tag 那遍 Linja 安装失败。
+#   ⇒ tag 照常推两个远端(客户端发布态 FetchContent 靠它取源码),但**不由它触发 CI**。
+#   若某天真需要对一个已推的 tag 单独验一次,用 workflow_dispatch 手动跑。
 
 # 同一分支上新的推送取消旧的运行 —— 排队等一个已经过时的结果没有意义。
 concurrency:
