@@ -93,6 +93,8 @@ const char *eventName(LogEvent e) noexcept
 		return "capture_commit_failed";
 	case LogEvent::kEntityPoolExhausted:
 		return "entity_pool_exhausted";
+	case LogEvent::kPetSwitchFailed:
+		return "pet_switch_failed";
 	}
 	return "unknown";
 }

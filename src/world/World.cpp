@@ -463,6 +463,81 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 			//    AI 修正段(`CHAR_DEFAULTMAXAI − WORKFIXAI`)需要未建的 `WORKFIXAI` ⇒ 不做。
 			break;
 		}
+		case SA::Domain::BattleEvent::BodyKind::PET_SWITCH:
+		{
+			// ── 批次 DR-BT21:换宠指令的世界写回 ────────────────────────
+			//
+			// ★ L3 只发了「换宠意图」(PetSwitch);真实的入 / 离场在这里落地 —— 读 L2 的
+			//   Player.pets / default_pet,调 M.2 的 enterPetToField / exitPetFromField。
+			// ⚠️★ **不复刻源码 BATTLE_PetOut 的反推缺陷**(DR-BT20 陷阱①):原版
+			//   `PetDefaultEntry` 恒返 0、靠「入场后 DEFAULTPET 是否 <0」反推成败,而宠位
+			//   被占时它**不清** DEFAULTPET ⇒ 误判「叫出成功」却没入场。这里用
+			//   `enterPetToField` 的**真实返回值**判成败,失败时 default_pet 保持原值。
+			const SA::Domain::PetSwitch &ps = e.body.pet_switch;
+			if (ps.actor >= static_cast<std::uint32_t>(SA::Rules::kSlotCount))
+				break;
+
+			// 换宠要读写主人的 L2 Player 实体。观战 / 敌人 / 尚未接 L2 的槽没有实体 ⇒
+			// 跳过 + 记账(同捕获 no_l2_context;敌人 AI 换宠尚未移植,此路径正常不触发)。
+			const bool has_l2 = ctx.players != nullptr && ctx.pets != nullptr &&
+			                    ctx.player_of_slot != nullptr;
+			SA::Model::Player *owner =
+			    has_l2 ? ctx.players->resolve((*ctx.player_of_slot)[ps.actor])
+			           : nullptr;
+			if (owner == nullptr)
+			{
+				if (ctx.logger != nullptr)
+					ctx.logger->log(
+					    SA::Platform::LogLevel::kError,
+					    SA::Platform::LogEvent::kPetSwitchFailed,
+					    {{"battle_id", field.battle_id},
+					     {"actor", static_cast<std::uint64_t>(ps.actor)},
+					     {"reason", std::string_view("no_owner")}});
+				break;
+			}
+
+			if (!ps.call_out)
+			{
+				// ── 收回(PET_IN):宠物离场 + 清出战宠 ────────────────────
+				exitPetFromField(field, static_cast<int>(ps.actor));
+				owner->default_pet = -1;
+				break;
+			}
+
+			// ── 叫出(PET_OUT):第 pet_slot 槽宠入场 ──────────────────────
+			if (ps.pet_slot >= SA::Model::kMaxPetHave)
+				break;
+			SA::Model::Pet *pet = ctx.pets->resolve(owner->pets[ps.pet_slot]);
+			if (pet == nullptr)
+			{
+				// 该槽空 / 悬空句柄 ⇒ 叫不出,default_pet 不变。
+				if (ctx.logger != nullptr)
+					ctx.logger->log(
+					    SA::Platform::LogLevel::kError,
+					    SA::Platform::LogEvent::kPetSwitchFailed,
+					    {{"battle_id", field.battle_id},
+					     {"actor", static_cast<std::uint64_t>(ps.actor)},
+					     {"pet_slot", static_cast<std::uint64_t>(ps.pet_slot)},
+					     {"reason", std::string_view("no_pet")}});
+				break;
+			}
+			if (enterPetToField(field, static_cast<int>(ps.actor), *pet))
+			{
+				owner->default_pet = static_cast<int>(ps.pet_slot);
+			}
+			else if (ctx.logger != nullptr)
+			{
+				// 宠位被占 / 宠物已死(enterPetToField 门②③)⇒ default_pet 不变。
+				ctx.logger->log(
+				    SA::Platform::LogLevel::kError,
+				    SA::Platform::LogEvent::kPetSwitchFailed,
+				    {{"battle_id", field.battle_id},
+				     {"actor", static_cast<std::uint64_t>(ps.actor)},
+				     {"pet_slot", static_cast<std::uint64_t>(ps.pet_slot)},
+				     {"reason", std::string_view("enter_failed")}});
+			}
+			break;
+		}
 		default:
 			// 其余事件是**表现**(HIT / TEXT_BOX / …)或未移植链路的占位,
 			// 对世界状态无影响 ⇒ 显式落到这里,不是遗漏。
@@ -823,6 +898,20 @@ bool World::joinBattle(BattleId battle, SA::Net::SessionId session,
 	// ⚠️ 查不到就留空句柄 —— 观战席位、以及尚未接 L2 的槽本来就没有实体,
 	//    那是正常状态,不是错误(见 BattleInstance::player_of_slot 的注释)。
 	b.player_of_slot[slot] = s.player_of_session.find(session);
+
+	// ★ DR-BT21:入场自动带出出战宠(读 L2 的 `default_pet`)。
+	//   ⚠️ M.2(§9.0.27 ⑤)时这是**死路径** —— `default_pet` 无写者;本批 PET_OUT 补上
+	//     写者后激活。demo 玩家无预设 `default_pet` ⇒ demo 不触发(正常),由单元测覆盖。
+	//   ★ 复用 M.2 的 enterPetToField:门②③(宠物存活 / 宠位空)在其内,失败即不入场。
+	if (SA::Model::Player *p = s.players.resolve(b.player_of_slot[slot]);
+	    p != nullptr && p->default_pet >= 0 &&
+	    p->default_pet < static_cast<int>(SA::Model::kMaxPetHave))
+	{
+		if (SA::Model::Pet *pet =
+		        s.pets.resolve(p->pets[static_cast<std::size_t>(p->default_pet)]))
+			enterPetToField(b.field, slot, *pet);
+	}
+
 	cit->second.session->markOnline();
 
 	// ★★ 入场即下发**自己是谁**与**现在是第几回合**,否则客户端无从组指令:
@@ -1131,6 +1220,13 @@ int World::playerCaptureCount(SA::Net::SessionId session) const
 	const SA::Model::Player *p =
 	    _impl->players.resolve(_impl->player_of_session.find(session));
 	return p == nullptr ? -1 : static_cast<int>(p->capture_count);
+}
+
+int World::playerDefaultPet(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : p->default_pet;
 }
 
 int World::playerPetSlotsUsed(SA::Net::SessionId session) const

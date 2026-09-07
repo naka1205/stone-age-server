@@ -373,6 +373,17 @@ message Boundary       { uint32 actor = 1; uint32 element = 2; }  // Ba 四属�
 message PetBattleModel { uint32 actor = 1; }                      // Bb 宠技战斗模组
 message FireHunt       { uint32 actor = 1; }                      // Bf 火线猎杀
 
+// 换宠结果(DR-BT21,阶段 2)。★ 原版换宠复用 BS 子命令(收回 f0 / 叫出 f1 + 展示串),
+//   但那串的完整视觉(图号/名字/血条)依赖尚未下发的 BattleSnapshot ⇒ 本事件是**意图锚点**:
+//   只带世界写所需的 (actor, pet_slot, call_out),不带展示数据(00 §9.0.28 边界)。
+// ⚠️ 不带 succeeded:真实成败(宠物存活 / 宠位空)一部分在 L2,由 World 层 applyEvents 落地
+//   决定(同 CaptureAct 的判定/世界写分离及其不对称,01 §13 欠债 22 族)。
+message PetSwitch {
+  uint32 actor    = 1;  // 主人战场槽(0..4 己方 / 10..14 敌方)
+  uint32 pet_slot = 2;  // 叫出 Player.pets[] 的槽号(call_out=true 时有效;收回时忽略)
+  bool   call_out = 3;  // true = 叫出(PET_OUT) · false = 收回(PET_IN)
+}
+
 // ── 事件包络 ──────────────────────────────────────────────────────
 
 message BattleEvent {
@@ -401,6 +412,7 @@ message BattleEvent {
     PetBattleModel pet_battle_model = 22;
     FireHunt       fire_hunt       = 23;
     KnockbackState knockback_state = 24;  // §3.8 A.4:打飞累加器回写(权威态,不演出)
+    PetSwitch      pet_switch      = 25;  // DR-BT21:换宠意图(世界写锚点,不演出)
   }
 }
 
@@ -429,8 +441,11 @@ message Attack    { uint32 target = 1; }
 message Guard     {}
 message EscapeCmd {}
 message Capture   { uint32 target = 1; }
-message PetIn     { uint32 pet_slot = 1; }
-message PetOut    {}
+// ★★ 换宠方向照源码(DR-BT20/DR-BT21,`battle_command.c:271/275`,unifdef_80 展开视图):
+//    PET_IN = **收回**当前出战宠(无参 —— 收的就是 default_pet)· PET_OUT = **叫出**第 N 槽宠。
+//    ⚠️ 与直觉相反(直觉以为 IN=进场带槽号)。初版 schema 把两者的字段接反,DR-BT21 修正。
+message PetIn     {}
+message PetOut    { uint32 pet_slot = 1; }
 message UseItem   { uint32 item_slot = 1; uint32 target = 2; }
 message PetSkill  { uint32 skill_id = 1; uint32 target = 2; }
 message ProfSkill { uint32 skill_id = 1; uint32 target = 2; }

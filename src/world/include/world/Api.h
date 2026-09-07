@@ -118,6 +118,9 @@ class World final : public SA::Net::TransportEvents,
 	//    (同 EntityIndex::find 未命中给明确空值那一条)。
 	int playerCaptureCount(SA::Net::SessionId session) const;
 	int playerPetSlotsUsed(SA::Net::SessionId session) const;
+	// 当前出战宠在 `pets[]` 的槽号(原 `CHAR_DEFAULTPET`)。-1 = 无实体 / 无出战宠。
+	// ★ DR-BT21 的测试观察面:换宠(PET_OUT/PET_IN)是否写对 `default_pet`。
+	int playerDefaultPet(SA::Net::SessionId session) const;
 
 	// 某场战斗的战场快照(只读)。不存在返回 nullptr。
 	//

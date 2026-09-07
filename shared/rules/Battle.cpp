@@ -1220,15 +1220,53 @@ bool resolveTurn(const BattleField &field,
 			continue;
 		}
 
+		// ── 换宠:叫出 / 收回(DR-BT21,阶段 2)──────────────────────
+		//
+		// ⚠️★ 换宠**无胜负判定阈**(DR-BT20):不是概率,是确定性世界写(叫出=宠物入场、
+		//    收回=宠物离场)。L3 在此只做**指令语义转发** —— 产一条 PetSwitch 意图事件;
+		//    真实的入 / 离场(读 L2 的 Player.pets / default_pet、判宠位空 / 宠物存活、写
+		//    default_pet)是世界写,留调用方 applyEvents(同逃跑计数器 ++、捕获生成宠物的
+		//    分工)。★ 按本文件顶部告诫「指令语义留 L3、不在调用方拦截」补 case。
+		// ⚠️ 三处源码行为**有意不复刻并就地记明**:
+		//    ① 变身还原(PetIn 对天狗 101428 / 狸 101749 换回原图,`battle_event.c:3814-3826`)
+		//       —— 变身系统未移植,同 DR-BT11「图号是实现方式不是玩法」取向,不照抄图号;
+		//    ② NORETURN 门(PetIn 的 `CHAR_BATTLEFLG_NORETURN` 拒收,`:3827`)—— `Combatant`
+		//       无该战斗标志位 ⇒ 本批一律可收回,记明待状态 / 标志系统补;
+		//    ③ MP 扣除(名义换宠 10MP)—— DR-BT3 定「战斗指令不耗 MP」(`BATTLE_MpDown` 是空
+		//       函数)⇒ 不写(写进去会让后人误以为生效,battle_events.proto §上行 已警示)。
+		if (cmd.command_kind == SA::Domain::BattleCommand::CommandKind::PET_OUT ||
+		    cmd.command_kind == SA::Domain::BattleCommand::CommandKind::PET_IN)
+		{
+			// 换宠是**主人**的指令 ⇒ 宠位单位(kPet)不能再换宠(否则 actor+5 会越到敌半场)。
+			//   与逃跑「宠物不能逃」同处拦 —— 指令语义留 L3。敌人无 L2 实体,调用方 resolve
+			//   不到主人时跳过(此路径当前不触发:敌人 AI 换宠未移植)。
+			if (actor.kind == CombatantKind::kPet)
+				continue;
+
+			const bool call_out =
+			    cmd.command_kind == SA::Domain::BattleCommand::CommandKind::PET_OUT;
+
+			SA::Domain::BattleEvent *ev =
+			    sink.push(SA::Domain::BattleEvent::BodyKind::PET_SWITCH);
+			if (ev == nullptr)
+				break;
+			ev->body.pet_switch.actor = static_cast<std::uint32_t>(actor_slot);
+			// pet_slot 仅叫出有效;收回忽略(源码 `battle_command.c:271` iNum<0 收回不读槽)。
+			ev->body.pet_switch.pet_slot =
+			    call_out ? cmd.command.pet_out.pet_slot : 0u;
+			ev->body.pet_switch.call_out = call_out;
+			// ★ 真实入 / 离场(读 L2、判宠位空 / 宠物存活、写 default_pet)由调用方按事件执行。
+			if (sink.overflowed())
+				break;
+			continue;
+		}
+
 		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::ATTACK)
 		{
 			// GUARD 与 WAIT 本身不产事件:防御的效果体现在**被攻击时**的减伤(§3.5),
 			// 由下方攻击链路读 `IsGuarding` 得到。
-			// ⚠️ PET_IN / PET_OUT / USE_ITEM / 技能 / 咒术仍落这里被跳过 ——
-			//    绑在批次 A.3+ / B / C 的链路上(见 battle.h 的表)。
-			//    ★ 换宠(PET_IN/OUT)**不在 A.2** —— 它无判定阈,真实成本是把宠物建模成
-			//      独立战斗槽单位入场(BATTLE_PetDefaultEntry),属 L2 实体族(1.2),
-			//      1.5 的 Combatant 只有 has_ride 骑乘、没有槽位宠 ⇒ 排在 L2 之后。
+			// ⚠️ USE_ITEM / 宠技 / 职技 / 咒术仍落这里被跳过 —— 绑在批次 B / C 的链路上
+			//    (见 battle.h 的表);换宠已在上方 PET_SWITCH case 接入。
 			continue;
 		}
 

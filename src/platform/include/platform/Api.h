@@ -162,6 +162,16 @@ enum class LogEvent : std::uint16_t
 	//    ⇒ 静默的后果很难归因:玩家连上了却没有实体、或捕获突然开始失败,
 	//      而那时离真正的原因(某处没释放)已经很远了。
 	kEntityPoolExhausted = 209,
+	// ★ 换宠指令世界写失败(2026-09-07,批次 DR-BT21)。`reason` 区分三类:
+	//   `no_owner`(观战 / 敌人 / 该槽尚未接 L2 ⇒ resolve 不到 Player)·
+	//   `no_pet`(叫出的 `pets[pet_slot]` 是空槽 / 悬空句柄)·
+	//   `enter_failed`(宠位被占 / 宠物已死 —— enterPetToField 门②③ 未过)。
+	//
+	// ⚠️★ 与 kCaptureCommitFailed 同族的**已知不对称**(01 §13 欠债 22 族):L3 的
+	//    `PetSwitch` 意图事件在判定阶段已发出,而叫出可能在世界写阶段才失败 ⇒ 客户端
+	//    (将来接 BattleSnapshot 后)可能演了换宠而服务端没真换。级别 error 同理由 ——
+	//    玩家侧「点了换宠却没换」是投诉级,不是可淹在 warn 里的东西。
+	kPetSwitchFailed = 210,
 };
 
 // 日志字段。定长语义、不做格式化字符串 —— printf 风格的日志无法被机器消费。

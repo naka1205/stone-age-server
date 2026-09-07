@@ -1095,3 +1095,137 @@ TEST_CASE("M.2:exitPetFromField 撤下宠物 —— 清占位但不置 dead")
 	CHECK_FALSE(f.at(SA::Rules::kBattlePlayerMax).occupied);
 	CHECK_FALSE(f.at(SA::Rules::kBattlePlayerMax).dead); // ★ 撤下不是战死
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  批次 DR-BT21:换宠指令 PET_OUT / PET_IN(端到端世界写)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ★★ 这一组验**世界写真的落下去了**(同 M.1 捕获组):经 World 公开接口发换宠指令、
+//    tick 跑 resolveTurn + applyEvents,断言战场宠位 / default_pet 这些**可观察后果** ——
+//    applyEvents 是内部函数,不直接测它,测它的效果。
+// ★ 换宠要有宠可换 ⇒ 先用捕获抓一只进 pets[](沿用 M.1 的 joinCapturable/captureTurn
+//   固定主种子手法),再叫出 / 收回。enemy_count≥2:抓 1 只后敌方仍有存活,战斗不结束。
+
+namespace
+{
+
+// 发一条 PET_OUT(叫出第 pet_slot 槽宠)并推进一个回合。
+void petOutTurn(Fixture &f, SA::Net::ConnectionId id, BattleId battle, int pet_slot)
+{
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = f.world.battleField(battle)->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::PET_OUT;
+	cmd.command.pet_out.pet_slot = static_cast<std::uint32_t>(pet_slot);
+	f.world.onBattleCommand(id, cmd);
+	f.clock.advance(2000);
+	f.world.tick();
+}
+
+// 发一条 PET_IN(收回当前出战宠,无参)并推进一个回合。
+void petInTurn(Fixture &f, SA::Net::ConnectionId id, BattleId battle)
+{
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = f.world.battleField(battle)->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::PET_IN;
+	f.world.onBattleCommand(id, cmd);
+	f.clock.advance(2000);
+	f.world.tick();
+}
+
+} // namespace
+
+TEST_CASE("DR-BT21:PET_OUT 叫出宠物入场 slots[主人+5] 并写 default_pet")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinCapturable(f, id, 2);
+	captureTurn(f, id, battle, SA::Rules::kSideOffset); // 抓进 pets[0]
+	REQUIRE(f.world.petCount() == 1);
+	REQUIRE(f.world.playerDefaultPet(id) == -1); // 还没叫出
+
+	petOutTurn(f, id, battle, 0);
+
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->at(SA::Rules::kBattlePlayerMax).occupied); // 主人 0 + 5
+	CHECK(fld->at(SA::Rules::kBattlePlayerMax).kind == SA::Rules::CombatantKind::kPet);
+	CHECK(f.world.playerDefaultPet(id) == 0);
+}
+
+TEST_CASE("DR-BT21:PET_IN 收回出战宠 ⇒ 宠位清空 + default_pet=-1")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinCapturable(f, id, 2);
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+	petOutTurn(f, id, battle, 0);
+	REQUIRE(f.world.battleField(battle)->at(SA::Rules::kBattlePlayerMax).occupied);
+	REQUIRE(f.world.playerDefaultPet(id) == 0);
+
+	petInTurn(f, id, battle);
+
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK_FALSE(fld->at(SA::Rules::kBattlePlayerMax).occupied);
+	CHECK_FALSE(fld->at(SA::Rules::kBattlePlayerMax).dead); // 撤下不是战死
+	CHECK(f.world.playerDefaultPet(id) == -1);
+}
+
+TEST_CASE("DR-BT21:叫出到已占宠位失败 ⇒ default_pet 不变(不复刻源码反推 bug)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinCapturable(f, id, 3);
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);     // pets[0]
+	captureTurn(f, id, battle, SA::Rules::kSideOffset + 1); // pets[1]
+	REQUIRE(f.world.petCount() == 2);
+
+	petOutTurn(f, id, battle, 0); // slots[5] = pets[0]
+	REQUIRE(f.world.playerDefaultPet(id) == 0);
+
+	// 宠位已被 pets[0] 占 ⇒ enterPetToField 门③ 失败。★ 关键:default_pet **仍是 0**,
+	//   不是 1 —— 源码靠「入场后 DEFAULTPET<0」反推会误判成功并置 1(DR-BT20 陷阱①),
+	//   我们用 enterPetToField 真实返回值,失败即不改 default_pet。
+	petOutTurn(f, id, battle, 1);
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->at(SA::Rules::kBattlePlayerMax).occupied);
+	CHECK(f.world.playerDefaultPet(id) == 0); // 没被改成 1
+}
+
+TEST_CASE("DR-BT21:叫出空槽 ⇒ 叫不出,宠位空、default_pet 不变")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinCapturable(f, id, 2);
+	captureTurn(f, id, battle, SA::Rules::kSideOffset); // 只有 pets[0]
+
+	petOutTurn(f, id, battle, 4); // pets[4] 空 ⇒ no_pet,不入场
+
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK_FALSE(fld->at(SA::Rules::kBattlePlayerMax).occupied);
+	CHECK(f.world.playerDefaultPet(id) == -1);
+}
+
+TEST_CASE("DR-BT21:joinBattle 自动带出出战宠(default_pet 跨战斗)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle1 = joinCapturable(f, id, 2);
+	captureTurn(f, id, battle1, SA::Rules::kSideOffset);
+	petOutTurn(f, id, battle1, 0);
+	REQUIRE(f.world.playerDefaultPet(id) == 0); // 出战宠已定
+
+	// ★ 同一会话进入新战斗:joinBattle 读 default_pet 自动带宠(本批激活的链路)。
+	//   ⚠️ demo 玩家 default_pet 恒 -1 ⇒ demo 不触发;这里靠先 PET_OUT 设好它来验证。
+	const BattleId battle2 = f.world.startBattle(makeCapturableField(1));
+	REQUIRE(f.world.joinBattle(battle2, id, 0));
+
+	const SA::Rules::BattleField *fld2 = f.world.battleField(battle2);
+	REQUIRE(fld2 != nullptr);
+	CHECK(fld2->at(SA::Rules::kBattlePlayerMax).occupied);
+	CHECK(fld2->at(SA::Rules::kBattlePlayerMax).kind == SA::Rules::CombatantKind::kPet);
+}

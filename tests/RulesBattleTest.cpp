@@ -1051,9 +1051,11 @@ TEST_CASE("ResolveTurn:批次 0.5 未接入的指令一律跳过,不产事件")
 	//    目标才产事件**;此表用的 Duel 里 slot 10 默认 `capturable=false`,若不移除,
 	//    这里的 CAPTURE 恰好因前置门①而落"不产事件"——那是**巧合命中**,不是覆盖边界,
 	//    留着会掩盖"捕获对可捕目标应产事件"。
+	// ⚠️★ PET_IN / PET_OUT 已于批次 DR-BT21 接入(产 PetSwitch 意图事件)⇒ **从本表移除**。
+	//    它们的行为由「换宠」系列用例钉住(本文件 resolveTurn 侧 + WorldTickTest 世界写侧)。
 	using K = SA::Domain::BattleCommand::CommandKind;
-	for (const auto k : {K::GUARD, K::WAIT, K::PET_IN,
-	                     K::PET_OUT, K::USE_ITEM, K::PET_SKILL, K::PROF_SKILL, K::SPELL})
+	for (const auto k : {K::GUARD, K::WAIT, K::USE_ITEM,
+	                     K::PET_SKILL, K::PROF_SKILL, K::SPELL})
 	{
 		Duel d = makeDuel();
 		setKind(d.cmds, 0, k);
@@ -1310,6 +1312,58 @@ TEST_CASE("逃跑:可回放 —— 同种子 + 同输入 ⇒ 结果逐位相同"
 	CHECK(ok1 == ok2);
 	CHECK(p1 == p2);
 	CHECK(r1.state() == r2.state());
+}
+
+// ── 换宠指令 PET_OUT / PET_IN(DR-BT21)────────────────────────────────
+//
+// ★ 换宠**无判定阈**:L3 只把指令转成一条 PetSwitch 意图事件,真实的入 / 离场是
+//   世界写(读 L2 的 Player.pets / default_pet),留 World::applyEvents。这里只验 L3
+//   这一段 —— 事件形状对不对;端到端世界写在 WorldTickTest 的 DR-BT21 组。
+
+TEST_CASE("换宠:PET_OUT ⇒ PetSwitch 叫出事件(call_out=true,带槽号)")
+{
+	Duel d = makeDuel();
+	setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::PET_OUT);
+	d.cmds.commands[0].command.pet_out.pet_slot = 2u; // 叫出第 2 槽宠
+	d.cmds.present[10] = false;                        // 敌方不动,只看换宠
+
+	SA::Domain::BattleEvents ev{};
+	MaxRandom rng;
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+	REQUIRE(ev.events.size() == 1);
+	REQUIRE(ev.events[0].body_kind == SA::Domain::BattleEvent::BodyKind::PET_SWITCH);
+	CHECK(ev.events[0].body.pet_switch.actor == 0u);
+	CHECK(ev.events[0].body.pet_switch.pet_slot == 2u);
+	CHECK(ev.events[0].body.pet_switch.call_out == true);
+}
+
+TEST_CASE("换宠:PET_IN ⇒ PetSwitch 收回事件(call_out=false)")
+{
+	Duel d = makeDuel();
+	setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::PET_IN);
+	d.cmds.present[10] = false;
+
+	SA::Domain::BattleEvents ev{};
+	MaxRandom rng;
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+	REQUIRE(ev.events.size() == 1);
+	REQUIRE(ev.events[0].body_kind == SA::Domain::BattleEvent::BodyKind::PET_SWITCH);
+	CHECK(ev.events[0].body.pet_switch.actor == 0u);
+	CHECK(ev.events[0].body.pet_switch.call_out == false);
+}
+
+TEST_CASE("换宠:宠物(kPet)不能换宠 ⇒ 不产事件(指令语义留 L3,同逃跑)")
+{
+	Duel d = makeDuel();
+	d.field.at(0).kind = CombatantKind::kPet; // 把 0 号改成宠物
+	setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::PET_OUT);
+	d.cmds.commands[0].command.pet_out.pet_slot = 0u;
+	d.cmds.present[10] = false;
+
+	SA::Domain::BattleEvents ev{};
+	MaxRandom rng;
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+	CHECK(ev.events.size() == 0);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

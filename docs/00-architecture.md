@@ -2551,6 +2551,81 @@ stash 回 HEAD 实测了一遍,才确认是那个数不准。
 ⇒ 客户端编译面不变、不必前推;⚠️ M.1 遗留的 `shared/model/{Pet,Player}.h` 漂移(客户端 pin=`v0.9.0`
 无这两个头)仍在,**搭后续真正改 `shared/` 编译面的批次一并前推消除**(§9.0.25 ①,不给漂移守卫加豁免)。
 
+### 9.0.28 ★★ 批次 DR-BT21 —— 换宠指令 PET_IN / PET_OUT,激活 M.2 的入场机制(2026-09-07)
+
+> **M.2(§9.0.27)交付了战场态入场机制 `enterPetToField` / `exitPetFromField`,但刻意没接
+> `joinBattle`、没建 `default_pet` 写者 —— 那会是永不触发的死路径。本批补上换宠**指令层**:玩家发
+> `PET_OUT` 叫出第 N 槽宠 / `PET_IN` 收回,`default_pet` 有了唯一写者,`joinBattle` 自动带宠随之激活。**
+>
+> ⚠️ 行号基准 = `unifdef_80` 展开视图(同 DR-BT19/20)。
+
+#### ① ★★ 一处必须先修的 schema 方向错误 —— 初版把 PetIn / PetOut 字段接反了
+
+`battle_events.proto` 初版(0.2 铺全量指令枚举时)按**直觉**建:`PetIn{ pet_slot }`(以为 IN=进场带槽号)、
+`PetOut{}`。但源码方向相反(DR-BT20 已锁、§9.0.27 ①):`PET_IN`=**收回**当前出战宠(无参 —— 收的就是
+`default_pet`,不必指定谁)、`PET_OUT`=**叫出**第 iNum 槽宠(带槽号,`battle_command.c:271` `iNum<0` 收回)。
+⇒ 本批修正为 `PetIn{}` / `PetOut{ pet_slot }`,重新生成 `battle_events.sa.h`。★ 这是 §9.0.27 ① 那条
+「照字面会把两条指令做反」在 schema 层的落实 —— 不改它,PET_OUT 拿不到槽号、PET_IN 白带一个没用的字段。
+
+#### ② 换宠无判定阈 ⇒ L3 只转发意图,世界写落 applyEvents(与捕获同分工)
+
+换宠不是概率,是确定性世界写。`resolveTurn` 补 `PET_OUT` / `PET_IN` 两个 case,各产一条 `PetSwitch`
+意图事件(`actor` + `pet_slot` + `call_out`);真实的入 / 离场(读 L2 `Player.pets` / `default_pet`、
+判宠位空 / 宠物存活、写 `default_pet`)在 `World::applyEvents` 落地,调 M.2 的 `enterPetToField` /
+`exitPetFromField`。★ 这与捕获「判定进 L3、世界写留调用方」同分工;按 `battle.h` 的告诫「指令语义留
+L3、不在调用方拦截」补 case,而非在 `onBattleCommand` 里绕过 `resolveTurn`。★ **状态门不新建**:
+`resolveTurn` 每指令前的 `checkCanAct`(DR-BT5 统一 8 项)已覆盖,且严于源码上行的 `checkErrorStatus`
+(5 项)—— M.2 记的「下一批接 checkErrorStatus 5 态」实由既有更严的门吸收,不重复实现。
+
+#### ③ ★★ 不复刻源码 BATTLE_PetOut 的反推缺陷(DR-BT20 陷阱①的正面兑现)
+
+源码 `BATTLE_PetOut`(`:3854`)先 `setInt(DEFAULTPET, petNo)`,再 `PetDefaultEntry`(恒返 0),最后靠
+「`getInt(DEFAULTPET) < 0`」**反推**成败。而宠位被占时 `PetDefaultEntry` 的 `NewEntry` 失败但**不清**
+`DEFAULTPET`(它只在「宠物死 / 无效」分支清,`:1428`)⇒ **误判「叫出成功」却没入场**。本批用
+`enterPetToField` 的**真实返回值**判成败,**失败即不改 `default_pet`** —— 比源码自洽:叫出到已占宠位
+失败时 `default_pet` 保持原值,不会像源码那样被留成一个「指向没入场的宠」的脏值。★ 与 DR-BT20 陷阱①
+一脉相承(源码有 bug 时让位于更健壮实现,同 DR-BT11 图号让位标志)。⇒ `world_tick` 有一条用例专钉它:
+抓两只、叫出 pets[0] 占住宠位,再叫 pets[1] 失败,断言 `default_pet` **仍是 0 不是 1**。
+
+#### ④ 三处源码行为有意不复刻,均就地记明(非遗漏)
+
+① **变身还原**:`BATTLE_PetIn` 开头对天狗(图号 101428)/ 狸(101749)/ `WORKFOXROUND` 换回原图并还原
+攻 / 敏(`:3814-3826`)—— 变身系统未移植,同 DR-BT11「图号是实现方式不是玩法」取向,不照抄图号。
+② **NORETURN 门**:`PetIn` 对带 `CHAR_BATTLEFLG_NORETURN` 的宠拒收(`:3827`)—— `Combatant` 无该战斗
+标志位,本批一律可收回,记明待状态 / 标志系统补。③ **MP 扣除**:名义换宠 10MP(`:282`)—— DR-BT3 已定
+「战斗指令不耗 MP」(`BATTLE_MpDown` 被 `#if 1` 短路成空函数),`battle_events.proto` §上行 已明令**不得
+写进代码**。★ 另核实一处不必特判:`BATTLE_DexCalc`(`:4674`)的行动顺序分档 switch **没有换宠的 case**
+⇒ 落 default 走默认档,与实现仓 `computeActionDex` 的默认档一致,不为换宠加档。
+
+#### ⑤ joinBattle 自动带宠激活,但 demo 仍不触发(靠单元测覆盖)
+
+`default_pet` 有了写者(PET_OUT),`joinBattle` 读它自动带宠不再是死路径。⚠️ 但 demo 玩家在会话就绪时建的
+`Player` `default_pet` 恒 -1(还没机会发 PET_OUT)⇒ **demo 仍不触发**。用例靠「抓宠 → PET_OUT 设
+`default_pet` → 同会话进入新战斗」的跨战斗流程覆盖它(`default_pet` 在 Player 实体上、会话不断线即保留)。
+★ 真正的跨战斗持久化(选角 / 存档)属阶段 2,那时它才在生产路径上自然触发。
+
+#### ⑥ 边界与推迟(用户 2026-09-07 拍板取此范围)
+
+下行只发 `PetSwitch` 意图(`actor` / `pet_slot` / `call_out`),**不带展示数据**。宠物出场的完整视觉
+(图号 / 名字 / 血条)依赖尚未下发的 `BattleSnapshot`(多批共同推迟项),`max_hp` 另依赖未移植的
+`complianceParameter`(欠债 23)⇒ 现在下发血条也是残缺,不做半拉子演出。⚠️ World 层叫出失败的不对称
+(意图事件已发、世界写在门上才失败)与捕获欠债 22 同族,登记 `01` §13,新增 `kPetSwitchFailed` 日志
+(`reason`: `no_owner` / `no_pet` / `enter_failed`)。
+
+#### ⑦ 复验 + 前推
+
+- Apple clang 21 + GCC 15.2 各清洁构建 `SA_WERROR=ON` **0 告警** · `ctest` **12/12** · `ci_verify`
+  **六项全过** · `shared_purity` / `module_boundaries` / `idl_verify` 通过 · `idl` 四道关(含 8KB 零分配
+  红线:`BattleEvent` union **28B 不变**、`BattleEvents` **7,184B 未越线**)。
+- 用例:`world_tick` 33→**38**(+5:叫出 / 收回 / 已占失败 / 空槽失败 / joinBattle 自动带宠)·
+  `rules_battle` 72→**75**(+3:PET_OUT / PET_IN 事件 / 宠物不能换宠)· 反向验证三处(default_pet 写入 /
+  自动带宠 / call_out,逐条 `sed -i` 转红再还原)。⚠️★ 还原后一度假红:`sed` 还原后 ninja 未重编
+  World.cpp(§9.0.16 / §9.0.27 ⑦ 的 mtime 竞态**又中一次**),`touch` 强制重编后回绿 —— 记此,老坑不长记性。
+- ★ **本批改了 `battle_events.proto`(客户端 watched path `battle_events.sa.h`)⇒ 必须前推**:连同
+  M.1/M.2 遗留的 `shared/model/{Pet,Player}.h` 漂移(§9.0.27 ⑤)一并消除,打 `shared-v0.10.0`,两仓 ×
+  两远端,客户端 `d2-only` 复验,CI 三平台;⚠️ MSVC 交 CI(M.1/M.2/L2 攒着的一并兑现)。
+  **⇒ 前推是外发动作,待用户确认后执行(推送纪律)。**
+
 ---
 
 ### 10.1 R-b:无解的结构性事实

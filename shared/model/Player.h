@@ -52,6 +52,11 @@ struct Player
 	//      没有任何一处会报错。★ ModelPoolTest 有一条用例专门钉这个后果。
 	std::array<EntityHandle, kMaxPetHave> pets{};
 
+	// 当前出战宠在 `pets[]` 中的下标(原 `CHAR_DEFAULTPET`)。-1 = 无出战宠。
+	// ★ 唯一写者 = 换宠指令 PET_OUT(设槽号)/ PET_IN(设 -1)(DR-BT21);`joinBattle`
+	//   读它自动带宠。M.1/M.2 按「不建没人用的字段」纪律留白,本批补上写者后解禁。
+	std::int32_t default_pet = -1;
+
 	// 累计捕获数(原 `CHAR_GETPETCOUNT`,源码 `battle_event.c:3543`)。
 	std::int32_t capture_count = 0;
 

@@ -611,6 +611,24 @@ inline void decode(SA::IDL::Reader& r, FireHunt& m) {
   m.actor = r.u32();
 }
 
+struct PetSwitch {
+  std::uint32_t actor;
+  std::uint32_t pet_slot;
+  bool call_out;
+};
+
+inline void encode(SA::IDL::Writer& w, const PetSwitch& m) {
+  w.u32(m.actor);
+  w.u32(m.pet_slot);
+  w.b(m.call_out);
+}
+
+inline void decode(SA::IDL::Reader& r, PetSwitch& m) {
+  m.actor = r.u32();
+  m.pet_slot = r.u32();
+  m.call_out = r.b();
+}
+
 struct BattleEvent {
   enum class BodyKind : std::uint16_t {
     NONE = 0,
@@ -638,6 +656,7 @@ struct BattleEvent {
     PET_BATTLE_MODEL = 22,
     FIRE_HUNT = 23,
     KNOCKBACK_STATE = 24,
+    PET_SWITCH = 25,
   };
   BodyKind body_kind;
   union BodyUnion {
@@ -665,6 +684,7 @@ struct BattleEvent {
     SA::Domain::PetBattleModel pet_battle_model;
     SA::Domain::FireHunt fire_hunt;
     SA::Domain::KnockbackState knockback_state;
+    SA::Domain::PetSwitch pet_switch;
   } body;
 };
 
@@ -742,6 +762,9 @@ inline void encode(SA::IDL::Writer& w, const BattleEvent& m) {
       break;
     case BattleEvent::BodyKind::KNOCKBACK_STATE:
       encode(w, m.body.knockback_state);
+      break;
+    case BattleEvent::BodyKind::PET_SWITCH:
+      encode(w, m.body.pet_switch);
       break;
     case BattleEvent::BodyKind::NONE:
     default:
@@ -850,6 +873,10 @@ inline void decode(SA::IDL::Reader& r, BattleEvent& m) {
         decode(r, m.body.knockback_state);
         m.body_kind = BattleEvent::BodyKind::KNOCKBACK_STATE;
         break;
+      case 25:
+        decode(r, m.body.pet_switch);
+        m.body_kind = BattleEvent::BodyKind::PET_SWITCH;
+        break;
       case 0:
         break;
       default:
@@ -926,26 +953,26 @@ inline void decode(SA::IDL::Reader& r, Capture& m) {
 }
 
 struct PetIn {
-  std::uint32_t pet_slot;
 };
 
 inline void encode(SA::IDL::Writer& w, const PetIn& m) {
-  w.u32(m.pet_slot);
-}
-
-inline void decode(SA::IDL::Reader& r, PetIn& m) {
-  m.pet_slot = r.u32();
-}
-
-struct PetOut {
-};
-
-inline void encode(SA::IDL::Writer& w, const PetOut& m) {
   (void)w; (void)m;
 }
 
-inline void decode(SA::IDL::Reader& r, PetOut& m) {
+inline void decode(SA::IDL::Reader& r, PetIn& m) {
   (void)r; (void)m;
+}
+
+struct PetOut {
+  std::uint32_t pet_slot;
+};
+
+inline void encode(SA::IDL::Writer& w, const PetOut& m) {
+  w.u32(m.pet_slot);
+}
+
+inline void decode(SA::IDL::Reader& r, PetOut& m) {
+  m.pet_slot = r.u32();
 }
 
 struct UseItem {
