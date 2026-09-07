@@ -575,7 +575,7 @@ damage ≥ maxhp·1.2 + 20                   → 一击打飞(IsUltimate=2)
 > - **打飞判定在死亡标记之前**:一击致死与打飞可同回合并存(原版据此把战果分流到
 >   `BATTLE_UltimateExtra`)。
 >
-> ⚠️ **打飞的下游后果有意不在 A.4 落地**(均非遗漏,见 `combatant.h` 的
+> ⚠️ **打飞的下游后果有意不在 A.4 落地**(均非遗漏,见 `Combatant.h` 的
 > `ultimate_accumulator` 注记):① `BENT_FLG_ULTIMATE` 令 `BATTLE_Index2No` 返回 −1
 > ⇒ 被打飞者**在本回合剩余派发**中从目标/连击掉出(★ 该 flg 下一回合开头即清除,
 > **不是跨回合行动剥夺**),依赖未移植的多目标/连击派发;② 阵亡时的额外战果属阶段 2。

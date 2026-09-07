@@ -70,6 +70,22 @@ static_assert(sizeof(Domain::BattleEvents) <= 8 * 1024,
 static_assert(sizeof(Domain::CombatantState) <= 512);
 static_assert(sizeof(Domain::BattleCommand) <= 32);
 
+// ★★ 上界断言挡不住的那一面(2026-09-07 补,`02` §10.1 复核):上面四条都是 `<=`,
+//    它们挡「字段被 oneof 撑爆」这类**变大**的回归 —— 而 DR-TS5 把名字上限 127→31
+//    使 BattleSnapshot 从 8,576 B 降到 2,816 B(**变小**),一条断言都没红,
+//    于是 `02` §10.1 那张体积表整天与代码不符,而它是排期与容量的参考。
+// ⇒ 凡 `02` §10.1 列出具体数字的类型,这里给一条**等值**断言:
+//    改数字与改断言是同一次动作,漏一边即编译失败。
+// ⚠️ 等值不是"越严越好"的洁癖:它钉的是**文档承诺的那个数**,
+//    而上面的 `<=` 钉的是**红线**。两者理由不同,都要留。
+static_assert(sizeof(Domain::BattleEvent) == 28, "`02` §10.1 的 BattleEvent 体积变了 —— 同步改表");
+static_assert(sizeof(Domain::BattleEvents) == 7184, "`02` §10.1 的 BattleEvents 体积变了 —— 同步改表");
+static_assert(sizeof(Domain::BattleSnapshot) == 2816,
+              "`02` §10.1 的 BattleSnapshot 体积变了 —— 同步改表。"
+              "若因名字上限调整而变,连带复核 DR-TS5(`11` §1.2)。");
+static_assert(sizeof(Domain::WindowOpen) == 12608, "`02` §10.1 的 WindowOpen 体积变了 —— 同步改表");
+static_assert(sizeof(Domain::BattleCommand) == 24, "`02` §10.1 的 BattleCommand 体积变了 —— 同步改表");
+
 int main()
 {
 	std::uint8_t buf[64 * 1024];
