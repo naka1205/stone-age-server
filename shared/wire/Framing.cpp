@@ -14,106 +14,125 @@
 
 #include <cstring>
 
-namespace SA::Wire {
-namespace {
+namespace SA::Wire
+{
+namespace
+{
 
 // 信封头的线上长度:u32 + u64。
 constexpr std::uint32_t kEnvelopeHeaderBytes = 12;
 
-std::uint32_t readU32Le(const std::uint8_t* p) noexcept {
-  return static_cast<std::uint32_t>(p[0]) |
-         (static_cast<std::uint32_t>(p[1]) << 8) |
-         (static_cast<std::uint32_t>(p[2]) << 16) |
-         (static_cast<std::uint32_t>(p[3]) << 24);
+std::uint32_t readU32Le(const std::uint8_t *p) noexcept
+{
+	return static_cast<std::uint32_t>(p[0]) |
+	       (static_cast<std::uint32_t>(p[1]) << 8) |
+	       (static_cast<std::uint32_t>(p[2]) << 16) |
+	       (static_cast<std::uint32_t>(p[3]) << 24);
 }
 
-}  // namespace
+} // namespace
 
-bool FrameReader::push(const std::uint8_t* data, std::size_t n) {
-  if (_failed) return false;
+bool FrameReader::push(const std::uint8_t *data, std::size_t n)
+{
+	if (_failed)
+		return false;
 
-  // 已消费的前缀攒够一半就回收,避免缓冲无限前移。
-  // ⚠️ 不是每次都 erase:那会把成帧变成 O(n²)。
-  if (_read > 0 && _read * 2 >= _buf.size()) {
-    _buf.erase(_buf.begin(), _buf.begin() + static_cast<std::ptrdiff_t>(_read));
-    _read = 0;
-  }
+	// 已消费的前缀攒够一半就回收,避免缓冲无限前移。
+	// ⚠️ 不是每次都 erase:那会把成帧变成 O(n²)。
+	if (_read > 0 && _read * 2 >= _buf.size())
+	{
+		_buf.erase(_buf.begin(), _buf.begin() + static_cast<std::ptrdiff_t>(_read));
+		_read = 0;
+	}
 
-  // ★ 累积上限 = 单帧上限 + 头 + 一帧余量。超过说明对端在灌垃圾
-  //   (或者我们把长度读错了)⇒ 关闭连接,不要继续吃内存。
-  //   15 §4.3:每连接缓冲是原版的成本主项,新实现「按需增长 + 上限熔断」。
-  const std::size_t limit =
-      static_cast<std::size_t>(kMaxFrameBytes) * 2 + kFrameHeaderBytes;
-  if (buffered() + n > limit) {
-    _failed = true;
-    return false;
-  }
+	// ★ 累积上限 = 单帧上限 + 头 + 一帧余量。超过说明对端在灌垃圾
+	//   (或者我们把长度读错了)⇒ 关闭连接,不要继续吃内存。
+	//   15 §4.3:每连接缓冲是原版的成本主项,新实现「按需增长 + 上限熔断」。
+	const std::size_t limit =
+	    static_cast<std::size_t>(kMaxFrameBytes) * 2 + kFrameHeaderBytes;
+	if (buffered() + n > limit)
+	{
+		_failed = true;
+		return false;
+	}
 
-  _buf.insert(_buf.end(), data, data + n);
-  return true;
+	_buf.insert(_buf.end(), data, data + n);
+	return true;
 }
 
-FrameStatus FrameReader::next(const std::uint8_t** payload,
-                              std::uint32_t* len) {
-  if (_failed) return FrameStatus::kTooLarge;
+FrameStatus FrameReader::next(const std::uint8_t **payload,
+                              std::uint32_t *len)
+{
+	if (_failed)
+		return FrameStatus::kTooLarge;
 
-  const std::size_t avail = buffered();
-  if (avail < kFrameHeaderBytes) return FrameStatus::kNeedMore;
+	const std::size_t avail = buffered();
+	if (avail < kFrameHeaderBytes)
+		return FrameStatus::kNeedMore;
 
-  const std::uint32_t declared = readU32Le(_buf.data() + _read);
+	const std::uint32_t declared = readU32Le(_buf.data() + _read);
 
-  // ⚠️★ 这两种失败是**粘性**的:长度字段一旦不可信,字节流就再也无法对齐,
-  //    "跳过这一帧"是没有意义的 —— 我们并不知道这一帧到哪结束。
-  if (declared == 0) {
-    _failed = true;
-    return FrameStatus::kEmpty;
-  }
-  if (declared > kMaxFrameBytes) {
-    _failed = true;
-    return FrameStatus::kTooLarge;
-  }
+	// ⚠️★ 这两种失败是**粘性**的:长度字段一旦不可信,字节流就再也无法对齐,
+	//    "跳过这一帧"是没有意义的 —— 我们并不知道这一帧到哪结束。
+	if (declared == 0)
+	{
+		_failed = true;
+		return FrameStatus::kEmpty;
+	}
+	if (declared > kMaxFrameBytes)
+	{
+		_failed = true;
+		return FrameStatus::kTooLarge;
+	}
 
-  if (avail < kFrameHeaderBytes + declared) return FrameStatus::kNeedMore;
+	if (avail < kFrameHeaderBytes + declared)
+		return FrameStatus::kNeedMore;
 
-  *payload = _buf.data() + _read + kFrameHeaderBytes;
-  *len = declared;
-  _pending = declared + static_cast<std::uint32_t>(kFrameHeaderBytes);
-  return FrameStatus::kOk;
+	*payload = _buf.data() + _read + kFrameHeaderBytes;
+	*len = declared;
+	_pending = declared + static_cast<std::uint32_t>(kFrameHeaderBytes);
+	return FrameStatus::kOk;
 }
 
-void FrameReader::pop() {
-  _read += _pending;
-  _pending = 0;
+void FrameReader::pop()
+{
+	_read += _pending;
+	_pending = 0;
 }
 
-bool writeFrame(const std::uint8_t* payload, std::uint32_t len,
-                std::vector<std::uint8_t>& out) {
-  // ★ 不截断。05 §10.4 记着原版 szAllBattleString 用 strncat 第三参写错、
-  //   等价无上界 strcat 的教训 —— 新实现宁可失败,不可写出半条。
-  if (len == 0 || len > kMaxFrameBytes) return false;
+bool writeFrame(const std::uint8_t *payload, std::uint32_t len,
+                std::vector<std::uint8_t> &out)
+{
+	// ★ 不截断。05 §10.4 记着原版 szAllBattleString 用 strncat 第三参写错、
+	//   等价无上界 strcat 的教训 —— 新实现宁可失败,不可写出半条。
+	if (len == 0 || len > kMaxFrameBytes)
+		return false;
 
-  out.push_back(static_cast<std::uint8_t>(len & 0xFFu));
-  out.push_back(static_cast<std::uint8_t>((len >> 8) & 0xFFu));
-  out.push_back(static_cast<std::uint8_t>((len >> 16) & 0xFFu));
-  out.push_back(static_cast<std::uint8_t>((len >> 24) & 0xFFu));
-  out.insert(out.end(), payload, payload + len);
-  return true;
+	out.push_back(static_cast<std::uint8_t>(len & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((len >> 8) & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((len >> 16) & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((len >> 24) & 0xFFu));
+	out.insert(out.end(), payload, payload + len);
+	return true;
 }
 
-bool decodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
-                    EnvelopeView& out) {
-  if (frame == nullptr || len < kEnvelopeHeaderBytes) return false;
+bool decodeEnvelope(const std::uint8_t *frame, std::uint32_t len,
+                    EnvelopeView &out)
+{
+	if (frame == nullptr || len < kEnvelopeHeaderBytes)
+		return false;
 
-  SA::IDL::Reader r(frame, len);
-  SA::Transport::EnvelopeHeader head;
-  decode(r, head);
-  if (!r.ok()) return false;
+	SA::IDL::Reader r(frame, len);
+	SA::Transport::EnvelopeHeader head;
+	decode(r, head);
+	if (!r.ok())
+		return false;
 
-  out.msg_id = head.msg_id;
-  out.corr_id = head.corr_id;
-  out.body = frame + kEnvelopeHeaderBytes;
-  out.body_len = len - kEnvelopeHeaderBytes;
-  return true;
+	out.msg_id = head.msg_id;
+	out.corr_id = head.corr_id;
+	out.body = frame + kEnvelopeHeaderBytes;
+	out.body_len = len - kEnvelopeHeaderBytes;
+	return true;
 }
 
-}  // namespace SA::Wire
+} // namespace SA::Wire

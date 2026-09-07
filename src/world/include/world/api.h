@@ -27,83 +27,87 @@
 #include "rules/Config.h"
 #include "rules/RandomSource.h"
 
-namespace SA::World {
+namespace SA::World
+{
 
 using BattleId = std::uint64_t;
 
 // tick 的阶段。★ 顺序**照抄** 01 §3.1,连未实现的四步也占位 ——
 //   原版 mainloop() 的顺序是"整个服务端行为的骨架"(01 §2),
 //   骨架的形状现在就要对,否则将来补 NPC 生成时会补在错的位置上。
-enum class TickPhase : std::uint8_t {
-  kClock = 1,         // ✅ 时钟推进
-  kNetInbound = 2,    // ✅ 网络入站
-  kNpcSpawn = 3,      // ⬜ 阶段 2
-  kBattle = 4,        // ✅ 战斗推进(★ 受节拍层控制,不等于 tick 频率)
-  kCharLoop = 5,      // ⬜ 阶段 2
-  kTimedJobs = 6,     // ⬜ 阶段 2
-  kOutboundFlush = 7, // ⬜ 阶段 2(CA/CD 视野聚合;1.5 无视野)
-  kShutdown = 8,      // ✅ 关闭检查
+enum class TickPhase : std::uint8_t
+{
+	kClock = 1,         // ✅ 时钟推进
+	kNetInbound = 2,    // ✅ 网络入站
+	kNpcSpawn = 3,      // ⬜ 阶段 2
+	kBattle = 4,        // ✅ 战斗推进(★ 受节拍层控制,不等于 tick 频率)
+	kCharLoop = 5,      // ⬜ 阶段 2
+	kTimedJobs = 6,     // ⬜ 阶段 2
+	kOutboundFlush = 7, // ⬜ 阶段 2(CA/CD 视野聚合;1.5 无视野)
+	kShutdown = 8,      // ✅ 关闭检查
 };
 
 // 一场战斗。★ 生命周期在 world,规则在 L3 —— 两者不混。
-struct BattleStats {
-  std::uint32_t turns_resolved = 0;
-  std::uint32_t events_emitted = 0;
-  bool truncated_once = false;   // ResolveTurn 曾返回 false(见 battle.h)
-  bool finished = false;
+struct BattleStats
+{
+	std::uint32_t turns_resolved = 0;
+	std::uint32_t events_emitted = 0;
+	bool truncated_once = false; // ResolveTurn 曾返回 false(见 battle.h)
+	bool finished = false;
 };
 
 class World final : public SA::Net::TransportEvents,
-                    public SA::Net::SessionHost {
- public:
-  World(const SA::Platform::ServerConfig& config,
-        SA::Platform::Clock& clock,
-        SA::Platform::Logger& logger,
-        SA::Platform::RandomSource& random,
-        SA::Net::Transport& transport);
-  ~World() override;
+                    public SA::Net::SessionHost
+{
+  public:
+	World(const SA::Platform::ServerConfig &config,
+	      SA::Platform::Clock &clock,
+	      SA::Platform::Logger &logger,
+	      SA::Platform::RandomSource &random,
+	      SA::Net::Transport &transport);
+	~World() override;
 
-  World(const World&) = delete;
-  World& operator=(const World&) = delete;
+	World(const World &) = delete;
+	World &operator=(const World &) = delete;
 
-  // 推进一个 tick。⚠️ 01 §2:主线程绝不允许阻塞 ⇒ 本函数不等待任何 I/O。
-  void tick();
+	// 推进一个 tick。⚠️ 01 §2:主线程绝不允许阻塞 ⇒ 本函数不等待任何 I/O。
+	void tick();
 
-  // 开一场战斗。★ 种子由 Platform::RandomSource 派发**并落日志** ——
-  //   01 §10「战斗事件流 + 注入式随机源 = 可回放」,而可回放的前提是种子留得下来。
-  BattleId startBattle(const SA::Rules::BattleField& field);
+	// 开一场战斗。★ 种子由 Platform::RandomSource 派发**并落日志** ——
+	//   01 §10「战斗事件流 + 注入式随机源 = 可回放」,而可回放的前提是种子留得下来。
+	BattleId startBattle(const SA::Rules::BattleField &field);
 
-  // 把一条会话接进某场战斗的某个槽。1.5 没有选角,槽位由调用方指定。
-  bool joinBattle(BattleId battle, SA::Net::SessionId session,
-                  std::uint8_t slot);
+	// 把一条会话接进某场战斗的某个槽。1.5 没有选角,槽位由调用方指定。
+	bool joinBattle(BattleId battle, SA::Net::SessionId session,
+	                std::uint8_t slot);
 
-  // ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
-  void requestShutdown() noexcept;
-  bool stopped() const noexcept;
+	// ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
+	void requestShutdown() noexcept;
+	bool stopped() const noexcept;
 
-  // ── TransportEvents ──
-  void onConnected(SA::Net::ConnectionId id) override;
-  void onBytes(SA::Net::ConnectionId id, const std::uint8_t* data,
-               std::size_t n) override;
-  void onDisconnected(SA::Net::ConnectionId id) override;
+	// ── TransportEvents ──
+	void onConnected(SA::Net::ConnectionId id) override;
+	void onBytes(SA::Net::ConnectionId id, const std::uint8_t *data,
+	             std::size_t n) override;
+	void onDisconnected(SA::Net::ConnectionId id) override;
 
-  // ── SessionHost ──
-  void onSessionReady(SA::Net::SessionId id) override;
-  void onBattleCommand(SA::Net::SessionId id,
-                       const SA::Domain::BattleCommand& cmd) override;
-  void onSessionClosed(SA::Net::SessionId id) override;
+	// ── SessionHost ──
+	void onSessionReady(SA::Net::SessionId id) override;
+	void onBattleCommand(SA::Net::SessionId id,
+	                     const SA::Domain::BattleCommand &cmd) override;
+	void onSessionClosed(SA::Net::SessionId id) override;
 
-  // ── 观察面(测试与运维)──
-  std::uint64_t ticks() const noexcept;
-  std::size_t sessionCount() const noexcept;
-  const BattleStats* stats(BattleId id) const;
-  SA::Net::SessionState sessionState(SA::Net::SessionId id) const;
+	// ── 观察面(测试与运维)──
+	std::uint64_t ticks() const noexcept;
+	std::size_t sessionCount() const noexcept;
+	const BattleStats *stats(BattleId id) const;
+	SA::Net::SessionState sessionState(SA::Net::SessionId id) const;
 
- private:
-  struct Impl;
-  std::unique_ptr<Impl> _impl;
+  private:
+	struct Impl;
+	std::unique_ptr<Impl> _impl;
 };
 
-}  // namespace SA::World
+} // namespace SA::World
 
-#endif  // SA_WORLD_API_H
+#endif // SA_WORLD_API_H

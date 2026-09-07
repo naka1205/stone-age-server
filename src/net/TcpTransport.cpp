@@ -36,29 +36,31 @@
 // ⚠️ WIN32_LEAN_AND_MEAN 要在 winsock2.h 之前;winsock2.h 要在 windows.h 之前
 //    (否则 windows.h 会先拉进 winsock.h v1,与 v2 冲突)。这个顺序是有讲究的,
 //    别按字母序"整理"它。
-#  ifndef WIN32_LEAN_AND_MEAN
-#    define WIN32_LEAN_AND_MEAN
-#  endif
-#  ifndef NOMINMAX
-#    define NOMINMAX
-#  endif
-#  include <winsock2.h>
-#  include <ws2tcpip.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #else
-#  include <arpa/inet.h>
-#  include <errno.h>
-#  include <fcntl.h>
-#  include <netinet/in.h>
-#  include <netinet/tcp.h>
-#  include <poll.h>
-#  include <signal.h>
-#  include <sys/socket.h>
-#  include <sys/types.h>
-#  include <unistd.h>
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
-namespace SA::Net {
-namespace {
+namespace SA::Net
+{
+namespace
+{
 
 // ── 平台差异 1/4:句柄类型与无效值 ────────────────────────────────
 #if defined(_WIN32)
@@ -72,41 +74,46 @@ using PollFd = struct pollfd;
 #endif
 
 // ── 平台差异 2/4:关闭 / 非阻塞 / "现在写不了" ────────────────────
-void closeSocket(SocketHandle s) noexcept {
+void closeSocket(SocketHandle s) noexcept
+{
 #if defined(_WIN32)
-  ::closesocket(s);
+	::closesocket(s);
 #else
-  ::close(s);
+	::close(s);
 #endif
 }
 
-bool setNonBlocking(SocketHandle s) noexcept {
+bool setNonBlocking(SocketHandle s) noexcept
+{
 #if defined(_WIN32)
-  u_long mode = 1;
-  return ::ioctlsocket(s, static_cast<long>(FIONBIO), &mode) == 0;
+	u_long mode = 1;
+	return ::ioctlsocket(s, static_cast<long>(FIONBIO), &mode) == 0;
 #else
-  const int flags = ::fcntl(s, F_GETFL, 0);
-  if (flags < 0) return false;
-  return ::fcntl(s, F_SETFL, flags | O_NONBLOCK) == 0;
+	const int flags = ::fcntl(s, F_GETFL, 0);
+	if (flags < 0)
+		return false;
+	return ::fcntl(s, F_SETFL, flags | O_NONBLOCK) == 0;
 #endif
 }
 
 // ★ 「这次不行,下次再来」与「真的坏了」必须分开 —— 把前者当错误处理,
 //   表现是**高负载下随机断连**,而低负载永远复现不出来。
-bool wouldBlock() noexcept {
+bool wouldBlock() noexcept
+{
 #if defined(_WIN32)
-  const int e = ::WSAGetLastError();
-  return e == WSAEWOULDBLOCK || e == WSAEINPROGRESS;
+	const int e = ::WSAGetLastError();
+	return e == WSAEWOULDBLOCK || e == WSAEINPROGRESS;
 #else
-  return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
+	return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
 #endif
 }
 
-int pollSockets(PollFd* fds, std::size_t n) noexcept {
+int pollSockets(PollFd *fds, std::size_t n) noexcept
+{
 #if defined(_WIN32)
-  return ::WSAPoll(fds, static_cast<ULONG>(n), 0);
+	return ::WSAPoll(fds, static_cast<ULONG>(n), 0);
 #else
-  return ::poll(fds, static_cast<nfds_t>(n), 0);
+	return ::poll(fds, static_cast<nfds_t>(n), 0);
 #endif
 }
 
@@ -115,420 +122,514 @@ int pollSockets(PollFd* fds, std::size_t n) noexcept {
 // ⚠️ 用**引用计数**而不是「进程里初始化一次就不管了」:测试会构造多个
 //    TcpTransport 并逐个析构,而 WSACleanup 是按 WSAStartup 次数配对的。
 //    POSIX 侧这个类整个是空壳,不留 #ifdef 在调用点。
-class SocketLibrary {
- public:
-  static bool acquire() noexcept {
+class SocketLibrary
+{
+  public:
+	static bool acquire() noexcept
+	{
 #if defined(_WIN32)
-    WSADATA data;
-    return ::WSAStartup(MAKEWORD(2, 2), &data) == 0;
+		WSADATA data;
+		return ::WSAStartup(MAKEWORD(2, 2), &data) == 0;
 #else
-    // ★ SIGPIPE:对端已关闭时 send() 默认会**杀掉进程**。macOS 有
-    //   SO_NOSIGPIPE、Linux 有 MSG_NOSIGNAL,但两者都要在每个调用点记得写
-    //   ⇒ 直接忽略信号,一次解决。⚠️ 这是进程级副作用,写在这里而不是
-    //     藏在 send 附近,是为了让它可被看见。
-    ::signal(SIGPIPE, SIG_IGN);
-    return true;
+		// ★ SIGPIPE:对端已关闭时 send() 默认会**杀掉进程**。macOS 有
+		//   SO_NOSIGPIPE、Linux 有 MSG_NOSIGNAL,但两者都要在每个调用点记得写
+		//   ⇒ 直接忽略信号,一次解决。⚠️ 这是进程级副作用,写在这里而不是
+		//     藏在 send 附近,是为了让它可被看见。
+		::signal(SIGPIPE, SIG_IGN);
+		return true;
 #endif
-  }
-  static void release() noexcept {
+	}
+	static void release() noexcept
+	{
 #if defined(_WIN32)
-    ::WSACleanup();
+		::WSACleanup();
 #endif
-  }
+	}
 };
 
-}  // namespace
+} // namespace
 
-struct TcpTransport::Impl {
-  struct Conn {
-    ConnectionId id = 0;
-    SocketHandle fd = kInvalidSocket;
-    std::vector<std::uint8_t> outbound;  // 尚未写出去的尾巴(见卷首 ①)
-    std::size_t out_sent = 0;            // outbound 里已写出的前缀长度
-    bool want_close = false;             // 已请求关闭,等出站排空
-    bool dead = false;                   // 本轮末尾清理
-  };
+struct TcpTransport::Impl
+{
+	struct Conn
+	{
+		ConnectionId id = 0;
+		SocketHandle fd = kInvalidSocket;
+		std::vector<std::uint8_t> outbound; // 尚未写出去的尾巴(见卷首 ①)
+		std::size_t out_sent = 0;           // outbound 里已写出的前缀长度
+		bool want_close = false;            // 已请求关闭,等出站排空
+		bool dead = false;                  // 本轮末尾清理
+	};
 
-  TransportEvents* events = nullptr;
-  SocketHandle listener = kInvalidSocket;
-  std::uint16_t port = 0;
-  std::string error;
-  bool lib_ready = false;
+	TransportEvents *events = nullptr;
+	SocketHandle listener = kInvalidSocket;
+	std::uint16_t port = 0;
+	std::string error;
+	bool lib_ready = false;
 
-  // ★ deque 而不是 vector:回调里宿主可能 Send/Close,进而增删连接。
-  //   deque 的**引用在两端插入时保持有效**,而 vector 会整体搬家 ——
-  //   那是一条典型的"回调里对象被移动"的悬垂路径(卷首 ③)。
-  std::deque<Conn> conns;
-  ConnectionId next_id = 1;
-  std::vector<PollFd> pollfds;
-  std::vector<ConnectionId> poll_ids;
+	// ★ deque 而不是 vector:回调里宿主可能 Send/Close,进而增删连接。
+	//   deque 的**引用在两端插入时保持有效**,而 vector 会整体搬家 ——
+	//   那是一条典型的"回调里对象被移动"的悬垂路径(卷首 ③)。
+	std::deque<Conn> conns;
+	ConnectionId next_id = 1;
+	std::vector<PollFd> pollfds;
+	std::vector<ConnectionId> poll_ids;
 
-  Conn* get(ConnectionId id) noexcept {
-    for (Conn& c : conns) {
-      if (c.id == id && !c.dead) return &c;
-    }
-    return nullptr;
-  }
-  const Conn* get(ConnectionId id) const noexcept {
-    for (const Conn& c : conns) {
-      if (c.id == id && !c.dead) return &c;
-    }
-    return nullptr;
-  }
+	Conn *get(ConnectionId id) noexcept
+	{
+		for (Conn &c : conns)
+		{
+			if (c.id == id && !c.dead)
+				return &c;
+		}
+		return nullptr;
+	}
+	const Conn *get(ConnectionId id) const noexcept
+	{
+		for (const Conn &c : conns)
+		{
+			if (c.id == id && !c.dead)
+				return &c;
+		}
+		return nullptr;
+	}
 
-  void fail(const char* what) {
-    error = what;
+	void fail(const char *what)
+	{
+		error = what;
 #if defined(_WIN32)
-    error += " (WSA error ";
-    error += std::to_string(::WSAGetLastError());
-    error += ")";
+		error += " (WSA error ";
+		error += std::to_string(::WSAGetLastError());
+		error += ")";
 #else
-    error += " (errno ";
-    error += std::to_string(errno);
-    error += ": ";
-    error += std::strerror(errno);
-    error += ")";
+		error += " (errno ";
+		error += std::to_string(errno);
+		error += ": ";
+		error += std::strerror(errno);
+		error += ")";
 #endif
-  }
+	}
 
-  // 尽力把 c 的出站队列写出去。返回 false 表示连接坏了。
-  bool flushOutbound(Conn& c) {
-    while (c.out_sent < c.outbound.size()) {
-      const char* p = reinterpret_cast<const char*>(c.outbound.data()) +
-                      c.out_sent;
-      const std::size_t remain = c.outbound.size() - c.out_sent;
+	// 尽力把 c 的出站队列写出去。返回 false 表示连接坏了。
+	bool flushOutbound(Conn &c)
+	{
+		while (c.out_sent < c.outbound.size())
+		{
+			const char *p = reinterpret_cast<const char *>(c.outbound.data()) +
+			                c.out_sent;
+			const std::size_t remain = c.outbound.size() - c.out_sent;
 #if defined(_WIN32)
-      const int n = ::send(c.fd, p, static_cast<int>(remain), 0);
+			const int n = ::send(c.fd, p, static_cast<int>(remain), 0);
 #else
-      const ssize_t n = ::send(c.fd, p, remain, 0);
+			const ssize_t n = ::send(c.fd, p, remain, 0);
 #endif
-      if (n > 0) {
-        c.out_sent += static_cast<std::size_t>(n);
-        continue;
-      }
-      // ★ n == 0 也走这里:对 send() 而言那同样是"没写进去",
-      //   继续循环会空转 ⇒ 当作 would-block 退出,下一轮 POLLOUT 再来。
-      if (n < 0 && !wouldBlock()) return false;
-      break;
-    }
-    if (c.out_sent == c.outbound.size()) {
-      c.outbound.clear();
-      c.out_sent = 0;
-    } else if (c.out_sent > 64 * 1024) {
-      // ★ 队列前缀已写出很多时才搬家 —— 每次写一点就 erase 是 O(n²)。
-      c.outbound.erase(c.outbound.begin(),
-                       c.outbound.begin() +
-                           static_cast<std::ptrdiff_t>(c.out_sent));
-      c.out_sent = 0;
-    }
-    return true;
-  }
+			if (n > 0)
+			{
+				c.out_sent += static_cast<std::size_t>(n);
+				continue;
+			}
+			// ★ n == 0 也走这里:对 send() 而言那同样是"没写进去",
+			//   继续循环会空转 ⇒ 当作 would-block 退出,下一轮 POLLOUT 再来。
+			if (n < 0 && !wouldBlock())
+				return false;
+			break;
+		}
+		if (c.out_sent == c.outbound.size())
+		{
+			c.outbound.clear();
+			c.out_sent = 0;
+		}
+		else if (c.out_sent > 64 * 1024)
+		{
+			// ★ 队列前缀已写出很多时才搬家 —— 每次写一点就 erase 是 O(n²)。
+			c.outbound.erase(c.outbound.begin(),
+			                 c.outbound.begin() +
+			                     static_cast<std::ptrdiff_t>(c.out_sent));
+			c.out_sent = 0;
+		}
+		return true;
+	}
 
-  void kill(Conn& c) {
-    if (c.dead) return;
-    c.dead = true;
-    if (c.fd != kInvalidSocket) {
-      closeSocket(c.fd);
-      c.fd = kInvalidSocket;
-    }
-  }
+	void kill(Conn &c)
+	{
+		if (c.dead)
+			return;
+		c.dead = true;
+		if (c.fd != kInvalidSocket)
+		{
+			closeSocket(c.fd);
+			c.fd = kInvalidSocket;
+		}
+	}
 };
 
 TcpTransport::TcpTransport() : _impl(new Impl) {}
 
-TcpTransport::~TcpTransport() {
-  // ⚠️ 析构里**不回调** OnDisconnected:宿主可能已经先于传输层销毁,
-  //    那正是"析构顺序依赖"这类错的温床。要通知就显式调 Stop()。
-  for (Impl::Conn& c : _impl->conns) {
-    if (c.fd != kInvalidSocket) closeSocket(c.fd);
-  }
-  if (_impl->listener != kInvalidSocket) closeSocket(_impl->listener);
-  if (_impl->lib_ready) SocketLibrary::release();
+TcpTransport::~TcpTransport()
+{
+	// ⚠️ 析构里**不回调** OnDisconnected:宿主可能已经先于传输层销毁,
+	//    那正是"析构顺序依赖"这类错的温床。要通知就显式调 Stop()。
+	for (Impl::Conn &c : _impl->conns)
+	{
+		if (c.fd != kInvalidSocket)
+			closeSocket(c.fd);
+	}
+	if (_impl->listener != kInvalidSocket)
+		closeSocket(_impl->listener);
+	if (_impl->lib_ready)
+		SocketLibrary::release();
 }
 
-bool TcpTransport::listen(const char* bind_addr, std::uint16_t port) {
-  Impl& d = *_impl;
-  if (d.listener != kInvalidSocket) {
-    d.error = "已经在监听了 —— 重复 Listen 是调用方的逻辑错,不是可恢复状态";
-    return false;
-  }
-  if (!d.lib_ready) {
-    if (!SocketLibrary::acquire()) {
-      d.fail("socket 库初始化失败");
-      return false;
-    }
-    d.lib_ready = true;
-  }
+bool TcpTransport::listen(const char *bind_addr, std::uint16_t port)
+{
+	Impl &d = *_impl;
+	if (d.listener != kInvalidSocket)
+	{
+		d.error = "已经在监听了 —— 重复 Listen 是调用方的逻辑错,不是可恢复状态";
+		return false;
+	}
+	if (!d.lib_ready)
+	{
+		if (!SocketLibrary::acquire())
+		{
+			d.fail("socket 库初始化失败");
+			return false;
+		}
+		d.lib_ready = true;
+	}
 
-  const SocketHandle fd = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (fd == kInvalidSocket) {
-    d.fail("socket() 失败");
-    return false;
-  }
+	const SocketHandle fd = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (fd == kInvalidSocket)
+	{
+		d.fail("socket() 失败");
+		return false;
+	}
 
-  // ── 平台差异 4/4:SO_REUSEADDR 在两边含义不同 ──────────────────
-  //
-  // ⚠️★ POSIX:允许绑一个处于 TIME_WAIT 的端口 —— 重启服务必需。
-  //    Windows:SO_REUSEADDR 允许**两个进程同时绑同一端口**,后者静默劫持
-  //    前者的流量(这是 winsock 的历史设计)。⇒ **Windows 侧不设它**。
-  //    这不是"两边写法不同",是**同名选项语义不同**,照抄会开出一个后门。
+	// ── 平台差异 4/4:SO_REUSEADDR 在两边含义不同 ──────────────────
+	//
+	// ⚠️★ POSIX:允许绑一个处于 TIME_WAIT 的端口 —— 重启服务必需。
+	//    Windows:SO_REUSEADDR 允许**两个进程同时绑同一端口**,后者静默劫持
+	//    前者的流量(这是 winsock 的历史设计)。⇒ **Windows 侧不设它**。
+	//    这不是"两边写法不同",是**同名选项语义不同**,照抄会开出一个后门。
 #if !defined(_WIN32)
-  const int on = 1;
-  ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
-               reinterpret_cast<const void*>(&on), sizeof(on));
+	const int on = 1;
+	::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
+	             reinterpret_cast<const void *>(&on), sizeof(on));
 #endif
 
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  // ⚠️★ htons / htonl / ntohs **不加 `::`**,而本文件其余系统调用都加了。
-  //    不是笔误:它们在 macOS(与多数 libc)上是**宏**,`::htons` 展开后是
-  //    `::__DARWIN_OSSwapInt16(...)` ⇒ 编译错。⇒ 一律非限定调用。
-  //    ★ 实测于本文件首次编译,记在这里免得有人"顺手统一风格"再踩一次。
-  addr.sin_port = htons(port);
-  if (bind_addr == nullptr || bind_addr[0] == '\0') {
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-  } else if (::inet_pton(AF_INET, bind_addr, &addr.sin_addr) != 1) {
-    d.error = "bind 地址不是合法的 IPv4 字面量:";
-    d.error += bind_addr;
-    closeSocket(fd);
-    return false;
-  }
+	sockaddr_in addr{};
+	addr.sin_family = AF_INET;
+	// ⚠️★ htons / htonl / ntohs **不加 `::`**,而本文件其余系统调用都加了。
+	//    不是笔误:它们在 macOS(与多数 libc)上是**宏**,`::htons` 展开后是
+	//    `::__DARWIN_OSSwapInt16(...)` ⇒ 编译错。⇒ 一律非限定调用。
+	//    ★ 实测于本文件首次编译,记在这里免得有人"顺手统一风格"再踩一次。
+	addr.sin_port = htons(port);
+	if (bind_addr == nullptr || bind_addr[0] == '\0')
+	{
+		addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	}
+	else if (::inet_pton(AF_INET, bind_addr, &addr.sin_addr) != 1)
+	{
+		d.error = "bind 地址不是合法的 IPv4 字面量:";
+		d.error += bind_addr;
+		closeSocket(fd);
+		return false;
+	}
 
-  if (::bind(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) {
-    d.fail("bind() 失败");
-    closeSocket(fd);
-    return false;
-  }
-  if (::listen(fd, 128) != 0) {
-    d.fail("listen() 失败");
-    closeSocket(fd);
-    return false;
-  }
-  if (!setNonBlocking(fd)) {
-    d.fail("监听 socket 设非阻塞失败");
-    closeSocket(fd);
-    return false;
-  }
+	if (::bind(fd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) != 0)
+	{
+		d.fail("bind() 失败");
+		closeSocket(fd);
+		return false;
+	}
+	if (::listen(fd, 128) != 0)
+	{
+		d.fail("listen() 失败");
+		closeSocket(fd);
+		return false;
+	}
+	if (!setNonBlocking(fd))
+	{
+		d.fail("监听 socket 设非阻塞失败");
+		closeSocket(fd);
+		return false;
+	}
 
-  // ★ 取回实际端口:port 传 0 时由系统分配,不回读就没人知道它是几。
-  sockaddr_in bound{};
+	// ★ 取回实际端口:port 传 0 时由系统分配,不回读就没人知道它是几。
+	sockaddr_in bound{};
 #if defined(_WIN32)
-  int len = static_cast<int>(sizeof(bound));
+	int len = static_cast<int>(sizeof(bound));
 #else
-  socklen_t len = sizeof(bound);
+	socklen_t len = sizeof(bound);
 #endif
-  if (::getsockname(fd, reinterpret_cast<sockaddr*>(&bound), &len) == 0) {
-    d.port = ntohs(bound.sin_port);
-  } else {
-    d.port = port;
-  }
+	if (::getsockname(fd, reinterpret_cast<sockaddr *>(&bound), &len) == 0)
+	{
+		d.port = ntohs(bound.sin_port);
+	}
+	else
+	{
+		d.port = port;
+	}
 
-  d.listener = fd;
-  d.error.clear();
-  return true;
+	d.listener = fd;
+	d.error.clear();
+	return true;
 }
 
-std::uint16_t TcpTransport::listenPort() const noexcept {
-  return _impl->port;
+std::uint16_t TcpTransport::listenPort() const noexcept
+{
+	return _impl->port;
 }
 
-const char* TcpTransport::lastError() const noexcept {
-  return _impl->error.c_str();
+const char *TcpTransport::lastError() const noexcept
+{
+	return _impl->error.c_str();
 }
 
-void TcpTransport::stop() {
-  Impl& d = *_impl;
-  if (d.listener != kInvalidSocket) {
-    closeSocket(d.listener);
-    d.listener = kInvalidSocket;
-    d.port = 0;
-  }
-  for (Impl::Conn& c : d.conns) {
-    if (c.dead) continue;
-    const ConnectionId id = c.id;
-    d.kill(c);
-    if (d.events != nullptr) d.events->onDisconnected(id);
-  }
-  d.conns.clear();
+void TcpTransport::stop()
+{
+	Impl &d = *_impl;
+	if (d.listener != kInvalidSocket)
+	{
+		closeSocket(d.listener);
+		d.listener = kInvalidSocket;
+		d.port = 0;
+	}
+	for (Impl::Conn &c : d.conns)
+	{
+		if (c.dead)
+			continue;
+		const ConnectionId id = c.id;
+		d.kill(c);
+		if (d.events != nullptr)
+			d.events->onDisconnected(id);
+	}
+	d.conns.clear();
 }
 
-void TcpTransport::setEvents(TransportEvents* events) {
-  _impl->events = events;
+void TcpTransport::setEvents(TransportEvents *events)
+{
+	_impl->events = events;
 }
 
-bool TcpTransport::send(ConnectionId id, const std::uint8_t* data,
-                        std::size_t n) {
-  Impl& d = *_impl;
-  Impl::Conn* c = d.get(id);
-  if (c == nullptr || c->want_close) return false;
+bool TcpTransport::send(ConnectionId id, const std::uint8_t *data,
+                        std::size_t n)
+{
+	Impl &d = *_impl;
+	Impl::Conn *c = d.get(id);
+	if (c == nullptr || c->want_close)
+		return false;
 
-  // ★ 熔断先判:队列已经超限说明对端不读,再排进去只是把内存耗尽推后一点。
-  if (c->outbound.size() - c->out_sent + n > kMaxOutboundBytes) {
-    d.error = "出站队列超过上限 —— 对端连上却不读,连接已断开";
-    c->want_close = true;
-    return false;
-  }
+	// ★ 熔断先判:队列已经超限说明对端不读,再排进去只是把内存耗尽推后一点。
+	if (c->outbound.size() - c->out_sent + n > kMaxOutboundBytes)
+	{
+		d.error = "出站队列超过上限 —— 对端连上却不读,连接已断开";
+		c->want_close = true;
+		return false;
+	}
 
-  c->outbound.insert(c->outbound.end(), data, data + n);
-  // ⚠️★ **不在这里直接 send()**,哪怕队列原本是空的。
-  //    理由是顺序:世界侧一个 tick 里可能对同一条连接 Push 多条消息,
-  //    立即写会让"先排队的后发"成为可能(前一条 would-block 排着队,
-  //    后一条却因为队列刚好排空而直接写出去)。
-  //    ⇒ 出站一律走 Poll() 的 POLLOUT 那条路径,**只有一个出口**。
-  return true;
+	c->outbound.insert(c->outbound.end(), data, data + n);
+	// ⚠️★ **不在这里直接 send()**,哪怕队列原本是空的。
+	//    理由是顺序:世界侧一个 tick 里可能对同一条连接 Push 多条消息,
+	//    立即写会让"先排队的后发"成为可能(前一条 would-block 排着队,
+	//    后一条却因为队列刚好排空而直接写出去)。
+	//    ⇒ 出站一律走 Poll() 的 POLLOUT 那条路径,**只有一个出口**。
+	return true;
 }
 
-void TcpTransport::close(ConnectionId id) {
-  Impl& d = *_impl;
-  Impl::Conn* c = d.get(id);
-  if (c == nullptr || c->want_close) return;
-  // ★ 优雅关闭:标记后先把出站排空,Poll() 再真正关掉并回调。
-  //   否则"发一条拒绝理由然后关连接"(02 §5.5 / session.cpp 的握手拒绝路径)
-  //   会把那条理由丢掉 —— 而客户端将看到一次无理由的断连。
-  c->want_close = true;
+void TcpTransport::close(ConnectionId id)
+{
+	Impl &d = *_impl;
+	Impl::Conn *c = d.get(id);
+	if (c == nullptr || c->want_close)
+		return;
+	// ★ 优雅关闭:标记后先把出站排空,Poll() 再真正关掉并回调。
+	//   否则"发一条拒绝理由然后关连接"(02 §5.5 / session.cpp 的握手拒绝路径)
+	//   会把那条理由丢掉 —— 而客户端将看到一次无理由的断连。
+	c->want_close = true;
 }
 
-void TcpTransport::poll() {
-  Impl& d = *_impl;
+void TcpTransport::poll()
+{
+	Impl &d = *_impl;
 
-  // ── 1. accept:一轮吃干净,不留到下一 tick ──────────────────────
-  if (d.listener != kInvalidSocket) {
-    for (;;) {
-      const SocketHandle fd = ::accept(d.listener, nullptr, nullptr);
-      if (fd == kInvalidSocket) break;  // would-block ⇒ 没有更多待接连接
-      if (!setNonBlocking(fd)) {
-        closeSocket(fd);
-        continue;
-      }
-      // ★ TCP_NODELAY:回合制的消息小而稀,Nagle 会把回执压在 40ms 上 ——
-      //   那是**协议层看不出来的延迟**,不是吞吐问题。
-      const int on = 1;
-      ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
-                   reinterpret_cast<const char*>(&on), sizeof(on));
+	// ── 1. accept:一轮吃干净,不留到下一 tick ──────────────────────
+	if (d.listener != kInvalidSocket)
+	{
+		for (;;)
+		{
+			const SocketHandle fd = ::accept(d.listener, nullptr, nullptr);
+			if (fd == kInvalidSocket)
+				break; // would-block ⇒ 没有更多待接连接
+			if (!setNonBlocking(fd))
+			{
+				closeSocket(fd);
+				continue;
+			}
+			// ★ TCP_NODELAY:回合制的消息小而稀,Nagle 会把回执压在 40ms 上 ——
+			//   那是**协议层看不出来的延迟**,不是吞吐问题。
+			const int on = 1;
+			::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
+			             reinterpret_cast<const char *>(&on), sizeof(on));
 
-      Impl::Conn c;
-      c.id = d.next_id++;
-      c.fd = fd;
-      d.conns.push_back(std::move(c));
-      if (d.events != nullptr) d.events->onConnected(d.conns.back().id);
-    }
-  }
+			Impl::Conn c;
+			c.id = d.next_id++;
+			c.fd = fd;
+			d.conns.push_back(std::move(c));
+			if (d.events != nullptr)
+				d.events->onConnected(d.conns.back().id);
+		}
+	}
 
-  // ── 2. poll:一次系统调用问全部连接 ────────────────────────────
-  //
-  // ⚠️ 每轮重建 pollfds 数组。它是 O(连接数) 的**内存写**,不是系统调用 ——
-  //    §5.1 批的原版是 O(连接数) 次 select **系统调用**,不是同一件事。
-  d.pollfds.clear();
-  d.poll_ids.clear();
-  for (Impl::Conn& c : d.conns) {
-    if (c.dead) continue;
-    PollFd p{};
-    p.fd = c.fd;
-    p.events = POLLIN;
-    if (c.out_sent < c.outbound.size()) p.events |= POLLOUT;
-    p.revents = 0;
-    d.pollfds.push_back(p);
-    d.poll_ids.push_back(c.id);
-  }
+	// ── 2. poll:一次系统调用问全部连接 ────────────────────────────
+	//
+	// ⚠️ 每轮重建 pollfds 数组。它是 O(连接数) 的**内存写**,不是系统调用 ——
+	//    §5.1 批的原版是 O(连接数) 次 select **系统调用**,不是同一件事。
+	d.pollfds.clear();
+	d.poll_ids.clear();
+	for (Impl::Conn &c : d.conns)
+	{
+		if (c.dead)
+			continue;
+		PollFd p{};
+		p.fd = c.fd;
+		p.events = POLLIN;
+		if (c.out_sent < c.outbound.size())
+			p.events |= POLLOUT;
+		p.revents = 0;
+		d.pollfds.push_back(p);
+		d.poll_ids.push_back(c.id);
+	}
 
-  if (!d.pollfds.empty()) {
-    const int ready = pollSockets(d.pollfds.data(), d.pollfds.size());
-    if (ready > 0) {
-      // ⚠️ 先写后读。理由:读回调里宿主会 Push 新的出站数据,若顺序反过来,
-      //    那批数据要等下一 tick 才可能被 poll 看到 —— 每次往返白等一个 tick。
-      //    ★ 这不影响正确性,影响的是 1.4 demo 里"一回合几个 tick"这种可观测量。
-      for (std::size_t i = 0; i < d.pollfds.size(); ++i) {
-        if ((d.pollfds[i].revents & POLLOUT) == 0) continue;
-        Impl::Conn* c = d.get(d.poll_ids[i]);
-        if (c == nullptr) continue;
-        if (!d.flushOutbound(*c)) c->want_close = true;
-      }
+	if (!d.pollfds.empty())
+	{
+		const int ready = pollSockets(d.pollfds.data(), d.pollfds.size());
+		if (ready > 0)
+		{
+			// ⚠️ 先写后读。理由:读回调里宿主会 Push 新的出站数据,若顺序反过来,
+			//    那批数据要等下一 tick 才可能被 poll 看到 —— 每次往返白等一个 tick。
+			//    ★ 这不影响正确性,影响的是 1.4 demo 里"一回合几个 tick"这种可观测量。
+			for (std::size_t i = 0; i < d.pollfds.size(); ++i)
+			{
+				if ((d.pollfds[i].revents & POLLOUT) == 0)
+					continue;
+				Impl::Conn *c = d.get(d.poll_ids[i]);
+				if (c == nullptr)
+					continue;
+				if (!d.flushOutbound(*c))
+					c->want_close = true;
+			}
 
-      // ── 3. 读 ────────────────────────────────────────────────
-      std::uint8_t buf[16 * 1024];
-      for (std::size_t i = 0; i < d.pollfds.size(); ++i) {
-        const short re = d.pollfds[i].revents;
-        if (re == 0) continue;
-        Impl::Conn* c = d.get(d.poll_ids[i]);
-        if (c == nullptr) continue;
+			// ── 3. 读 ────────────────────────────────────────────────
+			std::uint8_t buf[16 * 1024];
+			for (std::size_t i = 0; i < d.pollfds.size(); ++i)
+			{
+				const short re = d.pollfds[i].revents;
+				if (re == 0)
+					continue;
+				Impl::Conn *c = d.get(d.poll_ids[i]);
+				if (c == nullptr)
+					continue;
 
-        if ((re & POLLIN) != 0) {
-          for (;;) {
+				if ((re & POLLIN) != 0)
+				{
+					for (;;)
+					{
 #if defined(_WIN32)
-            const int n = ::recv(c->fd, reinterpret_cast<char*>(buf),
-                                 static_cast<int>(sizeof(buf)), 0);
+						const int n = ::recv(c->fd, reinterpret_cast<char *>(buf),
+						                     static_cast<int>(sizeof(buf)), 0);
 #else
-            const ssize_t n = ::recv(c->fd, buf, sizeof(buf), 0);
+						const ssize_t n = ::recv(c->fd, buf, sizeof(buf), 0);
 #endif
-            if (n > 0) {
-              if (d.events != nullptr) {
-                d.events->onBytes(c->id, buf, static_cast<std::size_t>(n));
-              }
-              // ⚠️★ 回调里宿主可能 Close() 了这条连接,甚至 accept 进了新连接
-              //    ⇒ **重新取指针**,不复用回调前那个。
-              c = d.get(d.poll_ids[i]);
-              if (c == nullptr) break;
-              if (static_cast<std::size_t>(n) < sizeof(buf)) break;
-              continue;  // 读满了缓冲,可能还有 ⇒ 再来一次
-            }
-            if (n == 0) {  // ★ 对端正常关闭
-              c->want_close = true;
-              c->outbound.clear();  // 对面走了,没什么可发的了
-              c->out_sent = 0;
-            } else if (!wouldBlock()) {
-              c->want_close = true;
-              c->outbound.clear();
-              c->out_sent = 0;
-            }
-            break;
-          }
-        }
-        // ★ POLLHUP / POLLERR:对端异常消失。POLLIN 分支的 recv 也会看到,
-        //   但连接从未有过入站数据时只有这里报得出来。
-        if (c != nullptr && (re & (POLLHUP | POLLERR | POLLNVAL)) != 0) {
-          c->want_close = true;
-          c->outbound.clear();
-          c->out_sent = 0;
-        }
-      }
-    }
-  }
+						if (n > 0)
+						{
+							if (d.events != nullptr)
+							{
+								d.events->onBytes(c->id, buf, static_cast<std::size_t>(n));
+							}
+							// ⚠️★ 回调里宿主可能 Close() 了这条连接,甚至 accept 进了新连接
+							//    ⇒ **重新取指针**,不复用回调前那个。
+							c = d.get(d.poll_ids[i]);
+							if (c == nullptr)
+								break;
+							if (static_cast<std::size_t>(n) < sizeof(buf))
+								break;
+							continue; // 读满了缓冲,可能还有 ⇒ 再来一次
+						}
+						if (n == 0)
+						{ // ★ 对端正常关闭
+							c->want_close = true;
+							c->outbound.clear(); // 对面走了,没什么可发的了
+							c->out_sent = 0;
+						}
+						else if (!wouldBlock())
+						{
+							c->want_close = true;
+							c->outbound.clear();
+							c->out_sent = 0;
+						}
+						break;
+					}
+				}
+				// ★ POLLHUP / POLLERR:对端异常消失。POLLIN 分支的 recv 也会看到,
+				//   但连接从未有过入站数据时只有这里报得出来。
+				if (c != nullptr && (re & (POLLHUP | POLLERR | POLLNVAL)) != 0)
+				{
+					c->want_close = true;
+					c->outbound.clear();
+					c->out_sent = 0;
+				}
+			}
+		}
+	}
 
-  // ── 4. 收尾:排空的待关连接才真正关闭,并回调 ───────────────────
-  for (Impl::Conn& c : d.conns) {
-    if (c.dead || !c.want_close) continue;
-    // 还有没写完的出站且连接仍活着 ⇒ 再试一次,写完了才关。
-    if (c.out_sent < c.outbound.size() && d.flushOutbound(c) &&
-        c.out_sent < c.outbound.size()) {
-      continue;  // 下一轮再来
-    }
-    const ConnectionId id = c.id;
-    d.kill(c);
-    if (d.events != nullptr) d.events->onDisconnected(id);
-  }
+	// ── 4. 收尾:排空的待关连接才真正关闭,并回调 ───────────────────
+	for (Impl::Conn &c : d.conns)
+	{
+		if (c.dead || !c.want_close)
+			continue;
+		// 还有没写完的出站且连接仍活着 ⇒ 再试一次,写完了才关。
+		if (c.out_sent < c.outbound.size() && d.flushOutbound(c) &&
+		    c.out_sent < c.outbound.size())
+		{
+			continue; // 下一轮再来
+		}
+		const ConnectionId id = c.id;
+		d.kill(c);
+		if (d.events != nullptr)
+			d.events->onDisconnected(id);
+	}
 
-  // ★ 统一在末尾摘除,避免在遍历/回调中间改动容器(卷首 ③)。
-  while (!d.conns.empty() && d.conns.front().dead) d.conns.pop_front();
-  if (!d.conns.empty()) {
-    std::deque<Impl::Conn> keep;
-    for (Impl::Conn& c : d.conns) {
-      if (!c.dead) keep.push_back(std::move(c));
-    }
-    d.conns.swap(keep);
-  }
+	// ★ 统一在末尾摘除,避免在遍历/回调中间改动容器(卷首 ③)。
+	while (!d.conns.empty() && d.conns.front().dead)
+		d.conns.pop_front();
+	if (!d.conns.empty())
+	{
+		std::deque<Impl::Conn> keep;
+		for (Impl::Conn &c : d.conns)
+		{
+			if (!c.dead)
+				keep.push_back(std::move(c));
+		}
+		d.conns.swap(keep);
+	}
 }
 
-std::size_t TcpTransport::connectionCount() const noexcept {
-  std::size_t n = 0;
-  for (const Impl::Conn& c : _impl->conns) {
-    if (!c.dead) ++n;
-  }
-  return n;
+std::size_t TcpTransport::connectionCount() const noexcept
+{
+	std::size_t n = 0;
+	for (const Impl::Conn &c : _impl->conns)
+	{
+		if (!c.dead)
+			++n;
+	}
+	return n;
 }
 
-std::size_t TcpTransport::pendingOutbound(ConnectionId id) const noexcept {
-  const Impl::Conn* c = _impl->get(id);
-  return c == nullptr ? 0 : c->outbound.size() - c->out_sent;
+std::size_t TcpTransport::pendingOutbound(ConnectionId id) const noexcept
+{
+	const Impl::Conn *c = _impl->get(id);
+	return c == nullptr ? 0 : c->outbound.size() - c->out_sent;
 }
 
-}  // namespace SA::Net
+} // namespace SA::Net

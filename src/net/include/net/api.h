@@ -31,12 +31,13 @@
 #include <vector>
 
 #include "domain/battle_events.sa.h"
+#include "ids.h"
 #include "transport/envelope.sa.h"
 #include "transport/handshake.sa.h"
-#include "ids.h"
 #include "wire/Framing.h"
 
-namespace SA::Net {
+namespace SA::Net
+{
 
 // ── 帧层与信封层:★★ 已于 2026-09-06 移出本模块(DR-TS9 乙案)──────────
 //
@@ -58,14 +59,14 @@ namespace SA::Net {
 //   ⇒ `shared/wire` 处理**字节与结构**,`src/net` 处理**连接**。
 //     这条切分正是前者能双端共享的原因。
 
-using SA::Wire::kMaxFrameBytes;
-using SA::Wire::kFrameHeaderBytes;
-using SA::Wire::FrameStatus;
-using SA::Wire::FrameReader;
-using SA::Wire::writeFrame;
-using SA::Wire::EnvelopeView;
 using SA::Wire::decodeEnvelope;
 using SA::Wire::encodeFramed;
+using SA::Wire::EnvelopeView;
+using SA::Wire::FrameReader;
+using SA::Wire::FrameStatus;
+using SA::Wire::kFrameHeaderBytes;
+using SA::Wire::kMaxFrameBytes;
+using SA::Wire::writeFrame;
 
 // ── 传输层 ────────────────────────────────────────────────────
 //
@@ -74,69 +75,73 @@ using SA::Wire::encodeFramed;
 
 using ConnectionId = std::uint64_t;
 
-class TransportEvents {
- public:
-  virtual ~TransportEvents() = default;
-  virtual void onConnected(ConnectionId id) = 0;
-  // ⚠️ 给的是**原始字节**,不保证帧对齐 —— 成帧是上层的事(FrameReader)。
-  //    这正是 TCP 与 WS 的差别被吸收掉的地方。
-  virtual void onBytes(ConnectionId id, const std::uint8_t* data,
-                       std::size_t n) = 0;
-  virtual void onDisconnected(ConnectionId id) = 0;
+class TransportEvents
+{
+  public:
+	virtual ~TransportEvents() = default;
+	virtual void onConnected(ConnectionId id) = 0;
+	// ⚠️ 给的是**原始字节**,不保证帧对齐 —— 成帧是上层的事(FrameReader)。
+	//    这正是 TCP 与 WS 的差别被吸收掉的地方。
+	virtual void onBytes(ConnectionId id, const std::uint8_t *data,
+	                     std::size_t n) = 0;
+	virtual void onDisconnected(ConnectionId id) = 0;
 
- protected:
-  TransportEvents() = default;
-  TransportEvents(const TransportEvents&) = default;
-  TransportEvents& operator=(const TransportEvents&) = default;
+  protected:
+	TransportEvents() = default;
+	TransportEvents(const TransportEvents &) = default;
+	TransportEvents &operator=(const TransportEvents &) = default;
 };
 
-class Transport {
- public:
-  virtual ~Transport() = default;
-  virtual void setEvents(TransportEvents* events) = 0;
-  virtual bool send(ConnectionId id, const std::uint8_t* data,
-                    std::size_t n) = 0;
-  virtual void close(ConnectionId id) = 0;
-  // 由主线程在 tick 第 2 步调用(01 §3.1「网络入站」)。
-  // ⚠️ 01 §2:主线程绝不允许阻塞 ⇒ 这个方法**不得**等待 I/O。
-  virtual void poll() = 0;
+class Transport
+{
+  public:
+	virtual ~Transport() = default;
+	virtual void setEvents(TransportEvents *events) = 0;
+	virtual bool send(ConnectionId id, const std::uint8_t *data,
+	                  std::size_t n) = 0;
+	virtual void close(ConnectionId id) = 0;
+	// 由主线程在 tick 第 2 步调用(01 §3.1「网络入站」)。
+	// ⚠️ 01 §2:主线程绝不允许阻塞 ⇒ 这个方法**不得**等待 I/O。
+	virtual void poll() = 0;
 
- protected:
-  Transport() = default;
-  Transport(const Transport&) = default;
-  Transport& operator=(const Transport&) = default;
+  protected:
+	Transport() = default;
+	Transport(const Transport &) = default;
+	Transport &operator=(const Transport &) = default;
 };
 
 // 进程内传输。测试用,同时是 01 §5.1 里 InProcTransport 的雏形。
-class LoopbackTransport final : public Transport {
- public:
-  void setEvents(TransportEvents* events) override { _events = events; }
-  bool send(ConnectionId id, const std::uint8_t* data,
-            std::size_t n) override;
-  void close(ConnectionId id) override;
-  void poll() override;
+class LoopbackTransport final : public Transport
+{
+  public:
+	void setEvents(TransportEvents *events) override { _events = events; }
+	bool send(ConnectionId id, const std::uint8_t *data,
+	          std::size_t n) override;
+	void close(ConnectionId id) override;
+	void poll() override;
 
-  // ── 测试侧驱动 ──
-  ConnectionId connect();                       // 建立一条连接
-  void deliver(ConnectionId id, const std::uint8_t* data, std::size_t n);
-  // 服务端经 Send() 发出的字节,按连接累积。
-  const std::vector<std::uint8_t>& sent(ConnectionId id) const;
-  void clearSent(ConnectionId id);
-  bool closed(ConnectionId id) const;
+	// ── 测试侧驱动 ──
+	ConnectionId connect(); // 建立一条连接
+	void deliver(ConnectionId id, const std::uint8_t *data, std::size_t n);
+	// 服务端经 Send() 发出的字节,按连接累积。
+	const std::vector<std::uint8_t> &sent(ConnectionId id) const;
+	void clearSent(ConnectionId id);
+	bool closed(ConnectionId id) const;
 
- private:
-  struct Conn {
-    ConnectionId id = 0;
-    std::vector<std::uint8_t> outbound;
-    std::vector<std::uint8_t> inbound;
-    bool closed = false;
-  };
-  Conn* get(ConnectionId id);
-  const Conn* get(ConnectionId id) const;
+  private:
+	struct Conn
+	{
+		ConnectionId id = 0;
+		std::vector<std::uint8_t> outbound;
+		std::vector<std::uint8_t> inbound;
+		bool closed = false;
+	};
+	Conn *get(ConnectionId id);
+	const Conn *get(ConnectionId id) const;
 
-  TransportEvents* _events = nullptr;
-  std::vector<Conn> _conns;
-  ConnectionId _nextId = 1;
+	TransportEvents *_events = nullptr;
+	std::vector<Conn> _conns;
+	ConnectionId _nextId = 1;
 };
 
 // ── TCP 传输(2026-09-04,1.5 收尾项)─────────────────────────────
@@ -172,44 +177,45 @@ class LoopbackTransport final : public Transport {
 //   那是一条不需要任何攻击技巧的内存耗尽路径。⇒ 超限即断连,不是等待。
 inline constexpr std::size_t kMaxOutboundBytes = 4u * 1024u * 1024u;
 
-class TcpTransport final : public Transport {
- public:
-  TcpTransport();
-  ~TcpTransport() override;
-  TcpTransport(const TcpTransport&) = delete;
-  TcpTransport& operator=(const TcpTransport&) = delete;
+class TcpTransport final : public Transport
+{
+  public:
+	TcpTransport();
+	~TcpTransport() override;
+	TcpTransport(const TcpTransport &) = delete;
+	TcpTransport &operator=(const TcpTransport &) = delete;
 
-  // 绑定并开始监听。⚠️ 失败返回 false —— 调用方**必须拒绝启动**
-  //   (01 §11.1「任一步失败即拒绝启动」),原因见 last_error()。
-  // ★ port = 0 表示由系统分配,之后用 listen_port() 取回实际端口。
-  //   这不是测试专用后门:它是让用例能在 CI 上并行跑而不撞端口的唯一干净办法。
-  bool listen(const char* bind_addr, std::uint16_t port);
+	// 绑定并开始监听。⚠️ 失败返回 false —— 调用方**必须拒绝启动**
+	//   (01 §11.1「任一步失败即拒绝启动」),原因见 last_error()。
+	// ★ port = 0 表示由系统分配,之后用 listen_port() 取回实际端口。
+	//   这不是测试专用后门:它是让用例能在 CI 上并行跑而不撞端口的唯一干净办法。
+	bool listen(const char *bind_addr, std::uint16_t port);
 
-  // 实际监听的端口。未监听时为 0。
-  std::uint16_t listenPort() const noexcept;
+	// 实际监听的端口。未监听时为 0。
+	std::uint16_t listenPort() const noexcept;
 
-  // 最近一次失败的原因。★ net **不链 sa_platform**(见 CMakeLists 里那条注释)
-  //   ⇒ 本模块不打日志,把错误交给宿主去打成 kConnectionClosed 之类的结构化事件。
-  const char* lastError() const noexcept;
+	// 最近一次失败的原因。★ net **不链 sa_platform**(见 CMakeLists 里那条注释)
+	//   ⇒ 本模块不打日志,把错误交给宿主去打成 kConnectionClosed 之类的结构化事件。
+	const char *lastError() const noexcept;
 
-  // 停止监听并关闭全部连接。⚠️ 会为每条连接回调 OnDisconnected。
-  void stop();
+	// 停止监听并关闭全部连接。⚠️ 会为每条连接回调 OnDisconnected。
+	void stop();
 
-  // ── Transport ──
-  void setEvents(TransportEvents* events) override;
-  bool send(ConnectionId id, const std::uint8_t* data, std::size_t n) override;
-  void close(ConnectionId id) override;
-  // ⚠️ 非阻塞:poll 超时为 0。01 §2「主线程绝不允许阻塞」。
-  void poll() override;
+	// ── Transport ──
+	void setEvents(TransportEvents *events) override;
+	bool send(ConnectionId id, const std::uint8_t *data, std::size_t n) override;
+	void close(ConnectionId id) override;
+	// ⚠️ 非阻塞:poll 超时为 0。01 §2「主线程绝不允许阻塞」。
+	void poll() override;
 
-  // ── 观察面(测试与运维)──
-  std::size_t connectionCount() const noexcept;
-  // 尚未写出去的字节数 —— 背压是否真的发生过,只有这个数说得出来。
-  std::size_t pendingOutbound(ConnectionId id) const noexcept;
+	// ── 观察面(测试与运维)──
+	std::size_t connectionCount() const noexcept;
+	// 尚未写出去的字节数 —— 背压是否真的发生过,只有这个数说得出来。
+	std::size_t pendingOutbound(ConnectionId id) const noexcept;
 
- private:
-  struct Impl;
-  std::unique_ptr<Impl> _impl;
+  private:
+	struct Impl;
+	std::unique_ptr<Impl> _impl;
 };
 
 // ── 会话(01 §5.2)──────────────────────────────────────────────
@@ -231,85 +237,89 @@ class TcpTransport final : public Transport {
 //      (它们要 storage,而 1.5 明确不要 storage)。战斗入场由 world 侧推,
 //      不由客户端请求 —— 这对 1.4 demo 是足够的,它验的是**事件流端到端一致**。
 
-enum class SessionState : std::uint8_t {
-  kAnonymous = 0,      // 连上了,还没握手
-  kAuthenticating = 1, // ⬜ 阶段 2:等账号校验回来
-  kAuthenticated = 2,  // 握手通过
-  kSelectingChar = 3,  // ⬜ 阶段 2
-  kOnline = 4,         // 在世,可收发玩法消息
-  kLoggingOut = 5,     // ⬜ 阶段 2
-  kClosed = 6,
+enum class SessionState : std::uint8_t
+{
+	kAnonymous = 0,      // 连上了,还没握手
+	kAuthenticating = 1, // ⬜ 阶段 2:等账号校验回来
+	kAuthenticated = 2,  // 握手通过
+	kSelectingChar = 3,  // ⬜ 阶段 2
+	kOnline = 4,         // 在世,可收发玩法消息
+	kLoggingOut = 5,     // ⬜ 阶段 2
+	kClosed = 6,
 };
 
-const char* sessionStateName(SessionState s) noexcept;
+const char *sessionStateName(SessionState s) noexcept;
 
 using SessionId = std::uint64_t;
 
 // 会话把「该做什么」交给宿主。★ net **不认识** world ——
 //   这正是 00 §3.1「各模块互相不可见,只暴露接口头,链接期换实现」的落点。
-class SessionHost {
- public:
-  virtual ~SessionHost() = default;
+class SessionHost
+{
+  public:
+	virtual ~SessionHost() = default;
 
-  // 握手通过。宿主可据此登记会话。
-  virtual void onSessionReady(SessionId id) = 0;
-  // 客户端上行的战斗指令(0x0210)。
-  virtual void onBattleCommand(SessionId id,
-                               const SA::Domain::BattleCommand& cmd) = 0;
-  virtual void onSessionClosed(SessionId id) = 0;
+	// 握手通过。宿主可据此登记会话。
+	virtual void onSessionReady(SessionId id) = 0;
+	// 客户端上行的战斗指令(0x0210)。
+	virtual void onBattleCommand(SessionId id,
+	                             const SA::Domain::BattleCommand &cmd) = 0;
+	virtual void onSessionClosed(SessionId id) = 0;
 
- protected:
-  SessionHost() = default;
-  SessionHost(const SessionHost&) = default;
-  SessionHost& operator=(const SessionHost&) = default;
+  protected:
+	SessionHost() = default;
+	SessionHost(const SessionHost &) = default;
+	SessionHost &operator=(const SessionHost &) = default;
 };
 
 // 单条会话。⚠️ 不持有 socket —— 出站字节交给调用方发。
-class Session {
- public:
-  Session(SessionId id, std::uint32_t protocol_version,
-          std::uint32_t heartbeat_interval_ms, SessionHost* host) noexcept;
+class Session
+{
+  public:
+	Session(SessionId id, std::uint32_t protocol_version,
+	        std::uint32_t heartbeat_interval_ms, SessionHost *host) noexcept;
 
-  SessionId id() const noexcept { return _id; }
-  SessionState state() const noexcept { return _state; }
-  bool closed() const noexcept { return _state == SessionState::kClosed; }
+	SessionId id() const noexcept { return _id; }
+	SessionState state() const noexcept { return _state; }
+	bool closed() const noexcept { return _state == SessionState::kClosed; }
 
-  // 处理一条已成帧的消息。
-  //
-  // 返回 false ⇒ **必须关闭连接**。02 §5.5 的取向:回执侧的强校验必须保留,
-  //   校验不过就是协议违规,不是"忽略这一条继续"。
-  // 出站字节追加进 out(已成帧,可直接交给 Transport::Send)。
-  bool handleFrame(const std::uint8_t* frame, std::uint32_t len,
-                   std::vector<std::uint8_t>& out);
+	// 处理一条已成帧的消息。
+	//
+	// 返回 false ⇒ **必须关闭连接**。02 §5.5 的取向:回执侧的强校验必须保留,
+	//   校验不过就是协议违规,不是"忽略这一条继续"。
+	// 出站字节追加进 out(已成帧,可直接交给 Transport::Send)。
+	bool handleFrame(const std::uint8_t *frame, std::uint32_t len,
+	                 std::vector<std::uint8_t> &out);
 
-  // 供 world 侧下推消息(战斗快照 / 事件流)。
-  template <typename M>
-  bool push(const M& msg, std::vector<std::uint8_t>& out) const {
-    // Notify 的 corr_id 为 0(02 §2.1)。
-    return encodeFramed(0, msg, out);
-  }
+	// 供 world 侧下推消息(战斗快照 / 事件流)。
+	template <typename M>
+	bool push(const M &msg, std::vector<std::uint8_t> &out) const
+	{
+		// Notify 的 corr_id 为 0(02 §2.1)。
+		return encodeFramed(0, msg, out);
+	}
 
-  void markOnline() noexcept;
-  void close() noexcept;
+	void markOnline() noexcept;
+	void close() noexcept;
 
-  // ── 供测试与运维观察 ──
-  std::uint64_t framesHandled() const noexcept { return _framesHandled; }
-  std::uint32_t lastRejectMsgId() const noexcept { return _lastRejectMsgId; }
+	// ── 供测试与运维观察 ──
+	std::uint64_t framesHandled() const noexcept { return _framesHandled; }
+	std::uint32_t lastRejectMsgId() const noexcept { return _lastRejectMsgId; }
 
- private:
-  bool handleHandshake(const EnvelopeView& env, std::vector<std::uint8_t>& out);
-  bool handlePing(const EnvelopeView& env, std::vector<std::uint8_t>& out);
-  bool handleBattleCommand(const EnvelopeView& env);
+  private:
+	bool handleHandshake(const EnvelopeView &env, std::vector<std::uint8_t> &out);
+	bool handlePing(const EnvelopeView &env, std::vector<std::uint8_t> &out);
+	bool handleBattleCommand(const EnvelopeView &env);
 
-  SessionId _id;
-  std::uint32_t _protocolVersion;
-  std::uint32_t _heartbeatIntervalMs;
-  SessionHost* _host;
-  SessionState _state = SessionState::kAnonymous;
-  std::uint64_t _framesHandled = 0;
-  std::uint32_t _lastRejectMsgId = 0;
+	SessionId _id;
+	std::uint32_t _protocolVersion;
+	std::uint32_t _heartbeatIntervalMs;
+	SessionHost *_host;
+	SessionState _state = SessionState::kAnonymous;
+	std::uint64_t _framesHandled = 0;
+	std::uint32_t _lastRejectMsgId = 0;
 };
 
-}  // namespace SA::Net
+} // namespace SA::Net
 
-#endif  // SA_NET_API_H
+#endif // SA_NET_API_H

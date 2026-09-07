@@ -22,28 +22,32 @@
 
 #include <cstdint>
 
-namespace SA::Model {
+namespace SA::Model
+{
 
 // 实体句柄。
 //
 // ★ `index` 是**定长池的下标**,不是指针 —— 03 §1:
 //   「句柄是 int 下标,不是裸指针;实体访问经类型化视图,不直接暴露池。」
-struct EntityHandle {
-  std::uint32_t index      = 0;
-  std::uint32_t generation = 0;  // ★ 槽位每次重用递增;0 保留给"空句柄"
+struct EntityHandle
+{
+	std::uint32_t index = 0;
+	std::uint32_t generation = 0; // ★ 槽位每次重用递增;0 保留给"空句柄"
 
-  constexpr bool valid() const noexcept { return generation != 0; }
+	constexpr bool valid() const noexcept { return generation != 0; }
 
-  friend constexpr bool operator==(EntityHandle a, EntityHandle b) noexcept {
-    return a.index == b.index && a.generation == b.generation;
-  }
-  friend constexpr bool operator!=(EntityHandle a, EntityHandle b) noexcept {
-    return !(a == b);
-  }
+	friend constexpr bool operator==(EntityHandle a, EntityHandle b) noexcept
+	{
+		return a.index == b.index && a.generation == b.generation;
+	}
+	friend constexpr bool operator!=(EntityHandle a, EntityHandle b) noexcept
+	{
+		return !(a == b);
+	}
 };
 
 inline constexpr EntityHandle kNullHandle{};
 
-}  // namespace SA::Model
+} // namespace SA::Model
 
-#endif  // __SA_Handle_H__
+#endif // __SA_Handle_H__

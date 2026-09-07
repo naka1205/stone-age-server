@@ -19,28 +19,30 @@
 
 #include <cstdint>
 
-namespace SA::Rules {
+namespace SA::Rules
+{
 
 // 注入式随机源。★ 两个方法对应原版仅有的两个入口。
-class Random {
- public:
-  virtual ~Random() = default;
+class Random
+{
+  public:
+	virtual ~Random() = default;
 
-  // 对应原版 `RAND(lo, hi)` —— **闭区间 [lo, hi]**。
-  // ⚠️ 原版语义就是闭区间(`RAND(0,1)` 会取到 0 或 1,见 §3.1 第三步第一分支
-  //    「只能造成 0 或 1」的表述)。实现方不得改成半开区间。
-  // ⚠️ lo > hi 时的行为由实现定义;调用方不得依赖 —— L3 内部须自行保证 lo <= hi。
-  virtual int rand(int lo, int hi) = 0;
+	// 对应原版 `RAND(lo, hi)` —— **闭区间 [lo, hi]**。
+	// ⚠️ 原版语义就是闭区间(`RAND(0,1)` 会取到 0 或 1,见 §3.1 第三步第一分支
+	//    「只能造成 0 或 1」的表述)。实现方不得改成半开区间。
+	// ⚠️ lo > hi 时的行为由实现定义;调用方不得依赖 —— L3 内部须自行保证 lo <= hi。
+	virtual int rand(int lo, int hi) = 0;
 
-  // 对应原版 `rand() % n` —— 返回 [0, n)。
-  // ⚠️ 单独保留而不用 Rand(0, n-1) 表达:原版这两个入口的取数序列不同,
-  //    合并会改变可回放序列。移植期须逐调用点对应到原来那个入口。
-  virtual int randMod(int n) = 0;
+	// 对应原版 `rand() % n` —— 返回 [0, n)。
+	// ⚠️ 单独保留而不用 Rand(0, n-1) 表达:原版这两个入口的取数序列不同,
+	//    合并会改变可回放序列。移植期须逐调用点对应到原来那个入口。
+	virtual int randMod(int n) = 0;
 
- protected:
-  Random() = default;
-  Random(const Random&) = default;
-  Random& operator=(const Random&) = default;
+  protected:
+	Random() = default;
+	Random(const Random &) = default;
+	Random &operator=(const Random &) = default;
 };
 
 // 确定性实现:同种子 + 同调用序列 ⇒ 同结果。用于黄金用例集与回放。
@@ -49,35 +51,41 @@ class Random {
 //   但 std::uniform_int_distribution 的取数方式**不由标准规定**,
 //   跨标准库实现会给出不同序列 ⇒ 黄金用例集在另一个平台上会整批失败。
 //   这里自己算,序列跨平台逐位一致。
-class SeededRandom final : public Random {
- public:
-  explicit SeededRandom(std::uint64_t seed) noexcept
-      : _state(seed ? seed : 0x9E3779B97F4A7C15ull) {}
+class SeededRandom final : public Random
+{
+  public:
+	explicit SeededRandom(std::uint64_t seed) noexcept
+	    : _state(seed ? seed : 0x9E3779B97F4A7C15ull) {}
 
-  int rand(int lo, int hi) noexcept override {
-    if (hi <= lo) return lo;
-    const std::uint64_t span = static_cast<std::uint64_t>(hi - lo) + 1u;
-    return lo + static_cast<int>(next() % span);
-  }
+	int rand(int lo, int hi) noexcept override
+	{
+		if (hi <= lo)
+			return lo;
+		const std::uint64_t span = static_cast<std::uint64_t>(hi - lo) + 1u;
+		return lo + static_cast<int>(next() % span);
+	}
 
-  int randMod(int n) noexcept override {
-    if (n <= 0) return 0;
-    return static_cast<int>(next() % static_cast<std::uint64_t>(n));
-  }
+	int randMod(int n) noexcept override
+	{
+		if (n <= 0)
+			return 0;
+		return static_cast<int>(next() % static_cast<std::uint64_t>(n));
+	}
 
-  std::uint64_t state() const noexcept { return _state; }
+	std::uint64_t state() const noexcept { return _state; }
 
- private:
-  std::uint64_t next() noexcept {
-    _state ^= _state >> 12;
-    _state ^= _state << 25;
-    _state ^= _state >> 27;
-    return _state * 0x2545F4914F6CDD1Dull;
-  }
+  private:
+	std::uint64_t next() noexcept
+	{
+		_state ^= _state >> 12;
+		_state ^= _state << 25;
+		_state ^= _state >> 27;
+		return _state * 0x2545F4914F6CDD1Dull;
+	}
 
-  std::uint64_t _state;
+	std::uint64_t _state;
 };
 
-}  // namespace SA::Rules
+} // namespace SA::Rules
 
-#endif  // __SA_RandomSource_H__
+#endif // __SA_RandomSource_H__

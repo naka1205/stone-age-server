@@ -35,10 +35,11 @@
 #include <cstdint>
 #include <vector>
 
-#include "transport/envelope.sa.h"
 #include "ids.h"
+#include "transport/envelope.sa.h"
 
-namespace SA::Wire {
+namespace SA::Wire
+{
 
 // ── 帧层:[u32 length][payload] ────────────────────────────────
 //
@@ -56,11 +57,12 @@ inline constexpr std::uint32_t kMaxFrameBytes = 64u * 1024u;
 // 长度前缀本身的宽度。
 inline constexpr std::size_t kFrameHeaderBytes = 4;
 
-enum class FrameStatus : std::uint8_t {
-  kOk = 0,        // 取到一条完整帧
-  kNeedMore = 1,  // 还没收够,继续等
-  kTooLarge = 2,  // ★ 声明长度超过 kMaxFrameBytes ⇒ 连接必须关闭
-  kEmpty = 3,     // 声明长度为 0 ⇒ 协议违规(信封头本身就不止 0 字节)
+enum class FrameStatus : std::uint8_t
+{
+	kOk = 0,       // 取到一条完整帧
+	kNeedMore = 1, // 还没收够,继续等
+	kTooLarge = 2, // ★ 声明长度超过 kMaxFrameBytes ⇒ 连接必须关闭
+	kEmpty = 3,    // 声明长度为 0 ⇒ 协议违规(信封头本身就不止 0 字节)
 };
 
 // 增量成帧器。喂字节进去,取完整帧出来。
@@ -68,51 +70,53 @@ enum class FrameStatus : std::uint8_t {
 // ⚠️★ kTooLarge / kEmpty 一旦出现就是**不可恢复**的:字节流已经无法再对齐,
 //    调用方必须关闭连接,不能"跳过这一帧继续读"。
 //    ⇒ 因此这两个状态是粘性的,Next() 会一直返回它。
-class FrameReader {
- public:
-  FrameReader() = default;
+class FrameReader
+{
+  public:
+	FrameReader() = default;
 
-  // 收到的原始字节。返回 false 表示累积缓冲超过了单帧上限 + 余量,
-  // 说明对端在灌垃圾 ⇒ 关闭连接。
-  bool push(const std::uint8_t* data, std::size_t n);
+	// 收到的原始字节。返回 false 表示累积缓冲超过了单帧上限 + 余量,
+	// 说明对端在灌垃圾 ⇒ 关闭连接。
+	bool push(const std::uint8_t *data, std::size_t n);
 
-  // 取下一条完整帧。kOk 时 *payload / *len 指向内部缓冲,
-  // **在下一次 Push() 或 Pop() 之前有效**。
-  FrameStatus next(const std::uint8_t** payload, std::uint32_t* len);
+	// 取下一条完整帧。kOk 时 *payload / *len 指向内部缓冲,
+	// **在下一次 Push() 或 Pop() 之前有效**。
+	FrameStatus next(const std::uint8_t **payload, std::uint32_t *len);
 
-  // 丢弃刚由 Next() 返回的那一帧。★ 与 Next() 分开是为了让调用方
-  //   可以零拷贝地处理帧内容,处理完再推进。
-  void pop();
+	// 丢弃刚由 Next() 返回的那一帧。★ 与 Next() 分开是为了让调用方
+	//   可以零拷贝地处理帧内容,处理完再推进。
+	void pop();
 
-  bool failed() const noexcept { return _failed; }
-  std::size_t buffered() const noexcept { return _buf.size() - _read; }
+	bool failed() const noexcept { return _failed; }
+	std::size_t buffered() const noexcept { return _buf.size() - _read; }
 
- private:
-  std::vector<std::uint8_t> _buf;
-  std::size_t _read = 0;        // 已消费的前缀长度
-  std::uint32_t _pending = 0;   // 刚由 Next() 交出的帧长(含头)
-  bool _failed = false;
+  private:
+	std::vector<std::uint8_t> _buf;
+	std::size_t _read = 0;      // 已消费的前缀长度
+	std::uint32_t _pending = 0; // 刚由 Next() 交出的帧长(含头)
+	bool _failed = false;
 };
 
 // 把一段负载写成一帧,追加到 out。负载超限返回 false(**不截断**)。
-bool writeFrame(const std::uint8_t* payload, std::uint32_t len,
-                std::vector<std::uint8_t>& out);
+bool writeFrame(const std::uint8_t *payload, std::uint32_t len,
+                std::vector<std::uint8_t> &out);
 
 // ── 信封层:EnvelopeHeader { msg_id, corr_id } + body ──────────
 //
 // 02 §2.1:body 不作为字段出现 —— 它是「紧跟在信封头之后、由 msg_id 决定类型
 //   的字节」,长度由帧层给出。把 body 建模成 bytes 会引入无上限变长字段。
 
-struct EnvelopeView {
-  std::uint32_t msg_id = 0;
-  std::uint64_t corr_id = 0;
-  const std::uint8_t* body = nullptr;
-  std::uint32_t body_len = 0;
+struct EnvelopeView
+{
+	std::uint32_t msg_id = 0;
+	std::uint64_t corr_id = 0;
+	const std::uint8_t *body = nullptr;
+	std::uint32_t body_len = 0;
 };
 
 // 从一条完整帧里剥出信封。格式不对返回 false ⇒ 整条消息作废,不存在部分成功。
-bool decodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
-                    EnvelopeView& out);
+bool decodeEnvelope(const std::uint8_t *frame, std::uint32_t len,
+                    EnvelopeView &out);
 
 // 把一条 IDL 消息编成「帧 + 信封 + body」并追加到 out。
 //
@@ -128,34 +132,36 @@ bool decodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
 //    SA::Transport 两个命名空间里,靠 ADL 各自找到自己那个。
 //    写成限定调用就要为两组各写一份重载,那正是"同一语义两份实现"。
 template <typename M>
-bool encodeFramed(std::uint64_t corr_id, const M& msg,
-                  std::vector<std::uint8_t>& out) {
-  const std::size_t start = out.size();
-  out.resize(start + kFrameHeaderBytes + kMaxFrameBytes);
+bool encodeFramed(std::uint64_t corr_id, const M &msg,
+                  std::vector<std::uint8_t> &out)
+{
+	const std::size_t start = out.size();
+	out.resize(start + kFrameHeaderBytes + kMaxFrameBytes);
 
-  SA::IDL::Writer w(out.data() + start + kFrameHeaderBytes, kMaxFrameBytes);
+	SA::IDL::Writer w(out.data() + start + kFrameHeaderBytes, kMaxFrameBytes);
 
-  SA::Transport::EnvelopeHeader head;
-  head.msg_id = SA::IDL::msg_id_of<M>();
-  head.corr_id = corr_id;
-  encode(w, head);
-  encode(w, msg);
+	SA::Transport::EnvelopeHeader head;
+	head.msg_id = SA::IDL::msg_id_of<M>();
+	head.corr_id = corr_id;
+	encode(w, head);
+	encode(w, msg);
 
-  if (!w.ok()) {
-    out.resize(start);
-    return false;
-  }
+	if (!w.ok())
+	{
+		out.resize(start);
+		return false;
+	}
 
-  const std::uint32_t payload_len = static_cast<std::uint32_t>(w.size());
-  out.resize(start + kFrameHeaderBytes + payload_len);
-  // 长度前缀:小端,与 IDL 运行时的整数序一致。
-  out[start + 0] = static_cast<std::uint8_t>(payload_len & 0xFFu);
-  out[start + 1] = static_cast<std::uint8_t>((payload_len >> 8) & 0xFFu);
-  out[start + 2] = static_cast<std::uint8_t>((payload_len >> 16) & 0xFFu);
-  out[start + 3] = static_cast<std::uint8_t>((payload_len >> 24) & 0xFFu);
-  return true;
+	const std::uint32_t payload_len = static_cast<std::uint32_t>(w.size());
+	out.resize(start + kFrameHeaderBytes + payload_len);
+	// 长度前缀:小端,与 IDL 运行时的整数序一致。
+	out[start + 0] = static_cast<std::uint8_t>(payload_len & 0xFFu);
+	out[start + 1] = static_cast<std::uint8_t>((payload_len >> 8) & 0xFFu);
+	out[start + 2] = static_cast<std::uint8_t>((payload_len >> 16) & 0xFFu);
+	out[start + 3] = static_cast<std::uint8_t>((payload_len >> 24) & 0xFFu);
+	return true;
 }
 
-}  // namespace SA::Wire
+} // namespace SA::Wire
 
-#endif  // __SA_Framing_H__
+#endif // __SA_Framing_H__

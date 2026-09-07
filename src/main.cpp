@@ -29,7 +29,8 @@
 #include "platform/api.h"
 #include "world/api.h"
 
-namespace {
+namespace
+{
 
 // ⚠️ 信号处理函数里只准做一件事:置标志。日志、关连接都在主线程的 tick 里做 ——
 //    在 handler 里碰 Logger / socket 是未定义行为的温床。
@@ -37,168 +38,187 @@ volatile std::sig_atomic_t g_stop_signal = 0;
 
 void onStopSignal(int sig) noexcept { g_stop_signal = sig; }
 
-void printUsage() {
-  std::fputs(
-      "用法: stone_age_server [--config <路径>] [--self-test]\n"
-      "\n"
-      "  --config <路径>   JSON 配置文件;不给则用内置默认值\n"
-      "  --self-test       启动、绑一个由系统分配的端口、跑够一个战斗回合间隔的 tick、\n"
-      "                    关闭、退出。退出码即判据(ctest 的 server_self_test 走这条)。\n"
-      "                    ★ 端口取 0 而不取配置值:自检要能在 CI 上并行跑而不撞端口 ——\n"
-      "                    它证明的是「入口能启动、能监听、能停」,不是「8300 空着」。\n",
-      stdout);
+void printUsage()
+{
+	std::fputs(
+	    "用法: stone_age_server [--config <路径>] [--self-test]\n"
+	    "\n"
+	    "  --config <路径>   JSON 配置文件;不给则用内置默认值\n"
+	    "  --self-test       启动、绑一个由系统分配的端口、跑够一个战斗回合间隔的 tick、\n"
+	    "                    关闭、退出。退出码即判据(ctest 的 server_self_test 走这条)。\n"
+	    "                    ★ 端口取 0 而不取配置值:自检要能在 CI 上并行跑而不撞端口 ——\n"
+	    "                    它证明的是「入口能启动、能监听、能停」,不是「8300 空着」。\n",
+	    stdout);
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char** argv) {
-  std::string config_path;
-  bool self_test = false;
+int main(int argc, char **argv)
+{
+	std::string config_path;
+	bool self_test = false;
 
-  for (int i = 1; i < argc; ++i) {
-    const char* a = argv[i];
-    if (std::strcmp(a, "--help") == 0 || std::strcmp(a, "-h") == 0) {
-      printUsage();
-      return 0;
-    }
-    if (std::strcmp(a, "--self-test") == 0) {
-      self_test = true;
-      continue;
-    }
-    if (std::strcmp(a, "--config") == 0) {
-      if (i + 1 >= argc) {
-        std::fputs("错误: --config 后面缺少路径\n", stderr);
-        return 2;
-      }
-      config_path = argv[++i];
-      continue;
-    }
-    std::fprintf(stderr, "错误: 无法识别的参数 %s\n", a);
-    printUsage();
-    return 2;
-  }
+	for (int i = 1; i < argc; ++i)
+	{
+		const char *a = argv[i];
+		if (std::strcmp(a, "--help") == 0 || std::strcmp(a, "-h") == 0)
+		{
+			printUsage();
+			return 0;
+		}
+		if (std::strcmp(a, "--self-test") == 0)
+		{
+			self_test = true;
+			continue;
+		}
+		if (std::strcmp(a, "--config") == 0)
+		{
+			if (i + 1 >= argc)
+			{
+				std::fputs("错误: --config 后面缺少路径\n", stderr);
+				return 2;
+			}
+			config_path = argv[++i];
+			continue;
+		}
+		std::fprintf(stderr, "错误: 无法识别的参数 %s\n", a);
+		printUsage();
+		return 2;
+	}
 
-  // ── 1. 读配置 + 校验 ──────────────────────────────────────
-  SA::Platform::ConfigResult cfg;
-  if (config_path.empty()) {
-    cfg = SA::Platform::parseConfig("{}");  // 全默认值,仍走同一条校验路径
-  } else {
-    cfg = SA::Platform::loadConfigFile(config_path);
-  }
+	// ── 1. 读配置 + 校验 ──────────────────────────────────────
+	SA::Platform::ConfigResult cfg;
+	if (config_path.empty())
+	{
+		cfg = SA::Platform::parseConfig("{}"); // 全默认值,仍走同一条校验路径
+	}
+	else
+	{
+		cfg = SA::Platform::loadConfigFile(config_path);
+	}
 
-  SA::Platform::Logger logger(cfg.ok ? cfg.config.log_level
-                                     : SA::Platform::LogLevel::kInfo);
+	SA::Platform::Logger logger(cfg.ok ? cfg.config.log_level
+	                                   : SA::Platform::LogLevel::kInfo);
 
-  if (!cfg.ok) {
-    // ★ 一次说完全部错误,然后拒绝启动(见 config.cpp 卷首)。
-    for (const SA::Platform::ConfigError& e : cfg.errors) {
-      logger.log(SA::Platform::LogLevel::kError,
-                 SA::Platform::LogEvent::kConfigRejected,
-                 {{"path", std::string_view(e.path)},
-                  {"reason", std::string_view(e.message)}});
-    }
-    return 1;
-  }
+	if (!cfg.ok)
+	{
+		// ★ 一次说完全部错误,然后拒绝启动(见 config.cpp 卷首)。
+		for (const SA::Platform::ConfigError &e : cfg.errors)
+		{
+			logger.log(SA::Platform::LogLevel::kError,
+			           SA::Platform::LogEvent::kConfigRejected,
+			           {{"path", std::string_view(e.path)},
+			            {"reason", std::string_view(e.message)}});
+		}
+		return 1;
+	}
 
-  logger.log(SA::Platform::LogLevel::kInfo,
-             SA::Platform::LogEvent::kServerStarting, {});
-  logger.log(SA::Platform::LogLevel::kInfo,
-             SA::Platform::LogEvent::kConfigLoaded,
-             {{"bind_addr", std::string_view(cfg.config.bind_addr)},
-              {"listen_port", static_cast<std::uint64_t>(cfg.config.listen_port)},
-              {"protocol_version",
-               static_cast<std::uint64_t>(cfg.config.protocol_version)},
-              {"tick_hz", static_cast<std::uint64_t>(cfg.config.tempo.tick_hz)},
-              {"battle_turn_interval_ms",
-               static_cast<std::uint64_t>(
-                   cfg.config.tempo.battle_turn_interval_ms)}});
+	logger.log(SA::Platform::LogLevel::kInfo,
+	           SA::Platform::LogEvent::kServerStarting, {});
+	logger.log(SA::Platform::LogLevel::kInfo,
+	           SA::Platform::LogEvent::kConfigLoaded,
+	           {{"bind_addr", std::string_view(cfg.config.bind_addr)},
+	            {"listen_port", static_cast<std::uint64_t>(cfg.config.listen_port)},
+	            {"protocol_version",
+	             static_cast<std::uint64_t>(cfg.config.protocol_version)},
+	            {"tick_hz", static_cast<std::uint64_t>(cfg.config.tempo.tick_hz)},
+	            {"battle_turn_interval_ms",
+	             static_cast<std::uint64_t>(
+	                 cfg.config.tempo.battle_turn_interval_ms)}});
 
-  // ── 5. 装载模块 ───────────────────────────────────────────
-  // ⚠️ 配置阶段已经拒掉了未实现的模块名(见 config.cpp),所以这里
-  //    不会出现"配置写着 social 而实际没装"的静默不一致。
-  for (const std::string& m : cfg.config.modules) {
-    logger.log(SA::Platform::LogLevel::kInfo,
-               SA::Platform::LogEvent::kModuleLoaded,
-               {{"module", std::string_view(m)}});
-  }
+	// ── 5. 装载模块 ───────────────────────────────────────────
+	// ⚠️ 配置阶段已经拒掉了未实现的模块名(见 config.cpp),所以这里
+	//    不会出现"配置写着 social 而实际没装"的静默不一致。
+	for (const std::string &m : cfg.config.modules)
+	{
+		logger.log(SA::Platform::LogLevel::kInfo,
+		           SA::Platform::LogEvent::kModuleLoaded,
+		           {{"module", std::string_view(m)}});
+	}
 
-  SA::Platform::MonotonicClock clock;
-  SA::Platform::RandomSource random(cfg.config.rng_seed);
-  // ★ 主随机种子必须落日志:没有它,"可回放"只是一句话(见 random.cpp)。
-  logger.log(SA::Platform::LogLevel::kInfo,
-             SA::Platform::LogEvent::kBattleSeed,
-             {{"master_seed", random.masterSeed()},
-              {"from_config", cfg.config.rng_seed != 0}});
+	SA::Platform::MonotonicClock clock;
+	SA::Platform::RandomSource random(cfg.config.rng_seed);
+	// ★ 主随机种子必须落日志:没有它,"可回放"只是一句话(见 random.cpp)。
+	logger.log(SA::Platform::LogLevel::kInfo,
+	           SA::Platform::LogEvent::kBattleSeed,
+	           {{"master_seed", random.masterSeed()},
+	            {"from_config", cfg.config.rng_seed != 0}});
 
-  // ── 6. 绑定端口 ───────────────────────────────────────────
-  // ★ 传输层**先于** World 构造 ⇒ 后于 World 析构(C++ 的构造/析构顺序保证)。
-  //   World 的 Tick 第 8 步与析构都会经 transport 关连接,它那时必须还活着;
-  //   反向没有悬垂问题 —— TcpTransport 的析构**不回调**(tcp_transport.cpp)。
-  SA::Net::TcpTransport transport;
-  const std::uint16_t port =
-      self_test ? std::uint16_t{0} : cfg.config.listen_port;
-  if (!transport.listen(cfg.config.bind_addr.c_str(), port)) {
-    logger.log(SA::Platform::LogLevel::kError,
-               SA::Platform::LogEvent::kListenFailed,
-               {{"bind_addr", std::string_view(cfg.config.bind_addr)},
-                {"port", static_cast<std::uint64_t>(port)},
-                {"reason", std::string_view(transport.lastError())}});
-    return 1;
-  }
+	// ── 6. 绑定端口 ───────────────────────────────────────────
+	// ★ 传输层**先于** World 构造 ⇒ 后于 World 析构(C++ 的构造/析构顺序保证)。
+	//   World 的 Tick 第 8 步与析构都会经 transport 关连接,它那时必须还活着;
+	//   反向没有悬垂问题 —— TcpTransport 的析构**不回调**(tcp_transport.cpp)。
+	SA::Net::TcpTransport transport;
+	const std::uint16_t port =
+	    self_test ? std::uint16_t{0} : cfg.config.listen_port;
+	if (!transport.listen(cfg.config.bind_addr.c_str(), port))
+	{
+		logger.log(SA::Platform::LogLevel::kError,
+		           SA::Platform::LogEvent::kListenFailed,
+		           {{"bind_addr", std::string_view(cfg.config.bind_addr)},
+		            {"port", static_cast<std::uint64_t>(port)},
+		            {"reason", std::string_view(transport.lastError())}});
+		return 1;
+	}
 
-  SA::World::World world(cfg.config, clock, logger, random, transport);
+	SA::World::World world(cfg.config, clock, logger, random, transport);
 
-  // 信号在 World 就位之后才挂:此前收到信号直接被默认动作杀掉即可,没有东西需要收尾。
-  std::signal(SIGINT, onStopSignal);
-  std::signal(SIGTERM, onStopSignal);
+	// 信号在 World 就位之后才挂:此前收到信号直接被默认动作杀掉即可,没有东西需要收尾。
+	std::signal(SIGINT, onStopSignal);
+	std::signal(SIGTERM, onStopSignal);
 
-  logger.log(SA::Platform::LogLevel::kInfo,
-             SA::Platform::LogEvent::kServerReady,
-             {{"bind_addr", std::string_view(cfg.config.bind_addr)},
-              // ★ 打的是**实际**监听到的端口,不是配置值 —— self-test 下两者不同。
-              {"listen_port", static_cast<std::uint64_t>(transport.listenPort())},
-              {"self_test", self_test}});
+	logger.log(SA::Platform::LogLevel::kInfo,
+	           SA::Platform::LogEvent::kServerReady,
+	           {{"bind_addr", std::string_view(cfg.config.bind_addr)},
+	            // ★ 打的是**实际**监听到的端口,不是配置值 —— self-test 下两者不同。
+	            {"listen_port", static_cast<std::uint64_t>(transport.listenPort())},
+	            {"self_test", self_test}});
 
-  // ── 7. 进 tick ────────────────────────────────────────────
-  const std::uint32_t hz = cfg.config.tempo.tick_hz;  // 配置已校验在 1..1000
-  // self-test 的预算:跑够能覆盖一个战斗回合间隔的 tick 数,然后停。
-  const std::uint64_t budget =
-      static_cast<std::uint64_t>(hz) *
-      (cfg.config.tempo.battle_turn_interval_ms / 1000 + 1);
+	// ── 7. 进 tick ────────────────────────────────────────────
+	const std::uint32_t hz = cfg.config.tempo.tick_hz; // 配置已校验在 1..1000
+	// self-test 的预算:跑够能覆盖一个战斗回合间隔的 tick 数,然后停。
+	const std::uint64_t budget =
+	    static_cast<std::uint64_t>(hz) *
+	    (cfg.config.tempo.battle_turn_interval_ms / 1000 + 1);
 
-  const SA::Platform::Millis t0 = clock.nowMs();
-  std::uint64_t ticks = 0;
-  bool shutting_down = false;
-  while (!world.stopped()) {
-    if (!shutting_down &&
-        (g_stop_signal != 0 || (self_test && ticks >= budget))) {
-      shutting_down = true;
-      if (g_stop_signal != 0) {
-        logger.log(SA::Platform::LogLevel::kInfo,
-                   SA::Platform::LogEvent::kShutdownSignal,
-                   {{"signal", static_cast<std::int64_t>(g_stop_signal)}});
-      }
-      // 本 tick 的第 8 步执行关闭(关全部连接),之后 stopped() 为真。
-      world.requestShutdown();
-    }
+	const SA::Platform::Millis t0 = clock.nowMs();
+	std::uint64_t ticks = 0;
+	bool shutting_down = false;
+	while (!world.stopped())
+	{
+		if (!shutting_down &&
+		    (g_stop_signal != 0 || (self_test && ticks >= budget)))
+		{
+			shutting_down = true;
+			if (g_stop_signal != 0)
+			{
+				logger.log(SA::Platform::LogLevel::kInfo,
+				           SA::Platform::LogEvent::kShutdownSignal,
+				           {{"signal", static_cast<std::int64_t>(g_stop_signal)}});
+			}
+			// 本 tick 的第 8 步执行关闭(关全部连接),之后 stopped() 为真。
+			world.requestShutdown();
+		}
 
-    world.tick();
-    ++ticks;
-    if (world.stopped()) break;
+		world.tick();
+		++ticks;
+		if (world.stopped())
+			break;
 
-    // 节拍:睡到 t0 + ticks/hz 这个**绝对期限**,不是「Tick 完再睡一个周期」——
-    //   后者会把每次 Tick 的耗时累积成漂移,tick 数与墙上时间慢慢脱钩。
-    //   ⚠️ 取时间只经 Clock(platform/api.h:「全仓唯一允许取真实时间的地方」),
-    //     sleep_for 只是等,不读钟。
-    const SA::Platform::Millis due =
-        t0 + static_cast<SA::Platform::Millis>((ticks * 1000u) / hz);
-    const SA::Platform::Millis now = clock.nowMs();
-    if (due > now) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(due - now));
-    }
-  }
+		// 节拍:睡到 t0 + ticks/hz 这个**绝对期限**,不是「Tick 完再睡一个周期」——
+		//   后者会把每次 Tick 的耗时累积成漂移,tick 数与墙上时间慢慢脱钩。
+		//   ⚠️ 取时间只经 Clock(platform/api.h:「全仓唯一允许取真实时间的地方」),
+		//     sleep_for 只是等,不读钟。
+		const SA::Platform::Millis due =
+		    t0 + static_cast<SA::Platform::Millis>((ticks * 1000u) / hz);
+		const SA::Platform::Millis now = clock.nowMs();
+		if (due > now)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(due - now));
+		}
+	}
 
-  // World 已在第 8 步关掉全部连接;这里只剩监听 socket 要收,以及万一漏网的连接。
-  transport.stop();
-  return 0;
+	// World 已在第 8 步关掉全部连接;这里只剩监听 socket 要收,以及万一漏网的连接。
+	transport.stop();
+	return 0;
 }

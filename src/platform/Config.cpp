@@ -17,64 +17,79 @@
 #include <sstream>
 #include <string>
 
-namespace SA::Platform {
-namespace {
+namespace SA::Platform
+{
+namespace
+{
 
-void addError(ConfigResult& r, std::string path, std::string message) {
-  r.errors.push_back(ConfigError{std::move(path), std::move(message)});
+void addError(ConfigResult &r, std::string path, std::string message)
+{
+	r.errors.push_back(ConfigError{std::move(path), std::move(message)});
 }
 
-std::string join(std::string_view prefix, std::string_view key) {
-  if (prefix.empty()) return std::string(key);
-  return std::string(prefix) + "." + std::string(key);
+std::string join(std::string_view prefix, std::string_view key)
+{
+	if (prefix.empty())
+		return std::string(key);
+	return std::string(prefix) + "." + std::string(key);
 }
 
 // 读一个无符号整数并校验范围。缺键 ⇒ 保持默认值,不报错(有默认值就是可选)。
 // ⚠️ 但**类型错**与**越界**一律报错 —— 那是写错了,不是没写。
-bool readUInt(const json::Value& obj, std::string_view prefix, const char* key,
-              std::uint64_t lo, std::uint64_t hi, std::uint64_t& out,
-              ConfigResult& r) {
-  const json::Value* v = obj.find(key);
-  if (v == nullptr) return true;  // 用默认值
-  if (!v->isNumber()) {
-    addError(r, join(prefix, key), "应为整数");
-    return false;
-  }
-  const double d = v->asNumber();
-  if (std::floor(d) != d) {
-    addError(r, join(prefix, key), "应为整数,不能有小数部分");
-    return false;
-  }
-  if (d < 0.0) {
-    addError(r, join(prefix, key), "不能为负数");
-    return false;
-  }
-  // double 能精确表示的整数上限是 2^53;超过它再比较范围已经没有意义。
-  if (d > 9007199254740992.0) {
-    addError(r, join(prefix, key), "数值过大");
-    return false;
-  }
-  const std::uint64_t u = static_cast<std::uint64_t>(d);
-  if (u < lo || u > hi) {
-    std::ostringstream os;
-    os << "取值须在 [" << lo << ", " << hi << "] 之间,实际为 " << u;
-    addError(r, join(prefix, key), os.str());
-    return false;
-  }
-  out = u;
-  return true;
+bool readUInt(const json::Value &obj, std::string_view prefix, const char *key,
+              std::uint64_t lo, std::uint64_t hi, std::uint64_t &out,
+              ConfigResult &r)
+{
+	const json::Value *v = obj.find(key);
+	if (v == nullptr)
+		return true; // 用默认值
+	if (!v->isNumber())
+	{
+		addError(r, join(prefix, key), "应为整数");
+		return false;
+	}
+	const double d = v->asNumber();
+	if (std::floor(d) != d)
+	{
+		addError(r, join(prefix, key), "应为整数,不能有小数部分");
+		return false;
+	}
+	if (d < 0.0)
+	{
+		addError(r, join(prefix, key), "不能为负数");
+		return false;
+	}
+	// double 能精确表示的整数上限是 2^53;超过它再比较范围已经没有意义。
+	if (d > 9007199254740992.0)
+	{
+		addError(r, join(prefix, key), "数值过大");
+		return false;
+	}
+	const std::uint64_t u = static_cast<std::uint64_t>(d);
+	if (u < lo || u > hi)
+	{
+		std::ostringstream os;
+		os << "取值须在 [" << lo << ", " << hi << "] 之间,实际为 " << u;
+		addError(r, join(prefix, key), os.str());
+		return false;
+	}
+	out = u;
+	return true;
 }
 
 // ★ 未知键一律报错,不是忽略。
 //   一个拼错的 "listen_prot" 被忽略,表现是"服务端起在了另一个端口而没人知道为什么"
 //   —— 正是 00 §10.4 那类不报错、不崩溃的静默错误。
-void rejectUnknownKeys(const json::Value& obj, std::string_view prefix,
-                       const std::set<std::string>& known, ConfigResult& r) {
-  for (const auto& kv : obj.asObject()) {
-    if (known.find(kv.first) == known.end()) {
-      addError(r, join(prefix, kv.first), "未知的配置项");
-    }
-  }
+void rejectUnknownKeys(const json::Value &obj, std::string_view prefix,
+                       const std::set<std::string> &known, ConfigResult &r)
+{
+	for (const auto &kv : obj.asObject())
+	{
+		if (known.find(kv.first) == known.end())
+		{
+			addError(r, join(prefix, kv.first), "未知的配置项");
+		}
+	}
 }
 
 // 绑定地址的形状校验。★ 只认点分十进制 IPv4 与空串 ——
@@ -82,256 +97,337 @@ void rejectUnknownKeys(const json::Value& obj, std::string_view prefix,
 //   认不出就绑定失败。⇒ 这里认的集合必须与那边一致,否则配置说"合法"而端口绑不上,
 //   报错会晚到第 6 步、且以 errno 文本的面目出现,与"地址写错了"看不出关系。
 // ⚠️ 主机名与 IPv6 都**不**放行:前者要 DNS(1.5 没有解析路径),后者 Listen 侧还不支持。
-bool isIpv4Literal(const std::string& s) {
-  int octets = 0;
-  std::size_t i = 0;
-  while (i < s.size()) {
-    if (octets == 4) return false;
-    std::size_t digits = 0;
-    int value = 0;
-    while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
-      value = value * 10 + (s[i] - '0');
-      if (++digits > 3) return false;
-      ++i;
-    }
-    if (digits == 0 || value > 255) return false;
-    // ★ 前导零一律拒:inet_pton 也拒(它与 inet_aton 的区别正在于此),
-    //   而人写 "010.0.0.1" 时想的多半是十进制 10。
-    if (digits > 1 && s[i - digits] == '0') return false;
-    ++octets;
-    if (i < s.size()) {
-      if (s[i] != '.') return false;
-      ++i;
-      if (i == s.size()) return false;   // 尾随的点
-    }
-  }
-  return octets == 4;
+bool isIpv4Literal(const std::string &s)
+{
+	int octets = 0;
+	std::size_t i = 0;
+	while (i < s.size())
+	{
+		if (octets == 4)
+			return false;
+		std::size_t digits = 0;
+		int value = 0;
+		while (i < s.size() && s[i] >= '0' && s[i] <= '9')
+		{
+			value = value * 10 + (s[i] - '0');
+			if (++digits > 3)
+				return false;
+			++i;
+		}
+		if (digits == 0 || value > 255)
+			return false;
+		// ★ 前导零一律拒:inet_pton 也拒(它与 inet_aton 的区别正在于此),
+		//   而人写 "010.0.0.1" 时想的多半是十进制 10。
+		if (digits > 1 && s[i - digits] == '0')
+			return false;
+		++octets;
+		if (i < s.size())
+		{
+			if (s[i] != '.')
+				return false;
+			++i;
+			if (i == s.size())
+				return false; // 尾随的点
+		}
+	}
+	return octets == 4;
 }
 
-bool parseLogLevel(std::string_view s, LogLevel& out) {
-  if (s == "trace") { out = LogLevel::kTrace; return true; }
-  if (s == "debug") { out = LogLevel::kDebug; return true; }
-  if (s == "info")  { out = LogLevel::kInfo;  return true; }
-  if (s == "warn")  { out = LogLevel::kWarn;  return true; }
-  if (s == "error") { out = LogLevel::kError; return true; }
-  return false;
+bool parseLogLevel(std::string_view s, LogLevel &out)
+{
+	if (s == "trace")
+	{
+		out = LogLevel::kTrace;
+		return true;
+	}
+	if (s == "debug")
+	{
+		out = LogLevel::kDebug;
+		return true;
+	}
+	if (s == "info")
+	{
+		out = LogLevel::kInfo;
+		return true;
+	}
+	if (s == "warn")
+	{
+		out = LogLevel::kWarn;
+		return true;
+	}
+	if (s == "error")
+	{
+		out = LogLevel::kError;
+		return true;
+	}
+	return false;
 }
 
 // 01 §12:--modules=gateway,world,session,social 之类决定装载什么。
 // ⚠️ 1.5 只有 world 一个模块真实存在(00 §9.0.4 明写不要 gateway/social/storage)。
 //    ⇒ 这里认得其余名字,但**装载它们会被拒绝**,而不是默默不装。
-bool isKnownModule(const std::string& m) {
-  return m == "world" || m == "gateway" || m == "session" || m == "social";
+bool isKnownModule(const std::string &m)
+{
+	return m == "world" || m == "gateway" || m == "session" || m == "social";
 }
 
-bool isImplementedModule(const std::string& m) { return m == "world"; }
+bool isImplementedModule(const std::string &m) { return m == "world"; }
 
-}  // namespace
+} // namespace
 
-ConfigResult parseConfig(std::string_view json_text) {
-  ConfigResult r;
+ConfigResult parseConfig(std::string_view json_text)
+{
+	ConfigResult r;
 
-  const json::ParseOutcome parsed = json::parse(json_text);
-  if (!parsed.ok) {
-    std::ostringstream os;
-    os << "第 " << parsed.line << " 行(偏移 " << parsed.offset << "):" << parsed.error;
-    addError(r, "<文件>", os.str());
-    return r;
-  }
-  if (!parsed.value.isObject()) {
-    addError(r, "<文件>", "顶层必须是一个 JSON 对象");
-    return r;
-  }
+	const json::ParseOutcome parsed = json::parse(json_text);
+	if (!parsed.ok)
+	{
+		std::ostringstream os;
+		os << "第 " << parsed.line << " 行(偏移 " << parsed.offset << "):" << parsed.error;
+		addError(r, "<文件>", os.str());
+		return r;
+	}
+	if (!parsed.value.isObject())
+	{
+		addError(r, "<文件>", "顶层必须是一个 JSON 对象");
+		return r;
+	}
 
-  const json::Value& root = parsed.value;
-  ServerConfig cfg;
+	const json::Value &root = parsed.value;
+	ServerConfig cfg;
 
-  rejectUnknownKeys(root, "",
-                    {"listen_port", "bind_addr", "protocol_version",
-                     "heartbeat_interval_ms", "rng_seed", "log_level", "tempo",
-                     "modules", "demo_battle"},
-                    r);
+	rejectUnknownKeys(root, "",
+	                  {"listen_port", "bind_addr", "protocol_version",
+	                   "heartbeat_interval_ms", "rng_seed", "log_level", "tempo",
+	                   "modules", "demo_battle"},
+	                  r);
 
-  // ── listen_port ───────────────────────────────────────────
-  // 下限 1024:1023 以下要 root,而这个服务端没有任何理由以 root 运行。
-  std::uint64_t port = cfg.listen_port;
-  if (readUInt(root, "", "listen_port", 1024, 65535, port, r)) {
-    cfg.listen_port = static_cast<std::uint16_t>(port);
-  }
+	// ── listen_port ───────────────────────────────────────────
+	// 下限 1024:1023 以下要 root,而这个服务端没有任何理由以 root 运行。
+	std::uint64_t port = cfg.listen_port;
+	if (readUInt(root, "", "listen_port", 1024, 65535, port, r))
+	{
+		cfg.listen_port = static_cast<std::uint16_t>(port);
+	}
 
-  // ── bind_addr ─────────────────────────────────────────────
-  //
-  // ⚠️★ **本项此前是一个静默失效的配置面**(2026-09-06 装配 1.4 时发现):
-  //    字段在 ServerConfig 里、main.cpp 三处在用、Listen() 吃它,
-  //    唯独这里从不读它、也没把它列进已知键 ⇒ 配置文件里写 bind_addr
-  //    **会被当成"未知的配置项"而拒绝启动**,而默认值恰好能用
-  //    ⇒ 没写的人不受影响,写了的人拿到一条与拼写错误同样的报错。
-  //    ★ 与 00 §9.0.12 那个 `-DSG_WERROR` 同族:开关看着在,实际没接上。
-  if (const json::Value* ba = root.find("bind_addr"); ba != nullptr) {
-    if (!ba->isString()) {
-      addError(r, "bind_addr", "应为字符串");
-    } else if (!isIpv4Literal(ba->asString())) {
-      addError(r, "bind_addr",
-               "只能是点分十进制 IPv4(如 0.0.0.0 / 127.0.0.1),"
-               "主机名与 IPv6 尚不支持,实际为 \"" + ba->asString() + "\"");
-    } else {
-      cfg.bind_addr = ba->asString();
-    }
-  }
+	// ── bind_addr ─────────────────────────────────────────────
+	//
+	// ⚠️★ **本项此前是一个静默失效的配置面**(2026-09-06 装配 1.4 时发现):
+	//    字段在 ServerConfig 里、main.cpp 三处在用、Listen() 吃它,
+	//    唯独这里从不读它、也没把它列进已知键 ⇒ 配置文件里写 bind_addr
+	//    **会被当成"未知的配置项"而拒绝启动**,而默认值恰好能用
+	//    ⇒ 没写的人不受影响,写了的人拿到一条与拼写错误同样的报错。
+	//    ★ 与 00 §9.0.12 那个 `-DSG_WERROR` 同族:开关看着在,实际没接上。
+	if (const json::Value *ba = root.find("bind_addr"); ba != nullptr)
+	{
+		if (!ba->isString())
+		{
+			addError(r, "bind_addr", "应为字符串");
+		}
+		else if (!isIpv4Literal(ba->asString()))
+		{
+			addError(r, "bind_addr",
+			         "只能是点分十进制 IPv4(如 0.0.0.0 / 127.0.0.1),"
+			         "主机名与 IPv6 尚不支持,实际为 \"" +
+			             ba->asString() + "\"");
+		}
+		else
+		{
+			cfg.bind_addr = ba->asString();
+		}
+	}
 
-  // ── protocol_version ──────────────────────────────────────
-  // ★ 0 不是合法版本:02 §2.1 要求版本不等即拒,而 0 常常是"字段没填"的表现,
-  //   让它合法就等于让"忘了填"和"确实是 0 版"无法区分。
-  std::uint64_t pv = cfg.protocol_version;
-  if (readUInt(root, "", "protocol_version", 1, 0xFFFFFFFFull, pv, r)) {
-    cfg.protocol_version = static_cast<std::uint32_t>(pv);
-  }
+	// ── protocol_version ──────────────────────────────────────
+	// ★ 0 不是合法版本:02 §2.1 要求版本不等即拒,而 0 常常是"字段没填"的表现,
+	//   让它合法就等于让"忘了填"和"确实是 0 版"无法区分。
+	std::uint64_t pv = cfg.protocol_version;
+	if (readUInt(root, "", "protocol_version", 1, 0xFFFFFFFFull, pv, r))
+	{
+		cfg.protocol_version = static_cast<std::uint32_t>(pv);
+	}
 
-  // ── heartbeat_interval_ms ─────────────────────────────────
-  // 下限 1000:比这更密的心跳只是在给自己造流量;上限 300000 = 5 分钟,
-  // 再长就失去"发现对端已经不在了"的意义。
-  std::uint64_t hb = cfg.heartbeat_interval_ms;
-  if (readUInt(root, "", "heartbeat_interval_ms", 1000, 300000, hb, r)) {
-    cfg.heartbeat_interval_ms = static_cast<std::uint32_t>(hb);
-  }
+	// ── heartbeat_interval_ms ─────────────────────────────────
+	// 下限 1000:比这更密的心跳只是在给自己造流量;上限 300000 = 5 分钟,
+	// 再长就失去"发现对端已经不在了"的意义。
+	std::uint64_t hb = cfg.heartbeat_interval_ms;
+	if (readUInt(root, "", "heartbeat_interval_ms", 1000, 300000, hb, r))
+	{
+		cfg.heartbeat_interval_ms = static_cast<std::uint32_t>(hb);
+	}
 
-  // ── rng_seed ──────────────────────────────────────────────
-  // 0 = 由启动时刻派生。★ 允许 0,因为它有明确语义,不是"没填"。
-  std::uint64_t seed = cfg.rng_seed;
-  if (readUInt(root, "", "rng_seed", 0, 0xFFFFFFFFFFFFFFFFull, seed, r)) {
-    cfg.rng_seed = seed;
-  }
+	// ── rng_seed ──────────────────────────────────────────────
+	// 0 = 由启动时刻派生。★ 允许 0,因为它有明确语义,不是"没填"。
+	std::uint64_t seed = cfg.rng_seed;
+	if (readUInt(root, "", "rng_seed", 0, 0xFFFFFFFFFFFFFFFFull, seed, r))
+	{
+		cfg.rng_seed = seed;
+	}
 
-  // ── log_level ─────────────────────────────────────────────
-  if (const json::Value* lv = root.find("log_level"); lv != nullptr) {
-    if (!lv->isString()) {
-      addError(r, "log_level", "应为字符串");
-    } else if (!parseLogLevel(lv->asString(), cfg.log_level)) {
-      addError(r, "log_level",
-               "只能是 trace / debug / info / warn / error 之一,实际为 \"" +
-                   lv->asString() + "\"");
-    }
-  }
+	// ── log_level ─────────────────────────────────────────────
+	if (const json::Value *lv = root.find("log_level"); lv != nullptr)
+	{
+		if (!lv->isString())
+		{
+			addError(r, "log_level", "应为字符串");
+		}
+		else if (!parseLogLevel(lv->asString(), cfg.log_level))
+		{
+			addError(r, "log_level",
+			         "只能是 trace / debug / info / warn / error 之一,实际为 \"" +
+			             lv->asString() + "\"");
+		}
+	}
 
-  // ── tempo(01 §3.2:玩法参数,不是性能参数)──────────────────
-  if (const json::Value* tp = root.find("tempo"); tp != nullptr) {
-    if (!tp->isObject()) {
-      addError(r, "tempo", "应为对象");
-    } else {
-      rejectUnknownKeys(*tp, "tempo",
-                        {"tick_hz", "battle_turn_interval_ms",
-                         "char_loop_interval_ms"},
-                        r);
+	// ── tempo(01 §3.2:玩法参数,不是性能参数)──────────────────
+	if (const json::Value *tp = root.find("tempo"); tp != nullptr)
+	{
+		if (!tp->isObject())
+		{
+			addError(r, "tempo", "应为对象");
+		}
+		else
+		{
+			rejectUnknownKeys(*tp, "tempo",
+			                  {"tick_hz", "battle_turn_interval_ms",
+			                   "char_loop_interval_ms"},
+			                  r);
 
-      // tick_hz 上限 1000:再高单 tick 预算就不足 1 毫秒,
-      // 而 01 §10 要求 tick 耗时可观测、有预算。
-      std::uint64_t hz = cfg.tempo.tick_hz;
-      if (readUInt(*tp, "tempo", "tick_hz", 1, 1000, hz, r)) {
-        cfg.tempo.tick_hz = static_cast<std::uint32_t>(hz);
-      }
+			// tick_hz 上限 1000:再高单 tick 预算就不足 1 毫秒,
+			// 而 01 §10 要求 tick 耗时可观测、有预算。
+			std::uint64_t hz = cfg.tempo.tick_hz;
+			if (readUInt(*tp, "tempo", "tick_hz", 1, 1000, hz, r))
+			{
+				cfg.tempo.tick_hz = static_cast<std::uint32_t>(hz);
+			}
 
-      // ⚠️ 战斗回合间隔的上下限是**玩法**判断,不是技术判断:
-      //    15 §5.2 实测原版 _BATTLE_TIME 为关 ⇒ 没有原版值可抄,
-      //    00 §0 又已认下 ④ 层永远无法验证 ⇒ 这两个界只是"离谱保护",
-      //    真值要靠人试。**别把它读成"我们知道正确值在这个区间"。**
-      std::uint64_t bt = cfg.tempo.battle_turn_interval_ms;
-      if (readUInt(*tp, "tempo", "battle_turn_interval_ms", 100, 60000, bt, r)) {
-        cfg.tempo.battle_turn_interval_ms = static_cast<std::uint32_t>(bt);
-      }
+			// ⚠️ 战斗回合间隔的上下限是**玩法**判断,不是技术判断:
+			//    15 §5.2 实测原版 _BATTLE_TIME 为关 ⇒ 没有原版值可抄,
+			//    00 §0 又已认下 ④ 层永远无法验证 ⇒ 这两个界只是"离谱保护",
+			//    真值要靠人试。**别把它读成"我们知道正确值在这个区间"。**
+			std::uint64_t bt = cfg.tempo.battle_turn_interval_ms;
+			if (readUInt(*tp, "tempo", "battle_turn_interval_ms", 100, 60000, bt, r))
+			{
+				cfg.tempo.battle_turn_interval_ms = static_cast<std::uint32_t>(bt);
+			}
 
-      std::uint64_t cl = cfg.tempo.char_loop_interval_ms;
-      if (readUInt(*tp, "tempo", "char_loop_interval_ms", 100, 60000, cl, r)) {
-        cfg.tempo.char_loop_interval_ms = static_cast<std::uint32_t>(cl);
-      }
-    }
-  }
+			std::uint64_t cl = cfg.tempo.char_loop_interval_ms;
+			if (readUInt(*tp, "tempo", "char_loop_interval_ms", 100, 60000, cl, r))
+			{
+				cfg.tempo.char_loop_interval_ms = static_cast<std::uint32_t>(cl);
+			}
+		}
+	}
 
-  // ── demo_battle(1.4 脚手架,见 api.h)────────────────────────
-  if (const json::Value* db = root.find("demo_battle"); db != nullptr) {
-    if (!db->isObject()) {
-      addError(r, "demo_battle", "应为对象");
-    } else {
-      rejectUnknownKeys(*db, "demo_battle", {"enabled", "slot"}, r);
+	// ── demo_battle(1.4 脚手架,见 api.h)────────────────────────
+	if (const json::Value *db = root.find("demo_battle"); db != nullptr)
+	{
+		if (!db->isObject())
+		{
+			addError(r, "demo_battle", "应为对象");
+		}
+		else
+		{
+			rejectUnknownKeys(*db, "demo_battle", {"enabled", "slot"}, r);
 
-      if (const json::Value* en = db->find("enabled"); en != nullptr) {
-        if (!en->isBool()) {
-          addError(r, "demo_battle.enabled", "应为 true 或 false");
-        } else {
-          cfg.demo_battle.enabled = en->asBool();
-        }
-      }
+			if (const json::Value *en = db->find("enabled"); en != nullptr)
+			{
+				if (!en->isBool())
+				{
+					addError(r, "demo_battle.enabled", "应为 true 或 false");
+				}
+				else
+				{
+					cfg.demo_battle.enabled = en->asBool();
+				}
+			}
 
-      // 上限 9:己方是 0..9(Rules::kSideOffset = 10)。
-      // ⚠️ 不写成 19 —— 让玩家落到敌方半场是配置写错,不是一种玩法。
-      //   ★ 这里是 platform,够不着 Rules::kSideOffset(L0 不依赖 L3),
-      //     ⇒ 数字写死在这里,并由 world 侧一条静态断言钉住两者一致。
-      std::uint64_t slot = cfg.demo_battle.slot;
-      if (readUInt(*db, "demo_battle", "slot", 0, 9, slot, r)) {
-        cfg.demo_battle.slot = static_cast<std::uint8_t>(slot);
-      }
-    }
-  }
+			// 上限 9:己方是 0..9(Rules::kSideOffset = 10)。
+			// ⚠️ 不写成 19 —— 让玩家落到敌方半场是配置写错,不是一种玩法。
+			//   ★ 这里是 platform,够不着 Rules::kSideOffset(L0 不依赖 L3),
+			//     ⇒ 数字写死在这里,并由 world 侧一条静态断言钉住两者一致。
+			std::uint64_t slot = cfg.demo_battle.slot;
+			if (readUInt(*db, "demo_battle", "slot", 0, 9, slot, r))
+			{
+				cfg.demo_battle.slot = static_cast<std::uint8_t>(slot);
+			}
+		}
+	}
 
-  // ── modules ───────────────────────────────────────────────
-  if (const json::Value* mods = root.find("modules"); mods != nullptr) {
-    if (!mods->isArray()) {
-      addError(r, "modules", "应为字符串数组");
-    } else if (mods->asArray().empty()) {
-      addError(r, "modules", "至少要装载一个模块");
-    } else {
-      std::vector<std::string> names;
-      std::set<std::string> seen;
-      bool bad = false;
-      for (std::size_t i = 0; i < mods->asArray().size(); ++i) {
-        const json::Value& item = mods->asArray()[i];
-        const std::string path = "modules[" + std::to_string(i) + "]";
-        if (!item.isString()) {
-          addError(r, path, "应为字符串");
-          bad = true;
-          continue;
-        }
-        const std::string& name = item.asString();
-        if (!isKnownModule(name)) {
-          addError(r, path, "未知模块 \"" + name + "\"");
-          bad = true;
-          continue;
-        }
-        if (!isImplementedModule(name)) {
-          // ★ 不是"忽略未实现的模块" —— 那会让部署配置写着 social
-          //   而实际没装,直到有人用到才发现。
-          addError(r, path,
-                   "模块 \"" + name +
-                       "\" 属阶段 2,尚未实现;阶段 1.5 只有 world "
-                       "(见 00 §9.0.4)");
-          bad = true;
-          continue;
-        }
-        if (!seen.insert(name).second) {
-          addError(r, path, "模块 \"" + name + "\" 重复出现");
-          bad = true;
-          continue;
-        }
-        names.push_back(name);
-      }
-      if (!bad) cfg.modules = std::move(names);
-    }
-  }
+	// ── modules ───────────────────────────────────────────────
+	if (const json::Value *mods = root.find("modules"); mods != nullptr)
+	{
+		if (!mods->isArray())
+		{
+			addError(r, "modules", "应为字符串数组");
+		}
+		else if (mods->asArray().empty())
+		{
+			addError(r, "modules", "至少要装载一个模块");
+		}
+		else
+		{
+			std::vector<std::string> names;
+			std::set<std::string> seen;
+			bool bad = false;
+			for (std::size_t i = 0; i < mods->asArray().size(); ++i)
+			{
+				const json::Value &item = mods->asArray()[i];
+				const std::string path = "modules[" + std::to_string(i) + "]";
+				if (!item.isString())
+				{
+					addError(r, path, "应为字符串");
+					bad = true;
+					continue;
+				}
+				const std::string &name = item.asString();
+				if (!isKnownModule(name))
+				{
+					addError(r, path, "未知模块 \"" + name + "\"");
+					bad = true;
+					continue;
+				}
+				if (!isImplementedModule(name))
+				{
+					// ★ 不是"忽略未实现的模块" —— 那会让部署配置写着 social
+					//   而实际没装,直到有人用到才发现。
+					addError(r, path,
+					         "模块 \"" + name +
+					             "\" 属阶段 2,尚未实现;阶段 1.5 只有 world "
+					             "(见 00 §9.0.4)");
+					bad = true;
+					continue;
+				}
+				if (!seen.insert(name).second)
+				{
+					addError(r, path, "模块 \"" + name + "\" 重复出现");
+					bad = true;
+					continue;
+				}
+				names.push_back(name);
+			}
+			if (!bad)
+				cfg.modules = std::move(names);
+		}
+	}
 
-  r.ok = r.errors.empty();
-  if (r.ok) r.config = std::move(cfg);
-  return r;
+	r.ok = r.errors.empty();
+	if (r.ok)
+		r.config = std::move(cfg);
+	return r;
 }
 
-ConfigResult loadConfigFile(const std::string& path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in) {
-    ConfigResult r;
-    addError(r, "<文件>", "读不到配置文件:" + path);
-    return r;
-  }
-  std::ostringstream buf;
-  buf << in.rdbuf();
-  return parseConfig(buf.str());
+ConfigResult loadConfigFile(const std::string &path)
+{
+	std::ifstream in(path, std::ios::binary);
+	if (!in)
+	{
+		ConfigResult r;
+		addError(r, "<文件>", "读不到配置文件:" + path);
+		return r;
+	}
+	std::ostringstream buf;
+	buf << in.rdbuf();
+	return parseConfig(buf.str());
 }
 
-}  // namespace SA::Platform
+} // namespace SA::Platform

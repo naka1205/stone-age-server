@@ -27,7 +27,8 @@
 #include <string_view>
 #include <vector>
 
-namespace SA::Platform {
+namespace SA::Platform
+{
 
 // ── 单调时钟 ──────────────────────────────────────────────────
 //
@@ -39,38 +40,41 @@ namespace SA::Platform {
 //      (测试要的是「把时间推到第 3000 毫秒」,不是「睡 3 秒」)。
 using Millis = std::int64_t;
 
-class Clock {
- public:
-  virtual ~Clock() = default;
-  // 单调递增的毫秒数。起点无意义,只有差值有意义。
-  virtual Millis nowMs() const noexcept = 0;
+class Clock
+{
+  public:
+	virtual ~Clock() = default;
+	// 单调递增的毫秒数。起点无意义,只有差值有意义。
+	virtual Millis nowMs() const noexcept = 0;
 
- protected:
-  Clock() = default;
-  Clock(const Clock&) = default;
-  Clock& operator=(const Clock&) = default;
+  protected:
+	Clock() = default;
+	Clock(const Clock &) = default;
+	Clock &operator=(const Clock &) = default;
 };
 
 // 生产实现:std::chrono::steady_clock。★ 全仓唯一允许取真实时间的地方。
-class MonotonicClock final : public Clock {
- public:
-  MonotonicClock() noexcept;
-  Millis nowMs() const noexcept override;
+class MonotonicClock final : public Clock
+{
+  public:
+	MonotonicClock() noexcept;
+	Millis nowMs() const noexcept override;
 
- private:
-  std::int64_t _originNs;
+  private:
+	std::int64_t _originNs;
 };
 
 // 测试实现:时间由调用方推。
-class ManualClock final : public Clock {
- public:
-  explicit ManualClock(Millis start = 0) noexcept : _now(start) {}
-  Millis nowMs() const noexcept override { return _now; }
-  void advance(Millis delta) noexcept { _now += delta; }
-  void setNow(Millis t) noexcept { _now = t; }
+class ManualClock final : public Clock
+{
+  public:
+	explicit ManualClock(Millis start = 0) noexcept : _now(start) {}
+	Millis nowMs() const noexcept override { return _now; }
+	void advance(Millis delta) noexcept { _now += delta; }
+	void setNow(Millis t) noexcept { _now = t; }
 
- private:
-  Millis _now;
+  private:
+	Millis _now;
 };
 
 // ── 结构化日志 ────────────────────────────────────────────────
@@ -84,109 +88,119 @@ class ManualClock final : public Clock {
 //    而 1.5 的日志需求是「把结构化事件打到 stderr」。
 //    ★ 但**事件枚举与字段模型现在就定死**,那才是难改的部分;
 //      将来换 spdlog 只需替换 Sink,调用点一处不动。
-enum class LogLevel : std::uint8_t {
-  kTrace = 0,
-  kDebug = 1,
-  kInfo = 2,
-  kWarn = 3,
-  kError = 4,
+enum class LogLevel : std::uint8_t
+{
+	kTrace = 0,
+	kDebug = 1,
+	kInfo = 2,
+	kWarn = 3,
+	kError = 4,
 };
 
 // 事件类型。★ 显式赋值 —— 与协议号同一条理由(02 §1.1):
 // 日志会被外部工具消费,编号一经发布不得复用。
-enum class LogEvent : std::uint16_t {
-  kUnspecified = 0,
+enum class LogEvent : std::uint16_t
+{
+	kUnspecified = 0,
 
-  // 1–99:进程生命周期(01 §11)
-  kServerStarting = 1,
-  kServerReady = 2,
-  kServerStopping = 3,
-  kConfigLoaded = 4,
-  kConfigRejected = 5,   // ★ 拒绝启动,见本文件卷首
-  kModuleLoaded = 6,
-  // ★ 01 §11.1 第 6 步「绑定端口」的失败面(2026-09-05,TcpTransport 接入入口时补)。
-  //   与 kConfigRejected 同一性质:任一步失败即拒绝启动,原因要在日志里说得出。
-  kListenFailed = 7,
-  // 收到 SIGINT / SIGTERM ⇒ 进入 01 §11.2 的停服路径。记它是为了让「进程为什么退了」
-  //   在日志里有答案 —— 被信号停掉与自己崩掉,事后看退出码分不出来。
-  kShutdownSignal = 8,
+	// 1–99:进程生命周期(01 §11)
+	kServerStarting = 1,
+	kServerReady = 2,
+	kServerStopping = 3,
+	kConfigLoaded = 4,
+	kConfigRejected = 5, // ★ 拒绝启动,见本文件卷首
+	kModuleLoaded = 6,
+	// ★ 01 §11.1 第 6 步「绑定端口」的失败面(2026-09-05,TcpTransport 接入入口时补)。
+	//   与 kConfigRejected 同一性质:任一步失败即拒绝启动,原因要在日志里说得出。
+	kListenFailed = 7,
+	// 收到 SIGINT / SIGTERM ⇒ 进入 01 §11.2 的停服路径。记它是为了让「进程为什么退了」
+	//   在日志里有答案 —— 被信号停掉与自己崩掉,事后看退出码分不出来。
+	kShutdownSignal = 8,
 
-  // 100–199:网络与会话(01 §5)
-  kConnectionAccepted = 100,
-  kConnectionClosed = 101,
-  kHandshakeAccepted = 102,
-  kHandshakeRejected = 103,
-  kFrameRejected = 104,   // ★ 超长 / 解码失败 ⇒ 整条消息作废
-  kSessionStateChanged = 105,
+	// 100–199:网络与会话(01 §5)
+	kConnectionAccepted = 100,
+	kConnectionClosed = 101,
+	kHandshakeAccepted = 102,
+	kHandshakeRejected = 103,
+	kFrameRejected = 104, // ★ 超长 / 解码失败 ⇒ 整条消息作废
+	kSessionStateChanged = 105,
 
-  // 200–299:世界与战斗(01 §3)
-  kTickBudgetExceeded = 200,
-  kBattleStarted = 201,
-  kBattleTurnResolved = 202,
-  kBattleFinished = 203,
-  // ★★ 可回放的落点:每场战斗的种子必须落日志。
-  //    01 §10「战斗事件流 + 注入式随机源 = 可回放」是 00 §0 中 ③ 层
-  //    「规则不可自证」最实际的补偿 —— 而它成立的前提是**种子留得下来**。
-  kBattleSeed = 204,
-  kBattleEventsTruncated = 205,  // ResolveTurn 返回 false,见 battle.h
-  // ★ 入场失败(2026-09-06,1.4 装配时补)。⚠️ 级别 error 不是 warn:
-  //   入场失败意味着战斗建了却没人在看,而客户端那头表现为
-  //   「连上了但什么都没发生」—— 00 §10.4 那类静默错误必须在日志里有名字。
-  kBattleJoinFailed = 206,
-  // ★ 入场成功:谁进了哪场的哪个槽。⚠️ 单独一条而不是复用 kBattleStarted ——
-  //   「开了一场」与「有人进来了」是两件事,且一场可以进多个人。
-  //   用同一个编号打两次、字段还不同,会让日志消费方无从对齐(编号是对外契约)。
-  kBattleJoined = 207,
+	// 200–299:世界与战斗(01 §3)
+	kTickBudgetExceeded = 200,
+	kBattleStarted = 201,
+	kBattleTurnResolved = 202,
+	kBattleFinished = 203,
+	// ★★ 可回放的落点:每场战斗的种子必须落日志。
+	//    01 §10「战斗事件流 + 注入式随机源 = 可回放」是 00 §0 中 ③ 层
+	//    「规则不可自证」最实际的补偿 —— 而它成立的前提是**种子留得下来**。
+	kBattleSeed = 204,
+	kBattleEventsTruncated = 205, // ResolveTurn 返回 false,见 battle.h
+	// ★ 入场失败(2026-09-06,1.4 装配时补)。⚠️ 级别 error 不是 warn:
+	//   入场失败意味着战斗建了却没人在看,而客户端那头表现为
+	//   「连上了但什么都没发生」—— 00 §10.4 那类静默错误必须在日志里有名字。
+	kBattleJoinFailed = 206,
+	// ★ 入场成功:谁进了哪场的哪个槽。⚠️ 单独一条而不是复用 kBattleStarted ——
+	//   「开了一场」与「有人进来了」是两件事,且一场可以进多个人。
+	//   用同一个编号打两次、字段还不同,会让日志消费方无从对齐(编号是对外契约)。
+	kBattleJoined = 207,
 };
 
 // 日志字段。定长语义、不做格式化字符串 —— printf 风格的日志无法被机器消费。
-class LogField {
- public:
-  enum class Kind : std::uint8_t { kInt, kUInt, kStr, kBool };
+class LogField
+{
+  public:
+	enum class Kind : std::uint8_t
+	{
+		kInt,
+		kUInt,
+		kStr,
+		kBool
+	};
 
-  LogField(const char* k, std::int64_t v) noexcept
-      : _key(k), _kind(Kind::kInt), _i(v) {}
-  LogField(const char* k, std::uint64_t v) noexcept
-      : _key(k), _kind(Kind::kUInt), _u(v) {}
-  LogField(const char* k, std::string_view v) noexcept
-      : _key(k), _kind(Kind::kStr), _s(v) {}
-  LogField(const char* k, bool v) noexcept
-      : _key(k), _kind(Kind::kBool), _b(v) {}
+	LogField(const char *k, std::int64_t v) noexcept
+	    : _key(k), _kind(Kind::kInt), _i(v) {}
+	LogField(const char *k, std::uint64_t v) noexcept
+	    : _key(k), _kind(Kind::kUInt), _u(v) {}
+	LogField(const char *k, std::string_view v) noexcept
+	    : _key(k), _kind(Kind::kStr), _s(v) {}
+	LogField(const char *k, bool v) noexcept
+	    : _key(k), _kind(Kind::kBool), _b(v) {}
 
-  const char* key() const noexcept { return _key; }
-  Kind kind() const noexcept { return _kind; }
-  std::int64_t asInt() const noexcept { return _i; }
-  std::uint64_t asUint() const noexcept { return _u; }
-  std::string_view asStr() const noexcept { return _s; }
-  bool asBool() const noexcept { return _b; }
+	const char *key() const noexcept { return _key; }
+	Kind kind() const noexcept { return _kind; }
+	std::int64_t asInt() const noexcept { return _i; }
+	std::uint64_t asUint() const noexcept { return _u; }
+	std::string_view asStr() const noexcept { return _s; }
+	bool asBool() const noexcept { return _b; }
 
- private:
-  const char* _key;
-  Kind _kind;
-  std::int64_t _i = 0;
-  std::uint64_t _u = 0;
-  std::string_view _s{};
-  bool _b = false;
+  private:
+	const char *_key;
+	Kind _kind;
+	std::int64_t _i = 0;
+	std::uint64_t _u = 0;
+	std::string_view _s{};
+	bool _b = false;
 };
 
-class Logger {
- public:
-  explicit Logger(LogLevel min_level = LogLevel::kInfo) noexcept
-      : _minLevel(min_level) {}
+class Logger
+{
+  public:
+	explicit Logger(LogLevel min_level = LogLevel::kInfo) noexcept
+	    : _minLevel(min_level) {}
 
-  void setMinLevel(LogLevel l) noexcept { _minLevel = l; }
-  LogLevel minLevel() const noexcept { return _minLevel; }
-  bool enabled(LogLevel l) const noexcept { return l >= _minLevel; }
+	void setMinLevel(LogLevel l) noexcept { _minLevel = l; }
+	LogLevel minLevel() const noexcept { return _minLevel; }
+	bool enabled(LogLevel l) const noexcept { return l >= _minLevel; }
 
-  void log(LogLevel level, LogEvent event,
-           std::initializer_list<LogField> fields = {}) const;
+	void log(LogLevel level, LogEvent event,
+	         std::initializer_list<LogField> fields = {}) const;
 
-  // 已产出的行数 —— 测试用,免得为了断言"记了这条日志"去解析 stderr。
-  std::uint64_t emitted() const noexcept { return _emitted; }
+	// 已产出的行数 —— 测试用,免得为了断言"记了这条日志"去解析 stderr。
+	std::uint64_t emitted() const noexcept { return _emitted; }
 
- private:
-  LogLevel _minLevel;
-  mutable std::uint64_t _emitted = 0;
+  private:
+	LogLevel _minLevel;
+	mutable std::uint64_t _emitted = 0;
 };
 
 // ── 配置 ──────────────────────────────────────────────────────
@@ -197,10 +211,11 @@ class Logger {
 //    ⇒ 原版战斗推进速度 = tick 频率,手感取决于当年硬件。
 //    ⇒ 新实现必须显式建模,且 00 §0 已认下 ④ 层永远无法验证
 //      ⇒ 这些值只能靠人试,所以它们是配置不是常量。
-struct TempoConfig {
-  std::uint32_t tick_hz = 60;
-  std::uint32_t battle_turn_interval_ms = 1200;
-  std::uint32_t char_loop_interval_ms = 1000;
+struct TempoConfig
+{
+	std::uint32_t tick_hz = 60;
+	std::uint32_t battle_turn_interval_ms = 1200;
+	std::uint32_t char_loop_interval_ms = 1000;
 };
 
 // ★★ 1.4 demo 的入场装配(2026-09-06)——**脚手架,不是玩法**。
@@ -215,40 +230,44 @@ struct TempoConfig {
 //   ② 「握手完该进哪里」在真玩法里是**选角 + 登录点**的结果(阶段 2,要 storage),
 //      此处这条捷径与它冲突 ⇒ 必须是显式打开的临时物,不能变成默认行为。
 //   ⇒ 用 config/demo.json 打开它(仓库内已备),阶段 2 接上选角后整块删掉。
-struct DemoBattleConfig {
-  bool enabled = false;
-  // 玩家落在哪个槽。0..9 是己方(Rules::kSideOffset 之前)。
-  std::uint8_t slot = 0;
+struct DemoBattleConfig
+{
+	bool enabled = false;
+	// 玩家落在哪个槽。0..9 是己方(Rules::kSideOffset 之前)。
+	std::uint8_t slot = 0;
 };
 
-struct ServerConfig {
-  std::uint16_t listen_port = 8300;
-  // ★ 绑定地址(2026-09-04,TcpTransport 落地时补)。
-  //   默认 0.0.0.0 = 全部网卡 —— 单容器形态下这是唯一可用的取值。
-  //   ⚠️ 生产分布式(00 §4.1)要把 world / gateway 绑在内网网卡上,
-  //     那时它才真正起作用。⇒ 现在就把字段立出来,免得届时回头改配置面。
-  std::string bind_addr = "0.0.0.0";
-  // ★ 单一整数,不做「主版本兼容、次版本忽略」的分支。不等即拒(02 §2.1)。
-  std::uint32_t protocol_version = 1;
-  std::uint32_t heartbeat_interval_ms = 30000;
-  // 0 = 由启动时刻派生并**打进日志**;非 0 = 固定种子,用于回放。
-  std::uint64_t rng_seed = 0;
-  LogLevel log_level = LogLevel::kInfo;
-  TempoConfig tempo{};
-  DemoBattleConfig demo_battle{};
-  // 01 §12:产物是**单一二进制**,--modules=... 决定装载哪些模块。
-  std::vector<std::string> modules{"world"};
+struct ServerConfig
+{
+	std::uint16_t listen_port = 8300;
+	// ★ 绑定地址(2026-09-04,TcpTransport 落地时补)。
+	//   默认 0.0.0.0 = 全部网卡 —— 单容器形态下这是唯一可用的取值。
+	//   ⚠️ 生产分布式(00 §4.1)要把 world / gateway 绑在内网网卡上,
+	//     那时它才真正起作用。⇒ 现在就把字段立出来,免得届时回头改配置面。
+	std::string bind_addr = "0.0.0.0";
+	// ★ 单一整数,不做「主版本兼容、次版本忽略」的分支。不等即拒(02 §2.1)。
+	std::uint32_t protocol_version = 1;
+	std::uint32_t heartbeat_interval_ms = 30000;
+	// 0 = 由启动时刻派生并**打进日志**;非 0 = 固定种子,用于回放。
+	std::uint64_t rng_seed = 0;
+	LogLevel log_level = LogLevel::kInfo;
+	TempoConfig tempo{};
+	DemoBattleConfig demo_battle{};
+	// 01 §12:产物是**单一二进制**,--modules=... 决定装载哪些模块。
+	std::vector<std::string> modules{"world"};
 };
 
-struct ConfigError {
-  std::string path;     // 例:"tempo.tick_hz"
-  std::string message;
+struct ConfigError
+{
+	std::string path; // 例:"tempo.tick_hz"
+	std::string message;
 };
 
-struct ConfigResult {
-  bool ok = false;
-  ServerConfig config{};
-  std::vector<ConfigError> errors{};
+struct ConfigResult
+{
+	bool ok = false;
+	ServerConfig config{};
+	std::vector<ConfigError> errors{};
 };
 
 // 解析并校验。⚠️ 任一项不合法 ⇒ ok == false,调用方必须拒绝启动(01 §11.1)。
@@ -256,7 +275,7 @@ struct ConfigResult {
 ConfigResult parseConfig(std::string_view json_text);
 
 // 读文件后交给 ParseConfig。文件读不到也是一条 ConfigError,不抛异常。
-ConfigResult loadConfigFile(const std::string& path);
+ConfigResult loadConfigFile(const std::string &path);
 
 // ── 随机源的服务端侧 ──────────────────────────────────────────
 //
@@ -264,25 +283,26 @@ ConfigResult loadConfigFile(const std::string& path);
 //   **服务端这一侧要负责的是种子从哪来、以及它有没有被记下来** ——
 //   01 §10:「同一随机种子 + 同一输入,结果必须逐位相同」。
 //   ⇒ 种子丢了,可回放性就只是一句话。
-class RandomSource {
- public:
-  // master_seed == 0 ⇒ 从启动时刻派生一个,并由调用方打进日志。
-  explicit RandomSource(std::uint64_t master_seed) noexcept;
+class RandomSource
+{
+  public:
+	// master_seed == 0 ⇒ 从启动时刻派生一个,并由调用方打进日志。
+	explicit RandomSource(std::uint64_t master_seed) noexcept;
 
-  std::uint64_t masterSeed() const noexcept { return _masterSeed; }
+	std::uint64_t masterSeed() const noexcept { return _masterSeed; }
 
-  // 每场战斗取一个。★ 序列由 master_seed 完全决定
-  //   ⇒ 记下 master_seed + 第几场,就能重放任意一场。
-  std::uint64_t nextSeed() noexcept;
+	// 每场战斗取一个。★ 序列由 master_seed 完全决定
+	//   ⇒ 记下 master_seed + 第几场,就能重放任意一场。
+	std::uint64_t nextSeed() noexcept;
 
-  std::uint64_t minted() const noexcept { return _minted; }
+	std::uint64_t minted() const noexcept { return _minted; }
 
- private:
-  std::uint64_t _masterSeed;
-  std::uint64_t _state;
-  std::uint64_t _minted = 0;
+  private:
+	std::uint64_t _masterSeed;
+	std::uint64_t _state;
+	std::uint64_t _minted = 0;
 };
 
-}  // namespace SA::Platform
+} // namespace SA::Platform
 
-#endif  // SA_PLATFORM_API_H
+#endif // SA_PLATFORM_API_H

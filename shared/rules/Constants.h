@@ -18,19 +18,20 @@
 
 #include <cstdint>
 
-namespace SA::Rules {
+namespace SA::Rules
+{
 
 // ── 伤害与回避的基本系数 ──────────────────────────────────────────
 // 全部 [8/8] —— 05-battle.md §3 卷首:「已跨版本核对 8/8 一致」。
 
-inline constexpr double kDamageRate   = 2.0;   // 三分段主公式第三段的线性放大
-inline constexpr double kDefenseRate  = 0.5;
+inline constexpr double kDamageRate = 2.0; // 三分段主公式第三段的线性放大
+inline constexpr double kDefenseRate = 0.5;
 inline constexpr double kCriticalRate = 1.0;
-inline constexpr int    kKawashiMaxRate = 75;  // 回避率上限(%)
-inline constexpr double kAjUp   = 1.5;         // 相克:克制
-inline constexpr double kAjSame = 1.0;         // 相克:同属
-inline constexpr double kAjDown = 0.6;         // 相克:被克
-inline constexpr int    kAttrMax = 100;        // 单属上限,且 Σ 四属 + 无属 == 100
+inline constexpr int kKawashiMaxRate = 75; // 回避率上限(%)
+inline constexpr double kAjUp = 1.5;       // 相克:克制
+inline constexpr double kAjSame = 1.0;     // 相克:同属
+inline constexpr double kAjDown = 0.6;     // 相克:被克
+inline constexpr int kAttrMax = 100;       // 单属上限,且 Σ 四属 + 无属 == 100
 
 // ★ [8.0] 防御系数由 `_BATTLE_NEWPOWER` 门控,8.0 **开**:
 //     defense = 0.70 × 防御力
@@ -61,18 +62,18 @@ inline constexpr int kAttackDefenseThresholdDen = 7;
 
 // ── 骑宠的攻击力合成 ────────────────────────────────────────────
 // [8.0] 05-battle.md §3.1 第 1 步。
-inline constexpr double kRideMeleeSelf  = 0.8;  // 有骑宠·近战:0.8·人 + 0.8·宠
-inline constexpr double kRideMeleePet   = 0.8;
-inline constexpr double kRideThrowSelf  = 1.0;  // 有骑宠·投掷:1.0·人 + 0.4·宠
-inline constexpr double kRideThrowPet   = 0.4;
+inline constexpr double kRideMeleeSelf = 0.8; // 有骑宠·近战:0.8·人 + 0.8·宠
+inline constexpr double kRideMeleePet = 0.8;
+inline constexpr double kRideThrowSelf = 1.0; // 有骑宠·投掷:1.0·人 + 0.4·宠
+inline constexpr double kRideThrowPet = 0.4;
 
 // ── 回避 ────────────────────────────────────────────────────────
 // [8.0] 05-battle.md §3.2。
-inline constexpr double kKawashiParaNormal = 0.02;   // 一般
-inline constexpr double kKawashiParaSpell  = 0.027;  // ★ 守方指令是咒术时更易被闪
-inline constexpr double kTypeModPetVsEnemy  = 0.8;   // 敌→宠 / 非敌→宠
-inline constexpr double kTypeModPlayerCross = 0.6;   // 非玩→玩 / 玩→非玩
-inline constexpr int    kDodgeBonusBow      = 20;    // 攻方持弓
+inline constexpr double kKawashiParaNormal = 0.02; // 一般
+inline constexpr double kKawashiParaSpell = 0.027; // ★ 守方指令是咒术时更易被闪
+inline constexpr double kTypeModPetVsEnemy = 0.8;  // 敌→宠 / 非敌→宠
+inline constexpr double kTypeModPlayerCross = 0.6; // 非玩→玩 / 玩→非玩
+inline constexpr int kDodgeBonusBow = 20;          // 攻方持弓
 
 // ── 防御减伤:六档随机 ──────────────────────────────────────────
 //
@@ -88,14 +89,18 @@ inline constexpr int    kDodgeBonusBow      = 20;    // 攻方持弓
 //   回归断言:`tests/rules_battle_test.cpp` 的「防御减伤:六档逐个边界」。
 //
 //   触发条件:守方指令 = 防御 **且 混乱值 ≤ 0**(两条,缺一不可)。
-struct GuardTier { int upper_bound; double factor; };
+struct GuardTier
+{
+	int upper_bound;
+	double factor;
+};
 inline constexpr GuardTier kGuardTiers[] = {
-    { 25,  0.00},   // 25%
-    { 50,  0.10},   // 25%
-    { 70,  0.20},   // 20%
-    { 85,  0.30},   // 15%
-    { 95,  0.40},   // 10%
-    {100,  0.50},   //  5%
+    {25, 0.00},  // 25%
+    {50, 0.10},  // 25%
+    {70, 0.20},  // 20%
+    {85, 0.30},  // 15%
+    {95, 0.40},  // 10%
+    {100, 0.50}, //  5%
 };
 
 // ── 暴击(§3.3,批次 A.3)────────────────────────────────────────
@@ -109,14 +114,14 @@ inline constexpr GuardTier kGuardTiers[] = {
 //   映射到 `Combatant::quick`,不新增字段。
 //
 // gCriticalPara = 0.09(默认 divpara);类型跨界时 divpara 暴增到 10.0(分母 111 倍)。
-inline constexpr double kCriticalPara      = 0.09;  // 默认分母(root=1,取平方根)
-inline constexpr double kCriticalParaCross = 10.0;  // 敌→宠 / 非玩→玩:分母暴增、不取根
-inline constexpr double kCriticalDexModPetVsEnemy  = 0.8;  // 宠→敌:Df_Dex × 0.8
-inline constexpr double kCriticalDexModPlayerCross = 0.6;  // 玩→非玩:Df_Dex × 0.6
-inline constexpr double kCriticalEquipFactor = 0.5;  // per += 装备暴击 × 0.5
-inline constexpr int    kCriticalPerMin   = 1;       // clamp 下限(per<0 → 1)
-inline constexpr int    kCriticalPerMax   = 10000;   // clamp 上限
-inline constexpr int    kCriticalRollMax  = 10000;   // 判定:RAND(1,10000) < per
+inline constexpr double kCriticalPara = 0.09;             // 默认分母(root=1,取平方根)
+inline constexpr double kCriticalParaCross = 10.0;        // 敌→宠 / 非玩→玩:分母暴增、不取根
+inline constexpr double kCriticalDexModPetVsEnemy = 0.8;  // 宠→敌:Df_Dex × 0.8
+inline constexpr double kCriticalDexModPlayerCross = 0.6; // 玩→非玩:Df_Dex × 0.6
+inline constexpr double kCriticalEquipFactor = 0.5;       // per += 装备暴击 × 0.5
+inline constexpr int kCriticalPerMin = 1;                 // clamp 下限(per<0 → 1)
+inline constexpr int kCriticalPerMax = 10000;             // clamp 上限
+inline constexpr int kCriticalRollMax = 10000;            // 判定:RAND(1,10000) < per
 // 暴击伤害 = DamageCalc + 守方原始防御 × (LVatt / LVdef) × 0.5。[8.0] `:1419`
 inline constexpr double kCriticalDamageDefFactor = 0.5;
 // ★ 守方免疫暴击 ⇒ per = 0。原版硬编码判据是**图号** 101813/101814(雷尔,`:1349`),
@@ -129,7 +134,7 @@ inline constexpr double kCriticalDamageDefFactor = 0.5;
 //    (光/镜/守/反弹 = L4 状态系统),输入面远大于暴击 ⇒ 排在状态系统之后。
 //    这两个常量目前无人调用,先留着,不代表已覆盖。
 inline constexpr double kCounterDamageRate = 0.75;
-inline constexpr int    kCounterDamageMin  = 1;
+inline constexpr int kCounterDamageMin = 1;
 
 // ── 打飞 / 究极一击(§3.8,批次 A.4)──────────────────────────────
 //
@@ -149,8 +154,8 @@ inline constexpr int    kCounterDamageMin  = 1;
 //
 // ★ 溢出累加器(原 `CHAR_WORKULTIMATE`):**持久、跨回合累积**,打飞命中即清零
 //   (`:2081`)。落 `Combatant::ultimate_accumulator`,由 ApplyEvents 维护。
-inline constexpr double kKnockbackHpMultiplier = 1.2;  // maxhp × 1.2
-inline constexpr int    kKnockbackHpBonus      = 20;    // + 20
+inline constexpr double kKnockbackHpMultiplier = 1.2; // maxhp × 1.2
+inline constexpr int kKnockbackHpBonus = 20;          // + 20
 // ★ 免疫打飞:原版硬编码雷尔图号 101813/101814(`:2076`)⇒ IsUltimate=0。
 //   ⚠️ DR-BT11 裁定改数据驱动 ⇒ 判据落 `CombatModifiers.immune_knockback` 标志,
 //     不比对图号(与 immune_critical 同处、同理由)。此处图号仅作溯源注释,代码不用。
@@ -181,14 +186,14 @@ inline constexpr double kDexJitterRatio = 0.1;
 //      否则            → 1
 // ⚠️★ 且**等级 < 10 或非玩家一律 1 段** —— 少了这道会让所有敌人都可能多段。
 inline constexpr int kUnarmedMultihitMinLevel = 10;
-inline constexpr int kUnarmedLuckFactor  = 5;
-inline constexpr int kUnarmedLuckCap     = 25;
-inline constexpr int kUnarmedRollMax     = 1000;
-inline constexpr int kUnarmedThreshold10 = 10;   // → RAND(5,10) 段
-inline constexpr int kUnarmedThreshold3  = 30;   // → 3 段
-inline constexpr int kUnarmedThreshold2  = 70;   // → 2 段
-inline constexpr int kUnarmedBurstMin    = 5;
-inline constexpr int kUnarmedBurstMax    = 10;
+inline constexpr int kUnarmedLuckFactor = 5;
+inline constexpr int kUnarmedLuckCap = 25;
+inline constexpr int kUnarmedRollMax = 1000;
+inline constexpr int kUnarmedThreshold10 = 10; // → RAND(5,10) 段
+inline constexpr int kUnarmedThreshold3 = 30;  // → 3 段
+inline constexpr int kUnarmedThreshold2 = 70;  // → 2 段
+inline constexpr int kUnarmedBurstMin = 5;
+inline constexpr int kUnarmedBurstMax = 10;
 
 // ── 属性 ────────────────────────────────────────────────────────
 //
@@ -199,12 +204,13 @@ inline constexpr int kUnarmedBurstMax    = 10;
 //
 // ⇒ 本枚举**采用数组顺序**(与源码的 T_pow 一致),相克矩阵按本枚举重排后给出。
 //   照抄文档里那张表而不重排,会得到一个看起来对、算出来错的矩阵。
-enum class Element : std::uint8_t {
-  kEarth = 0,   // 地
-  kWater = 1,   // 水
-  kFire  = 2,   // 火
-  kWind  = 3,   // 风
-  kNone  = 4,   // 无(= max(0, 100 − Σ其余),不是独立配置项)
+enum class Element : std::uint8_t
+{
+	kEarth = 0, // 地
+	kWater = 1, // 水
+	kFire = 2,  // 火
+	kWind = 3,  // 风
+	kNone = 4,  // 无(= max(0, 100 − Σ其余),不是独立配置项)
 };
 inline constexpr int kElementCount = 5;
 
@@ -218,11 +224,11 @@ inline constexpr int kElementCount = 5;
 // ★ 因 Σatk = Σdef = 100,全无属性时系数为 1.0 ⇒ 量纲自洽。
 inline constexpr double kElementMatrix[kElementCount][kElementCount] = {
     // 守:      地     水     火     风     无
-    /* 攻 地 */ {1.0,  1.5,  1.0,  0.6,  1.5},
-    /* 攻 水 */ {0.6,  1.0,  1.5,  1.0,  1.5},
-    /* 攻 火 */ {1.0,  0.6,  1.0,  1.5,  1.5},
-    /* 攻 风 */ {1.5,  1.0,  0.6,  1.0,  1.5},
-    /* 攻 无 */ {0.6,  0.6,  0.6,  0.6,  1.0},
+    /* 攻 地 */ {1.0, 1.5, 1.0, 0.6, 1.5},
+    /* 攻 水 */ {0.6, 1.0, 1.5, 1.0, 1.5},
+    /* 攻 火 */ {1.0, 0.6, 1.0, 1.5, 1.5},
+    /* 攻 风 */ {1.5, 1.0, 0.6, 1.0, 1.5},
+    /* 攻 无 */ {0.6, 0.6, 0.6, 0.6, 1.0},
 };
 
 // 结果 = damage × Σ(攻方各属 × 守方各属 × 系数) / 10000
@@ -245,12 +251,13 @@ inline constexpr int kElementDivisor = 10000;
 //   与守方的比值翻倍 ⇒ **伤害整体 ×2,而且只在特定属性组合下出现**。
 //   这个 bug 在 2026-08-31 移植时真的发生了,被相克用例的手算基准接住
 //   (期望 150、实得 300)。⇒ 显式建枚举,不复用 Element。
-enum class FieldAttribute : std::uint8_t {
-  kNone  = 0,   // ★ 无属性场地 —— 与 Element::kEarth 同为 0,含义完全不同
-  kEarth = 1,
-  kWater = 2,
-  kFire  = 3,
-  kWind  = 4,
+enum class FieldAttribute : std::uint8_t
+{
+	kNone = 0, // ★ 无属性场地 —— 与 Element::kEarth 同为 0,含义完全不同
+	kEarth = 1,
+	kWater = 2,
+	kFire = 3,
+	kWind = 4,
 };
 
 // 场地属性:power = 0.5(默认)或 0.5 + 该属值·att_pow·0.0001·0.5
@@ -259,8 +266,16 @@ inline constexpr double kFieldPowBase = 0.5;
 
 // ── 武器类(反击相性表的维度)────────────────────────────────────
 // [8.0] 05-battle.md §3.5 的 CounterTbl 是 7 行 × 8 列。
-enum class WeaponClass : std::uint8_t {
-  kNone = 0, kClaw = 1, kAxe = 2, kRod = 3, kSpear = 4, kBow = 5, kThrow = 6, kOther = 7,
+enum class WeaponClass : std::uint8_t
+{
+	kNone = 0,
+	kClaw = 1,
+	kAxe = 2,
+	kRod = 3,
+	kSpear = 4,
+	kBow = 5,
+	kThrow = 6,
+	kOther = 7,
 };
 inline constexpr int kWeaponClassCount = 8;
 // ⚠️ 攻方只有 7 类(kOther 不作为攻方出现在原表里)—— 移植时须核对第 8 行的处置,
@@ -270,10 +285,10 @@ inline constexpr int kWeaponClassCount = 8;
 //
 // [8.0] 05-battle.md §2.4:`_MULTIPLAYER_` 在 8.0 为**关**,
 // SSRC80 连 #ifdef 都没有(硬编码 10/5/10)。客户端基线亦为关 ⇒ 双端一致。
-inline constexpr int kBattleEntryMax = 10;   // 每侧槽位
+inline constexpr int kBattleEntryMax = 10; // 每侧槽位
 inline constexpr int kBattlePlayerMax = 5;
-inline constexpr int kSideOffset = 10;       // 敌方槽号 = 10 + i
-inline constexpr int kSlotCount = kBattleEntryMax * 2;  // 20,== 就绪位图宽度
+inline constexpr int kSideOffset = 10;                 // 敌方槽号 = 10 + i
+inline constexpr int kSlotCount = kBattleEntryMax * 2; // 20,== 就绪位图宽度
 
 // ── 状态 ────────────────────────────────────────────────────────
 // DR-BT4:补齐到 44,同源生成。枚举真源在 idl/schema/domain/battle_status.proto,
@@ -295,11 +310,11 @@ inline constexpr int kBattleTimeLimitSeconds = 3600;
 //    escape_cnt = 2**,不是 05 §6.1 原文所说的 1。高幸运下 `95×2 > 100` 首次必逃。
 //    ⇒ 调用方传入的 escape_cnt 必须已含这一口径(= escape_count + 1,而 escape_count
 //      在喂快照前已 ++)。用例「逃跑:首次尝试 escape_cnt=2」钉住它。
-inline constexpr int kEscapeCoefLuck5 = 95;  // luck ≥ 5(:4295)
-inline constexpr int kEscapeCoefLuck4 = 60;  // luck = 4(:4298)
-inline constexpr int kEscapeCoefLuck3 = 50;  // luck = 3(:4301)
-inline constexpr int kEscapeCoefLuck2 = 40;  // luck = 2(:4304)
-inline constexpr int kEscapeCoefLuck1 = 30;  // luck = 1(:4307)
+inline constexpr int kEscapeCoefLuck5 = 95; // luck ≥ 5(:4295)
+inline constexpr int kEscapeCoefLuck4 = 60; // luck = 4(:4298)
+inline constexpr int kEscapeCoefLuck3 = 50; // luck = 3(:4301)
+inline constexpr int kEscapeCoefLuck2 = 40; // luck = 2(:4304)
+inline constexpr int kEscapeCoefLuck1 = 30; // luck = 1(:4307)
 
 // ΔLv 惩罚系数:中低档 Esc −= kEscapeLevelPenalty × (enemyAvgLevel − myLevel)(:4298)。
 inline constexpr int kEscapeLevelPenalty = 2;
@@ -332,19 +347,19 @@ inline constexpr int kEscapeNoEnemyRate = 100;
 //     WorkGet  = (Df_HpPer + Df_Level + Df_Dex + (难度 + 攻方幸运)) × 攻方魅力 / 50
 //     WorkGet += 捕获率提升;  目标睡眠 +15;  min(WorkGet, 99)
 //     成功:RAND(1,100) < WorkGet                       ★ 严格小于,同逃跑
-inline constexpr double kCaptureCharmDivisor = 50.0;  // 魅力 50 ⇒ 系数 1(:3852)
-inline constexpr double kCaptureLevelDivisor = 2.0;   // ★ 浮点,不是整数(见上)
-inline constexpr double kCaptureDexDivisor   = 15.0;  // ★ 浮点,不是整数
-inline constexpr double kCaptureHpBase       = 10.0;  // Df_HpPer 的常数项(:3852)
-inline constexpr int    kCaptureSleepBonus   = 15;    // 目标睡眠 +15(:3859-3861)
-inline constexpr int    kCaptureMaxRate      = 99;    // 上限 99%(:3863)
+inline constexpr double kCaptureCharmDivisor = 50.0; // 魅力 50 ⇒ 系数 1(:3852)
+inline constexpr double kCaptureLevelDivisor = 2.0;  // ★ 浮点,不是整数(见上)
+inline constexpr double kCaptureDexDivisor = 15.0;   // ★ 浮点,不是整数
+inline constexpr double kCaptureHpBase = 10.0;       // Df_HpPer 的常数项(:3852)
+inline constexpr int kCaptureSleepBonus = 15;        // 目标睡眠 +15(:3859-3861)
+inline constexpr int kCaptureMaxRate = 99;           // 上限 99%(:3863)
 // ★ `Df_Ge` 的兜底初值(:3819 `Df_Ge = 30`)—— 仅当敌人模板读不到难度时用。
 //   1.5 无敌人模板 ⇒ 调用方按此兜底(见 world.cpp)。
-inline constexpr int    kCaptureDifficultyDefault = 30;
+inline constexpr int kCaptureDifficultyDefault = 30;
 
 // ★ 等级门(`:3834`):`myLv + 5 < targetLv` 直接失败。5 是硬编码的等级容差。
-inline constexpr int    kCaptureLevelGate = 5;
+inline constexpr int kCaptureLevelGate = 5;
 
-}  // namespace SA::Rules
+} // namespace SA::Rules
 
-#endif  // __SA_Constants_H__
+#endif // __SA_Constants_H__

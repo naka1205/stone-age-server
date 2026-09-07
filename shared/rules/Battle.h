@@ -32,16 +32,18 @@
 #include "rules/Config.h"
 #include "rules/RandomSource.h"
 
-namespace SA::Rules {
+namespace SA::Rules
+{
 
 // 本回合各槽的指令。
 //
 // ⚠️ 指令的**合法性校验发生在调用之前**(05 §1.5:「已通过合法性校验」)。
 //    L3 不做鉴权、不判「这个技能你学过没」—— 那需要读角色的技能表,
 //    会把 L3 的输入面撑大到整个角色模型。
-struct TurnCommands {
-  SA::Domain::BattleCommand commands[kSlotCount]{};
-  bool present[kSlotCount]{};   // 该槽本回合是否有指令(敌方由 AI 填,视为齐备)
+struct TurnCommands
+{
+	SA::Domain::BattleCommand commands[kSlotCount]{};
+	bool present[kSlotCount]{}; // 该槽本回合是否有指令(敌方由 AI 填,视为齐备)
 };
 
 // ── DR-BT5:唯一的「能否行动」判定 ─────────────────────────────
@@ -60,7 +62,7 @@ struct TurnCommands {
 //    正确做法不在"上行拒不拒绝"里选,而是置灰 + 告知原因。
 //
 // 返回 CANNOT_ACT_NONE 表示可行动。
-SA::Domain::CannotActReason checkCanAct(const Combatant& c) noexcept;
+SA::Domain::CannotActReason checkCanAct(const Combatant &c) noexcept;
 
 // ── 回合结算 ──────────────────────────────────────────────────
 //
@@ -102,11 +104,11 @@ SA::Domain::CannotActReason checkCanAct(const Combatant& c) noexcept;
 //      而 `00` §0 已认下 ③ 层不可自证,用例集是**唯一**补偿手段,基线错了补偿反成负资产。
 //    ⇒ 正确处置是**回到 `battle_event.c` 补齐这两处的取数入口后再实现**,
 //      已登记为 `01` §13 欠债 1 的子项。
-bool resolveTurn(const BattleField& field,
-                 const TurnCommands& commands,
-                 const RulesConfig& config,
-                 Random& rng,
-                 SA::Domain::BattleEvents& out) noexcept;
+bool resolveTurn(const BattleField &field,
+                 const TurnCommands &commands,
+                 const RulesConfig &config,
+                 Random &rng,
+                 SA::Domain::BattleEvents &out) noexcept;
 
 // ── 调度子步骤(供上层与测试直接调用)──────────────────────────
 
@@ -117,9 +119,9 @@ bool resolveTurn(const BattleField& field,
 //
 // ⚠️ 批次 0.5 只实现**默认档**(`dex −= RAND(0, 0.1·quick)`)。其余 8 档绑在
 //    尚未接入的指令上,接入时在本函数内按 `kind` 分档,不要散到调用方。
-std::int32_t computeActionDex(const Combatant& c,
-                              const SA::Domain::BattleCommand& command,
-                              Random& rng) noexcept;
+std::int32_t computeActionDex(const Combatant &c,
+                              const SA::Domain::BattleCommand &command,
+                              Random &rng) noexcept;
 
 // 计算本回合行动顺序,把槽号按先后写进 `order`,返回参与行动的单位数。
 //
@@ -128,24 +130,24 @@ std::int32_t computeActionDex(const Combatant& c,
 //    (`00` §10.2 六项永久不可判定之一)。
 //    ✅ DR-BT8 裁定 = **显式定义为「按入场位次」** ⇒ 本函数用**稳定**排序,
 //      同键时保持槽号升序。⚠️ 不可换成 `std::sort` —— 它不保证稳定。
-int buildActionOrder(const BattleField& field,
-                     const TurnCommands& commands,
-                     Random& rng,
+int buildActionOrder(const BattleField &field,
+                     const TurnCommands &commands,
+                     Random &rng,
                      std::uint8_t (&order)[kSlotCount]) noexcept;
 
 // 本次攻击的段数(§3.9)。★ DR-BT1:空手多段**各段全额**(`gDamageDiv` 保持 1.0)。
 //
 // ⚠️ 空手分档的两道前置缺一不可:**等级 ≥ 10** 且 **是玩家**,否则恒为 1 段。
-int rollAttackCount(const Combatant& attacker,
-                    const RulesConfig& config,
-                    Random& rng) noexcept;
+int rollAttackCount(const Combatant &attacker,
+                    const RulesConfig &config,
+                    Random &rng) noexcept;
 
 // 防御减伤系数(§3.5)。★ **不是固定系数,是 RAND(1,100) 分六档**,
 // 期望 ≈ 0.155 且 **25% 概率完全免伤**。
 //
 // ⚠️ 调用方须自行确认触发条件(守方指令 = 防御 **且** 混乱值 ≤ 0);
 //    本函数只负责抽档,不判条件 —— 判条件要读指令,会把它的入参撑大。
-double rollGuardFactor(Random& rng) noexcept;
+double rollGuardFactor(Random &rng) noexcept;
 
 // 骑宠伤害分摊(§3.6)。★ **DR-BT2 = 修正**,不是照抄。
 //
@@ -154,9 +156,10 @@ double rollGuardFactor(Random& rng) noexcept;
 //     反向惩罚「培养骑宠」这一核心养成路径。
 // ✅ 修正后:分子改 `myDef`(防御高者多扛)、去掉两处 `+1`(无损分摊)
 //   ⇒ `player + pet` 恒等于 `damage`(IDL `Damage` 注释已按此写)。
-struct RideSplit {
-  std::int32_t player = 0;
-  std::int32_t pet    = 0;
+struct RideSplit
+{
+	std::int32_t player = 0;
+	std::int32_t pet = 0;
 };
 RideSplit splitRideDamage(std::int32_t damage,
                           std::int32_t my_defense,
@@ -187,8 +190,8 @@ bool rollEscape(bool is_pvp,
                 int my_level,
                 int enemy_level_sum,
                 int enemy_alive_count,
-                Random& rng,
-                int* out_percent = nullptr) noexcept;
+                Random &rng,
+                int *out_percent = nullptr) noexcept;
 
 // 捕获判定(§6.2)。1:1 移植 `BATTLE_CaptureCheck`(`battle_event.c:3806`)。
 // true = 捕获成功。
@@ -224,8 +227,8 @@ bool rollCapture(int my_level, int target_level,
                  int capture_difficulty,
                  int capture_bonus,
                  bool target_asleep,
-                 Random& rng,
-                 int* out_percent = nullptr) noexcept;
+                 Random &rng,
+                 int *out_percent = nullptr) noexcept;
 
 // ── 供上层与测试直接调用的子步骤 ──────────────────────────────
 //
@@ -239,9 +242,9 @@ bool rollCapture(int my_level, int target_level,
 //    乘进攻方属性向量,再调返回 **int** 的 `BATTLE_AttrCalc`
 //    ⇒ 链路上有**三次整数截断**。改成系数形式数学上等价,但截断位置变了
 //    ⇒ 与原版逐位不同,可回放性失效。**形状也是公式的一部分。**
-std::int32_t applyElementMatrix(const BattleField& field,
-                                const Combatant& attacker,
-                                const Combatant& defender,
+std::int32_t applyElementMatrix(const BattleField &field,
+                                const Combatant &attacker,
+                                const Combatant &defender,
                                 std::int32_t damage) noexcept;
 
 // 四属性相克系数 —— ⚠️ **纯展示/测试用,结算路径不得调用。**
@@ -249,7 +252,7 @@ std::int32_t applyElementMatrix(const BattleField& field,
 // 它没有 `ApplyElementMatrix` 的三次截断,两者只在数学上等价、逐位不等价。
 // 保留它是因为「量纲自洽」这条性质(Σatk = Σdef = 100 ⇒ 全无属性时系数 1.0)
 // 值得被独立断言;拿它去算伤害就复活了「同一语义两份实现」这个 bug 类。
-double elementCoefficient(const Combatant& attacker, const Combatant& defender) noexcept;
+double elementCoefficient(const Combatant &attacker, const Combatant &defender) noexcept;
 
 // 伤害主公式(§3.1 七步)。
 //
@@ -273,11 +276,11 @@ double elementCoefficient(const Combatant& attacker, const Combatant& defender) 
 //
 // ⚠️ **批次 0(普攻链路)的三处有意空缺**,均在实现处就地记明、非遗漏:
 //   四属结界 · 附加伤害/减免 · 「舍己」忽略装备 —— 三者都属职业/宠物技能链路。
-std::int32_t computeDamage(const BattleField& field,
-                           const Combatant& attacker,
-                           const Combatant& defender,
-                           const RulesConfig& config,
-                           Random& rng) noexcept;
+std::int32_t computeDamage(const BattleField &field,
+                           const Combatant &attacker,
+                           const Combatant &defender,
+                           const RulesConfig &config,
+                           Random &rng) noexcept;
 
 // 回避判定。true = 已闪避。
 //
@@ -289,12 +292,12 @@ std::int32_t computeDamage(const BattleField& field,
 // ⚠️★ 原版在闪避成功时嵌了 `PROFESSION_SKILL_LVEVEL_UP` 副作用
 //    (`battle_event.c:899`)—— 正是四步改造第②步要剥离的典型。
 //    本函数**只返回判定结果**,技能升级由调用方按事件处理。
-bool rollDodge(const Combatant& attacker,
-               const Combatant& defender,
+bool rollDodge(const Combatant &attacker,
+               const Combatant &defender,
                bool defender_guarding,
                bool defender_casting_spell,
-               const RulesConfig& config,
-               Random& rng) noexcept;
+               const RulesConfig &config,
+               Random &rng) noexcept;
 
 // 暴击判定(§3.3,批次 A.3)。true = 本次命中为暴击。
 //
@@ -308,20 +311,20 @@ bool rollDodge(const Combatant& attacker,
 //    ⚠️ 暗月狂狼的 `perCri×1.3` + 攻/敏各 +20% 也是世界写(属宠技,B 批次),不在此。
 //
 // ★ 类型跨界(敌→宠 / 非玩→玩)时分母从 0.09 暴增到 10.0 且不取平方根 ⇒ 暴击率极低。
-bool rollCritical(const Combatant& attacker,
-                  const Combatant& defender,
-                  Random& rng) noexcept;
+bool rollCritical(const Combatant &attacker,
+                  const Combatant &defender,
+                  Random &rng) noexcept;
 
 // 暴击伤害:`ComputeDamage + 守方原始防御 × (LVatt / LVdef) × 0.5`。[8.0] `:1419`
 //
 // ⚠️★ **持弓时暴击不吃伤害加成**(`:1594` `gWeponType != ITEM_BOW`)—— 那一路只置
 //    暴击标志、伤害仍走普通 `ComputeDamage`。该分支由调用方按 `mods.wielding_bow`
 //    决定走哪个函数,本函数只算"加成后"的值。
-std::int32_t computeCriticalDamage(const BattleField& field,
-                                   const Combatant& attacker,
-                                   const Combatant& defender,
-                                   const RulesConfig& config,
-                                   Random& rng) noexcept;
+std::int32_t computeCriticalDamage(const BattleField &field,
+                                   const Combatant &attacker,
+                                   const Combatant &defender,
+                                   const RulesConfig &config,
+                                   Random &rng) noexcept;
 
 // 打飞判定(§3.8,批次 A.4)。1:1 移植 `BATTLE_DamageSub` 的打飞段(`:2060-2081`)。
 //
@@ -338,18 +341,19 @@ std::int32_t computeCriticalDamage(const BattleField& field,
 //    且不动累加器(原版 `:2076` 命中即 `IsUltimate=0`,在累加之后覆盖结果)。
 //    ★ 但**累加仍要发生**(原版是先累加、再按图号清零 IsUltimate),
 //      故 out_accumulator 仍返回累加后的值 —— 逐位照源码顺序。
-enum class KnockbackKind : std::uint8_t {
-  kNone        = 0,   // 未打飞
-  kAccumulated = 1,   // 累积打飞(原 IsUltimate=1)
-  kOneShot     = 2,   // 一击打飞(原 IsUltimate=2)
+enum class KnockbackKind : std::uint8_t
+{
+	kNone = 0,        // 未打飞
+	kAccumulated = 1, // 累积打飞(原 IsUltimate=1)
+	kOneShot = 2,     // 一击打飞(原 IsUltimate=2)
 };
 KnockbackKind rollKnockback(std::int32_t damage,
                             std::int32_t overflow,
                             std::int32_t max_hp,
                             std::int32_t accumulator,
                             bool immune_knockback,
-                            std::int32_t* out_accumulator) noexcept;
+                            std::int32_t *out_accumulator) noexcept;
 
-}  // namespace SA::Rules
+} // namespace SA::Rules
 
-#endif  // __SA_Battle_H__
+#endif // __SA_Battle_H__

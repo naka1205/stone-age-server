@@ -35,7 +35,14 @@ using namespace SA;
 //   两份都错成同一个样子的概率极低;任何一侧被改动都会被抓住。
 
 // 原表列序:无 火 水 地 风
-enum DocIdx { kDocNone = 0, kDocFire = 1, kDocWater = 2, kDocEarth = 3, kDocWind = 4 };
+enum DocIdx
+{
+	kDocNone = 0,
+	kDocFire = 1,
+	kDocWater = 2,
+	kDocEarth = 3,
+	kDocWind = 4
+};
 
 // 原表行序:火 水 地 风 无
 static constexpr double kDocMatrix[5][5] = {
@@ -46,189 +53,223 @@ static constexpr double kDocMatrix[5][5] = {
     /* 攻 无 */ {1.0, 0.6, 0.6, 0.6, 0.6},
 };
 static constexpr int kDocRowOf[5] = {
-    /* 攻 火 */ 0, /* 攻 水 */ 1, /* 攻 地 */ 2, /* 攻 风 */ 3, /* 攻 无 */ 4,
+    /* 攻 火 */ 0,
+    /* 攻 水 */ 1,
+    /* 攻 地 */ 2,
+    /* 攻 风 */ 3,
+    /* 攻 无 */ 4,
 };
 
 // Element(地=0 水=1 火=2 风=3 无=4) → 原表的行下标 / 列下标
 static constexpr int kElemToDocRow[5] = {
-    kDocRowOf[2],  // 地 → 原表第 3 行
-    kDocRowOf[1],  // 水 → 原表第 2 行
-    kDocRowOf[0],  // 火 → 原表第 1 行
-    kDocRowOf[3],  // 风 → 原表第 4 行
-    kDocRowOf[4],  // 无 → 原表第 5 行
+    kDocRowOf[2], // 地 → 原表第 3 行
+    kDocRowOf[1], // 水 → 原表第 2 行
+    kDocRowOf[0], // 火 → 原表第 1 行
+    kDocRowOf[3], // 风 → 原表第 4 行
+    kDocRowOf[4], // 无 → 原表第 5 行
 };
 static constexpr int kElemToDocCol[5] = {
-    kDocEarth, kDocWater, kDocFire, kDocWind, kDocNone,
+    kDocEarth,
+    kDocWater,
+    kDocFire,
+    kDocWind,
+    kDocNone,
 };
 
-static void checkElementMatrix() {
-  for (int atk = 0; atk < Rules::kElementCount; ++atk) {
-    for (int def = 0; def < Rules::kElementCount; ++def) {
-      const double got = Rules::kElementMatrix[atk][def];
-      const double want = kDocMatrix[kElemToDocRow[atk]][kElemToDocCol[def]];
-      if (got != want) {
-        std::printf("★ 相克矩阵重排错误 [攻%d][守%d]: 得 %.1f 应 %.1f\n",
-                    atk, def, got, want);
-        assert(false && "相克矩阵与 05-battle.md §3.4 原表不符");
-      }
-    }
-  }
-  // 量纲自洽:全无属性时系数应为 1.0(§3.4「因 Σatk = Σdef = 100」)
-  assert(Rules::kElementMatrix[4][4] == 1.0);
+static void checkElementMatrix()
+{
+	for (int atk = 0; atk < Rules::kElementCount; ++atk)
+	{
+		for (int def = 0; def < Rules::kElementCount; ++def)
+		{
+			const double got = Rules::kElementMatrix[atk][def];
+			const double want = kDocMatrix[kElemToDocRow[atk]][kElemToDocCol[def]];
+			if (got != want)
+			{
+				std::printf("★ 相克矩阵重排错误 [攻%d][守%d]: 得 %.1f 应 %.1f\n",
+				            atk, def, got, want);
+				assert(false && "相克矩阵与 05-battle.md §3.4 原表不符");
+			}
+		}
+	}
+	// 量纲自洽:全无属性时系数应为 1.0(§3.4「因 Σatk = Σdef = 100」)
+	assert(Rules::kElementMatrix[4][4] == 1.0);
 }
 
 // ── ⑤ M10:句柄带 generation ──────────────────────────────────
 static_assert(std::is_trivially_copyable_v<Model::EntityHandle>);
 static_assert(sizeof(Model::EntityHandle) == 8);
 
-static void checkHandle() {
-  assert(!Model::kNullHandle.valid());
+static void checkHandle()
+{
+	assert(!Model::kNullHandle.valid());
 
-  // 同一个池槽位被复用:index 相同、generation 递增 ⇒ 旧句柄必须不等于新句柄。
-  // ★ 这正是 17 §7.2 那个真实故障(fdid 归零后迟到应答命中新连接)的进程内对应物。
-  const Model::EntityHandle old_ref{42, 1};
-  const Model::EntityHandle reused{42, 2};
-  assert(old_ref != reused);
-  assert(old_ref.valid() && reused.valid());
+	// 同一个池槽位被复用:index 相同、generation 递增 ⇒ 旧句柄必须不等于新句柄。
+	// ★ 这正是 17 §7.2 那个真实故障(fdid 归零后迟到应答命中新连接)的进程内对应物。
+	const Model::EntityHandle old_ref{42, 1};
+	const Model::EntityHandle reused{42, 2};
+	assert(old_ref != reused);
+	assert(old_ref.valid() && reused.valid());
 }
 
 // ── ③ 随机源可回放 ───────────────────────────────────────────
-static void checkReplayable() {
-  // 同种子 + 同调用序列 ⇒ 逐位相同。这是黄金用例集成立的前提(05 §1.5)。
-  Rules::SeededRandom a(20260831u);
-  Rules::SeededRandom b(20260831u);
-  for (int i = 0; i < 1000; ++i) {
-    assert(a.rand(0, 100) == b.rand(0, 100));
-    assert(a.randMod(37) == b.randMod(37));
-  }
+static void checkReplayable()
+{
+	// 同种子 + 同调用序列 ⇒ 逐位相同。这是黄金用例集成立的前提(05 §1.5)。
+	Rules::SeededRandom a(20260831u);
+	Rules::SeededRandom b(20260831u);
+	for (int i = 0; i < 1000; ++i)
+	{
+		assert(a.rand(0, 100) == b.rand(0, 100));
+		assert(a.randMod(37) == b.randMod(37));
+	}
 
-  // 不同种子应给出不同序列(否则种子没起作用)。
-  Rules::SeededRandom c(1u), d(2u);
-  bool differs = false;
-  for (int i = 0; i < 64 && !differs; ++i) {
-    if (c.rand(0, 1000000) != d.rand(0, 1000000)) differs = true;
-  }
-  assert(differs);
+	// 不同种子应给出不同序列(否则种子没起作用)。
+	Rules::SeededRandom c(1u), d(2u);
+	bool differs = false;
+	for (int i = 0; i < 64 && !differs; ++i)
+	{
+		if (c.rand(0, 1000000) != d.rand(0, 1000000))
+			differs = true;
+	}
+	assert(differs);
 
-  // Rand 是**闭区间** [lo, hi] —— 原版 RAND 语义(§3.1 第三步「只能造成 0 或 1」)。
-  Rules::SeededRandom e(7u);
-  bool saw_lo = false, saw_hi = false;
-  for (int i = 0; i < 512; ++i) {
-    const int v = e.rand(0, 1);
-    assert(v == 0 || v == 1);
-    if (v == 0) saw_lo = true;
-    if (v == 1) saw_hi = true;
-  }
-  assert(saw_lo && saw_hi && "RAND(0,1) 必须能取到两端");
+	// Rand 是**闭区间** [lo, hi] —— 原版 RAND 语义(§3.1 第三步「只能造成 0 或 1」)。
+	Rules::SeededRandom e(7u);
+	bool saw_lo = false, saw_hi = false;
+	for (int i = 0; i < 512; ++i)
+	{
+		const int v = e.rand(0, 1);
+		assert(v == 0 || v == 1);
+		if (v == 0)
+			saw_lo = true;
+		if (v == 1)
+			saw_hi = true;
+	}
+	assert(saw_lo && saw_hi && "RAND(0,1) 必须能取到两端");
 
-  // 退化输入不得越界。
-  Rules::SeededRandom f(9u);
-  assert(f.rand(5, 5) == 5);
-  assert(f.randMod(0) == 0);
-  assert(f.randMod(-3) == 0);
+	// 退化输入不得越界。
+	Rules::SeededRandom f(9u);
+	assert(f.rand(5, 5) == 5);
+	assert(f.randMod(0) == 0);
+	assert(f.randMod(-3) == 0);
 
-  // Random 是可注入的抽象:通过基类引用调用应得到同样的序列。
-  Rules::SeededRandom g(123u);
-  Rules::Random& via_base = g;
-  Rules::SeededRandom h(123u);
-  for (int i = 0; i < 100; ++i) assert(via_base.rand(1, 9) == h.rand(1, 9));
+	// Random 是可注入的抽象:通过基类引用调用应得到同样的序列。
+	Rules::SeededRandom g(123u);
+	Rules::Random &via_base = g;
+	Rules::SeededRandom h(123u);
+	for (int i = 0; i < 100; ++i)
+		assert(via_base.rand(1, 9) == h.rand(1, 9));
 }
 
 // ── 战场快照的形状 ───────────────────────────────────────────
-static void checkBattleField() {
-  static_assert(Rules::kSlotCount == 20, "2 side × BATTLE_ENTRY_MAX(10)，== 就绪位图宽度");
-  static_assert(std::is_trivially_copyable_v<Rules::Combatant>);
-  static_assert(std::is_trivially_copyable_v<Rules::BattleField>);
+static void checkBattleField()
+{
+	static_assert(Rules::kSlotCount == 20, "2 side × BATTLE_ENTRY_MAX(10)，== 就绪位图宽度");
+	static_assert(std::is_trivially_copyable_v<Rules::Combatant>);
+	static_assert(std::is_trivially_copyable_v<Rules::BattleField>);
 
-  Rules::BattleField field{};
-  field.battle_id = 1;
-  field.turn = 1;
+	Rules::BattleField field{};
+	field.battle_id = 1;
+	field.turn = 1;
 
-  Rules::Combatant& me = field.at(0);
-  me.occupied = true;
-  me.kind = Rules::CombatantKind::kPlayer;
-  me.slot = 0;
-  me.hp = 300; me.max_hp = 300;
-  me.attack = 120; me.defense = 80; me.quick = 40; me.luck = 25;
-  // 四属:地水火风。Σ = 60 ⇒ 无属性余量 = 40
-  me.elements[0] = 30; me.elements[1] = 10; me.elements[2] = 20; me.elements[3] = 0;
-  assert(me.noneElement() == 40);
+	Rules::Combatant &me = field.at(0);
+	me.occupied = true;
+	me.kind = Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.hp = 300;
+	me.max_hp = 300;
+	me.attack = 120;
+	me.defense = 80;
+	me.quick = 40;
+	me.luck = 25;
+	// 四属:地水火风。Σ = 60 ⇒ 无属性余量 = 40
+	me.elements[0] = 30;
+	me.elements[1] = 10;
+	me.elements[2] = 20;
+	me.elements[3] = 0;
+	assert(me.noneElement() == 40);
 
-  Rules::Combatant& foe = field.at(Rules::kSideOffset);
-  foe.occupied = true;
-  foe.kind = Rules::CombatantKind::kEnemy;
-  foe.slot = static_cast<std::uint8_t>(Rules::kSideOffset);
-  foe.hp = 200; foe.max_hp = 200;
-  // 满火属 ⇒ 无属性余量为 0(上限 100)
-  foe.elements[2] = Rules::kAttrMax;
-  assert(foe.noneElement() == 0);
-  assert(foe.isEnemy() && !foe.isPlayer());
+	Rules::Combatant &foe = field.at(Rules::kSideOffset);
+	foe.occupied = true;
+	foe.kind = Rules::CombatantKind::kEnemy;
+	foe.slot = static_cast<std::uint8_t>(Rules::kSideOffset);
+	foe.hp = 200;
+	foe.max_hp = 200;
+	// 满火属 ⇒ 无属性余量为 0(上限 100)
+	foe.elements[2] = Rules::kAttrMax;
+	assert(foe.noneElement() == 0);
+	assert(foe.isEnemy() && !foe.isPlayer());
 
-  // 阵营划分:0..9 vs 10..19
-  assert(Rules::BattleField::sameSide(0, 9));
-  assert(Rules::BattleField::sameSide(10, 19));
-  assert(!Rules::BattleField::sameSide(9, 10));
+	// 阵营划分:0..9 vs 10..19
+	assert(Rules::BattleField::sameSide(0, 9));
+	assert(Rules::BattleField::sameSide(10, 19));
+	assert(!Rules::BattleField::sameSide(9, 10));
 
-  // 超出四属上限时余量钳到 0,不得为负。
-  Rules::Combatant over{};
-  over.elements[0] = 80; over.elements[1] = 80;
-  assert(over.noneElement() == 0);
+	// 超出四属上限时余量钳到 0,不得为负。
+	Rules::Combatant over{};
+	over.elements[0] = 80;
+	over.elements[1] = 80;
+	assert(over.noneElement() == 0);
 }
 
 // ── ④ 与 IDL domain/ 类型的互操作 ────────────────────────────
-static void checkIdlInterop() {
-  // shared/rules 的契约以 IDL 事件类型为输出 —— 这是 D2 的接口面(02 §9)。
-  Domain::BattleEvents out{};
-  out.battle_id = 99;
-  out.turn = 1;
+static void checkIdlInterop()
+{
+	// shared/rules 的契约以 IDL 事件类型为输出 —— 这是 D2 的接口面(02 §9)。
+	Domain::BattleEvents out{};
+	out.battle_id = 99;
+	out.turn = 1;
 
-  Domain::BattleEvent e{};
-  e.body_kind = Domain::BattleEvent::BodyKind::DAMAGE;
-  e.body.damage.target = static_cast<std::uint32_t>(Rules::kSideOffset);
-  e.body.damage.hp_delta = -25;
-  out.events.push_back(e);
-  assert(out.events.size() == 1);
+	Domain::BattleEvent e{};
+	e.body_kind = Domain::BattleEvent::BodyKind::DAMAGE;
+	e.body.damage.target = static_cast<std::uint32_t>(Rules::kSideOffset);
+	e.body.damage.hp_delta = -25;
+	out.events.push_back(e);
+	assert(out.events.size() == 1);
 
-  // DR-BT5 的 CannotActReason 来自 IDL,由 shared/rules 的 CheckCanAct 返回。
-  const Domain::CannotActReason ok = Domain::CannotActReason::CANNOT_ACT_NONE;
-  assert(ok == Domain::CannotActReason::CANNOT_ACT_NONE);
+	// DR-BT5 的 CannotActReason 来自 IDL,由 shared/rules 的 CheckCanAct 返回。
+	const Domain::CannotActReason ok = Domain::CannotActReason::CANNOT_ACT_NONE;
+	assert(ok == Domain::CannotActReason::CANNOT_ACT_NONE);
 
-  // 状态枚举容量与 constants.h 的记载一致(DR-BT4 补齐到 44)。
-  static_assert(Rules::kBattleStatusCount == 44);
-  assert(static_cast<int>(Domain::BattleStatus::BATTLE_ST_ICECRACK10) == 43);
+	// 状态枚举容量与 constants.h 的记载一致(DR-BT4 补齐到 44)。
+	static_assert(Rules::kBattleStatusCount == 44);
+	assert(static_cast<int>(Domain::BattleStatus::BATTLE_ST_ICECRACK10) == 43);
 
-  // TurnCommands 的槽宽与战场一致。
-  Rules::TurnCommands cmds{};
-  cmds.present[0] = true;
-  cmds.commands[0].battle_id = 99;
-  cmds.commands[0].turn = 1;
-  cmds.commands[0].command_kind = Domain::BattleCommand::CommandKind::ATTACK;
-  cmds.commands[0].command.attack.target = static_cast<std::uint32_t>(Rules::kSideOffset);
-  assert(cmds.present[0]);
+	// TurnCommands 的槽宽与战场一致。
+	Rules::TurnCommands cmds{};
+	cmds.present[0] = true;
+	cmds.commands[0].battle_id = 99;
+	cmds.commands[0].turn = 1;
+	cmds.commands[0].command_kind = Domain::BattleCommand::CommandKind::ATTACK;
+	cmds.commands[0].command.attack.target = static_cast<std::uint32_t>(Rules::kSideOffset);
+	assert(cmds.present[0]);
 }
 
 // ── 配置默认值:两个最容易写错的数 ────────────────────────────
-static void checkConfigDefaults() {
-  const Rules::RulesConfig cfg{};
-  // ★★ getDamageCalc() 兜底是 70 不是 100 —— 8.0 投产下全部物理伤害统一乘 0.70。
-  //    写成 100 会让全局伤害偏高 43%。
-  assert(cfg.damage_calc_percent == 70);
-  // DR-BT1 裁定照抄,默认 true。
-  assert(cfg.unarmed_multihit_full_damage);
-  // DR-DT1 裁定按设计意图(浮点),不复刻 atoi 截断。
-  assert(!cfg.replicate_atoi_truncation);
-  // DR-WM1 取 23;DR-WM2 取 10。
-  assert(cfg.sight_radius == 23);
-  assert(cfg.enemy_move_num == 10);
+static void checkConfigDefaults()
+{
+	const Rules::RulesConfig cfg{};
+	// ★★ getDamageCalc() 兜底是 70 不是 100 —— 8.0 投产下全部物理伤害统一乘 0.70。
+	//    写成 100 会让全局伤害偏高 43%。
+	assert(cfg.damage_calc_percent == 70);
+	// DR-BT1 裁定照抄,默认 true。
+	assert(cfg.unarmed_multihit_full_damage);
+	// DR-DT1 裁定按设计意图(浮点),不复刻 atoi 截断。
+	assert(!cfg.replicate_atoi_truncation);
+	// DR-WM1 取 23;DR-WM2 取 10。
+	assert(cfg.sight_radius == 23);
+	assert(cfg.enemy_move_num == 10);
 }
 
-int main() {
-  checkElementMatrix();
-  checkHandle();
-  checkReplayable();
-  checkBattleField();
-  checkIdlInterop();
-  checkConfigDefaults();
-  std::printf("OK  contract smoke: 相克矩阵/句柄/可回放/战场/IDL互操作/配置默认值\n");
-  return 0;
+int main()
+{
+	checkElementMatrix();
+	checkHandle();
+	checkReplayable();
+	checkBattleField();
+	checkIdlInterop();
+	checkConfigDefaults();
+	std::printf("OK  contract smoke: 相克矩阵/句柄/可回放/战场/IDL互操作/配置默认值\n");
+	return 0;
 }
