@@ -52,7 +52,7 @@ constexpr std::uint32_t kHeartbeat = 30000;
 #if defined(_WIN32)
 using RawSocket = SOCKET;
 constexpr RawSocket kBad = INVALID_SOCKET;
-void RawClose(RawSocket s) { ::closesocket(s); }
+void rawClose(RawSocket s) { ::closesocket(s); }
 #else
 using RawSocket = int;
 constexpr RawSocket kBad = -1;
@@ -95,7 +95,7 @@ class TestClient
 		if (rcvbuf_bytes > 0)
 		{
 #if defined(_WIN32)
-			::setsockopt(fd_, SOL_SOCKET, SO_RCVBUF,
+			::setsockopt(_fd, SOL_SOCKET, SO_RCVBUF,
 			             reinterpret_cast<const char *>(&rcvbuf_bytes),
 			             sizeof(rcvbuf_bytes));
 #else
@@ -115,7 +115,7 @@ class TestClient
 		}
 #if defined(_WIN32)
 		DWORD tv = 2000; // 毫秒
-		::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO,
+		::setsockopt(_fd, SOL_SOCKET, SO_RCVTIMEO,
 		             reinterpret_cast<const char *>(&tv), sizeof(tv));
 #else
 		timeval tv{};
@@ -131,7 +131,7 @@ class TestClient
 		while (sent < n)
 		{
 #if defined(_WIN32)
-			const int r = ::send(fd_, reinterpret_cast<const char *>(p) + sent,
+			const int r = ::send(_fd, reinterpret_cast<const char *>(p) + sent,
 			                     static_cast<int>(n - sent), 0);
 #else
 			const ssize_t r = ::send(_fd, p + sent, n - sent, 0);
@@ -156,7 +156,7 @@ class TestClient
 		while (out.size() < want)
 		{
 #if defined(_WIN32)
-			const int n = ::recv(fd_, reinterpret_cast<char *>(buf),
+			const int n = ::recv(_fd, reinterpret_cast<char *>(buf),
 			                     static_cast<int>(sizeof(buf)), 0);
 #else
 			const ssize_t n = ::recv(_fd, buf, sizeof(buf), 0);
@@ -176,7 +176,7 @@ class TestClient
 		for (;;)
 		{
 #if defined(_WIN32)
-			const int n = ::recv(fd_, reinterpret_cast<char *>(buf),
+			const int n = ::recv(_fd, reinterpret_cast<char *>(buf),
 			                     static_cast<int>(sizeof(buf)), 0);
 #else
 			const ssize_t n = ::recv(_fd, buf, sizeof(buf), 0);
