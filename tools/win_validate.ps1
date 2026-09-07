@@ -364,7 +364,7 @@ Section "6. ★ 断言防线反向验证(防「绿色的假测试」)"
 if ($SkipNegative) {
     Record "断言防线反向验证" $true "按 -SkipNegative 跳过"
 } else {
-    $target = Join-Path $ServerDir "shared\rules\constants.h"
+    $target = Join-Path $ServerDir "shared\rules\Constants.h"
     $backup = "$target.win_validate_backup"
     Copy-Item $target $backup -Force
     try {

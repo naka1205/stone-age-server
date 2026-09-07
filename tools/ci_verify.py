@@ -303,7 +303,7 @@ def negative_check(build, config):
           它的结果(产物干净了没)。⇒ 见 _restore_and_recheck():还原 → 重建整个目录
           → 复跑受影响的两条用例 → **断言它们回到绿**。
     """
-    target = REPO / "shared" / "rules" / "constants.h"
+    target = REPO / "shared" / "rules" / "Constants.h"
     backup = target.with_suffix(".h.ci_verify_backup")
     orig = target.read_text(encoding="utf-8")
 
