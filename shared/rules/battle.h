@@ -60,7 +60,7 @@ struct TurnCommands {
 //    正确做法不在"上行拒不拒绝"里选,而是置灰 + 告知原因。
 //
 // 返回 CANNOT_ACT_NONE 表示可行动。
-SA::Domain::CannotActReason CheckCanAct(const Combatant& c) noexcept;
+SA::Domain::CannotActReason checkCanAct(const Combatant& c) noexcept;
 
 // ── 回合结算 ──────────────────────────────────────────────────
 //
@@ -102,7 +102,7 @@ SA::Domain::CannotActReason CheckCanAct(const Combatant& c) noexcept;
 //      而 `00` §0 已认下 ③ 层不可自证,用例集是**唯一**补偿手段,基线错了补偿反成负资产。
 //    ⇒ 正确处置是**回到 `battle_event.c` 补齐这两处的取数入口后再实现**,
 //      已登记为 `01` §13 欠债 1 的子项。
-bool ResolveTurn(const BattleField& field,
+bool resolveTurn(const BattleField& field,
                  const TurnCommands& commands,
                  const RulesConfig& config,
                  Random& rng,
@@ -117,7 +117,7 @@ bool ResolveTurn(const BattleField& field,
 //
 // ⚠️ 批次 0.5 只实现**默认档**(`dex −= RAND(0, 0.1·quick)`)。其余 8 档绑在
 //    尚未接入的指令上,接入时在本函数内按 `kind` 分档,不要散到调用方。
-std::int32_t ComputeActionDex(const Combatant& c,
+std::int32_t computeActionDex(const Combatant& c,
                               const SA::Domain::BattleCommand& command,
                               Random& rng) noexcept;
 
@@ -128,7 +128,7 @@ std::int32_t ComputeActionDex(const Combatant& c,
 //    (`00` §10.2 六项永久不可判定之一)。
 //    ✅ DR-BT8 裁定 = **显式定义为「按入场位次」** ⇒ 本函数用**稳定**排序,
 //      同键时保持槽号升序。⚠️ 不可换成 `std::sort` —— 它不保证稳定。
-int BuildActionOrder(const BattleField& field,
+int buildActionOrder(const BattleField& field,
                      const TurnCommands& commands,
                      Random& rng,
                      std::uint8_t (&order)[kSlotCount]) noexcept;
@@ -136,7 +136,7 @@ int BuildActionOrder(const BattleField& field,
 // 本次攻击的段数(§3.9)。★ DR-BT1:空手多段**各段全额**(`gDamageDiv` 保持 1.0)。
 //
 // ⚠️ 空手分档的两道前置缺一不可:**等级 ≥ 10** 且 **是玩家**,否则恒为 1 段。
-int RollAttackCount(const Combatant& attacker,
+int rollAttackCount(const Combatant& attacker,
                     const RulesConfig& config,
                     Random& rng) noexcept;
 
@@ -145,7 +145,7 @@ int RollAttackCount(const Combatant& attacker,
 //
 // ⚠️ 调用方须自行确认触发条件(守方指令 = 防御 **且** 混乱值 ≤ 0);
 //    本函数只负责抽档,不判条件 —— 判条件要读指令,会把它的入参撑大。
-double RollGuardFactor(Random& rng) noexcept;
+double rollGuardFactor(Random& rng) noexcept;
 
 // 骑宠伤害分摊(§3.6)。★ **DR-BT2 = 修正**,不是照抄。
 //
@@ -158,7 +158,7 @@ struct RideSplit {
   std::int32_t player = 0;
   std::int32_t pet    = 0;
 };
-RideSplit SplitRideDamage(std::int32_t damage,
+RideSplit splitRideDamage(std::int32_t damage,
                           std::int32_t my_defense,
                           std::int32_t pet_defense) noexcept;
 
@@ -181,7 +181,7 @@ RideSplit SplitRideDamage(std::int32_t damage,
 //                        (`:4281-4282`,constants.h kEscapeAbioLevelPenalty);调用方算好。
 //   enemy_alive_count —— 敌方存活数;0 ⇒ Esc=100(`:4289-4291`)。
 //   out_percent       —— 回填判定用的 Esc 百分比(供展示/调试;可传 nullptr)。
-bool RollEscape(bool is_pvp,
+bool rollEscape(bool is_pvp,
                 int attacker_luck_tier,
                 int escape_cnt,
                 int my_level,
@@ -217,7 +217,7 @@ bool RollEscape(bool is_pvp,
 //   capture_bonus                  —— 攻方捕获率提升(原 WORKMODCAPTURE)。
 //   target_asleep                  —— 守方睡眠 ⇒ +15(原 WORKSLEEP > 0)。
 //   out_percent                    —— 回填 WorkGet 百分比(可传 nullptr)。
-bool RollCapture(int my_level, int target_level,
+bool rollCapture(int my_level, int target_level,
                  int my_dex, int target_dex,
                  int my_charm, int my_luck,
                  int target_hp, int target_max_hp,
@@ -239,7 +239,7 @@ bool RollCapture(int my_level, int target_level,
 //    乘进攻方属性向量,再调返回 **int** 的 `BATTLE_AttrCalc`
 //    ⇒ 链路上有**三次整数截断**。改成系数形式数学上等价,但截断位置变了
 //    ⇒ 与原版逐位不同,可回放性失效。**形状也是公式的一部分。**
-std::int32_t ApplyElementMatrix(const BattleField& field,
+std::int32_t applyElementMatrix(const BattleField& field,
                                 const Combatant& attacker,
                                 const Combatant& defender,
                                 std::int32_t damage) noexcept;
@@ -249,7 +249,7 @@ std::int32_t ApplyElementMatrix(const BattleField& field,
 // 它没有 `ApplyElementMatrix` 的三次截断,两者只在数学上等价、逐位不等价。
 // 保留它是因为「量纲自洽」这条性质(Σatk = Σdef = 100 ⇒ 全无属性时系数 1.0)
 // 值得被独立断言;拿它去算伤害就复活了「同一语义两份实现」这个 bug 类。
-double ElementCoefficient(const Combatant& attacker, const Combatant& defender) noexcept;
+double elementCoefficient(const Combatant& attacker, const Combatant& defender) noexcept;
 
 // 伤害主公式(§3.1 七步)。
 //
@@ -273,7 +273,7 @@ double ElementCoefficient(const Combatant& attacker, const Combatant& defender) 
 //
 // ⚠️ **批次 0(普攻链路)的三处有意空缺**,均在实现处就地记明、非遗漏:
 //   四属结界 · 附加伤害/减免 · 「舍己」忽略装备 —— 三者都属职业/宠物技能链路。
-std::int32_t ComputeDamage(const BattleField& field,
+std::int32_t computeDamage(const BattleField& field,
                            const Combatant& attacker,
                            const Combatant& defender,
                            const RulesConfig& config,
@@ -289,7 +289,7 @@ std::int32_t ComputeDamage(const BattleField& field,
 // ⚠️★ 原版在闪避成功时嵌了 `PROFESSION_SKILL_LVEVEL_UP` 副作用
 //    (`battle_event.c:899`)—— 正是四步改造第②步要剥离的典型。
 //    本函数**只返回判定结果**,技能升级由调用方按事件处理。
-bool RollDodge(const Combatant& attacker,
+bool rollDodge(const Combatant& attacker,
                const Combatant& defender,
                bool defender_guarding,
                bool defender_casting_spell,
@@ -308,7 +308,7 @@ bool RollDodge(const Combatant& attacker,
 //    ⚠️ 暗月狂狼的 `perCri×1.3` + 攻/敏各 +20% 也是世界写(属宠技,B 批次),不在此。
 //
 // ★ 类型跨界(敌→宠 / 非玩→玩)时分母从 0.09 暴增到 10.0 且不取平方根 ⇒ 暴击率极低。
-bool RollCritical(const Combatant& attacker,
+bool rollCritical(const Combatant& attacker,
                   const Combatant& defender,
                   Random& rng) noexcept;
 
@@ -317,7 +317,7 @@ bool RollCritical(const Combatant& attacker,
 // ⚠️★ **持弓时暴击不吃伤害加成**(`:1594` `gWeponType != ITEM_BOW`)—— 那一路只置
 //    暴击标志、伤害仍走普通 `ComputeDamage`。该分支由调用方按 `mods.wielding_bow`
 //    决定走哪个函数,本函数只算"加成后"的值。
-std::int32_t ComputeCriticalDamage(const BattleField& field,
+std::int32_t computeCriticalDamage(const BattleField& field,
                                    const Combatant& attacker,
                                    const Combatant& defender,
                                    const RulesConfig& config,
@@ -343,7 +343,7 @@ enum class KnockbackKind : std::uint8_t {
   kAccumulated = 1,   // 累积打飞(原 IsUltimate=1)
   kOneShot     = 2,   // 一击打飞(原 IsUltimate=2)
 };
-KnockbackKind RollKnockback(std::int32_t damage,
+KnockbackKind rollKnockback(std::int32_t damage,
                             std::int32_t overflow,
                             std::int32_t max_hp,
                             std::int32_t accumulator,

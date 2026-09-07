@@ -21,7 +21,7 @@ namespace {
 //   那个产玩法随机数(必须双端逐位一致);这个只派生种子(不进 L3)。
 //   ⚠️ 不复用同一个算法是有意的 —— 若种子序列与玩法序列同源,
 //     "第 N 场战斗的种子"会与"某场战斗内第 N 次取数"产生可预测的关联。
-std::uint64_t SplitMix64(std::uint64_t& state) noexcept {
+std::uint64_t splitMix64(std::uint64_t& state) noexcept {
   state += 0x9E3779B97F4A7C15ull;
   std::uint64_t z = state;
   z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
@@ -29,7 +29,7 @@ std::uint64_t SplitMix64(std::uint64_t& state) noexcept {
   return z ^ (z >> 31);
 }
 
-std::uint64_t DeriveBootSeed() noexcept {
+std::uint64_t deriveBootSeed() noexcept {
   // ⚠️ 这是**唯一**允许用墙钟的地方,而且它不参与任何逻辑判断 ——
   //    只是要一个"每次启动都不同"的数。取到之后立刻被打进日志,
   //    从那一刻起整条随机序列就是确定的、可复现的。
@@ -37,18 +37,18 @@ std::uint64_t DeriveBootSeed() noexcept {
   const std::uint64_t ns = static_cast<std::uint64_t>(
       std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
   std::uint64_t s = ns;
-  return SplitMix64(s);
+  return splitMix64(s);
 }
 
 }  // namespace
 
 RandomSource::RandomSource(std::uint64_t master_seed) noexcept
-    : _masterSeed(master_seed != 0 ? master_seed : DeriveBootSeed()),
+    : _masterSeed(master_seed != 0 ? master_seed : deriveBootSeed()),
       _state(_masterSeed) {}
 
-std::uint64_t RandomSource::NextSeed() noexcept {
+std::uint64_t RandomSource::nextSeed() noexcept {
   ++_minted;
-  const std::uint64_t s = SplitMix64(_state);
+  const std::uint64_t s = splitMix64(_state);
   // ★ 0 是 SeededRandom 的哨兵(它会替换成一个固定常数)⇒ 让 0 永远不出现,
   //   否则"第 N 场战斗"与"某场种子恰为 0 的战斗"会共用同一条序列。
   return s != 0 ? s : 0x9E3779B97F4A7C15ull;

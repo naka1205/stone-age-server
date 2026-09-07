@@ -19,14 +19,14 @@ namespace {
 // 记录会话回调,免得用"有没有发出某条消息"去间接推断状态。
 class RecordingHost final : public SessionHost {
  public:
-  void OnSessionReady(SessionId id) override {
+  void onSessionReady(SessionId id) {
     ready.push_back(id);
   }
-  void OnBattleCommand(SessionId id, const SA::Domain::BattleCommand& cmd) override {
+  void onBattleCommand(SessionId id, const SA::Domain::BattleCommand& cmd) {
     commands.push_back(cmd);
     last_command_session = id;
   }
-  void OnSessionClosed(SessionId id) override { closed.push_back(id); }
+  void onSessionClosed(SessionId id) { closed.push_back(id); }
 
   std::vector<SessionId> ready;
   std::vector<SessionId> closed;
@@ -36,15 +36,15 @@ class RecordingHost final : public SessionHost {
 
 // 把一条消息编成帧(客户端视角)。
 template <typename M>
-std::vector<std::uint8_t> Framed(std::uint64_t corr_id, const M& msg) {
+std::vector<std::uint8_t> framed(std::uint64_t corr_id, const M& msg) {
   std::vector<std::uint8_t> out;
-  REQUIRE(EncodeFramed(corr_id, msg, out));
+  REQUIRE(encodeFramed(corr_id, msg, out));
   return out;
 }
 
 // 从一段出站字节里取第 index 条帧的信封。
 // ⚠️★ body **必须复制出来**,不能把 env.body 直接带出本函数。
-//    FrameReader::Next() 的契约写得很清楚:「*payload 指向内部缓冲,
+//    FrameReader::next() 的契约写得很清楚:「*payload 指向内部缓冲,
 //    在下一次 Push()/Pop() 之前有效」—— 而 r 是本函数的局部变量,
 //    一返回就析构 ⇒ env.body 成为悬垂指针。
 //
@@ -52,33 +52,33 @@ std::vector<std::uint8_t> Framed(std::uint64_t corr_id, const M& msg) {
 //   4 个用例读出的 body 字段**全是 0**,而 msg_id / corr_id 却对 ——
 //   因为后两者是值拷贝。症状看起来像「IDL 解码器把字段读丢了」,
 //   根因却在测试自己。⇒ 先怀疑测试,再怀疑被测对象。
-bool NthEnvelope(const std::vector<std::uint8_t>& bytes, std::size_t index,
+bool nthEnvelope(const std::vector<std::uint8_t>& bytes, std::size_t index,
                  EnvelopeView& out, std::vector<std::uint8_t>& body_storage) {
   FrameReader r;
-  if (!r.Push(bytes.data(), bytes.size())) return false;
+  if (!r.push(bytes.data(), bytes.size())) return false;
   for (std::size_t i = 0;; ++i) {
     const std::uint8_t* p = nullptr;
     std::uint32_t len = 0;
-    if (r.Next(&p, &len) != FrameStatus::kOk) return false;
+    if (r.next(&p, &len) != FrameStatus::kOk) return false;
     if (i == index) {
-      if (!DecodeEnvelope(p, len, out)) return false;
+      if (!decodeEnvelope(p, len, out)) return false;
       body_storage.assign(out.body, out.body + out.body_len);
       out.body = body_storage.data();
       return true;
     }
-    r.Pop();
+    r.pop();
   }
 }
 
-std::size_t FrameCount(const std::vector<std::uint8_t>& bytes) {
+std::size_t frameCount(const std::vector<std::uint8_t>& bytes) {
   FrameReader r;
-  if (!r.Push(bytes.data(), bytes.size())) return 0;
+  if (!r.push(bytes.data(), bytes.size())) return 0;
   std::size_t n = 0;
   for (;;) {
     const std::uint8_t* p = nullptr;
     std::uint32_t len = 0;
-    if (r.Next(&p, &len) != FrameStatus::kOk) return n;
-    r.Pop();
+    if (r.next(&p, &len) != FrameStatus::kOk) return n;
+    r.pop();
     ++n;
   }
 }
@@ -93,18 +93,18 @@ std::size_t FrameCount(const std::vector<std::uint8_t>& bytes) {
 TEST_CASE("成帧往返") {
   const std::uint8_t payload[] = {1, 2, 3, 4, 5};
   std::vector<std::uint8_t> wire;
-  REQUIRE(WriteFrame(payload, 5, wire));
+  REQUIRE(writeFrame(payload, 5, wire));
   CHECK(wire.size() == 4 + 5);
 
   FrameReader r;
-  REQUIRE(r.Push(wire.data(), wire.size()));
+  REQUIRE(r.push(wire.data(), wire.size()));
   const std::uint8_t* p = nullptr;
   std::uint32_t len = 0;
-  REQUIRE(r.Next(&p, &len) == FrameStatus::kOk);
+  REQUIRE(r.next(&p, &len) == FrameStatus::kOk);
   CHECK(len == 5);
   CHECK(std::memcmp(p, payload, 5) == 0);
-  r.Pop();
-  CHECK(r.Next(&p, &len) == FrameStatus::kNeedMore);
+  r.pop();
+  CHECK(r.next(&p, &len) == FrameStatus::kNeedMore);
 }
 
 // ★★ 这条是成帧真正要对付的东西:TCP 是**字节流**,
@@ -112,18 +112,18 @@ TEST_CASE("成帧往返") {
 TEST_CASE("逐字节喂入 —— 分片在任何位置都不能出错") {
   const std::uint8_t payload[] = {9, 8, 7, 6, 5, 4, 3, 2, 1, 0};
   std::vector<std::uint8_t> wire;
-  REQUIRE(WriteFrame(payload, 10, wire));
+  REQUIRE(writeFrame(payload, 10, wire));
 
   FrameReader r;
   const std::uint8_t* p = nullptr;
   std::uint32_t len = 0;
   for (std::size_t i = 0; i + 1 < wire.size(); ++i) {
-    REQUIRE(r.Push(&wire[i], 1));
+    REQUIRE(r.push(&wire[i], 1));
     // 最后一个字节到达之前,永远只能是 kNeedMore
-    REQUIRE(r.Next(&p, &len) == FrameStatus::kNeedMore);
+    REQUIRE(r.next(&p, &len) == FrameStatus::kNeedMore);
   }
-  REQUIRE(r.Push(&wire[wire.size() - 1], 1));
-  REQUIRE(r.Next(&p, &len) == FrameStatus::kOk);
+  REQUIRE(r.push(&wire[wire.size() - 1], 1));
+  REQUIRE(r.next(&p, &len) == FrameStatus::kOk);
   CHECK(len == 10);
   CHECK(std::memcmp(p, payload, 10) == 0);
 }
@@ -133,19 +133,19 @@ TEST_CASE("一次喂入多帧,逐条取出") {
   const std::uint8_t b[] = {2, 2};
   const std::uint8_t c[] = {3, 3, 3};
   std::vector<std::uint8_t> wire;
-  REQUIRE(WriteFrame(a, 1, wire));
-  REQUIRE(WriteFrame(b, 2, wire));
-  REQUIRE(WriteFrame(c, 3, wire));
+  REQUIRE(writeFrame(a, 1, wire));
+  REQUIRE(writeFrame(b, 2, wire));
+  REQUIRE(writeFrame(c, 3, wire));
 
   FrameReader r;
-  REQUIRE(r.Push(wire.data(), wire.size()));
+  REQUIRE(r.push(wire.data(), wire.size()));
   for (std::uint32_t expect = 1; expect <= 3; ++expect) {
     const std::uint8_t* p = nullptr;
     std::uint32_t len = 0;
-    REQUIRE(r.Next(&p, &len) == FrameStatus::kOk);
+    REQUIRE(r.next(&p, &len) == FrameStatus::kOk);
     CHECK(len == expect);
     CHECK(p[0] == expect);
-    r.Pop();
+    r.pop();
   }
 }
 
@@ -161,24 +161,24 @@ TEST_CASE("超长帧:拒绝,且不可恢复") {
   wire[3] = static_cast<std::uint8_t>((bogus >> 24) & 0xFFu);
 
   FrameReader r;
-  REQUIRE(r.Push(wire.data(), wire.size()));
+  REQUIRE(r.push(wire.data(), wire.size()));
   const std::uint8_t* p = nullptr;
   std::uint32_t len = 0;
-  CHECK(r.Next(&p, &len) == FrameStatus::kTooLarge);
+  CHECK(r.next(&p, &len) == FrameStatus::kTooLarge);
   CHECK(r.failed());
   // 粘性:再问一次还是失败,不会因为又喂了字节就"好了"
   const std::uint8_t more[] = {0, 0, 0, 0};
-  CHECK_FALSE(r.Push(more, 4));
-  CHECK(r.Next(&p, &len) == FrameStatus::kTooLarge);
+  CHECK_FALSE(r.push(more, 4));
+  CHECK(r.next(&p, &len) == FrameStatus::kTooLarge);
 }
 
 TEST_CASE("零长帧是协议违规 —— 信封头本身就不止 0 字节") {
   const std::uint8_t wire[4] = {0, 0, 0, 0};
   FrameReader r;
-  REQUIRE(r.Push(wire, 4));
+  REQUIRE(r.push(wire, 4));
   const std::uint8_t* p = nullptr;
   std::uint32_t len = 0;
-  CHECK(r.Next(&p, &len) == FrameStatus::kEmpty);
+  CHECK(r.next(&p, &len) == FrameStatus::kEmpty);
   CHECK(r.failed());
 }
 
@@ -189,7 +189,7 @@ TEST_CASE("累积缓冲有上限,对端灌垃圾时熔断") {
   const std::vector<std::uint8_t> junk(16 * 1024, 0xAB);
   bool tripped = false;
   for (int i = 0; i < 64; ++i) {
-    if (!r.Push(junk.data(), junk.size())) {
+    if (!r.push(junk.data(), junk.size())) {
       tripped = true;
       break;
     }
@@ -202,20 +202,20 @@ TEST_CASE("负载超限时 WriteFrame 失败而不是截断") {
   // ⇒ 新实现宁可失败,不可写出半条。
   const std::vector<std::uint8_t> big(kMaxFrameBytes + 1, 0x5A);
   std::vector<std::uint8_t> out;
-  CHECK_FALSE(WriteFrame(big.data(), static_cast<std::uint32_t>(big.size()), out));
+  CHECK_FALSE(writeFrame(big.data(), static_cast<std::uint32_t>(big.size()), out));
   CHECK(out.empty());
-  CHECK_FALSE(WriteFrame(big.data(), 0, out));
+  CHECK_FALSE(writeFrame(big.data(), 0, out));
 }
 
 // ══ 信封层 ═══════════════════════════════════════════════════════
 TEST_CASE("信封往返:msg_id 由类型编译期决定") {
   SA::Transport::Ping ping;
   ping.client_time_ms = 0xDEADBEEFull;
-  const std::vector<std::uint8_t> wire = Framed(42, ping);
+  const std::vector<std::uint8_t> wire = framed(42, ping);
 
   EnvelopeView env;
   std::vector<std::uint8_t> body;
-  REQUIRE(NthEnvelope(wire, 0, env, body));
+  REQUIRE(nthEnvelope(wire, 0, env, body));
   CHECK(env.msg_id == static_cast<std::uint32_t>(SA::IDL::MsgId::Ping));
   CHECK(env.corr_id == 42u);
 
@@ -229,8 +229,8 @@ TEST_CASE("信封往返:msg_id 由类型编译期决定") {
 TEST_CASE("信封头都不够长的帧 ⇒ 整条作废") {
   const std::uint8_t tiny[3] = {1, 2, 3};
   EnvelopeView env;
-  CHECK_FALSE(DecodeEnvelope(tiny, 3, env));
-  CHECK_FALSE(DecodeEnvelope(nullptr, 0, env));
+  CHECK_FALSE(decodeEnvelope(tiny, 3, env));
+  CHECK_FALSE(decodeEnvelope(nullptr, 0, env));
 }
 
 // ══ 会话状态机(01 §5.2)═════════════════════════════════════════
@@ -239,11 +239,11 @@ namespace {
 constexpr std::uint32_t kVersion = 3;
 constexpr std::uint32_t kHeartbeat = 30000;
 
-std::vector<std::uint8_t> HandshakeFrame(std::uint32_t version) {
+std::vector<std::uint8_t> handshakeFrame(std::uint32_t version) {
   SA::Transport::HandshakeRequest req{};
   req.protocol_version = version;
   req.client_build.assign("test");
-  return Framed(1, req);
+  return framed(1, req);
 }
 
 }  // namespace
@@ -253,9 +253,9 @@ TEST_CASE("握手通过 ⇒ 已认证,并回 HandshakeAccepted") {
   Session s(7, kVersion, kHeartbeat, &host);
   CHECK(s.state() == SessionState::kAnonymous);
 
-  const std::vector<std::uint8_t> in = HandshakeFrame(kVersion);
+  const std::vector<std::uint8_t> in = handshakeFrame(kVersion);
   std::vector<std::uint8_t> out;
-  REQUIRE(s.HandleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
+  REQUIRE(s.handleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
 
   CHECK(s.state() == SessionState::kAuthenticated);
   REQUIRE(host.ready.size() == 1);
@@ -263,7 +263,7 @@ TEST_CASE("握手通过 ⇒ 已认证,并回 HandshakeAccepted") {
 
   EnvelopeView env;
   std::vector<std::uint8_t> body;
-  REQUIRE(NthEnvelope(out, 0, env, body));
+  REQUIRE(nthEnvelope(out, 0, env, body));
   CHECK(env.msg_id == static_cast<std::uint32_t>(SA::IDL::MsgId::HandshakeAccepted));
   CHECK(env.corr_id == 1u);   // corr_id 原样回带(02 §1.3)
 
@@ -280,15 +280,15 @@ TEST_CASE("握手通过 ⇒ 已认证,并回 HandshakeAccepted") {
 TEST_CASE("版本不符 ⇒ 拒绝,但要先把拒绝理由发出去再关") {
   RecordingHost host;
   Session s(7, kVersion, kHeartbeat, &host);
-  const std::vector<std::uint8_t> in = HandshakeFrame(kVersion + 1);
+  const std::vector<std::uint8_t> in = handshakeFrame(kVersion + 1);
   std::vector<std::uint8_t> out;
-  CHECK_FALSE(s.HandleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
+  CHECK_FALSE(s.handleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
   CHECK(s.state() == SessionState::kClosed);
 
   // ⚠️ 不发就关,客户端只看到断连,无从提示"请更新到 vN"。
   EnvelopeView env;
   std::vector<std::uint8_t> body;
-  REQUIRE(NthEnvelope(out, 0, env, body));
+  REQUIRE(nthEnvelope(out, 0, env, body));
   CHECK(env.msg_id == static_cast<std::uint32_t>(SA::IDL::MsgId::HandshakeRejected));
   SA::IDL::Reader rd(env.body, env.body_len);
   SA::Transport::HandshakeRejected rej{};
@@ -304,37 +304,37 @@ TEST_CASE("握手之前的任何其它消息 ⇒ 协议违规") {
   RecordingHost host;
   Session s(7, kVersion, kHeartbeat, &host);
   SA::Transport::Ping ping{};
-  const std::vector<std::uint8_t> in = Framed(1, ping);
+  const std::vector<std::uint8_t> in = framed(1, ping);
   std::vector<std::uint8_t> out;
-  CHECK_FALSE(s.HandleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
-  CHECK(s.last_reject_msg_id() == static_cast<std::uint32_t>(SA::IDL::MsgId::Ping));
+  CHECK_FALSE(s.handleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
+  CHECK(s.lastRejectMsgId() == static_cast<std::uint32_t>(SA::IDL::MsgId::Ping));
 }
 
 TEST_CASE("重复握手 ⇒ 协议违规(状态机不许被重放绕过)") {
   RecordingHost host;
   Session s(7, kVersion, kHeartbeat, &host);
-  const std::vector<std::uint8_t> in = HandshakeFrame(kVersion);
+  const std::vector<std::uint8_t> in = handshakeFrame(kVersion);
   std::vector<std::uint8_t> out;
-  REQUIRE(s.HandleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
-  CHECK_FALSE(s.HandleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
+  REQUIRE(s.handleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
+  CHECK_FALSE(s.handleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
 }
 
 TEST_CASE("Ping ⇒ Pong,client_time_ms 原样回带") {
   RecordingHost host;
   Session s(7, kVersion, kHeartbeat, &host);
   std::vector<std::uint8_t> out;
-  const std::vector<std::uint8_t> hs = HandshakeFrame(kVersion);
-  REQUIRE(s.HandleFrame(hs.data() + 4, static_cast<std::uint32_t>(hs.size() - 4), out));
+  const std::vector<std::uint8_t> hs = handshakeFrame(kVersion);
+  REQUIRE(s.handleFrame(hs.data() + 4, static_cast<std::uint32_t>(hs.size() - 4), out));
   out.clear();
 
   SA::Transport::Ping ping{};
   ping.client_time_ms = 123456789ull;
-  const std::vector<std::uint8_t> in = Framed(99, ping);
-  REQUIRE(s.HandleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
+  const std::vector<std::uint8_t> in = framed(99, ping);
+  REQUIRE(s.handleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
 
   EnvelopeView env;
   std::vector<std::uint8_t> body;
-  REQUIRE(NthEnvelope(out, 0, env, body));
+  REQUIRE(nthEnvelope(out, 0, env, body));
   CHECK(env.msg_id == static_cast<std::uint32_t>(SA::IDL::MsgId::Pong));
   CHECK(env.corr_id == 99u);
   SA::IDL::Reader rd(env.body, env.body_len);
@@ -349,23 +349,23 @@ TEST_CASE("战斗指令要求 kOnline") {
   RecordingHost host;
   Session s(7, kVersion, kHeartbeat, &host);
   std::vector<std::uint8_t> out;
-  const std::vector<std::uint8_t> hs = HandshakeFrame(kVersion);
-  REQUIRE(s.HandleFrame(hs.data() + 4, static_cast<std::uint32_t>(hs.size() - 4), out));
+  const std::vector<std::uint8_t> hs = handshakeFrame(kVersion);
+  REQUIRE(s.handleFrame(hs.data() + 4, static_cast<std::uint32_t>(hs.size() - 4), out));
 
   SA::Domain::BattleCommand cmd{};
   cmd.battle_id = 1;
   cmd.turn = 0;
   cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
   cmd.command.attack.target = 10;
-  const std::vector<std::uint8_t> in = Framed(0, cmd);
+  const std::vector<std::uint8_t> in = framed(0, cmd);
 
   SUBCASE("仅已认证 ⇒ 拒绝") {
-    CHECK_FALSE(s.HandleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
+    CHECK_FALSE(s.handleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
     CHECK(host.commands.empty());
   }
   SUBCASE("在世 ⇒ 转交宿主") {
-    s.MarkOnline();
-    CHECK(s.HandleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
+    s.markOnline();
+    CHECK(s.handleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
     REQUIRE(host.commands.size() == 1);
     CHECK(host.commands[0].command.attack.target == 10u);
     CHECK(host.last_command_session == 7u);
@@ -376,15 +376,15 @@ TEST_CASE("未知 msg_id ⇒ 协议违规,不是「忽略并继续」") {
   RecordingHost host;
   Session s(7, kVersion, kHeartbeat, &host);
   std::vector<std::uint8_t> out;
-  const std::vector<std::uint8_t> hs = HandshakeFrame(kVersion);
-  REQUIRE(s.HandleFrame(hs.data() + 4, static_cast<std::uint32_t>(hs.size() - 4), out));
+  const std::vector<std::uint8_t> hs = handshakeFrame(kVersion);
+  REQUIRE(s.handleFrame(hs.data() + 4, static_cast<std::uint32_t>(hs.size() - 4), out));
 
   // 手搓一条 msg_id 不存在的帧
   std::vector<std::uint8_t> bogus(12, 0);
   bogus[0] = 0xEF;
   bogus[1] = 0xBE;
-  CHECK_FALSE(s.HandleFrame(bogus.data(), 12, out));
-  CHECK(s.last_reject_msg_id() == 0xBEEFu);
+  CHECK_FALSE(s.handleFrame(bogus.data(), 12, out));
+  CHECK(s.lastRejectMsgId() == 0xBEEFu);
 }
 
 // ══ LoopbackTransport ════════════════════════════════════════════
@@ -392,12 +392,12 @@ namespace {
 
 class ByteSink final : public TransportEvents {
  public:
-  void OnConnected(ConnectionId id) override { connected.push_back(id); }
-  void OnBytes(ConnectionId id, const std::uint8_t* d, std::size_t n) override {
+  void onConnected(ConnectionId id) override { connected.push_back(id); }
+  void onBytes(ConnectionId id, const std::uint8_t* d, std::size_t n) override {
     (void)id;
     received.insert(received.end(), d, d + n);
   }
-  void OnDisconnected(ConnectionId id) override { disconnected.push_back(id); }
+  void onDisconnected(ConnectionId id) override { disconnected.push_back(id); }
 
   std::vector<ConnectionId> connected;
   std::vector<ConnectionId> disconnected;
@@ -409,25 +409,25 @@ class ByteSink final : public TransportEvents {
 TEST_CASE("Loopback:连接、投递、发送、关闭") {
   LoopbackTransport t;
   ByteSink sink;
-  t.SetEvents(&sink);
+  t.setEvents(&sink);
 
-  const ConnectionId id = t.Connect();
+  const ConnectionId id = t.connect();
   REQUIRE(sink.connected.size() == 1);
 
   const std::uint8_t in[] = {1, 2, 3};
-  t.Deliver(id, in, 3);
+  t.deliver(id, in, 3);
   CHECK(sink.received.empty());   // ★ Poll 之前不交付 —— 入站发生在 tick 第 2 步
-  t.Poll();
+  t.poll();
   CHECK(sink.received.size() == 3);
 
   const std::uint8_t out[] = {9, 9};
-  CHECK(t.Send(id, out, 2));
+  CHECK(t.send(id, out, 2));
   CHECK(t.sent(id).size() == 2);
 
-  t.Close(id);
+  t.close(id);
   CHECK(t.closed(id));
   CHECK(sink.disconnected.size() == 1);
-  CHECK_FALSE(t.Send(id, out, 2));
+  CHECK_FALSE(t.send(id, out, 2));
 }
 
 TEST_CASE("多帧编码进同一个出站缓冲") {
@@ -436,7 +436,7 @@ TEST_CASE("多帧编码进同一个出站缓冲") {
   a.client_time_ms = 1;
   SA::Transport::Ping b{};
   b.client_time_ms = 2;
-  REQUIRE(EncodeFramed(0, a, out));
-  REQUIRE(EncodeFramed(0, b, out));
-  CHECK(FrameCount(out) == 2);
+  REQUIRE(encodeFramed(0, a, out));
+  REQUIRE(encodeFramed(0, b, out));
+  CHECK(frameCount(out) == 2);
 }

@@ -276,13 +276,13 @@ struct Combatant {
   CombatModifiers mods{};
 
   // 无属性余量。★ 不是独立配置项,是推导量:max(0, 100 − Σ四属)。
-  constexpr std::int32_t NoneElement() const noexcept {
+  constexpr std::int32_t noneElement() const noexcept {
     const std::int32_t sum = elements[0] + elements[1] + elements[2] + elements[3];
     return sum >= kAttrMax ? 0 : (kAttrMax - sum);
   }
 
-  constexpr bool IsEnemy() const noexcept { return kind == CombatantKind::kEnemy; }
-  constexpr bool IsPlayer() const noexcept { return kind == CombatantKind::kPlayer; }
+  constexpr bool isEnemy() const noexcept { return kind == CombatantKind::kEnemy; }
+  constexpr bool isPlayer() const noexcept { return kind == CombatantKind::kPlayer; }
 };
 
 // ── 战场快照 ──────────────────────────────────────────────────
@@ -308,7 +308,7 @@ struct BattleField {
   constexpr Combatant& at(int slot) noexcept { return slots[slot]; }
 
   // 同侧判定:0..9 与 10..19。
-  static constexpr bool SameSide(int a, int b) noexcept {
+  static constexpr bool sameSide(int a, int b) noexcept {
     return (a < kSideOffset) == (b < kSideOffset);
   }
 };

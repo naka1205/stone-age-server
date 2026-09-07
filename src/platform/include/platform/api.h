@@ -43,7 +43,7 @@ class Clock {
  public:
   virtual ~Clock() = default;
   // 单调递增的毫秒数。起点无意义,只有差值有意义。
-  virtual Millis NowMs() const noexcept = 0;
+  virtual Millis nowMs() const noexcept = 0;
 
  protected:
   Clock() = default;
@@ -55,7 +55,7 @@ class Clock {
 class MonotonicClock final : public Clock {
  public:
   MonotonicClock() noexcept;
-  Millis NowMs() const noexcept override;
+  Millis nowMs() const noexcept override;
 
  private:
   std::int64_t _originNs;
@@ -65,9 +65,9 @@ class MonotonicClock final : public Clock {
 class ManualClock final : public Clock {
  public:
   explicit ManualClock(Millis start = 0) noexcept : _now(start) {}
-  Millis NowMs() const noexcept override { return _now; }
-  void Advance(Millis delta) noexcept { _now += delta; }
-  void SetNow(Millis t) noexcept { _now = t; }
+  Millis nowMs() const noexcept override { return _now; }
+  void advance(Millis delta) noexcept { _now += delta; }
+  void setNow(Millis t) noexcept { _now = t; }
 
  private:
   Millis _now;
@@ -155,10 +155,10 @@ class LogField {
 
   const char* key() const noexcept { return _key; }
   Kind kind() const noexcept { return _kind; }
-  std::int64_t as_int() const noexcept { return _i; }
-  std::uint64_t as_uint() const noexcept { return _u; }
-  std::string_view as_str() const noexcept { return _s; }
-  bool as_bool() const noexcept { return _b; }
+  std::int64_t asInt() const noexcept { return _i; }
+  std::uint64_t asUint() const noexcept { return _u; }
+  std::string_view asStr() const noexcept { return _s; }
+  bool asBool() const noexcept { return _b; }
 
  private:
   const char* _key;
@@ -174,11 +174,11 @@ class Logger {
   explicit Logger(LogLevel min_level = LogLevel::kInfo) noexcept
       : _minLevel(min_level) {}
 
-  void set_min_level(LogLevel l) noexcept { _minLevel = l; }
-  LogLevel min_level() const noexcept { return _minLevel; }
-  bool Enabled(LogLevel l) const noexcept { return l >= _minLevel; }
+  void setMinLevel(LogLevel l) noexcept { _minLevel = l; }
+  LogLevel minLevel() const noexcept { return _minLevel; }
+  bool enabled(LogLevel l) const noexcept { return l >= _minLevel; }
 
-  void Log(LogLevel level, LogEvent event,
+  void log(LogLevel level, LogEvent event,
            std::initializer_list<LogField> fields = {}) const;
 
   // 已产出的行数 —— 测试用,免得为了断言"记了这条日志"去解析 stderr。
@@ -253,10 +253,10 @@ struct ConfigResult {
 
 // 解析并校验。⚠️ 任一项不合法 ⇒ ok == false,调用方必须拒绝启动(01 §11.1)。
 //   「内容数据不全就起来,只会在玩家碰到时才炸」—— 这个快速失败的性质是保留项。
-ConfigResult ParseConfig(std::string_view json_text);
+ConfigResult parseConfig(std::string_view json_text);
 
 // 读文件后交给 ParseConfig。文件读不到也是一条 ConfigError,不抛异常。
-ConfigResult LoadConfigFile(const std::string& path);
+ConfigResult loadConfigFile(const std::string& path);
 
 // ── 随机源的服务端侧 ──────────────────────────────────────────
 //
@@ -269,11 +269,11 @@ class RandomSource {
   // master_seed == 0 ⇒ 从启动时刻派生一个,并由调用方打进日志。
   explicit RandomSource(std::uint64_t master_seed) noexcept;
 
-  std::uint64_t master_seed() const noexcept { return _masterSeed; }
+  std::uint64_t masterSeed() const noexcept { return _masterSeed; }
 
   // 每场战斗取一个。★ 序列由 master_seed 完全决定
   //   ⇒ 记下 master_seed + 第几场,就能重放任意一场。
-  std::uint64_t NextSeed() noexcept;
+  std::uint64_t nextSeed() noexcept;
 
   std::uint64_t minted() const noexcept { return _minted; }
 

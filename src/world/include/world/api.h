@@ -67,37 +67,37 @@ class World final : public SA::Net::TransportEvents,
   World& operator=(const World&) = delete;
 
   // 推进一个 tick。⚠️ 01 §2:主线程绝不允许阻塞 ⇒ 本函数不等待任何 I/O。
-  void Tick();
+  void tick();
 
   // 开一场战斗。★ 种子由 Platform::RandomSource 派发**并落日志** ——
   //   01 §10「战斗事件流 + 注入式随机源 = 可回放」,而可回放的前提是种子留得下来。
-  BattleId StartBattle(const SA::Rules::BattleField& field);
+  BattleId startBattle(const SA::Rules::BattleField& field);
 
   // 把一条会话接进某场战斗的某个槽。1.5 没有选角,槽位由调用方指定。
-  bool JoinBattle(BattleId battle, SA::Net::SessionId session,
+  bool joinBattle(BattleId battle, SA::Net::SessionId session,
                   std::uint8_t slot);
 
   // ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
-  void RequestShutdown() noexcept;
+  void requestShutdown() noexcept;
   bool stopped() const noexcept;
 
   // ── TransportEvents ──
-  void OnConnected(SA::Net::ConnectionId id) override;
-  void OnBytes(SA::Net::ConnectionId id, const std::uint8_t* data,
+  void onConnected(SA::Net::ConnectionId id) override;
+  void onBytes(SA::Net::ConnectionId id, const std::uint8_t* data,
                std::size_t n) override;
-  void OnDisconnected(SA::Net::ConnectionId id) override;
+  void onDisconnected(SA::Net::ConnectionId id) override;
 
   // ── SessionHost ──
-  void OnSessionReady(SA::Net::SessionId id) override;
-  void OnBattleCommand(SA::Net::SessionId id,
+  void onSessionReady(SA::Net::SessionId id) override;
+  void onBattleCommand(SA::Net::SessionId id,
                        const SA::Domain::BattleCommand& cmd) override;
-  void OnSessionClosed(SA::Net::SessionId id) override;
+  void onSessionClosed(SA::Net::SessionId id) override;
 
   // ── 观察面(测试与运维)──
   std::uint64_t ticks() const noexcept;
-  std::size_t session_count() const noexcept;
+  std::size_t sessionCount() const noexcept;
   const BattleStats* stats(BattleId id) const;
-  SA::Net::SessionState session_state(SA::Net::SessionId id) const;
+  SA::Net::SessionState sessionState(SA::Net::SessionId id) const;
 
  private:
   struct Impl;

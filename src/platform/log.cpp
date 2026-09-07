@@ -16,7 +16,7 @@
 namespace SA::Platform {
 namespace {
 
-const char* LevelName(LogLevel l) noexcept {
+const char* levelName(LogLevel l) noexcept {
   switch (l) {
     case LogLevel::kTrace: return "trace";
     case LogLevel::kDebug: return "debug";
@@ -30,7 +30,7 @@ const char* LevelName(LogLevel l) noexcept {
 // 事件名。★ 与枚举一一对应,**不**用宏生成 ——
 //   漏一条时编译器会在 switch 上告警(-Wswitch 属 -Wall),
 //   而宏表漏一条是悄无声息的。
-const char* EventName(LogEvent e) noexcept {
+const char* eventName(LogEvent e) noexcept {
   switch (e) {
     case LogEvent::kUnspecified:          return "unspecified";
     case LogEvent::kServerStarting:       return "server_starting";
@@ -60,7 +60,7 @@ const char* EventName(LogEvent e) noexcept {
 }
 
 // logfmt 的值:含空格或引号就加引号。
-void AppendValue(std::string& out, std::string_view v) {
+void appendValue(std::string& out, std::string_view v) {
   bool needs_quote = v.empty();
   for (const char c : v) {
     if (c == ' ' || c == '"' || c == '=' || c == '\n' || c == '\t') {
@@ -84,14 +84,14 @@ void AppendValue(std::string& out, std::string_view v) {
 
 }  // namespace
 
-void Logger::Log(LogLevel level, LogEvent event,
+void Logger::log(LogLevel level, LogEvent event,
                  std::initializer_list<LogField> fields) const {
-  if (!Enabled(level)) return;
+  if (!enabled(level)) return;
 
   std::string line;
   line.reserve(128);
-  line.append("level=").append(LevelName(level));
-  line.append(" event=").append(EventName(event));
+  line.append("level=").append(levelName(level));
+  line.append(" event=").append(eventName(event));
   line.append(" code=").append(std::to_string(static_cast<std::uint16_t>(event)));
 
   for (const LogField& f : fields) {
@@ -100,16 +100,16 @@ void Logger::Log(LogLevel level, LogEvent event,
     line.push_back('=');
     switch (f.kind()) {
       case LogField::Kind::kInt:
-        line.append(std::to_string(f.as_int()));
+        line.append(std::to_string(f.asInt()));
         break;
       case LogField::Kind::kUInt:
-        line.append(std::to_string(f.as_uint()));
+        line.append(std::to_string(f.asUint()));
         break;
       case LogField::Kind::kBool:
-        line.append(f.as_bool() ? "true" : "false");
+        line.append(f.asBool() ? "true" : "false");
         break;
       case LogField::Kind::kStr:
-        AppendValue(line, f.as_str());
+        appendValue(line, f.asStr());
         break;
     }
   }

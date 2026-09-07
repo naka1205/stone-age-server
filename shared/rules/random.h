@@ -30,12 +30,12 @@ class Random {
   // ⚠️ 原版语义就是闭区间(`RAND(0,1)` 会取到 0 或 1,见 §3.1 第三步第一分支
   //    「只能造成 0 或 1」的表述)。实现方不得改成半开区间。
   // ⚠️ lo > hi 时的行为由实现定义;调用方不得依赖 —— L3 内部须自行保证 lo <= hi。
-  virtual int Rand(int lo, int hi) = 0;
+  virtual int rand(int lo, int hi) = 0;
 
   // 对应原版 `rand() % n` —— 返回 [0, n)。
   // ⚠️ 单独保留而不用 Rand(0, n-1) 表达:原版这两个入口的取数序列不同,
   //    合并会改变可回放序列。移植期须逐调用点对应到原来那个入口。
-  virtual int RandMod(int n) = 0;
+  virtual int randMod(int n) = 0;
 
  protected:
   Random() = default;
@@ -54,21 +54,21 @@ class SeededRandom final : public Random {
   explicit SeededRandom(std::uint64_t seed) noexcept
       : _state(seed ? seed : 0x9E3779B97F4A7C15ull) {}
 
-  int Rand(int lo, int hi) noexcept override {
+  int rand(int lo, int hi) noexcept override {
     if (hi <= lo) return lo;
     const std::uint64_t span = static_cast<std::uint64_t>(hi - lo) + 1u;
-    return lo + static_cast<int>(Next() % span);
+    return lo + static_cast<int>(next() % span);
   }
 
-  int RandMod(int n) noexcept override {
+  int randMod(int n) noexcept override {
     if (n <= 0) return 0;
-    return static_cast<int>(Next() % static_cast<std::uint64_t>(n));
+    return static_cast<int>(next() % static_cast<std::uint64_t>(n));
   }
 
   std::uint64_t state() const noexcept { return _state; }
 
  private:
-  std::uint64_t Next() noexcept {
+  std::uint64_t next() noexcept {
     _state ^= _state >> 12;
     _state ^= _state << 25;
     _state ^= _state >> 27;

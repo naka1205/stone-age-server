@@ -74,15 +74,15 @@ class FrameReader {
 
   // 收到的原始字节。返回 false 表示累积缓冲超过了单帧上限 + 余量,
   // 说明对端在灌垃圾 ⇒ 关闭连接。
-  bool Push(const std::uint8_t* data, std::size_t n);
+  bool push(const std::uint8_t* data, std::size_t n);
 
   // 取下一条完整帧。kOk 时 *payload / *len 指向内部缓冲,
   // **在下一次 Push() 或 Pop() 之前有效**。
-  FrameStatus Next(const std::uint8_t** payload, std::uint32_t* len);
+  FrameStatus next(const std::uint8_t** payload, std::uint32_t* len);
 
   // 丢弃刚由 Next() 返回的那一帧。★ 与 Next() 分开是为了让调用方
   //   可以零拷贝地处理帧内容,处理完再推进。
-  void Pop();
+  void pop();
 
   bool failed() const noexcept { return _failed; }
   std::size_t buffered() const noexcept { return _buf.size() - _read; }
@@ -95,7 +95,7 @@ class FrameReader {
 };
 
 // 把一段负载写成一帧,追加到 out。负载超限返回 false(**不截断**)。
-bool WriteFrame(const std::uint8_t* payload, std::uint32_t len,
+bool writeFrame(const std::uint8_t* payload, std::uint32_t len,
                 std::vector<std::uint8_t>& out);
 
 // ── 信封层:EnvelopeHeader { msg_id, corr_id } + body ──────────
@@ -111,7 +111,7 @@ struct EnvelopeView {
 };
 
 // 从一条完整帧里剥出信封。格式不对返回 false ⇒ 整条消息作废,不存在部分成功。
-bool DecodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
+bool decodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
                     EnvelopeView& out);
 
 // 把一条 IDL 消息编成「帧 + 信封 + body」并追加到 out。
@@ -128,7 +128,7 @@ bool DecodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
 //    SA::Transport 两个命名空间里,靠 ADL 各自找到自己那个。
 //    写成限定调用就要为两组各写一份重载,那正是"同一语义两份实现"。
 template <typename M>
-bool EncodeFramed(std::uint64_t corr_id, const M& msg,
+bool encodeFramed(std::uint64_t corr_id, const M& msg,
                   std::vector<std::uint8_t>& out) {
   const std::size_t start = out.size();
   out.resize(start + kFrameHeaderBytes + kMaxFrameBytes);

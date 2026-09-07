@@ -34,7 +34,7 @@ struct BattleInstance {
 
 // 一侧是否已全灭。★ 这是**战斗结束**的判据,不是 L3 的事 ——
 //   L3 只结算一个回合,"还要不要打下一回合"是世界的生命周期问题。
-bool SideWipedOut(const SA::Rules::BattleField& field, bool enemy_side) {
+bool sideWipedOut(const SA::Rules::BattleField& field, bool enemy_side) {
   bool any_alive = false;
   for (int i = 0; i < SA::Rules::kSlotCount; ++i) {
     const SA::Rules::Combatant& c = field.at(i);
@@ -58,7 +58,7 @@ bool SideWipedOut(const SA::Rules::BattleField& field, bool enemy_side) {
 // ⚠️ 玩家侧**不**在这里补默认指令:L3 已把「无指令 ⇒ 本回合不行动」写死
 //   (battle.cpp 的 BuildActionOrder)。「玩家没提交该怎么办」是收集期与超时的
 //   问题,属阶段 2,且是玩家可感知的玩法口径 ⇒ 须显式裁定,不由实现者定。
-void FillEnemyCommands(const SA::Rules::BattleField& field,
+void fillEnemyCommands(const SA::Rules::BattleField& field,
                        SA::Rules::TurnCommands& commands) {
   // 目标:玩家侧第一个活着的。
   int target = -1;
@@ -95,7 +95,7 @@ void FillEnemyCommands(const SA::Rules::BattleField& field,
 // ⚠️ 1.5 只写 HP 与死亡:状态附加(§4.3)· 打飞(§3.8)· 换装 · 变身
 //    绑在批次 A–D 的链路上,L3 此刻也不产它们的事件。
 //    ⇒ **不猜**,与批次 0.5 对暴击/反击的处置同一条纪律。
-void ApplyEvents(const SA::Domain::BattleEvents& events,
+void applyEvents(const SA::Domain::BattleEvents& events,
                  SA::Rules::BattleField& field) {
   for (std::size_t i = 0; i < events.events.size(); ++i) {
     const SA::Domain::BattleEvent& e = events.events[i];
@@ -191,7 +191,7 @@ void ApplyEvents(const SA::Domain::BattleEvents& events,
 //        否则 demo 挂起时分不清是"敌人打不动"还是"事件流断了";
 //     ② 客户端正常出招时,战斗**更快**结束 ⇒ 指令确实被采纳了。
 //        ★ 这一条才是 1.4 真正要证明的东西:上行链路是通的。
-SA::Rules::BattleField MakeDemoField() {
+SA::Rules::BattleField makeDemoField() {
   SA::Rules::BattleField f{};
 
   SA::Rules::Combatant& me = f.at(0);
@@ -271,13 +271,13 @@ World::World(const SA::Platform::ServerConfig& config,
              SA::Platform::RandomSource& random,
              SA::Net::Transport& transport)
     : _impl(std::make_unique<Impl>(config, clock, logger, random, transport)) {
-  transport.SetEvents(this);
+  transport.setEvents(this);
 }
 
 World::~World() = default;
 
 // ══ tick(01 §3.1)═══════════════════════════════════════════════
-void World::Tick() {
+void World::tick() {
   Impl& s = *_impl;
   if (s.stopped) return;
   ++s.ticks;
@@ -285,11 +285,11 @@ void World::Tick() {
   // ── 1. 时钟推进 ──
   // ★ 统一时钟源、单调时钟。整个 tick 内**只取一次** ——
   //   同一 tick 里两处取到不同的"现在"会让节拍判断出现自相矛盾的结果。
-  s.now_ms = s.clock.NowMs();
+  s.now_ms = s.clock.nowMs();
 
   // ── 2. 网络入站 ──
   // 从传输层取已到达的字节,派发到会话。★ 不阻塞(01 §2)。
-  s.transport.Poll();
+  s.transport.poll();
 
   // ── 3. NPC 生成 ──  ⬜ 阶段 2
 
@@ -302,15 +302,15 @@ void World::Tick() {
       if (s.now_ms < b.next_turn_at_ms) continue;
 
       // ★ 敌方 AI 先填指令(见 FillEnemyCommands 卷首:这是 battle.h 指定的分工)。
-      FillEnemyCommands(b.field, b.commands);
+      fillEnemyCommands(b.field, b.commands);
 
       // 结算一个回合。⚠️ 返回 false = 事件超过 256 条被迫截断。
       //   05 §10.4 记着原版无上界 strcat 的教训 ⇒ **必须处理**,不可当没看见。
-      const bool ok = SA::Rules::ResolveTurn(b.field, b.commands,
+      const bool ok = SA::Rules::resolveTurn(b.field, b.commands,
                                              s.rules_config, b.rng, b.events);
       if (!ok) {
         b.stats.truncated_once = true;
-        s.logger.Log(SA::Platform::LogLevel::kWarn,
+        s.logger.log(SA::Platform::LogLevel::kWarn,
                      SA::Platform::LogEvent::kBattleEventsTruncated,
                      {{"battle_id", b.id},
                       {"turn", static_cast<std::uint64_t>(b.field.turn)}});
@@ -321,7 +321,7 @@ void World::Tick() {
       }
 
       // ★★ 写回世界状态 —— 见 ApplyEvents 卷首:L3 有意不写,调用方必须写。
-      ApplyEvents(b.events, b.field);
+      applyEvents(b.events, b.field);
 
       b.stats.events_emitted += static_cast<std::uint32_t>(b.events.events.size());
       ++b.stats.turns_resolved;
@@ -332,10 +332,10 @@ void World::Tick() {
         if (it == s.conns.end()) continue;
         Impl::Conn& c = it->second;
         if (c.session == nullptr) continue;
-        (void)c.session->Push(b.events, c.outbound);
+        (void)c.session->push(b.events, c.outbound);
       }
 
-      s.logger.Log(SA::Platform::LogLevel::kDebug,
+      s.logger.log(SA::Platform::LogLevel::kDebug,
                    SA::Platform::LogEvent::kBattleTurnResolved,
                    {{"battle_id", b.id},
                     {"turn", static_cast<std::uint64_t>(b.field.turn)},
@@ -349,7 +349,7 @@ void World::Tick() {
           s.now_ms + static_cast<SA::Platform::Millis>(
                          s.config.tempo.battle_turn_interval_ms);
 
-      if (SideWipedOut(b.field, true) || SideWipedOut(b.field, false)) {
+      if (sideWipedOut(b.field, true) || sideWipedOut(b.field, false)) {
         b.stats.finished = true;
         finished.push_back(b.id);
       } else {
@@ -362,14 +362,14 @@ void World::Tick() {
         for (const SA::Net::SessionId sid : b.members) {
           const auto it = s.conns.find(sid);
           if (it == s.conns.end() || it->second.session == nullptr) continue;
-          (void)it->second.session->Push(begin, it->second.outbound);
+          (void)it->second.session->push(begin, it->second.outbound);
         }
       }
     }
     for (const BattleId id : finished) {
       const auto it = s.battles.find(id);
       if (it == s.battles.end()) continue;
-      s.logger.Log(SA::Platform::LogLevel::kInfo,
+      s.logger.log(SA::Platform::LogLevel::kInfo,
                    SA::Platform::LogEvent::kBattleFinished,
                    {{"battle_id", id},
                     {"turns", static_cast<std::uint64_t>(
@@ -387,7 +387,7 @@ void World::Tick() {
   for (auto& kv : s.conns) {
     Impl::Conn& c = kv.second;
     if (c.outbound.empty()) continue;
-    (void)s.transport.Send(c.conn_id, c.outbound.data(), c.outbound.size());
+    (void)s.transport.send(c.conn_id, c.outbound.data(), c.outbound.size());
     c.outbound.clear();
   }
 
@@ -396,7 +396,7 @@ void World::Tick() {
     // ⚠️ 01 §11.2 的完整停服流程(拒绝新连接 → 广播倒计时 → 逐会话保存
     //    → 等在途请求收敛 → 落盘确认)在 1.5 **做不了也不该做**:
     //    没有 storage、没有跨模块请求。这里只做能做的那部分。
-    s.logger.Log(SA::Platform::LogLevel::kInfo,
+    s.logger.log(SA::Platform::LogLevel::kInfo,
                  SA::Platform::LogEvent::kServerStopping,
                  {{"connections", static_cast<std::uint64_t>(s.conns.size())},
                   {"battles", static_cast<std::uint64_t>(s.battles.size())}});
@@ -410,16 +410,16 @@ void World::Tick() {
     for (const SA::Net::ConnectionId cid : closing) {
       const auto it = s.conns.find(cid);
       if (it != s.conns.end() && it->second.session != nullptr) {
-        it->second.session->Close();
+        it->second.session->close();
       }
-      s.transport.Close(cid);
+      s.transport.close(cid);
     }
     s.stopped = true;
   }
 }
 
 // ══ 战斗生命周期 ═════════════════════════════════════════════════
-BattleId World::StartBattle(const SA::Rules::BattleField& field) {
+BattleId World::startBattle(const SA::Rules::BattleField& field) {
   Impl& s = *_impl;
   const BattleId id = s.next_battle_id++;
 
@@ -427,7 +427,7 @@ BattleId World::StartBattle(const SA::Rules::BattleField& field) {
   b.id = id;
   b.field = field;
   b.field.battle_id = id;
-  b.seed = s.random.NextSeed();
+  b.seed = s.random.nextSeed();
   b.rng = SA::Rules::SeededRandom(b.seed);
   b.next_turn_at_ms =
       s.now_ms +
@@ -436,19 +436,19 @@ BattleId World::StartBattle(const SA::Rules::BattleField& field) {
   const std::uint64_t seed = b.seed;
   s.battles.emplace(id, std::move(b));
 
-  s.logger.Log(SA::Platform::LogLevel::kInfo,
+  s.logger.log(SA::Platform::LogLevel::kInfo,
                SA::Platform::LogEvent::kBattleStarted, {{"battle_id", id}});
   // ★★ 种子单独一条,级别 info:它是可回放的**唯一**凭据。
   //    调低成 debug 就等于在生产上关掉了可回放性。
-  s.logger.Log(SA::Platform::LogLevel::kInfo,
+  s.logger.log(SA::Platform::LogLevel::kInfo,
                SA::Platform::LogEvent::kBattleSeed,
                {{"battle_id", id},
                 {"seed", seed},
-                {"master_seed", s.random.master_seed()}});
+                {"master_seed", s.random.masterSeed()}});
   return id;
 }
 
-bool World::JoinBattle(BattleId battle, SA::Net::SessionId session,
+bool World::joinBattle(BattleId battle, SA::Net::SessionId session,
                        std::uint8_t slot) {
   Impl& s = *_impl;
   const auto bit = s.battles.find(battle);
@@ -470,7 +470,7 @@ bool World::JoinBattle(BattleId battle, SA::Net::SessionId session,
   }
   b.members.push_back(session);
   b.slot_of[session] = slot;
-  cit->second.session->MarkOnline();
+  cit->second.session->markOnline();
 
   // ★★ 入场即下发**自己是谁**与**现在是第几回合**,否则客户端无从组指令:
   //    BattleCommand 要带 battle_id 与 turn,而这两样它此刻都还不知道
@@ -487,18 +487,18 @@ bool World::JoinBattle(BattleId battle, SA::Net::SessionId session,
   self.menu_flags = 0;
   // ★ 但 cannot_act **不留 0**:DR-BT5 把「能否行动」定为 Rules::CheckCanAct
   //   这一个真源,而它已经在 L3 里 ⇒ 照真源填,不是硬编码一个"可以行动"。
-  self.cannot_act = SA::Rules::CheckCanAct(b.field.at(slot));
-  (void)cit->second.session->Push(self, cit->second.outbound);
+  self.cannot_act = SA::Rules::checkCanAct(b.field.at(slot));
+  (void)cit->second.session->push(self, cit->second.outbound);
 
   SA::Domain::BattleTurnBegin begin;
   begin.battle_id = b.id;
   begin.turn = b.field.turn;
   begin.ready_mask = 0;   // 1.5 没有收集期,理由见 Tick 第 4 步
-  (void)cit->second.session->Push(begin, cit->second.outbound);
+  (void)cit->second.session->push(begin, cit->second.outbound);
 
   // ⚠️ 入场日志放在这里而不是调用方:任何入场路径都该留痕,
   //   而"谁在哪场的哪个槽"是排查战斗问题时第一个要问的东西。
-  s.logger.Log(SA::Platform::LogLevel::kInfo,
+  s.logger.log(SA::Platform::LogLevel::kInfo,
                SA::Platform::LogEvent::kBattleJoined,
                {{"battle_id", b.id},
                 {"session_id", session},
@@ -507,7 +507,7 @@ bool World::JoinBattle(BattleId battle, SA::Net::SessionId session,
 }
 
 // ══ TransportEvents ═════════════════════════════════════════════
-void World::OnConnected(SA::Net::ConnectionId id) {
+void World::onConnected(SA::Net::ConnectionId id) {
   Impl& s = *_impl;
   Impl::Conn c;
   c.conn_id = id;
@@ -517,69 +517,69 @@ void World::OnConnected(SA::Net::ConnectionId id) {
       id, s.config.protocol_version, s.config.heartbeat_interval_ms, this);
   s.conns.emplace(id, std::move(c));
 
-  s.logger.Log(SA::Platform::LogLevel::kDebug,
+  s.logger.log(SA::Platform::LogLevel::kDebug,
                SA::Platform::LogEvent::kConnectionAccepted, {{"conn_id", id}});
 }
 
-void World::OnBytes(SA::Net::ConnectionId id, const std::uint8_t* data,
+void World::onBytes(SA::Net::ConnectionId id, const std::uint8_t* data,
                     std::size_t n) {
   Impl& s = *_impl;
   const auto it = s.conns.find(id);
   if (it == s.conns.end()) return;
   Impl::Conn& c = it->second;
 
-  if (!c.reader.Push(data, n)) {
-    s.logger.Log(SA::Platform::LogLevel::kWarn,
+  if (!c.reader.push(data, n)) {
+    s.logger.log(SA::Platform::LogLevel::kWarn,
                  SA::Platform::LogEvent::kFrameRejected,
                  {{"conn_id", id}, {"reason", std::string_view("buffer_limit")}});
-    s.transport.Close(id);
+    s.transport.close(id);
     return;
   }
 
   for (;;) {
     const std::uint8_t* payload = nullptr;
     std::uint32_t len = 0;
-    const SA::Net::FrameStatus st = c.reader.Next(&payload, &len);
+    const SA::Net::FrameStatus st = c.reader.next(&payload, &len);
     if (st == SA::Net::FrameStatus::kNeedMore) break;
     if (st != SA::Net::FrameStatus::kOk) {
       // ⚠️ kTooLarge / kEmpty 不可恢复:字节流已无法对齐(见 net/api.h)。
-      s.logger.Log(SA::Platform::LogLevel::kWarn,
+      s.logger.log(SA::Platform::LogLevel::kWarn,
                    SA::Platform::LogEvent::kFrameRejected,
                    {{"conn_id", id},
                     {"reason", std::string_view(
                                    st == SA::Net::FrameStatus::kTooLarge
                                        ? "frame_too_large"
                                        : "frame_empty")}});
-      s.transport.Close(id);
+      s.transport.close(id);
       return;
     }
 
-    const bool ok = c.session->HandleFrame(payload, len, c.outbound);
-    c.reader.Pop();
+    const bool ok = c.session->handleFrame(payload, len, c.outbound);
+    c.reader.pop();
     if (!ok) {
-      s.logger.Log(SA::Platform::LogLevel::kWarn,
+      s.logger.log(SA::Platform::LogLevel::kWarn,
                    SA::Platform::LogEvent::kHandshakeRejected,
                    {{"conn_id", id},
                     {"msg_id", static_cast<std::uint64_t>(
-                                   c.session->last_reject_msg_id())},
-                    {"state", std::string_view(SA::Net::SessionStateName(
+                                   c.session->lastRejectMsgId())},
+                    {"state", std::string_view(SA::Net::sessionStateName(
                                   c.session->state()))}});
       // ★ 先把已生成的出站字节发出去(可能含 HandshakeRejected),再关。
       if (!c.outbound.empty()) {
-        (void)s.transport.Send(id, c.outbound.data(), c.outbound.size());
+        (void)s.transport.send(id, c.outbound.data(), c.outbound.size());
         c.outbound.clear();
       }
-      s.transport.Close(id);
+      s.transport.close(id);
       return;
     }
   }
 }
 
-void World::OnDisconnected(SA::Net::ConnectionId id) {
+void World::onDisconnected(SA::Net::ConnectionId id) {
   Impl& s = *_impl;
   const auto it = s.conns.find(id);
   if (it == s.conns.end()) return;
-  if (it->second.session != nullptr) it->second.session->Close();
+  if (it->second.session != nullptr) it->second.session->close();
 
   for (auto& kv : s.battles) {
     std::vector<SA::Net::SessionId>& m = kv.second.members;
@@ -588,14 +588,14 @@ void World::OnDisconnected(SA::Net::ConnectionId id) {
   }
   s.conns.erase(it);
 
-  s.logger.Log(SA::Platform::LogLevel::kDebug,
+  s.logger.log(SA::Platform::LogLevel::kDebug,
                SA::Platform::LogEvent::kConnectionClosed, {{"conn_id", id}});
 }
 
 // ══ SessionHost ═════════════════════════════════════════════════
-void World::OnSessionReady(SA::Net::SessionId id) {
+void World::onSessionReady(SA::Net::SessionId id) {
   Impl& s = *_impl;
-  s.logger.Log(SA::Platform::LogLevel::kInfo,
+  s.logger.log(SA::Platform::LogLevel::kInfo,
                SA::Platform::LogEvent::kHandshakeAccepted,
                {{"session_id", id}});
 
@@ -609,27 +609,27 @@ void World::OnSessionReady(SA::Net::SessionId id) {
   // ★ 每条会话开**自己的**一场,不共用:多会话共用一场就要回答
   //   "第二个人落在哪个槽""先来的打到一半后来的怎么进",那是组队/观战的玩法口径
   //   (阶段 2),不该由一段 demo 脚手架顺手定下来。
-  const BattleId battle = StartBattle(MakeDemoField());
+  const BattleId battle = startBattle(makeDemoField());
   const std::uint8_t slot = s.config.demo_battle.slot;
-  if (!JoinBattle(battle, id, slot)) {
+  if (!joinBattle(battle, id, slot)) {
     // ⚠️ 进不去要**报出来**。这条路径上 JoinBattle 的每一个 false 都意味着
     //    上面刚建的战斗成了没人看的孤儿,而客户端会停在"连上了但什么都没发生"
     //    —— 那正是 00 §10.4 说的静默错误。
-    s.logger.Log(SA::Platform::LogLevel::kError,
+    s.logger.log(SA::Platform::LogLevel::kError,
                  SA::Platform::LogEvent::kBattleJoinFailed,
                  {{"battle_id", battle},
                   {"session_id", id},
                   {"reason", std::string_view("demo_join_failed")}});
     return;
   }
-  s.logger.Log(SA::Platform::LogLevel::kDebug,
+  s.logger.log(SA::Platform::LogLevel::kDebug,
                SA::Platform::LogEvent::kSessionStateChanged,
                {{"session_id", id},
                 {"state", std::string_view("online")},
                 {"demo", true}});
 }
 
-void World::OnBattleCommand(SA::Net::SessionId id,
+void World::onBattleCommand(SA::Net::SessionId id,
                             const SA::Domain::BattleCommand& cmd) {
   Impl& s = *_impl;
   const auto bit = s.battles.find(cmd.battle_id);
@@ -649,21 +649,21 @@ void World::OnBattleCommand(SA::Net::SessionId id,
   b.commands.present[slot] = true;
 }
 
-void World::OnSessionClosed(SA::Net::SessionId id) {
-  _impl->logger.Log(SA::Platform::LogLevel::kDebug,
+void World::onSessionClosed(SA::Net::SessionId id) {
+  _impl->logger.log(SA::Platform::LogLevel::kDebug,
                     SA::Platform::LogEvent::kSessionStateChanged,
                     {{"session_id", id},
                      {"state", std::string_view("closed")}});
 }
 
 // ══ 观察面 ═══════════════════════════════════════════════════════
-void World::RequestShutdown() noexcept { _impl->shutdown_requested = true; }
+void World::requestShutdown() noexcept { _impl->shutdown_requested = true; }
 
 bool World::stopped() const noexcept { return _impl->stopped; }
 
 std::uint64_t World::ticks() const noexcept { return _impl->ticks; }
 
-std::size_t World::session_count() const noexcept {
+std::size_t World::sessionCount() const noexcept {
   return _impl->conns.size();
 }
 
@@ -672,7 +672,7 @@ const BattleStats* World::stats(BattleId id) const {
   return it == _impl->battles.end() ? nullptr : &it->second.stats;
 }
 
-SA::Net::SessionState World::session_state(SA::Net::SessionId id) const {
+SA::Net::SessionState World::sessionState(SA::Net::SessionId id) const {
   const auto it = _impl->conns.find(id);
   if (it == _impl->conns.end() || it->second.session == nullptr) {
     return SA::Net::SessionState::kClosed;

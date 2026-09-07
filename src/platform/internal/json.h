@@ -36,28 +36,28 @@ class Value {
   Value() = default;
 
   static Value Bool(bool v);
-  static Value Number(double v);
-  static Value Str(std::string v);
-  static Value Obj(Object v);
-  static Value Arr(Array v);
+  static Value number(double v);
+  static Value str(std::string v);
+  static Value obj(Object v);
+  static Value arr(Array v);
 
   Type type() const noexcept { return _type; }
-  bool is_null() const noexcept { return _type == Type::kNull; }
-  bool is_bool() const noexcept { return _type == Type::kBool; }
-  bool is_number() const noexcept { return _type == Type::kNumber; }
-  bool is_string() const noexcept { return _type == Type::kString; }
-  bool is_object() const noexcept { return _type == Type::kObject; }
-  bool is_array() const noexcept { return _type == Type::kArray; }
+  bool isNull() const noexcept { return _type == Type::kNull; }
+  bool isBool() const noexcept { return _type == Type::kBool; }
+  bool isNumber() const noexcept { return _type == Type::kNumber; }
+  bool isString() const noexcept { return _type == Type::kString; }
+  bool isObject() const noexcept { return _type == Type::kObject; }
+  bool isArray() const noexcept { return _type == Type::kArray; }
 
-  bool as_bool() const noexcept { return _bool; }
-  double as_number() const noexcept { return _number; }
-  const std::string& as_string() const noexcept { return _string; }
-  const Object& as_object() const noexcept { return _object; }
-  const Array& as_array() const noexcept { return _array; }
+  bool asBool() const noexcept { return _bool; }
+  double asNumber() const noexcept { return _number; }
+  const std::string& asString() const noexcept { return _string; }
+  const Object& asObject() const noexcept { return _object; }
+  const Array& asArray() const noexcept { return _array; }
 
   // 找不到返回 nullptr。★ 不提供「找不到给默认值」的重载 ——
   //   那会让「键写错了」和「键没写」变成同一件事,而前者是配置错误。
-  const Value* Find(std::string_view key) const;
+  const Value* find(std::string_view key) const;
 
  private:
   Type _type = Type::kNull;
@@ -76,7 +76,7 @@ struct ParseOutcome {
   int line = 1;           // 1 起
 };
 
-ParseOutcome Parse(std::string_view text);
+ParseOutcome parse(std::string_view text);
 
 }  // namespace SA::Platform::json
 

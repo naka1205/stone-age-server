@@ -20,7 +20,7 @@ namespace {
 // 信封头的线上长度:u32 + u64。
 constexpr std::uint32_t kEnvelopeHeaderBytes = 12;
 
-std::uint32_t ReadU32LE(const std::uint8_t* p) noexcept {
+std::uint32_t readU32Le(const std::uint8_t* p) noexcept {
   return static_cast<std::uint32_t>(p[0]) |
          (static_cast<std::uint32_t>(p[1]) << 8) |
          (static_cast<std::uint32_t>(p[2]) << 16) |
@@ -29,7 +29,7 @@ std::uint32_t ReadU32LE(const std::uint8_t* p) noexcept {
 
 }  // namespace
 
-bool FrameReader::Push(const std::uint8_t* data, std::size_t n) {
+bool FrameReader::push(const std::uint8_t* data, std::size_t n) {
   if (_failed) return false;
 
   // 已消费的前缀攒够一半就回收,避免缓冲无限前移。
@@ -53,14 +53,14 @@ bool FrameReader::Push(const std::uint8_t* data, std::size_t n) {
   return true;
 }
 
-FrameStatus FrameReader::Next(const std::uint8_t** payload,
+FrameStatus FrameReader::next(const std::uint8_t** payload,
                               std::uint32_t* len) {
   if (_failed) return FrameStatus::kTooLarge;
 
   const std::size_t avail = buffered();
   if (avail < kFrameHeaderBytes) return FrameStatus::kNeedMore;
 
-  const std::uint32_t declared = ReadU32LE(_buf.data() + _read);
+  const std::uint32_t declared = readU32Le(_buf.data() + _read);
 
   // ⚠️★ 这两种失败是**粘性**的:长度字段一旦不可信,字节流就再也无法对齐,
   //    "跳过这一帧"是没有意义的 —— 我们并不知道这一帧到哪结束。
@@ -81,12 +81,12 @@ FrameStatus FrameReader::Next(const std::uint8_t** payload,
   return FrameStatus::kOk;
 }
 
-void FrameReader::Pop() {
+void FrameReader::pop() {
   _read += _pending;
   _pending = 0;
 }
 
-bool WriteFrame(const std::uint8_t* payload, std::uint32_t len,
+bool writeFrame(const std::uint8_t* payload, std::uint32_t len,
                 std::vector<std::uint8_t>& out) {
   // ★ 不截断。05 §10.4 记着原版 szAllBattleString 用 strncat 第三参写错、
   //   等价无上界 strcat 的教训 —— 新实现宁可失败,不可写出半条。
@@ -100,7 +100,7 @@ bool WriteFrame(const std::uint8_t* payload, std::uint32_t len,
   return true;
 }
 
-bool DecodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
+bool decodeEnvelope(const std::uint8_t* frame, std::uint32_t len,
                     EnvelopeView& out) {
   if (frame == nullptr || len < kEnvelopeHeaderBytes) return false;
 

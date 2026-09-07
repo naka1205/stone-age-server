@@ -61,7 +61,7 @@ static constexpr int kElemToDocCol[5] = {
     kDocEarth, kDocWater, kDocFire, kDocWind, kDocNone,
 };
 
-static void CheckElementMatrix() {
+static void checkElementMatrix() {
   for (int atk = 0; atk < Rules::kElementCount; ++atk) {
     for (int def = 0; def < Rules::kElementCount; ++def) {
       const double got = Rules::kElementMatrix[atk][def];
@@ -81,7 +81,7 @@ static void CheckElementMatrix() {
 static_assert(std::is_trivially_copyable_v<Model::EntityHandle>);
 static_assert(sizeof(Model::EntityHandle) == 8);
 
-static void CheckHandle() {
+static void checkHandle() {
   assert(!Model::kNullHandle.valid());
 
   // 同一个池槽位被复用:index 相同、generation 递增 ⇒ 旧句柄必须不等于新句柄。
@@ -93,20 +93,20 @@ static void CheckHandle() {
 }
 
 // ── ③ 随机源可回放 ───────────────────────────────────────────
-static void CheckReplayable() {
+static void checkReplayable() {
   // 同种子 + 同调用序列 ⇒ 逐位相同。这是黄金用例集成立的前提(05 §1.5)。
   Rules::SeededRandom a(20260831u);
   Rules::SeededRandom b(20260831u);
   for (int i = 0; i < 1000; ++i) {
-    assert(a.Rand(0, 100) == b.Rand(0, 100));
-    assert(a.RandMod(37) == b.RandMod(37));
+    assert(a.rand(0, 100) == b.rand(0, 100));
+    assert(a.randMod(37) == b.randMod(37));
   }
 
   // 不同种子应给出不同序列(否则种子没起作用)。
   Rules::SeededRandom c(1u), d(2u);
   bool differs = false;
   for (int i = 0; i < 64 && !differs; ++i) {
-    if (c.Rand(0, 1000000) != d.Rand(0, 1000000)) differs = true;
+    if (c.rand(0, 1000000) != d.rand(0, 1000000)) differs = true;
   }
   assert(differs);
 
@@ -114,7 +114,7 @@ static void CheckReplayable() {
   Rules::SeededRandom e(7u);
   bool saw_lo = false, saw_hi = false;
   for (int i = 0; i < 512; ++i) {
-    const int v = e.Rand(0, 1);
+    const int v = e.rand(0, 1);
     assert(v == 0 || v == 1);
     if (v == 0) saw_lo = true;
     if (v == 1) saw_hi = true;
@@ -123,19 +123,19 @@ static void CheckReplayable() {
 
   // 退化输入不得越界。
   Rules::SeededRandom f(9u);
-  assert(f.Rand(5, 5) == 5);
-  assert(f.RandMod(0) == 0);
-  assert(f.RandMod(-3) == 0);
+  assert(f.rand(5, 5) == 5);
+  assert(f.randMod(0) == 0);
+  assert(f.randMod(-3) == 0);
 
   // Random 是可注入的抽象:通过基类引用调用应得到同样的序列。
   Rules::SeededRandom g(123u);
   Rules::Random& via_base = g;
   Rules::SeededRandom h(123u);
-  for (int i = 0; i < 100; ++i) assert(via_base.Rand(1, 9) == h.Rand(1, 9));
+  for (int i = 0; i < 100; ++i) assert(via_base.rand(1, 9) == h.rand(1, 9));
 }
 
 // ── 战场快照的形状 ───────────────────────────────────────────
-static void CheckBattleField() {
+static void checkBattleField() {
   static_assert(Rules::kSlotCount == 20, "2 side × BATTLE_ENTRY_MAX(10)，== 就绪位图宽度");
   static_assert(std::is_trivially_copyable_v<Rules::Combatant>);
   static_assert(std::is_trivially_copyable_v<Rules::BattleField>);
@@ -152,7 +152,7 @@ static void CheckBattleField() {
   me.attack = 120; me.defense = 80; me.quick = 40; me.luck = 25;
   // 四属:地水火风。Σ = 60 ⇒ 无属性余量 = 40
   me.elements[0] = 30; me.elements[1] = 10; me.elements[2] = 20; me.elements[3] = 0;
-  assert(me.NoneElement() == 40);
+  assert(me.noneElement() == 40);
 
   Rules::Combatant& foe = field.at(Rules::kSideOffset);
   foe.occupied = true;
@@ -161,22 +161,22 @@ static void CheckBattleField() {
   foe.hp = 200; foe.max_hp = 200;
   // 满火属 ⇒ 无属性余量为 0(上限 100)
   foe.elements[2] = Rules::kAttrMax;
-  assert(foe.NoneElement() == 0);
-  assert(foe.IsEnemy() && !foe.IsPlayer());
+  assert(foe.noneElement() == 0);
+  assert(foe.isEnemy() && !foe.isPlayer());
 
   // 阵营划分:0..9 vs 10..19
-  assert(Rules::BattleField::SameSide(0, 9));
-  assert(Rules::BattleField::SameSide(10, 19));
-  assert(!Rules::BattleField::SameSide(9, 10));
+  assert(Rules::BattleField::sameSide(0, 9));
+  assert(Rules::BattleField::sameSide(10, 19));
+  assert(!Rules::BattleField::sameSide(9, 10));
 
   // 超出四属上限时余量钳到 0,不得为负。
   Rules::Combatant over{};
   over.elements[0] = 80; over.elements[1] = 80;
-  assert(over.NoneElement() == 0);
+  assert(over.noneElement() == 0);
 }
 
 // ── ④ 与 IDL domain/ 类型的互操作 ────────────────────────────
-static void CheckIdlInterop() {
+static void checkIdlInterop() {
   // shared/rules 的契约以 IDL 事件类型为输出 —— 这是 D2 的接口面(02 §9)。
   Domain::BattleEvents out{};
   out.battle_id = 99;
@@ -208,7 +208,7 @@ static void CheckIdlInterop() {
 }
 
 // ── 配置默认值:两个最容易写错的数 ────────────────────────────
-static void CheckConfigDefaults() {
+static void checkConfigDefaults() {
   const Rules::RulesConfig cfg{};
   // ★★ getDamageCalc() 兜底是 70 不是 100 —— 8.0 投产下全部物理伤害统一乘 0.70。
   //    写成 100 会让全局伤害偏高 43%。
@@ -223,12 +223,12 @@ static void CheckConfigDefaults() {
 }
 
 int main() {
-  CheckElementMatrix();
-  CheckHandle();
-  CheckReplayable();
-  CheckBattleField();
-  CheckIdlInterop();
-  CheckConfigDefaults();
+  checkElementMatrix();
+  checkHandle();
+  checkReplayable();
+  checkBattleField();
+  checkIdlInterop();
+  checkConfigDefaults();
   std::printf("OK  contract smoke: 相克矩阵/句柄/可回放/战场/IDL互操作/配置默认值\n");
   return 0;
 }

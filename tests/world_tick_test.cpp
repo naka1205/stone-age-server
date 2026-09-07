@@ -20,8 +20,8 @@ using namespace SA::World;
 
 namespace {
 
-SA::Platform::ServerConfig MakeConfig() {
-  const SA::Platform::ConfigResult r = SA::Platform::ParseConfig(R"({
+SA::Platform::ServerConfig makeConfig() {
+  const SA::Platform::ConfigResult r = SA::Platform::parseConfig(R"({
     "protocol_version": 1,
     "log_level": "error",
     "tempo": { "tick_hz": 100, "battle_turn_interval_ms": 1000 }
@@ -35,7 +35,7 @@ SA::Platform::ServerConfig MakeConfig() {
 // ⚠️ 数值不追求"像原版" —— 00 §0 已认下 ③ 层不可自证、④ 层无法验证。
 //    这里只要求"能分出胜负",验的是**生命周期**,不是平衡性。
 //    平衡性归 tests/rules_battle_test.cpp 的黄金用例集。
-SA::Rules::BattleField MakeField() {
+SA::Rules::BattleField makeField() {
   SA::Rules::BattleField f{};
   SA::Rules::Combatant& me = f.at(0);
   me.occupied = true;
@@ -65,7 +65,7 @@ SA::Rules::BattleField MakeField() {
 
 // 把测试用的四件套攒在一起,免得每个用例都写一遍。
 struct Fixture {
-  SA::Platform::ServerConfig config = MakeConfig();
+  SA::Platform::ServerConfig config = makeConfig();
   SA::Platform::ManualClock clock{0};
   SA::Platform::Logger logger{SA::Platform::LogLevel::kError};
   SA::Platform::RandomSource random{0xABCDEF};
@@ -77,7 +77,7 @@ struct Fixture {
 
 TEST_CASE("tick 会推进,且不会自己停下来") {
   Fixture f;
-  for (int i = 0; i < 10; ++i) f.world.Tick();
+  for (int i = 0; i < 10; ++i) f.world.tick();
   CHECK(f.world.ticks() == 10);
   CHECK_FALSE(f.world.stopped());
 }
@@ -85,24 +85,24 @@ TEST_CASE("tick 会推进,且不会自己停下来") {
 // ★★ 本文件的核心用例。
 TEST_CASE("战斗推进受节拍控制,不等于 tick 频率") {
   Fixture f;
-  const BattleId id = f.world.StartBattle(MakeField());
+  const BattleId id = f.world.startBattle(makeField());
   REQUIRE(f.world.stats(id) != nullptr);
 
   // 间隔 1000 ms。在此之前无论 tick 多少次,都不该结算出一个回合。
   for (int i = 0; i < 500; ++i) {
-    f.clock.Advance(1);   // 每 tick 1 ms ⇒ 累计 500 ms
-    f.world.Tick();
+    f.clock.advance(1);   // 每 tick 1 ms ⇒ 累计 500 ms
+    f.world.tick();
   }
   CHECK(f.world.stats(id)->turns_resolved == 0);
   CHECK(f.world.ticks() == 500);
 
   // 越过间隔 ⇒ 结算一个回合。
-  f.clock.Advance(600);
-  f.world.Tick();
+  f.clock.advance(600);
+  f.world.tick();
   CHECK(f.world.stats(id)->turns_resolved == 1);
 
   // ⚠️ 再连 tick 也不该多结算 —— 下一回合要再等一个间隔。
-  for (int i = 0; i < 100; ++i) f.world.Tick();
+  for (int i = 0; i < 100; ++i) f.world.tick();
   CHECK(f.world.stats(id)->turns_resolved == 1);
 }
 
@@ -110,11 +110,11 @@ TEST_CASE("节拍是配置项:改间隔,回合数跟着变") {
   Fixture f;
   f.config.tempo.battle_turn_interval_ms = 100;
   World w(f.config, f.clock, f.logger, f.random, f.transport);
-  const BattleId id = w.StartBattle(MakeField());
+  const BattleId id = w.startBattle(makeField());
 
   for (int i = 0; i < 10; ++i) {
-    f.clock.Advance(100);
-    w.Tick();
+    f.clock.advance(100);
+    w.tick();
   }
   // 10 次跨越 100 ms 的间隔 ⇒ 该结算多轮(具体轮数取决于战斗何时结束)。
   CHECK(w.stats(id)->turns_resolved >= 2);
@@ -128,8 +128,8 @@ TEST_CASE("节拍是配置项:改间隔,回合数跟着变") {
 //   ⇒ 一场没有会话参与的战斗只有敌方在动 ⇒ 要打得完,敌方就得打得动。
 // ⚠️ 原夹具 attack=20 对 defense=50,每回合伤害趋近下限,200 回合打不完 ——
 //   那是**用例的隐含前提**(以为双方都会动)与 L3 语义不符,不是实现错。
-SA::Rules::BattleField MakeFieldEnemyStrong() {
-  SA::Rules::BattleField f = MakeField();
+SA::Rules::BattleField makeFieldEnemyStrong() {
+  SA::Rules::BattleField f = makeField();
   SA::Rules::Combatant& foe = f.at(SA::Rules::kSideOffset);
   foe.level = 40;
   foe.attack = 400;
@@ -139,17 +139,17 @@ SA::Rules::BattleField MakeFieldEnemyStrong() {
 
 TEST_CASE("战斗会打完:一侧全灭 ⇒ finished") {
   Fixture f;
-  const BattleId id = f.world.StartBattle(MakeFieldEnemyStrong());
+  const BattleId id = f.world.startBattle(makeFieldEnemyStrong());
   for (int i = 0; i < 200 && !f.world.stats(id)->finished; ++i) {
-    f.clock.Advance(1000);
-    f.world.Tick();
+    f.clock.advance(1000);
+    f.world.tick();
   }
   CHECK(f.world.stats(id)->finished);
   CHECK(f.world.stats(id)->turns_resolved > 0);
   // 打完之后不再结算。
   const std::uint32_t at_end = f.world.stats(id)->turns_resolved;
-  f.clock.Advance(10000);
-  f.world.Tick();
+  f.clock.advance(10000);
+  f.world.tick();
   CHECK(f.world.stats(id)->turns_resolved == at_end);
 }
 
@@ -158,16 +158,16 @@ TEST_CASE("战斗会打完:一侧全灭 ⇒ finished") {
 //    无法与原版比对,但**可以与自己的历史行为比对**。
 TEST_CASE("可回放:同主种子的两次运行逐位一致") {
   auto run = [](std::uint64_t master) {
-    SA::Platform::ServerConfig cfg = MakeConfig();
+    SA::Platform::ServerConfig cfg = makeConfig();
     SA::Platform::ManualClock clock{0};
     SA::Platform::Logger logger{SA::Platform::LogLevel::kError};
     SA::Platform::RandomSource random{master};
     SA::Net::LoopbackTransport transport;
     World w(cfg, clock, logger, random, transport);
-    const BattleId id = w.StartBattle(MakeFieldEnemyStrong());
+    const BattleId id = w.startBattle(makeFieldEnemyStrong());
     for (int i = 0; i < 200 && !w.stats(id)->finished; ++i) {
-      clock.Advance(1000);
-      w.Tick();
+      clock.advance(1000);
+      w.tick();
     }
     return std::pair<std::uint32_t, std::uint32_t>(w.stats(id)->turns_resolved,
                                                    w.stats(id)->events_emitted);
@@ -184,12 +184,12 @@ TEST_CASE("可回放:同主种子的两次运行逐位一致") {
 // ── 连接与会话在 world 里的接线 ──────────────────────────────
 namespace {
 
-std::vector<std::uint8_t> HandshakeBytes(std::uint32_t version) {
+std::vector<std::uint8_t> handshakeBytes(std::uint32_t version) {
   SA::Transport::HandshakeRequest req{};
   req.protocol_version = version;
   req.client_build.assign("test");
   std::vector<std::uint8_t> out;
-  REQUIRE(SA::Net::EncodeFramed(1, req, out));
+  REQUIRE(SA::Net::encodeFramed(1, req, out));
   return out;
 }
 
@@ -197,24 +197,24 @@ std::vector<std::uint8_t> HandshakeBytes(std::uint32_t version) {
 
 TEST_CASE("连上 → 握手 → 已认证") {
   Fixture f;
-  const SA::Net::ConnectionId id = f.transport.Connect();
-  CHECK(f.world.session_count() == 1);
-  CHECK(f.world.session_state(id) == SA::Net::SessionState::kAnonymous);
+  const SA::Net::ConnectionId id = f.transport.connect();
+  CHECK(f.world.sessionCount() == 1);
+  CHECK(f.world.sessionState(id) == SA::Net::SessionState::kAnonymous);
 
-  const std::vector<std::uint8_t> hs = HandshakeBytes(f.config.protocol_version);
-  f.transport.Deliver(id, hs.data(), hs.size());
-  f.world.Tick();   // 第 2 步:网络入站
+  const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+  f.transport.deliver(id, hs.data(), hs.size());
+  f.world.tick();   // 第 2 步:网络入站
 
-  CHECK(f.world.session_state(id) == SA::Net::SessionState::kAuthenticated);
+  CHECK(f.world.sessionState(id) == SA::Net::SessionState::kAuthenticated);
   CHECK_FALSE(f.transport.sent(id).empty());   // HandshakeAccepted 已发出
 }
 
 TEST_CASE("版本不符 ⇒ 连接被关,但拒绝理由已经发出去了") {
   Fixture f;
-  const SA::Net::ConnectionId id = f.transport.Connect();
-  const std::vector<std::uint8_t> hs = HandshakeBytes(f.config.protocol_version + 1);
-  f.transport.Deliver(id, hs.data(), hs.size());
-  f.world.Tick();
+  const SA::Net::ConnectionId id = f.transport.connect();
+  const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version + 1);
+  f.transport.deliver(id, hs.data(), hs.size());
+  f.world.tick();
 
   CHECK(f.transport.closed(id));
   CHECK_FALSE(f.transport.sent(id).empty());
@@ -222,18 +222,18 @@ TEST_CASE("版本不符 ⇒ 连接被关,但拒绝理由已经发出去了") {
 
 TEST_CASE("入场后能收到事件流") {
   Fixture f;
-  const SA::Net::ConnectionId id = f.transport.Connect();
-  const std::vector<std::uint8_t> hs = HandshakeBytes(f.config.protocol_version);
-  f.transport.Deliver(id, hs.data(), hs.size());
-  f.world.Tick();
-  f.transport.ClearSent(id);
+  const SA::Net::ConnectionId id = f.transport.connect();
+  const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+  f.transport.deliver(id, hs.data(), hs.size());
+  f.world.tick();
+  f.transport.clearSent(id);
 
-  const BattleId battle = f.world.StartBattle(MakeField());
-  REQUIRE(f.world.JoinBattle(battle, id, 0));
-  CHECK(f.world.session_state(id) == SA::Net::SessionState::kOnline);
+  const BattleId battle = f.world.startBattle(makeField());
+  REQUIRE(f.world.joinBattle(battle, id, 0));
+  CHECK(f.world.sessionState(id) == SA::Net::SessionState::kOnline);
 
-  f.clock.Advance(2000);
-  f.world.Tick();
+  f.clock.advance(2000);
+  f.world.tick();
   CHECK(f.world.stats(battle)->turns_resolved == 1);
   // ★ 1.4 demo 的验收对象就是这一串字节:**事件流端到端一致**。
   CHECK_FALSE(f.transport.sent(id).empty());
@@ -241,39 +241,39 @@ TEST_CASE("入场后能收到事件流") {
 
 TEST_CASE("没握手的连接不能入场") {
   Fixture f;
-  const SA::Net::ConnectionId id = f.transport.Connect();
-  const BattleId battle = f.world.StartBattle(MakeField());
-  CHECK_FALSE(f.world.JoinBattle(battle, id, 0));
+  const SA::Net::ConnectionId id = f.transport.connect();
+  const BattleId battle = f.world.startBattle(makeField());
+  CHECK_FALSE(f.world.joinBattle(battle, id, 0));
 }
 
 TEST_CASE("入场参数的边界") {
   Fixture f;
-  const SA::Net::ConnectionId id = f.transport.Connect();
-  const std::vector<std::uint8_t> hs = HandshakeBytes(f.config.protocol_version);
-  f.transport.Deliver(id, hs.data(), hs.size());
-  f.world.Tick();
+  const SA::Net::ConnectionId id = f.transport.connect();
+  const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+  f.transport.deliver(id, hs.data(), hs.size());
+  f.world.tick();
 
-  const BattleId battle = f.world.StartBattle(MakeField());
-  CHECK_FALSE(f.world.JoinBattle(9999, id, 0));                 // 战斗不存在
-  CHECK_FALSE(f.world.JoinBattle(battle, id, 200));             // 槽号越界
-  CHECK(f.world.JoinBattle(battle, id, 0));
-  CHECK_FALSE(f.world.JoinBattle(battle, id, 1));               // 重复入场
+  const BattleId battle = f.world.startBattle(makeField());
+  CHECK_FALSE(f.world.joinBattle(9999, id, 0));                 // 战斗不存在
+  CHECK_FALSE(f.world.joinBattle(battle, id, 200));             // 槽号越界
+  CHECK(f.world.joinBattle(battle, id, 0));
+  CHECK_FALSE(f.world.joinBattle(battle, id, 1));               // 重复入场
 }
 
 TEST_CASE("断线会把会话从战斗里摘掉") {
   Fixture f;
-  const SA::Net::ConnectionId id = f.transport.Connect();
-  const std::vector<std::uint8_t> hs = HandshakeBytes(f.config.protocol_version);
-  f.transport.Deliver(id, hs.data(), hs.size());
-  f.world.Tick();
-  const BattleId battle = f.world.StartBattle(MakeField());
-  REQUIRE(f.world.JoinBattle(battle, id, 0));
+  const SA::Net::ConnectionId id = f.transport.connect();
+  const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+  f.transport.deliver(id, hs.data(), hs.size());
+  f.world.tick();
+  const BattleId battle = f.world.startBattle(makeField());
+  REQUIRE(f.world.joinBattle(battle, id, 0));
 
-  f.transport.Close(id);
-  CHECK(f.world.session_count() == 0);
+  f.transport.close(id);
+  CHECK(f.world.sessionCount() == 0);
   // 战斗本身照常推进(1.5 没有"人走了就散场"的规则,那属玩法)
-  f.clock.Advance(2000);
-  f.world.Tick();
+  f.clock.advance(2000);
+  f.world.tick();
   CHECK(f.world.stats(battle)->turns_resolved == 1);
 }
 
@@ -281,14 +281,14 @@ TEST_CASE("断线会把会话从战斗里摘掉") {
 //    这条只验能做的那部分:拒绝之后确实停下来了。
 TEST_CASE("停服请求 ⇒ 关闭全部连接并停止") {
   Fixture f;
-  const SA::Net::ConnectionId id = f.transport.Connect();
-  f.world.RequestShutdown();
-  f.world.Tick();
+  const SA::Net::ConnectionId id = f.transport.connect();
+  f.world.requestShutdown();
+  f.world.tick();
   CHECK(f.world.stopped());
   CHECK(f.transport.closed(id));
   // 停了之后 tick 不再推进
   const std::uint64_t at_stop = f.world.ticks();
-  f.world.Tick();
+  f.world.tick();
   CHECK(f.world.ticks() == at_stop);
 }
 
@@ -333,25 +333,25 @@ struct ClientMirror {
   int damage_events = 0;
 
   // 喂一段服务端出站字节,把里面所有完整帧消费掉。
-  void Feed(const std::vector<std::uint8_t>& bytes) {
+  void feed(const std::vector<std::uint8_t>& bytes) {
     if (bytes.empty()) return;
-    REQUIRE(reader.Push(bytes.data(), bytes.size()));
+    REQUIRE(reader.push(bytes.data(), bytes.size()));
     for (;;) {
       const std::uint8_t* p = nullptr;
       std::uint32_t len = 0;
-      const SA::Net::FrameStatus st = reader.Next(&p, &len);
+      const SA::Net::FrameStatus st = reader.next(&p, &len);
       if (st == SA::Net::FrameStatus::kNeedMore) break;
       REQUIRE(st == SA::Net::FrameStatus::kOk);
 
       SA::Net::EnvelopeView env;
-      REQUIRE(SA::Net::DecodeEnvelope(p, len, env));
+      REQUIRE(SA::Net::decodeEnvelope(p, len, env));
       // ⚠️ body 必须在 Pop() 之前用掉或拷走(net_framing_test.cpp 卷首的教训)。
-      Dispatch(env);
-      reader.Pop();
+      dispatch(env);
+      reader.pop();
     }
   }
 
-  void Dispatch(const SA::Net::EnvelopeView& env) {
+  void dispatch(const SA::Net::EnvelopeView& env) {
     ++seen[env.msg_id];
     order.push_back(env.msg_id);
     SA::IDL::Reader rd(env.body, env.body_len);
@@ -399,14 +399,14 @@ struct ClientMirror {
 
   // ⚠️ 用它而不是 damage_taken[slot]:map::operator[] 不是 const,
   //    且会**插入**一个 0 —— 在断言里悄悄改被观测对象是很坏的习惯。
-  std::int64_t damage_of(std::uint32_t slot) const {
+  std::int64_t damageOf(std::uint32_t slot) const {
     const auto it = damage_taken.find(slot);
     return it == damage_taken.end() ? 0 : it->second;
   }
 };
 
-SA::Platform::ServerConfig DemoConfig() {
-  const SA::Platform::ConfigResult r = SA::Platform::ParseConfig(R"({
+SA::Platform::ServerConfig demoConfig() {
+  const SA::Platform::ConfigResult r = SA::Platform::parseConfig(R"({
     "protocol_version": 1,
     "log_level": "error",
     "tempo": { "tick_hz": 100, "battle_turn_interval_ms": 1000 },
@@ -424,21 +424,21 @@ struct DemoRun {
   bool finished = false;
 };
 
-DemoRun RunDemo(bool submit_commands, std::uint64_t master_seed) {
+DemoRun runDemo(bool submit_commands, std::uint64_t master_seed) {
   DemoRun out;
-  SA::Platform::ServerConfig cfg = DemoConfig();
+  SA::Platform::ServerConfig cfg = demoConfig();
   SA::Platform::ManualClock clock{0};
   SA::Platform::Logger logger{SA::Platform::LogLevel::kError};
   SA::Platform::RandomSource random{master_seed};
   SA::Net::LoopbackTransport transport;
   World w(cfg, clock, logger, random, transport);
 
-  const SA::Net::ConnectionId id = transport.Connect();
-  const std::vector<std::uint8_t> hs = HandshakeBytes(cfg.protocol_version);
-  transport.Deliver(id, hs.data(), hs.size());
-  w.Tick();
-  out.mirror.Feed(transport.sent(id));
-  transport.ClearSent(id);
+  const SA::Net::ConnectionId id = transport.connect();
+  const std::vector<std::uint8_t> hs = handshakeBytes(cfg.protocol_version);
+  transport.deliver(id, hs.data(), hs.size());
+  w.tick();
+  out.mirror.feed(transport.sent(id));
+  transport.clearSent(id);
 
   // 客户端此刻必须已经知道:我是谁、现在第几回合。
   REQUIRE(out.mirror.has_self);
@@ -455,15 +455,15 @@ DemoRun RunDemo(bool submit_commands, std::uint64_t master_seed) {
       cmd.command.attack.target =
           static_cast<std::uint32_t>(SA::Rules::kSideOffset);
       std::vector<std::uint8_t> wire;
-      REQUIRE(SA::Net::EncodeFramed(0, cmd, wire));
-      transport.Deliver(id, wire.data(), wire.size());
+      REQUIRE(SA::Net::encodeFramed(0, cmd, wire));
+      transport.deliver(id, wire.data(), wire.size());
       last_submitted = out.mirror.turn;
     }
 
-    clock.Advance(1000);
-    w.Tick();
-    out.mirror.Feed(transport.sent(id));
-    transport.ClearSent(id);
+    clock.advance(1000);
+    w.tick();
+    out.mirror.feed(transport.sent(id));
+    transport.clearSent(id);
 
     const BattleStats* st = w.stats(out.mirror.battle_id);
     REQUIRE(st != nullptr);
@@ -482,7 +482,7 @@ DemoRun RunDemo(bool submit_commands, std::uint64_t master_seed) {
 // ★ 握手完就能拿到"我是谁" —— 缺这一步客户端组不出 BattleCommand
 //   (它要 battle_id 与 turn,而这两样握手回执里都没有)。
 TEST_CASE("demo 装配:握手即入场,且入场信息先于事件流到达") {
-  const DemoRun run = RunDemo(false, 0x2026'09'06ull);
+  const DemoRun run = runDemo(false, 0x2026'09'06ull);
 
   CHECK(run.mirror.count(SA::IDL::MsgId::HandshakeAccepted) == 1);
   CHECK(run.mirror.count(SA::IDL::MsgId::BattleSelfInfo) == 1);
@@ -515,29 +515,29 @@ TEST_CASE("demo 装配:握手即入场,且入场信息先于事件流到达") {
 //    战斗也必须在有限回合内结束 —— 否则 demo 挂起时分不清是敌人打不动
 //    还是事件流断了。
 TEST_CASE("demo 战斗会自己打完 —— 客户端不出招也不会卡住") {
-  const DemoRun run = RunDemo(false, 0x1111);
+  const DemoRun run = runDemo(false, 0x1111);
   CHECK(run.finished);
   CHECK(run.turns > 0);
   CHECK(run.mirror.battle_events_msgs > 0);
   CHECK(run.mirror.damage_events > 0);
   // 玩家没出招 ⇒ 敌方(slot 10)**一点伤害都不该吃到**。
   // ⚠️ 这条同时守着 L3 的既定语义:「无指令 ⇒ 本回合不行动」。
-  CHECK(run.mirror.damage_of(
+  CHECK(run.mirror.damageOf(
             static_cast<std::uint32_t>(SA::Rules::kSideOffset)) == 0);
   // 而玩家自己在挨打。
-  CHECK(run.mirror.damage_of(0) > 0);
+  CHECK(run.mirror.damageOf(0) > 0);
 }
 
 // ★★★ 本文件里与 1.4 关系最直接的一条:**上行链路真的被采纳了**。
 //    同一份战场、同一主种子,唯一的差别是客户端有没有把 BattleCommand 发上来。
 //    ⇒ 敌方吃到伤害这件事,只可能来自那条上行指令。
 TEST_CASE("端到端:客户端出招 ⇒ 敌方吃到伤害(上行链路的凭据)") {
-  const DemoRun idle = RunDemo(false, 0x2222);
-  const DemoRun active = RunDemo(true, 0x2222);
+  const DemoRun idle = runDemo(false, 0x2222);
+  const DemoRun active = runDemo(true, 0x2222);
 
   const auto foe = static_cast<std::uint32_t>(SA::Rules::kSideOffset);
-  CHECK(idle.mirror.damage_of(foe) == 0);
-  CHECK(active.mirror.damage_of(foe) > 0);
+  CHECK(idle.mirror.damageOf(foe) == 0);
+  CHECK(active.mirror.damageOf(foe) > 0);
 
   CHECK(active.finished);
   // 出招方打得更快 —— 不是数值口味,是"指令确实进了结算"的可判定表现。
@@ -551,15 +551,15 @@ TEST_CASE("demo 装配默认关 —— 握手完只是已认证,不会自己进�
   Fixture f;   // MakeConfig() 里没有 demo_battle 段
   REQUIRE_FALSE(f.config.demo_battle.enabled);
 
-  const SA::Net::ConnectionId id = f.transport.Connect();
-  const std::vector<std::uint8_t> hs = HandshakeBytes(f.config.protocol_version);
-  f.transport.Deliver(id, hs.data(), hs.size());
-  f.world.Tick();
+  const SA::Net::ConnectionId id = f.transport.connect();
+  const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+  f.transport.deliver(id, hs.data(), hs.size());
+  f.world.tick();
 
-  CHECK(f.world.session_state(id) == SA::Net::SessionState::kAuthenticated);
+  CHECK(f.world.sessionState(id) == SA::Net::SessionState::kAuthenticated);
 
   ClientMirror m;
-  m.Feed(f.transport.sent(id));
+  m.feed(f.transport.sent(id));
   CHECK(m.count(SA::IDL::MsgId::HandshakeAccepted) == 1);
   CHECK(m.count(SA::IDL::MsgId::BattleSelfInfo) == 0);
   CHECK(m.count(SA::IDL::MsgId::BattleTurnBegin) == 0);
@@ -567,7 +567,7 @@ TEST_CASE("demo 装配默认关 —— 握手完只是已认证,不会自己进�
 
 // ★ 槽位是配置项,且**真的**按它落位 —— 不是读进来就丢。
 TEST_CASE("demo 槽位按配置落位") {
-  SA::Platform::ServerConfig cfg = DemoConfig();
+  SA::Platform::ServerConfig cfg = demoConfig();
   cfg.demo_battle.slot = 3;
   SA::Platform::ManualClock clock{0};
   SA::Platform::Logger logger{SA::Platform::LogLevel::kError};
@@ -575,13 +575,13 @@ TEST_CASE("demo 槽位按配置落位") {
   SA::Net::LoopbackTransport transport;
   World w(cfg, clock, logger, random, transport);
 
-  const SA::Net::ConnectionId id = transport.Connect();
-  const std::vector<std::uint8_t> hs = HandshakeBytes(cfg.protocol_version);
-  transport.Deliver(id, hs.data(), hs.size());
-  w.Tick();
+  const SA::Net::ConnectionId id = transport.connect();
+  const std::vector<std::uint8_t> hs = handshakeBytes(cfg.protocol_version);
+  transport.deliver(id, hs.data(), hs.size());
+  w.tick();
 
   ClientMirror m;
-  m.Feed(transport.sent(id));
+  m.feed(transport.sent(id));
   REQUIRE(m.has_self);
   CHECK(m.self.slot == 3);
 }
@@ -589,12 +589,12 @@ TEST_CASE("demo 槽位按配置落位") {
 //   这里同理 —— 上一回合的决定在新回合里执行是错的。
 TEST_CASE("指令必须指向当前回合") {
   Fixture f;
-  const SA::Net::ConnectionId id = f.transport.Connect();
-  const std::vector<std::uint8_t> hs = HandshakeBytes(f.config.protocol_version);
-  f.transport.Deliver(id, hs.data(), hs.size());
-  f.world.Tick();
-  const BattleId battle = f.world.StartBattle(MakeField());
-  REQUIRE(f.world.JoinBattle(battle, id, 0));
+  const SA::Net::ConnectionId id = f.transport.connect();
+  const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+  f.transport.deliver(id, hs.data(), hs.size());
+  f.world.tick();
+  const BattleId battle = f.world.startBattle(makeField());
+  REQUIRE(f.world.joinBattle(battle, id, 0));
 
   SA::Domain::BattleCommand stale{};
   stale.battle_id = battle;
@@ -603,9 +603,9 @@ TEST_CASE("指令必须指向当前回合") {
   stale.command.attack.target = static_cast<std::uint32_t>(SA::Rules::kSideOffset);
 
   std::vector<std::uint8_t> wire;
-  REQUIRE(SA::Net::EncodeFramed(0, stale, wire));
-  f.transport.Deliver(id, wire.data(), wire.size());
-  f.world.Tick();
+  REQUIRE(SA::Net::encodeFramed(0, stale, wire));
+  f.transport.deliver(id, wire.data(), wire.size());
+  f.world.tick();
 
   // 会话层接受了它(消息合法),world 层按回合号丢弃 —— 连接不该被关。
   CHECK_FALSE(f.transport.closed(id));

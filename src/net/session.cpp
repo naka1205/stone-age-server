@@ -7,7 +7,7 @@
 
 namespace SA::Net {
 
-const char* SessionStateName(SessionState s) noexcept {
+const char* sessionStateName(SessionState s) noexcept {
   switch (s) {
     case SessionState::kAnonymous:      return "anonymous";
     case SessionState::kAuthenticating: return "authenticating";
@@ -28,22 +28,22 @@ Session::Session(SessionId id, std::uint32_t protocol_version,
       _heartbeatIntervalMs(heartbeat_interval_ms),
       _host(host) {}
 
-void Session::MarkOnline() noexcept {
+void Session::markOnline() noexcept {
   if (_state == SessionState::kAuthenticated) _state = SessionState::kOnline;
 }
 
-void Session::Close() noexcept {
+void Session::close() noexcept {
   if (_state == SessionState::kClosed) return;
   _state = SessionState::kClosed;
-  if (_host != nullptr) _host->OnSessionClosed(_id);
+  if (_host != nullptr) _host->onSessionClosed(_id);
 }
 
-bool Session::HandleFrame(const std::uint8_t* frame, std::uint32_t len,
+bool Session::handleFrame(const std::uint8_t* frame, std::uint32_t len,
                           std::vector<std::uint8_t>& out) {
   if (_state == SessionState::kClosed) return false;
 
   EnvelopeView env;
-  if (!DecodeEnvelope(frame, len, env)) {
+  if (!decodeEnvelope(frame, len, env)) {
     // 02 §2.1:解码失败是「整条消息作废」,不存在部分成功的中间态。
     _lastRejectMsgId = 0;
     return false;
@@ -64,11 +64,11 @@ bool Session::HandleFrame(const std::uint8_t* frame, std::uint32_t len,
 
   switch (id) {
     case SA::IDL::MsgId::HandshakeRequest:
-      return HandleHandshake(env, out);
+      return handleHandshake(env, out);
     case SA::IDL::MsgId::Ping:
-      return HandlePing(env, out);
+      return handlePing(env, out);
     case SA::IDL::MsgId::BattleCommand:
-      return HandleBattleCommand(env);
+      return handleBattleCommand(env);
     default:
       // ⚠️ 未知或方向错的消息 ⇒ 协议违规,关闭连接。
       //   不"忽略并继续":那会让客户端的 bug 表现为"服务端没反应",
@@ -78,7 +78,7 @@ bool Session::HandleFrame(const std::uint8_t* frame, std::uint32_t len,
   }
 }
 
-bool Session::HandleHandshake(const EnvelopeView& env,
+bool Session::handleHandshake(const EnvelopeView& env,
                               std::vector<std::uint8_t>& out) {
   // 重复握手是协议违规:握手改变会话状态,允许重放等于允许状态机被绕。
   if (_state != SessionState::kAnonymous) {
@@ -98,9 +98,9 @@ bool Session::HandleHandshake(const EnvelopeView& env,
     rej.required_protocol_version = _protocolVersion;
     // ⚠️ 拒绝也要发出去再关 —— 否则客户端只看到断连,无从提示"请更新"。
     //   corr_id 原样回带,让客户端能把它对上自己那条请求(02 §1.3)。
-    (void)EncodeFramed(env.corr_id, rej, out);
+    (void)encodeFramed(env.corr_id, rej, out);
     _state = SessionState::kClosed;
-    if (_host != nullptr) _host->OnSessionClosed(_id);
+    if (_host != nullptr) _host->onSessionClosed(_id);
     return false;
   }
 
@@ -108,14 +108,14 @@ bool Session::HandleHandshake(const EnvelopeView& env,
   acc.session_id = _id;
   // ★ 心跳间隔由服务端下发,客户端不硬编码(handshake.proto 的原话)。
   acc.heartbeat_interval_ms = _heartbeatIntervalMs;
-  if (!EncodeFramed(env.corr_id, acc, out)) return false;
+  if (!encodeFramed(env.corr_id, acc, out)) return false;
 
   _state = SessionState::kAuthenticated;
-  if (_host != nullptr) _host->OnSessionReady(_id);
+  if (_host != nullptr) _host->onSessionReady(_id);
   return true;
 }
 
-bool Session::HandlePing(const EnvelopeView& env,
+bool Session::handlePing(const EnvelopeView& env,
                          std::vector<std::uint8_t>& out) {
   SA::IDL::Reader r(env.body, env.body_len);
   SA::Transport::Ping ping;
@@ -130,10 +130,10 @@ bool Session::HandlePing(const EnvelopeView& env,
   //      现在留 0 而不是随手 time(nullptr):01 §3.1「不用墙钟做逻辑判断」,
   //      而一个"看起来有值其实是墙钟"的字段比 0 更难查。
   pong.server_time_ms = 0;
-  return EncodeFramed(env.corr_id, pong, out);
+  return encodeFramed(env.corr_id, pong, out);
 }
 
-bool Session::HandleBattleCommand(const EnvelopeView& env) {
+bool Session::handleBattleCommand(const EnvelopeView& env) {
   // ⚠️ 只有在世的会话能下指令。原版把这类校验散在各处,
   //    这里集中在状态机上 —— 02 §5.5「回执侧的两条强校验必须保留」同一取向。
   if (_state != SessionState::kOnline) {
@@ -150,7 +150,7 @@ bool Session::HandleBattleCommand(const EnvelopeView& env) {
   //   shared/rules/battle.h 明写 L3 的输入是"已通过合法性校验"的指令,
   //   而 DR-BT5 把「能否行动」统一到 Rules::CheckCanAct 这一个真源。
   //   net 只负责"这条消息在这个状态下允不允许出现"。
-  if (_host != nullptr) _host->OnBattleCommand(_id, cmd);
+  if (_host != nullptr) _host->onBattleCommand(_id, cmd);
   return true;
 }
 
