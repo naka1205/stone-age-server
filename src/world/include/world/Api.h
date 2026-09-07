@@ -20,6 +20,7 @@
 #include <memory>
 #include <vector>
 
+#include "model/Pet.h"
 #include "net/Api.h"
 #include "platform/Api.h"
 #include "rules/Battle.h"
@@ -132,6 +133,42 @@ class World final : public SA::Net::TransportEvents,
 	struct Impl;
 	std::unique_ptr<Impl> _impl;
 };
+
+// ── 战场态宠物入场 / 离场(批次 M.2)────────────────────────────────
+//
+// ★★ 把一只 L2 `Model::Pet` 投影成战场态 `Rules::Combatant`,放进
+//    `slots[owner_field_slot + kBattlePlayerMax]`。原版宠物是站在 `Entry[主人位次+5]`
+//    的**独立完整战斗单位**(展开视图 `battle.c:932` 的 `BATTLE_NewEntry` `CHAR_TYPEPET`
+//    分支),**不是** `Combatant::ride_hp` 那只骑乘宠 —— 两套东西。
+//
+// ★ 自由函数而非 `World` 成员:它是**纯投影 + 站位判定**,不碰 World 的运行时所有权
+//   (会话 / 池)⇒ 可被单元测直接喂 `field` + `Pet` 验证,不必跑一整场战斗。
+//
+// ⚠️★ **本批(M.2)只交付这个机制**。"选哪只宠"(读 `Player::default_pet`)与在
+//    `joinBattle` 里自动带出,留给换宠指令批次 —— 那时 `default_pet` 才有写者(PET_OUT);
+//    现在就接进 `joinBattle` 会是一条**永不触发的死路径**(捕获不设 `default_pet`,
+//    而换宠指令尚未做)⇒ 不写永假分支(同 `createPetFromCombatant` 对源码门 ② 的处置)。
+//
+// 返回是否入场成功。三道门(照 `BATTLE_PetDefaultEntry:1402` + `NewEntry` 的 kPet 分支):
+//   ① `owner_field_slot` 必须在玩家段(每 side 前 `kBattlePlayerMax` 槽;宠位不能再带宠);
+//   ② 宠物存活 `pet.hp > 0`。⚠️ 源码是"有效 && !CHAR_ISDIE && HP>0",`ISDIE` 依赖未移植的
+//      状态系统 ⇒ 本批以 `hp>0` 为准并记明,`ISDIE` 单独成立的情形待状态系统补;
+//   ③ 目标宠位 `slots[owner+5]` 未被占(源码 `NewEntry:975` 的 `ENTRYMAX`)。
+//
+// ⚠️★★ 源码 `BATTLE_PetDefaultEntry` **恒返回 0**(`battle.c:1432`,`NewEntry` 成败都不改
+//    `ret`),`BATTLE_PetOut` 只能靠"入场后 `DEFAULTPET` 是否 <0"反推成败 —— 一处隐性缺陷。
+//    ★ 本函数**返回真实入场成败**,不复刻它;换宠指令批次的 PET_OUT 用这个返回值。
+//
+// ⚠️★ 战斗三围 `attack`/`defense`/`quick`/`max_hp` **留 0** —— `Pet` 只有原始四维,
+//    推导三围的 `complianceParameter` 未移植(06 域)。这是登记在案的残缺(同 M.1 捕获
+//    宠物四维=0):宠物能进出场 / 被打 / 死亡回池,但暂无战力,等属性推导移植后回填。
+bool enterPetToField(SA::Rules::BattleField &field, int owner_field_slot,
+                     const SA::Model::Pet &pet);
+
+// 把宠物从战场撤下(占位清空)。仿 `BATTLE_PetDefaultExit:1377`。
+// ★ 只置 `occupied=false` —— 撤下不是战死,**不置 `dead`**(同逃跑成功 / 捕获离场:
+//   记成阵亡会污染战果 / 经验结算,阶段 2)。owner_field_slot 越界或非玩家段则无操作。
+void exitPetFromField(SA::Rules::BattleField &field, int owner_field_slot);
 
 } // namespace SA::World
 

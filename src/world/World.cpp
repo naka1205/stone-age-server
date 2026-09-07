@@ -1154,4 +1154,67 @@ const SA::Rules::BattleField *World::battleField(BattleId id) const
 	return it == _impl->battles.end() ? nullptr : &it->second.field;
 }
 
+// ── 战场态宠物入场 / 离场(批次 M.2)──────────────────────────────
+//
+// 详注见 world/Api.h 的声明处:纯投影 + 站位判定,三道门照 `BATTLE_PetDefaultEntry`
+// (展开视图 `battle.c:1402`)+ `BATTLE_NewEntry` 的 `CHAR_TYPEPET` 分支(`:932`)。
+bool enterPetToField(SA::Rules::BattleField &field, int owner_field_slot,
+                     const SA::Model::Pet &pet)
+{
+	// ── 门 ①:owner 必须在玩家段(每 side 前 kBattlePlayerMax 槽)──────────
+	// ⚠️ 宠位(owner % kSideOffset >= kBattlePlayerMax)不能再带宠 —— 否则 owner+5
+	//    会落到敌方半场或越界。
+	if (owner_field_slot < 0 || owner_field_slot >= SA::Rules::kSlotCount)
+		return false;
+	if (owner_field_slot % SA::Rules::kSideOffset >= SA::Rules::kBattlePlayerMax)
+		return false;
+
+	// ── 门 ②:宠物存活(源码 battle.c:1418-1420 有效 && !ISDIE && HP>0)──────
+	//    ISDIE 依赖未移植的状态系统 ⇒ 本批以 hp>0 为准,见 Api.h 声明处。
+	if (pet.hp <= 0)
+		return false;
+
+	// ── 门 ③:目标宠位未被占(源码 NewEntry:975 ⇒ ENTRYMAX)──────────────
+	const int pet_field_slot = owner_field_slot + SA::Rules::kBattlePlayerMax;
+	SA::Rules::Combatant &dst = field.at(pet_field_slot);
+	if (dst.occupied)
+		return false;
+
+	// ── 投影 Pet → Combatant(拿得到的字段)────────────────────────────
+	// ★ 先清成干净单位,不留前一个占据该槽者的脏值 —— 离场只置 occupied=false,
+	//   其余字段是旧的(同 EntityPool::allocate 发干净槽的理由)。
+	dst = SA::Rules::Combatant{};
+	dst.occupied = true;
+	dst.kind = SA::Rules::CombatantKind::kPet;
+	dst.slot = static_cast<std::uint8_t>(pet_field_slot);
+	dst.level = pet.level;
+	dst.hp = pet.hp;
+	dst.mp = pet.mp;
+	dst.max_mp = pet.max_mp;
+	dst.luck = pet.luck;
+
+	// ⚠️★★ 四属**按具名下标取,绝不按位置拷** —— 三套顺序两两不同(原版 CHAR_*AT
+	//    火水地风 / Rules::Element 地水火风 / 相克表头 无火水地风),本项目已栽过两次。
+	//    与 createPetFromCombatant 的反向映射同源。
+	dst.elements[static_cast<int>(SA::Rules::Element::kEarth)] = pet.earth;
+	dst.elements[static_cast<int>(SA::Rules::Element::kWater)] = pet.water;
+	dst.elements[static_cast<int>(SA::Rules::Element::kFire)] = pet.fire;
+	dst.elements[static_cast<int>(SA::Rules::Element::kWind)] = pet.wind;
+
+	// ★ attack / defense / quick / max_hp 留 0(Combatant{} 已置 0):Pet 无这些字段,
+	//   推导它们的 complianceParameter 未移植(06 域)⇒ 登记在案的残缺,见 Api.h 声明处。
+	return true;
+}
+
+void exitPetFromField(SA::Rules::BattleField &field, int owner_field_slot)
+{
+	if (owner_field_slot < 0 || owner_field_slot >= SA::Rules::kSlotCount)
+		return;
+	if (owner_field_slot % SA::Rules::kSideOffset >= SA::Rules::kBattlePlayerMax)
+		return;
+	const int pet_field_slot = owner_field_slot + SA::Rules::kBattlePlayerMax;
+	// ★ 只清占位,不置 dead(撤下不是战死)。
+	field.at(pet_field_slot).occupied = false;
+}
+
 } // namespace SA::World

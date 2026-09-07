@@ -939,3 +939,159 @@ TEST_CASE("骑宠 HP:pet_hp_delta 落到 ride_hp,并夹在 0 以上")
 	}
 	CHECK(dropped);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  批次 M.2:战场态宠物入场 / 离场(enterPetToField / exitPetFromField)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ★★ 这一组直接单元测入场**机制**(纯函数,喂 field + Pet)—— 不经 World、不跑战斗。
+//    理由:"选哪只宠"要读 Player::default_pet,而设它的写者(PET_OUT 指令)还没做
+//    ⇒ 本批只验"给定一只宠,投影 + 站位 + 三门"这条机制;端到端(joinBattle 自动带宠)
+//    留给换宠指令批次。applyEvents 对宠位的写在 M.1「骑宠 HP」一类里已覆盖
+//    (它对任意 occupied 槽无差别),这里不重复,也不拿零三围的宠去跑 L3 结算。
+
+namespace
+{
+
+// 一只有战斗意义的 Pet:hp / 等级 / 四属性都非零,便于断言投影确实搬了值。
+SA::Model::Pet makeLivePet()
+{
+	SA::Model::Pet p{};
+	p.hp = 120;
+	p.mp = 30;
+	p.max_mp = 40;
+	p.level = 15;
+	p.luck = 7;
+	// ★ 四属性给四个**不同**的值,好让"按具名下标 vs 按位置"的错误暴露出来。
+	p.earth = 11;
+	p.water = 22;
+	p.fire = 33;
+	p.wind = 44;
+	return p;
+}
+
+// 一个主人在指定槽的战场。
+SA::Rules::BattleField makeFieldWithOwnerAt(int owner_slot)
+{
+	SA::Rules::BattleField f{};
+	SA::Rules::Combatant &me = f.at(owner_slot);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = static_cast<std::uint8_t>(owner_slot);
+	me.level = 20;
+	me.hp = 500;
+	me.max_hp = 500;
+	return f;
+}
+
+} // namespace
+
+TEST_CASE("M.2:默认宠投影进 slots[主人+5],可投影字段搬对")
+{
+	SA::Rules::BattleField f = makeFieldWithOwnerAt(0);
+	const SA::Model::Pet pet = makeLivePet();
+
+	REQUIRE(enterPetToField(f, 0, pet));
+
+	const SA::Rules::Combatant &p = f.at(SA::Rules::kBattlePlayerMax); // slot 5
+	CHECK(p.occupied);
+	CHECK(p.kind == SA::Rules::CombatantKind::kPet);
+	CHECK(p.slot == static_cast<std::uint8_t>(SA::Rules::kBattlePlayerMax));
+	CHECK(p.hp == 120);
+	CHECK(p.mp == 30);
+	CHECK(p.max_mp == 40);
+	CHECK(p.level == 15);
+	CHECK(p.luck == 7);
+}
+
+TEST_CASE("M.2:四属性按具名下标映射,绝不按位置(顺序陷阱)")
+{
+	SA::Rules::BattleField f = makeFieldWithOwnerAt(0);
+	const SA::Model::Pet pet = makeLivePet(); // earth11 water22 fire33 wind44
+
+	REQUIRE(enterPetToField(f, 0, pet));
+	const SA::Rules::Combatant &p = f.at(SA::Rules::kBattlePlayerMax);
+
+	// ★ 按 Element 具名下标断言。若实现按位置拷(pet.fire 是第 3 个字段,
+	//   而 Element::kFire==2、kEarth==0),这里会红。
+	CHECK(p.elements[static_cast<int>(SA::Rules::Element::kEarth)] == 11);
+	CHECK(p.elements[static_cast<int>(SA::Rules::Element::kWater)] == 22);
+	CHECK(p.elements[static_cast<int>(SA::Rules::Element::kFire)] == 33);
+	CHECK(p.elements[static_cast<int>(SA::Rules::Element::kWind)] == 44);
+}
+
+TEST_CASE("M.2:战斗三围是登记在案的零(complianceParameter 未移植)")
+{
+	SA::Rules::BattleField f = makeFieldWithOwnerAt(0);
+	const SA::Model::Pet pet = makeLivePet();
+
+	REQUIRE(enterPetToField(f, 0, pet));
+	const SA::Rules::Combatant &p = f.at(SA::Rules::kBattlePlayerMax);
+
+	// ⚠️★ 钉住残缺本身,免得下一个人以为三围填上了:Pet 无 attack/defense/quick,
+	//    max_hp 由 complianceParameter 推导,均未移植(06 域)。
+	CHECK(p.attack == 0);
+	CHECK(p.defense == 0);
+	CHECK(p.quick == 0);
+	CHECK(p.max_hp == 0);
+}
+
+TEST_CASE("M.2:死宠(hp<=0)不入场")
+{
+	SA::Rules::BattleField f = makeFieldWithOwnerAt(0);
+	SA::Model::Pet pet = makeLivePet();
+	pet.hp = 0;
+
+	CHECK_FALSE(enterPetToField(f, 0, pet));
+	CHECK_FALSE(f.at(SA::Rules::kBattlePlayerMax).occupied);
+}
+
+TEST_CASE("M.2:宠位已被占 ⇒ 入场失败,原单位不被覆盖")
+{
+	SA::Rules::BattleField f = makeFieldWithOwnerAt(0);
+	SA::Rules::Combatant &squatter = f.at(SA::Rules::kBattlePlayerMax);
+	squatter.occupied = true;
+	squatter.kind = SA::Rules::CombatantKind::kEnemy;
+	squatter.hp = 99;
+
+	const SA::Model::Pet pet = makeLivePet();
+	CHECK_FALSE(enterPetToField(f, 0, pet));
+	// ★ 原单位原样保留 —— 入场失败不该踩掉已在场的单位。
+	CHECK(f.at(SA::Rules::kBattlePlayerMax).kind == SA::Rules::CombatantKind::kEnemy);
+	CHECK(f.at(SA::Rules::kBattlePlayerMax).hp == 99);
+}
+
+TEST_CASE("M.2:owner 必须在玩家段 —— 宠位 / 越界都不带宠")
+{
+	SA::Rules::BattleField f{};
+	const SA::Model::Pet pet = makeLivePet();
+	// owner=5 是己方宠位(kBattlePlayerMax..kSideOffset-1)⇒ 拒绝。
+	CHECK_FALSE(enterPetToField(f, SA::Rules::kBattlePlayerMax, pet));
+	CHECK_FALSE(enterPetToField(f, SA::Rules::kSlotCount, pet)); // 越界
+	CHECK_FALSE(enterPetToField(f, -1, pet));
+}
+
+TEST_CASE("M.2:敌方主人的宠站到敌方宠段(主人+5,不串半场)")
+{
+	// 敌方主人 slot 10。
+	SA::Rules::BattleField f = makeFieldWithOwnerAt(SA::Rules::kSideOffset);
+	const SA::Model::Pet pet = makeLivePet();
+
+	REQUIRE(enterPetToField(f, SA::Rules::kSideOffset, pet));
+	// 敌方宠位 = 10 + 5 = 15,仍在敌方半场。
+	const int pet_slot = SA::Rules::kSideOffset + SA::Rules::kBattlePlayerMax;
+	CHECK(f.at(pet_slot).occupied);
+	CHECK(f.at(pet_slot).kind == SA::Rules::CombatantKind::kPet);
+}
+
+TEST_CASE("M.2:exitPetFromField 撤下宠物 —— 清占位但不置 dead")
+{
+	SA::Rules::BattleField f = makeFieldWithOwnerAt(0);
+	const SA::Model::Pet pet = makeLivePet();
+	REQUIRE(enterPetToField(f, 0, pet));
+	REQUIRE(f.at(SA::Rules::kBattlePlayerMax).occupied);
+
+	exitPetFromField(f, 0);
+	CHECK_FALSE(f.at(SA::Rules::kBattlePlayerMax).occupied);
+	CHECK_FALSE(f.at(SA::Rules::kBattlePlayerMax).dead); // ★ 撤下不是战死
+}
