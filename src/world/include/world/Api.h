@@ -103,6 +103,31 @@ class World final : public SA::Net::TransportEvents,
 	const BattleStats *stats(BattleId id) const;
 	SA::Net::SessionState sessionState(SA::Net::SessionId id) const;
 
+	// ── L2 实体池的观察面(批次 M.1)──────────────────────────────
+	//
+	// ★ 池在 pimpl 的 Impl 里 ⇒ 用例与运维只能经这里看见它。加这四个是因为
+	//   欠债 20 的要害正是「地基绿而运行时不接,ctest 一样全过」——
+	//   **没有观察面,就没有任何东西能断言接上了。**
+	std::size_t playerCount() const noexcept;
+	std::size_t petCount() const noexcept;
+
+	// 某会话背后 Player 的捕获计数 / 已占宠物槽数。
+	// ⚠️ 会话不存在或没有 L2 实体 ⇒ **返回 −1**,不返 0 ——
+	//    0 与"真的是 0"分不开,而这两种情况在排查时要问的是完全不同的问题
+	//    (同 EntityIndex::find 未命中给明确空值那一条)。
+	int playerCaptureCount(SA::Net::SessionId session) const;
+	int playerPetSlotsUsed(SA::Net::SessionId session) const;
+
+	// 某场战斗的战场快照(只读)。不存在返回 nullptr。
+	//
+	// ★ 加它的理由有两条,都不是"为了测试方便":
+	//   ① 运维侧「现在战场什么样」是排查战斗问题的第一手信息(与 stats() 同族);
+	//   ② ★ 世界写的效果有一半落在 `field` 上(HP / 骑宠 HP / 离场 / capture_bonus 清零),
+	//      而 applyEvents 是 world 内部函数 ⇒ **没有这个面,那半边世界写没有任何东西
+	//      能断言它真的发生了** —— 而"看起来做了、其实没写"正是 §9.0.16 那族静默。
+	// ⚠️ 返回 const 引用语义:调用方不得改战场。要改只能经事件(ApplyEvents 卷首那条分工)。
+	const SA::Rules::BattleField *battleField(BattleId id) const;
+
   private:
 	struct Impl;
 	std::unique_ptr<Impl> _impl;

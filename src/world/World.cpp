@@ -11,13 +11,59 @@
 #include "world/Api.h"
 
 #include <algorithm>
+#include <array>
 #include <map>
 #include <vector>
+
+#include "model/EntityIndex.h"
+#include "model/EntityPool.h"
+#include "model/Player.h"
 
 namespace SA::World
 {
 namespace
 {
+
+// ── L2 实体池的容量(批次 M.1)─────────────────────────────────────────
+//
+// ★★ 取值有源码依据,不是拍的:`15` §2 的配置表实测 `csa8.0/setup.cf` ——
+//     fdnum = 100(角色数组**玩家段**维度,兼 fd 表长度与 accept 硬边界,C1/C6)
+//     petnum = 2,000(角色数组**宠物段**维度)
+//   ⚠️ C7:真实玩家上限 = fdnum − 系统占用(fd 表里混着 acfd/bindedfd/mfd/npcfd)
+//     ⇒ 100 是**上界**,不是可达并发数。
+//
+// ★ 一处很值得记的印证:`15` C4 实测原版角色是**三段式单一数组**
+//   `CHAR_chara[fdnum + petnum + othercharnum]`,段边界 `initCharCounter[0..2]`,
+//   **按 `CHAR_WHICHTYPE` 选段轮转分配** ——
+//   ⇒ 原版本来就是"按族分段的池",我们只是把段换成**独立强类型池**(M2)。
+//     和类型不是我们发明的抽象,是把它疤痕化的实现还原成本来的形状。
+//
+// ⚠️★ **这两个数不能配置化,而这是 EntityPool 定长设计的代价**:
+//    `EntityPool<T, Capacity>` 的 Capacity 是**模板参数** ⇒ 必须编译期常量。
+//    要让容量可配就得改成运行期容量的池,而那会丢掉 `std::array` 存储 ——
+//    正是 `15` §9.1 三根支柱第 ① 条「运行期零分配」的前提。
+//    ⇒ 原版 `fdnum` 是配置项,我们这里是常量,**这是有意的取舍,不是遗漏**。
+inline constexpr std::size_t kMaxPlayers = 100;
+inline constexpr std::size_t kMaxPets = 2000;
+
+using PlayerPool = SA::Model::EntityPool<SA::Model::Player, kMaxPlayers>;
+using PetPool = SA::Model::EntityPool<SA::Model::Pet, kMaxPets>;
+
+// 世界写的落脚点集合(批次 M.1)。
+//
+// ★ 传一个结构而不是四个参数:捕获一步要写宠物池、写主人的槽、读攻方句柄、
+//   还要在池满时落日志 —— 参数列表会随每个新落地的事件继续变长。
+// ⚠️ 全是**指针且允许为空**:`ApplyEvents` 的既有用例(纯 HP / 逃跑 / 打飞)不需要
+//    任何 L2 落脚点,而给它们造一套空池只是为了填参数 ⇒ 空 = "这一批世界写做不了",
+//    分支里显式判、显式记账,不静默跳过。
+struct WorldWriteContext
+{
+	PlayerPool *players = nullptr;
+	PetPool *pets = nullptr;
+	const std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> *player_of_slot =
+	    nullptr;
+	SA::Platform::Logger *logger = nullptr;
+};
 
 // 战斗事件缓冲。★ 每场战斗**复用一个**:domain::BattleEvents 是 7 KB 的 POD,
 //   每回合新建一个就是每回合一次 7 KB 的拷贝(shared/rules/battle.h 的原话)。
@@ -33,6 +79,12 @@ struct BattleInstance
 	BattleStats stats{};
 	std::vector<SA::Net::SessionId> members{}; // 订阅事件流的会话
 	std::map<SA::Net::SessionId, std::uint8_t> slot_of{};
+
+	// ★ 槽号 → 该槽背后的 L2 `Player` 实体(批次 M.1)。
+	//   捕获要把新宠物挂进**攻方主人**的宠物槽,而事件里只有槽号 ⇒ 这条映射是必需的。
+	// ⚠️ 空句柄 = 该槽没有 L2 实体 —— **这是正常状态**,不是错误:
+	//    1.5 的敌人本来就没有 `Player` 实体,观战席位也不会有。
+	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> player_of_slot{};
 };
 
 // 一侧是否已全灭。★ 这是**战斗结束**的判据,不是 L3 的事 ——
@@ -99,6 +151,90 @@ void fillEnemyCommands(const SA::Rules::BattleField &field,
 	}
 }
 
+// 从被捕目标造一只宠物并挂进主人的宠物槽(批次 M.1)。
+//
+// ★★ **照抄** `PET_createPetFromCharaIndex`(展开视图 `char/pet.c:325-405`)的
+//    「门 → 拷字段 → 挂槽」三段结构。返回值对应源码的 `pindex != -1`。
+//
+// 源码三条失败路径,逐条对应:
+//   ① `:333` `CHAR_getCharPetElement() < 0`      ⇒ 主人宠物槽满
+//   ② `:336` `CHAR_getDefaultChar(&, 31010)` 失败 ⇒ ★ 本批**不适用且不伪造**:
+//      源码从宠物基础模板 31010 起、再逐字段覆盖,而模板属 L4 内容导入(D 线);
+//      我们直接按被捕目标构造 ⇒ 这条门恒不触发。记明,不写一个永假的判断。
+//   ③ `:382` `PET_initCharOneArray() < 0`        ⇒ 全局池满 = `allocate()` 返 kNullHandle
+//
+// ⚠️★★ **顺序要紧,而这正是本批最值得记的一点**:先找槽(可失败)、再 allocate
+//    (可失败)、**最后**才写主人的槽 —— 这是源码的形状,也恰好是「预留 → 提交」:
+//    两个可失败的动作都排在任何不可回退的写之前
+//    ⇒ 失败时世界状态**一个字节都没动**,不需要补偿逻辑。
+//    ★ 00 §6 那条「gmsv 进程内也需要工作单元边界」在本批第一次有了具体形状,
+//      而它不是我们设计出来的 —— **回源码核实时它已经在那里了**。
+bool createPetFromCombatant(const SA::Rules::Combatant &src,
+                            SA::Model::EntityHandle owner_handle,
+                            PlayerPool &players, PetPool &pets)
+{
+	SA::Model::Player *owner = players.resolve(owner_handle);
+	// ★ 主人已下线 / 句柄悬空 ⇒ M10 让它当场变成空指针,而不是脏读一个被复用的槽。
+	if (owner == nullptr)
+		return false;
+
+	// ── 门 ①:主人的宠物槽 ────────────────────────────────────────
+	const int pet_slot = owner->findFreePetSlot();
+	if (pet_slot < 0)
+		return false;
+
+	// ── 门 ③:全局宠物池 ──────────────────────────────────────────
+	const SA::Model::EntityHandle pet_handle = pets.allocate();
+	if (!pet_handle.valid())
+		return false;
+	SA::Model::Pet *pet = pets.resolve(pet_handle);
+	if (pet == nullptr)
+	{
+		// ★ 走不到:刚 allocate 成功的句柄必然 resolve 得到。留这一判是因为若它真的
+		//   发生,静默继续就是往空指针上写 —— 与"永假的判断"不同类:那条(门 ②)是
+		//   源码有而我们不适用,这条是我们自己的不变量,守它零成本。
+		return false;
+	}
+
+	// ── 拷字段(源码 :337-377 里我们**拿得到**的那些)──────────────
+	//
+	// ⚠️★ 拿不到的四项(vital / str / tough / dex)与名字**留 0 / 留空**,理由见
+	//    Pet.h 的「原始四维」注释:被捕目标在战场里只是 `Rules::Combatant`
+	//    (战斗输入子集),敌人侧没有 L2 实体。★ 这是登记在案的残缺,不是遗漏。
+	pet->hp = src.hp;
+	pet->mp = src.mp;
+	pet->max_mp = src.max_mp;
+	pet->luck = src.luck;
+	pet->level = src.level;
+
+	// ⚠️★★ 四属**按具名下标取,绝不按位置拷** —— 三套顺序两两不同
+	//    (原版 `CHAR_*AT` 火水地风 / `Rules::Element` 地水火风 / 相克表头 无火水地风),
+	//    详见 Pet.h 的顺序陷阱注释。本项目已在这一类上栽过两次。
+	pet->earth = src.elements[static_cast<int>(SA::Rules::Element::kEarth)];
+	pet->water = src.elements[static_cast<int>(SA::Rules::Element::kWater)];
+	pet->fire = src.elements[static_cast<int>(SA::Rules::Element::kFire)];
+	pet->wind = src.elements[static_cast<int>(SA::Rules::Element::kWind)];
+
+	// 捕获等级(源码 `battle_event.c:3518`:`PETGETLV` = 宠物 `CHAR_LV`)。
+	// ⚠️ 同槽异义:`CHAR_PETGETLV` == `CHAR_CHATVOLUME`(音量),见 Pet.h 卷首。
+	pet->capture_level = src.level;
+
+	// 主人反向引用(源码 :393 `WORKPLAYERINDEX` / :395-397 `OWNERCHARANAME`)。
+	// ★ 存句柄而不是下标:带 generation ⇒ 主人换人后旧引用作废(M10)。
+	pet->owner = owner_handle;
+	pet->owner_char_name = owner->name;
+
+	// `VARIABLEAI = 0`(源码 `battle_event.c:3549`)。★ 这一条不依赖任何未移植的东西,
+	//   照做。⚠️ 紧跟其后的 AI 修正段(`CHAR_DEFAULTMAXAI − WORKFIXAI`)需要 `WORKFIXAI`,
+	//   而那个字段本批未建 ⇒ 不做,见下方 applyEvents 第 8 步的记账。
+	pet->variable_ai = 0;
+
+	// ── 提交:挂进主人的槽(源码 :394 `CHAR_setCharPet`)──────────────
+	// ★ 到这里已经没有可失败的动作 ⇒ 不会留下"宠物造好了却没挂上"的半成品。
+	owner->pets[static_cast<std::size_t>(pet_slot)] = pet_handle;
+	return true;
+}
+
 // ★★ 按事件列表把结果写回世界状态。
 //
 // 这一步**必须由调用方做**,不是 world 多管闲事:批次 0.5 的裁定
@@ -110,11 +246,17 @@ void fillEnemyCommands(const SA::Rules::BattleField &field,
 //    但**没有任何人掉血** ⇒ 战斗永远打不完,而没有一处会报错。
 //    (2026-09-04 src/ 首次接入构建时就是这样暴露的。)
 //
-// ⚠️ 1.5 只写 HP 与死亡:状态附加(§4.3)· 打飞(§3.8)· 换装 · 变身
-//    绑在批次 A–D 的链路上,L3 此刻也不产它们的事件。
-//    ⇒ **不猜**,与批次 0.5 对暴击/反击的处置同一条纪律。
+// ⚠️ 覆盖面(截至批次 M.1):HP / MP · 死亡 · 逃跑 · 打飞累加器 · ★ 骑宠 HP ·
+//    ★ 捕获(生成宠物 + 挂主人槽 + 捕获计数 + 目标离场)。
+//    **仍不写**:状态附加(§4.3)· 换装 · 变身 —— 绑在批次 A–D 的链路上,
+//    L3 此刻也不产它们的事件 ⇒ **不猜**,与批次 0.5 对暴击/反击的处置同一条纪律。
+//
+// ★ `ctx` 是世界写的落脚点集合(见 WorldWriteContext):**允许全空** ——
+//   HP / 逃跑 / 打飞那几类不需要任何 L2 实体,给它们造一套空池只为填参数是本末倒置。
+//   需要落脚点的分支自己判、判不到就显式记账(捕获那一段是唯一的例子)。
 void applyEvents(const SA::Domain::BattleEvents &events,
-                 SA::Rules::BattleField &field)
+                 SA::Rules::BattleField &field,
+                 const WorldWriteContext &ctx)
 {
 	for (std::size_t i = 0; i < events.events.size(); ++i)
 	{
@@ -133,8 +275,29 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 			c.mp += d.mp_delta;
 			if (c.mp < 0)
 				c.mp = 0;
-			// ⚠️ pet_hp_delta 暂不落地:1.5 的 Combatant 还没有骑宠的独立 HP 槽
-			//    (那属 1.2 L2 实体族)。**记在这里,不要默默丢掉**。
+
+			// ── 骑宠分摊后的宠物侧落地(批次 M.1)──────────────────────
+			//
+			// ⚠️★ 这一条此前记作「pet_hp_delta 暂不落地:1.5 的 Combatant 还没有骑宠的
+			//    独立 HP 槽(那属 1.2 L2 实体族)」—— **那是错的**:`Combatant::ride_hp` /
+			//    `ride_max_hp` 自 `b4670d8`(2026-08-31 阶段 1.0 骨架)就存在,比写下那条
+			//    注释的 `d7a5754`(2026-09-04)早三天。
+			//    ⇒ pet_hp_delta 的落地**从来不依赖 L2 实体池**。★ 记这一笔是因为它把一件
+			//      当时就能做的事记成了被阻塞的事 —— 与 00 §9.0.12 那族「报告印的不是观测」
+			//      同源,只是这次分叉的两头是**注释与它自己仓里的字段**。
+			//
+			// pet_hp_delta 同样是负数(Battle.cpp 的 `d.pet_hp_delta = -to_pet`)。
+			// ⚠️ L3 只在 `has_ride && pet_hp > 0` 时才分摊 ⇒ 无骑宠时恒 0,无条件加不会误伤。
+			c.ride_hp += d.pet_hp_delta;
+			if (c.ride_hp < 0)
+				c.ride_hp = 0;
+			// ★ **不**夹上界:`to_pet >= 0` ⇒ pet_hp_delta 恒 ≤ 0 ⇒ ride_hp 只会减。
+			//   写一个永不触发的上界分支就是"无人触发的清零"那一类(见下方 CAPTURE_ACT)。
+			//
+			// ⚠️ **骑宠死亡的连带**(解除骑乘 / 换回原图 / 置落马标记)仍不做,但推迟理由
+			//    要改准:不是"没有字段",而是 Battle.cpp:1354 已裁定它在**表现侧** ——
+			//    由调用方按打完后的 HP 判定并下发 BattleSnapshot,而 BattleSnapshot 本身
+			//    尚未下发(world/Api.h 卷首边界 ③)。
 			if (c.hp <= 0)
 			{
 				c.hp = 0;
@@ -197,27 +360,107 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 		}
 		case SA::Domain::BattleEvent::BodyKind::CAPTURE_ACT:
 		{
-			// 批次 A.2:捕获事件的世界写回。
+			// ── 批次 A.2 / M.1:捕获事件的世界写回 ──────────────────────
+			//
+			// ★★ 顺序**照抄** `BATTLE_Capture`(展开视图 `battle_event.c:3480-3567`)。
+			//    源码那个顺序本身就是答案:唯一可失败的一步(生成宠物)排在最前,
+			//    其后全是不可失败的写 ⇒ 失败即整笔不做,客户端收到 `BT|…|f0`。
+			//    ★ 这让 00 §6「gmsv 进程内也需要工作单元边界」有了具体形状,
+			//      而且**不需要我们另设一个** —— 回源码核实时它已经在那里了。
 			const SA::Domain::CaptureAct &cap = e.body.capture_act;
 			if (cap.target >= static_cast<std::uint32_t>(SA::Rules::kSlotCount))
 				break;
 			SA::Rules::Combatant &tgt = field.at(static_cast<int>(cap.target));
 			if (!tgt.occupied)
 				break;
-			if (cap.flags != 0u)
+
+			// ── 第 0 步(源码 :3510):`WORKMODCAPTURE = 0`,**无条件,成败都清** ──
+			//
+			// ⚠️★ 此前这一条记作「按理应清…待道具/技能能设置它时一并落地」——
+			//    **位置与条件都记错了**:它不在成功分支里,而是在 flg 判定**之后**、
+			//    创建宠物**之前**无条件执行。
+			//    ⇒ 原结论(现在清了没有可观察效果,因为当前无路径设置 capture_bonus)
+			//      仍然成立,但那是「无可观察效果」,不是「应该推迟」。
+			//    ★ 差别在于:照源码位置写下来,等到有人开始设置 capture_bonus 的那天
+			//      它自动是对的;推迟则留下一个要靠人记得回来补的洞。
+			if (cap.actor < static_cast<std::uint32_t>(SA::Rules::kSlotCount))
 			{
-				// ★ 捕获成功 ⇒ 被捕目标离场(源码 `BATTLE_Exit`),**不是战死** ——
-				//   置 occupied=false 让 SideWipedOut 视其"已不在场"。同逃跑,不置 dead。
-				// ⚠️★ **1.5 有意不做的三件世界写,均非遗漏,而是缺落脚点**:
-				//   ① 生成宠物入攻方队伍(`PET_createPetFromCharaIndex`)—— 要 L2 宠物模型
-				//      与角色背包(1.2 / 阶段 2);
-				//   ② 删除条件捕获道具(DR-BT10「全删」)—— 要道具系统(阶段 2);
-				//   ③ 攻方 `capture_bonus` 清零(源码 :4121)—— 1.5 的 field 就地 mutate,
-				//      按理应清,但 capture_bonus 属 mods、当前无路径设置它 ⇒ 记在此,
-				//      待道具/技能能设置它时一并落地,不提前写一处无人触发的清零。
-				tgt.occupied = false;
+				SA::Rules::Combatant &atk = field.at(static_cast<int>(cap.actor));
+				if (atk.occupied)
+					atk.mods.capture_bonus = 0;
 			}
-			// 失败 ⇒ 无世界写(目标留场),事件仅供客户端演出。
+
+			// 判定失败 ⇒ 无其余世界写(目标留场),事件仅供客户端演出"抓失败"。
+			if (cap.flags == 0u)
+				break;
+
+			// ── 第 1 步(源码 :3512):★ **门** —— 生成宠物,−1 即整笔失败 ────
+			bool created = false;
+			const bool has_l2 = ctx.players != nullptr && ctx.pets != nullptr &&
+			                    ctx.player_of_slot != nullptr &&
+			                    cap.actor < static_cast<std::uint32_t>(
+			                                    SA::Rules::kSlotCount);
+			if (has_l2)
+			{
+				created = createPetFromCombatant(
+				    tgt, (*ctx.player_of_slot)[cap.actor], *ctx.players, *ctx.pets);
+			}
+
+			if (!created)
+			{
+				// ⚠️★★ **一处已知的不对称,显式记账而不是掩盖**:
+				//    源码里"创建失败"会把 `flg` 改回 0 ⇒ 客户端收到 `f0`(抓失败)。
+				//    而我们把判定(L3)与世界写(这里)分成两段,`CaptureAct` 事件
+				//    **已经发出去了**且 `flags` 说的是"判定通过" ⇒ 改不回来。
+				//    ★ 要对齐就得让 L3 在判定时知道宠物池 / 主人槽的状态,那是把 L2
+				//      运行时状态灌进 L3 的纯函数入口 —— 与 D2 冲突,不在本批解。
+				//    ⇒ 本批处置:**不写世界**(目标留场、不加捕获计数)+ 落 error 日志。
+				//      表现上客户端会演"抓到了"而服务端没给宠物,已登记为欠债。
+				if (ctx.logger != nullptr)
+				{
+					ctx.logger->log(
+					    SA::Platform::LogLevel::kError,
+					    SA::Platform::LogEvent::kCaptureCommitFailed,
+					    {{"battle_id", field.battle_id},
+					     {"actor", static_cast<std::uint64_t>(cap.actor)},
+					     {"target", static_cast<std::uint64_t>(cap.target)},
+					     {"reason", std::string_view(has_l2 ? "pet_create_failed"
+					                                       : "no_l2_context")}});
+				}
+				break;
+			}
+
+			// ── 第 2 步(源码 :3518):`PETGETLV` ⇒ 已在 createPetFromCombatant 内 ──
+			//
+			// ⬜ **第 3 步** `LogPet(...)`(:3527)⇒ 挂阶段 2 的 **2.2 审计事件模型**
+			//    (00 §9 阶段 2 表;`08` 的 GoldLedger 第三步依赖同一个模型)。
+			//    ⚠️ 上面那条 error 日志**不是**它的替代:一条记的是失败,一条是成功审计。
+			// ⬜ **第 4 步** `CaptureOkFunction`(:3540)⇒ NPC 行为绑定。
+			//    ★ 03 §2.3 已裁定**不复刻**字符串→函数指针的运行期绑定
+			//      (原版三处可断且全部静默,18+16+6 例)⇒ 届时用接口 / 函数值直接注册。
+			// ⬜ **第 5 步** `BATTLE_CaptureItemDelAll`(:3541)⇒ 道具系统(DR-BT10「全删」)。
+			//    ⚠️ 这一步做不了正是「捕获仍不完整」的最后一环:原版**扣了道具**才给宠物,
+			//      我们现在是白给。别把它读成"差不多做完了"。
+
+			// ── 第 6 步(源码 :3543):捕获计数 +1 ────────────────────────
+			if (SA::Model::Player *owner =
+			        ctx.players->resolve((*ctx.player_of_slot)[cap.actor]);
+			    owner != nullptr)
+			{
+				++owner->capture_count;
+			}
+
+			// ── 第 7 步(源码 :3546):`BATTLE_Exit` —— 目标离场 ────────────
+			//
+			// ★ 置 occupied=false 让 sideWipedOut 视其"已不在场";**不置 dead** ——
+			//   被捕不是战死,记成阵亡会污染战果/经验结算(同逃跑成功那一条)。
+			// ⚠️ 必须在 createPetFromCombatant **之后**:那一步要读 tgt 的字段。
+			tgt.occupied = false;
+
+			// ⬜ **第 8 步**(源码 :3547-3555):`CHAR_complianceParameter(pindex)` ⇒
+			//    属性推导公式未移植(属成长养成域 06),见 Pet.h 文末 ②;
+			//    `VARIABLEAI = 0` 已在 createPetFromCombatant 内;
+			//    AI 修正段(`CHAR_DEFAULTMAXAI − WORKFIXAI`)需要未建的 `WORKFIXAI` ⇒ 不做。
 			break;
 		}
 		default:
@@ -314,6 +557,24 @@ struct World::Impl
 	SA::Platform::Millis now_ms = 0;
 	bool shutdown_requested = false;
 	bool stopped = false;
+
+	// ── L2 实体池与索引(批次 M.1,01 §13 欠债 20 的 ①)────────────────
+	//
+	// ★★ 这是「地基」变成「运行时」的那一步:`shared/model/` 的三个纯头此前
+	//    **没有任何一个实例挂在 World 上** ⇒ `ModelPoolTest` 全绿而世界里没有实体,
+	//    与 §9.0.16 那条「`OnSessionReady` 只打日志」是同一族静默(欠债 20 的原话)。
+	//
+	// ⚠️ 池按值内嵌:`EntityPool` 的存储是 `std::array` ⇒ 这两个成员就是那 2,100 个槽
+	//    本身,不是指针。★ Impl 自己在 `unique_ptr` 里(pimpl)⇒ 它们落在堆上一次分配完,
+	//    此后运行期零分配(15 §9.1 支柱 ①)。
+	PlayerPool players{};
+	PetPool pets{};
+
+	// 会话 → Player 实体。★ 03 §8.2 三条查找路径之一(原 `getCharindexFromFdid`
+	//   那族**全表扫** + 每格加解锁,`fdnum=1000` 下每条应答扫 1,000 次)。
+	// ⚠️ 索引里的句柄**可能悬空**,这是正常的 —— 验世代是 `EntityPool::resolve` 的活
+	//   (EntityIndex.h 卷首的两步分工)。
+	SA::Model::ConnIndex player_of_session{};
 };
 
 World::World(const SA::Platform::ServerConfig &config,
@@ -378,7 +639,13 @@ void World::tick()
 			}
 
 			// ★★ 写回世界状态 —— 见 ApplyEvents 卷首:L3 有意不写,调用方必须写。
-			applyEvents(b.events, b.field);
+			//   ★ 批次 M.1 起带上 L2 落脚点(池 / 主人槽 / 日志),捕获才有地方落。
+			WorldWriteContext wctx;
+			wctx.players = &s.players;
+			wctx.pets = &s.pets;
+			wctx.player_of_slot = &b.player_of_slot;
+			wctx.logger = &s.logger;
+			applyEvents(b.events, b.field, wctx);
 
 			b.stats.events_emitted += static_cast<std::uint32_t>(b.events.events.size());
 			++b.stats.turns_resolved;
@@ -550,6 +817,12 @@ bool World::joinBattle(BattleId battle, SA::Net::SessionId session,
 	}
 	b.members.push_back(session);
 	b.slot_of[session] = slot;
+	// ★ 槽号 → L2 `Player` 实体(批次 M.1)。捕获要把新宠物挂进**攻方主人**的宠物槽,
+	//   而事件里只有槽号 ⇒ 入场时就把这条映射建起来,不到用时再去反查 `slot_of`
+	//   (反查是 O(n) 且要在 applyEvents 里拿到 Impl,那会把 L2 落脚点越铺越宽)。
+	// ⚠️ 查不到就留空句柄 —— 观战席位、以及尚未接 L2 的槽本来就没有实体,
+	//    那是正常状态,不是错误(见 BattleInstance::player_of_slot 的注释)。
+	b.player_of_slot[slot] = s.player_of_session.find(session);
 	cit->second.session->markOnline();
 
 	// ★★ 入场即下发**自己是谁**与**现在是第几回合**,否则客户端无从组指令:
@@ -673,11 +946,40 @@ void World::onDisconnected(SA::Net::ConnectionId id)
 	if (it->second.session != nullptr)
 		it->second.session->close();
 
+	// ── L2:释放该会话的 Player 实体及其宠物(批次 M.1)────────────────────
+	//
+	// ⚠️★★ **宠物必须一起释放**,否则 Pet 池只增不减:主人走了,它的宠物槽再没人看,
+	//    而那些槽在池里仍然占用。★ 这不会有任何一处报错 —— 只会在跑够久之后表现为
+	//    「捕获突然开始失败」(池满),而那时离真正的原因(这里没释放)已经很远。
+	//    ⇒ 与 Player.h 里 `pets` 的注释是同一条的两半:那边说"释放 Pet 时要清槽",
+	//      这边是唯一真正执行它的地方。
+	const SA::Model::EntityHandle ph = s.player_of_session.find(id);
+	if (SA::Model::Player *p = s.players.resolve(ph); p != nullptr)
+	{
+		for (std::size_t i = 0; i < SA::Model::kMaxPetHave; ++i)
+		{
+			if (!p->pets[i].valid())
+				continue;
+			// ★ release 对悬空句柄返回 false 且不做事(generation 校验)⇒ 无需先 resolve。
+			(void)s.pets.release(p->pets[i]);
+			(void)p->clearPetSlot(static_cast<int>(i));
+		}
+		(void)s.players.release(ph);
+	}
+	s.player_of_session.erase(id);
+
 	for (auto &kv : s.battles)
 	{
 		std::vector<SA::Net::SessionId> &m = kv.second.members;
 		m.erase(std::remove(m.begin(), m.end(), id), m.end());
 		kv.second.slot_of.erase(id);
+		// ★ 槽 → Player 的映射一并清:句柄已作废,留着虽不会脏读(resolve 返 nullptr,
+		//   M10)但会误导 —— 读代码的人会以为那个槽还有主人。
+		for (SA::Model::EntityHandle &h : kv.second.player_of_slot)
+		{
+			if (h == ph)
+				h = SA::Model::kNullHandle;
+		}
 	}
 	s.conns.erase(it);
 
@@ -692,6 +994,39 @@ void World::onSessionReady(SA::Net::SessionId id)
 	s.logger.log(SA::Platform::LogLevel::kInfo,
 	             SA::Platform::LogEvent::kHandshakeAccepted,
 	             {{"session_id", id}});
+
+	// ── L2:会话就绪 ⇒ 该会话有了一个 Player 实体(批次 M.1)───────────────
+	//
+	// ⚠️★ **这是一处有意的临时形态,与 demo_battle 同族**:真玩法里 Player 实体是
+	//    **选角**的产物(阶段 2,要 storage),握手只做认证。此处握手后就建,是为了让
+	//    捕获的世界写有一个主人可挂 —— 而**不是**因为「握手 == 有角色」这句话是对的。
+	//    ⇒ 阶段 2 接上选角时,这一段移到选角完成的回调里(与欠债 17 删 demo_battle 同期)。
+	//
+	// ★ 但它**不放在下面的 demo 分支里**:`demo_battle` 关掉时会话照样该有实体 ——
+	//   「这条会话背后有个玩家」是会话事实,与要不要进 demo 战斗无关。
+	if (!s.player_of_session.find(id).valid())
+	{
+		const SA::Model::EntityHandle ph = s.players.allocate();
+		if (!ph.valid())
+		{
+			// ⚠️ 池满必须报出来,理由见 LogEvent::kEntityPoolExhausted。
+			//   ★ 不 return:没有 L2 实体不该挡住会话本身(战斗事件流仍然能跑,
+			//     只是捕获会在提交阶段失败并落 capture_commit_failed)。
+			s.logger.log(SA::Platform::LogLevel::kError,
+			             SA::Platform::LogEvent::kEntityPoolExhausted,
+			             {{"session_id", id},
+			              {"pool", std::string_view("player")},
+			              {"capacity", static_cast<std::uint64_t>(kMaxPlayers)}});
+		}
+		else
+		{
+			s.player_of_session.insert(id, ph);
+			// ⚠️★ 名字**留空**:1.5 没有选角 ⇒ 没有名字的来源。
+			//    ★ 不编一个 "player_1" 之类的占位 —— 那会让「名字是哪来的」看起来
+			//      已经有答案了。11 §14 记的 DR-TS5 正是这么被撞出来的:定长 POD 强制
+			//      回答「名字能多长」,而「名字从哪来」是同一族问题,同样该由裁定回答。
+		}
+	}
 
 	// ── 1.4 demo 的入场装配(默认关,见 platform/api.h 的 DemoBattleConfig)──
 	//
@@ -784,6 +1119,39 @@ SA::Net::SessionState World::sessionState(SA::Net::SessionId id) const
 		return SA::Net::SessionState::kClosed;
 	}
 	return it->second.session->state();
+}
+
+// ── L2 实体池的观察面(批次 M.1)─────────────────────────────────
+std::size_t World::playerCount() const noexcept { return _impl->players.size(); }
+
+std::size_t World::petCount() const noexcept { return _impl->pets.size(); }
+
+int World::playerCaptureCount(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : static_cast<int>(p->capture_count);
+}
+
+int World::playerPetSlotsUsed(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return -1;
+	int used = 0;
+	for (std::size_t i = 0; i < SA::Model::kMaxPetHave; ++i)
+	{
+		if (p->pets[i].valid())
+			++used;
+	}
+	return used;
+}
+
+const SA::Rules::BattleField *World::battleField(BattleId id) const
+{
+	const auto it = _impl->battles.find(id);
+	return it == _impl->battles.end() ? nullptr : &it->second.field;
 }
 
 } // namespace SA::World

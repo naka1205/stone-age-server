@@ -12,6 +12,8 @@
 
 #include "world/Api.h"
 
+#include "model/Player.h"
+
 #include <cstdint>
 #include <map>
 #include <vector>
@@ -665,4 +667,275 @@ TEST_CASE("指令必须指向当前回合")
 
 	// 会话层接受了它(消息合法),world 层按回合号丢弃 —— 连接不该被关。
 	CHECK_FALSE(f.transport.closed(id));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  批次 M.1:L2 实体族接线(01 §13 欠债 20)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ★★ 这一组验的是**世界写真的落下去了**,而不是"事件发出去了"。
+//    欠债 20 的要害原话:「地基绿而运行时不接,ctest 一样 12/12 全过」——
+//    所以每条用例都断言一个**池 / 主人槽 / 战场上可观察的后果**,不是断言事件条数。
+
+namespace
+{
+
+// 一个捕获必定判定通过的战场:己方 1 人(高魅力)、敌方 N 个残血可捕获目标。
+//
+// ★ 为什么魅力给 200:`rollCapture` 的 work 会被 `min(…, 99)` 夹住(源码 :3863),
+//   而 `rand(1,100) < 99` ⇒ **98% 成功**。魅力再高也不会到 100% ——
+//   ⚠️ 原版没有下限钳位也没有上限 100,照抄即此。⇒ 用例靠**固定主种子**取得确定性,
+//     与「可回放:同主种子的两次运行逐位一致」那条同一手法。
+//   ★ 主种子改了这几条要重新确认,这是有意的代价:比"多打几回合直到成功"好 ——
+//     后者是概率性用例,而偶发红是 00 §10.4 里最难归因的一类。
+SA::Rules::BattleField makeCapturableField(int enemy_count)
+{
+	SA::Rules::BattleField f{};
+	SA::Rules::Combatant &me = f.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = 5000; // 打不死,免得战斗在捕获完之前结束
+	me.max_hp = 5000;
+	me.attack = 10;
+	me.defense = 500;
+	me.quick = 200;
+	me.luck = 10;
+	me.charm = 200; // ★ 捕获的乘性主因子(§6.2:× charm / 50)
+
+	for (int i = 0; i < enemy_count; ++i)
+	{
+		SA::Rules::Combatant &foe = f.at(SA::Rules::kSideOffset + i);
+		foe.occupied = true;
+		foe.kind = SA::Rules::CombatantKind::kEnemy;
+		foe.slot = static_cast<std::uint8_t>(SA::Rules::kSideOffset + i);
+		foe.level = 5;
+		foe.hp = 1; // 残血 ⇒ Df_HpPer 接近上限(二次式,源码 :3852)
+		foe.max_hp = 40;
+		foe.attack = 1;
+		foe.defense = 1;
+		foe.quick = 30;
+		foe.luck = 1;
+		foe.mods.capturable = true; // ★ 前置门 ②(源码 :3830)
+	}
+	return f;
+}
+
+// 握手 + 入场,返回战斗号。★ 会话就绪时 World 会建 Player 实体(批次 M.1)。
+BattleId joinCapturable(Fixture &f, SA::Net::ConnectionId id, int enemy_count)
+{
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	const BattleId battle = f.world.startBattle(makeCapturableField(enemy_count));
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	return battle;
+}
+
+// 发一条捕获指令并推进一个回合。
+void captureTurn(Fixture &f, SA::Net::ConnectionId id, BattleId battle,
+                 int target_slot)
+{
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = f.world.battleField(battle)->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::CAPTURE;
+	cmd.command.capture.target = static_cast<std::uint32_t>(target_slot);
+	f.world.onBattleCommand(id, cmd);
+	f.clock.advance(2000);
+	f.world.tick();
+}
+
+} // namespace
+
+TEST_CASE("L2:会话就绪即有 Player 实体,断线即释放")
+{
+	Fixture f;
+	CHECK(f.world.playerCount() == 0);
+	CHECK(f.world.playerCaptureCount(1) == -1); // ★ 没有实体是 −1,不是 0
+
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	CHECK(f.world.playerCount() == 1);
+	CHECK(f.world.playerCaptureCount(id) == 0); // 有实体了,计数确实是 0
+
+	f.transport.close(id);
+	CHECK(f.world.playerCount() == 0);
+	CHECK(f.world.playerCaptureCount(id) == -1);
+}
+
+TEST_CASE("L2:捕获成功 ⇒ 宠物进池、挂进主人槽、计数 +1、目标离场")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinCapturable(f, id, 1);
+
+	REQUIRE(f.world.petCount() == 0);
+	REQUIRE(f.world.playerPetSlotsUsed(id) == 0);
+
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+
+	// ★★ 四个后果一起断言 —— 少任何一个都说明那条链没接上:
+	CHECK(f.world.petCount() == 1);              // ① 宠物进了池
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);  // ② 挂进了主人的槽
+	CHECK(f.world.playerCaptureCount(id) == 1);  // ③ 捕获计数(源码 :3543)
+	// ④ 目标离场(源码 :3546 BATTLE_Exit)—— occupied=false 而**不是** dead
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK_FALSE(fld->at(SA::Rules::kSideOffset).occupied);
+	CHECK_FALSE(fld->at(SA::Rules::kSideOffset).dead);
+}
+
+TEST_CASE("L2:捕获出的宠物字段 —— 拿得到的拷了,拿不到的是登记在案的零")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinCapturable(f, id, 1);
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+	REQUIRE(f.world.petCount() == 1);
+
+	// ⚠️★ 这条用例的作用是**钉住残缺本身**,免得下一个人以为字段填上了:
+	//    被捕目标在战场里只是 Rules::Combatant(战斗输入子集),
+	//    没有 vital / str / tough / dex,也没有名字 ⇒ 敌人侧缺 L2 实体(Pet.h 卷首)。
+	//    这不是 bug,是登记在案的缺口;补齐要等 EntityKind::kEnemy 族 + L4 内容导入。
+	//
+	// ★ 池内实体没有对外观察面(有意如此:L2 字段不该经 world 的公开 API 逐个漏出去),
+	//   所以这里只断言"能拿到的那部分确实被拷了"这个可观察后果:
+	//   宠物存在 ⇒ 说明 createPetFromCombatant 走完了整条门 + 拷贝 + 挂槽。
+	CHECK(f.world.petCount() == 1);
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+}
+
+TEST_CASE("L2:宠物槽满是捕获的门 —— 第 6 只抓不进来,且世界一个字节都没动")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	// 6 个可捕获目标:前 5 个填满宠物槽,第 6 个用来撞门。
+	const BattleId battle = joinCapturable(f, id, 6);
+
+	for (int i = 0; i < static_cast<int>(SA::Model::kMaxPetHave); ++i)
+		captureTurn(f, id, battle, SA::Rules::kSideOffset + i);
+
+	REQUIRE(f.world.petCount() == 5);
+	REQUIRE(f.world.playerPetSlotsUsed(id) == 5);
+	REQUIRE(f.world.playerCaptureCount(id) == 5);
+
+	// ★★ 第 6 次:判定照样通过(L3 不知道槽满),但世界写在**门**上失败。
+	captureTurn(f, id, battle, SA::Rules::kSideOffset + 5);
+
+	CHECK(f.world.petCount() == 5);             // 没有第 6 只宠物
+	CHECK(f.world.playerCaptureCount(id) == 5); // ★ 计数也没加(源码里它在门之后)
+	// ★ 目标**留场** —— 源码 flg 改回 0 ⇒ BATTLE_Exit 不执行。
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->at(SA::Rules::kSideOffset + 5).occupied);
+}
+
+TEST_CASE("L2:断线释放主人时,它的宠物一并回池")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinCapturable(f, id, 2);
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+	captureTurn(f, id, battle, SA::Rules::kSideOffset + 1);
+	REQUIRE(f.world.petCount() == 2);
+
+	f.transport.close(id);
+	// ⚠️★ 少了这一步,Pet 池只增不减,而**没有任何一处会报错** ——
+	//    表现是跑够久之后"捕获突然开始失败",那时离原因已经很远。
+	CHECK(f.world.petCount() == 0);
+	CHECK(f.world.playerCount() == 0);
+}
+
+TEST_CASE("L2:capture_bonus 无条件清零 —— 判定失败那条路径也清")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	// ★ 让判定**必定失败**:目标不带可捕获标记(前置门 ② 不过)⇒ flags == 0。
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	SA::Rules::BattleField field = makeCapturableField(1);
+	field.at(SA::Rules::kSideOffset).mods.capturable = false;
+	field.at(0).mods.capture_bonus = 40; // 假装某道具/技能设过它
+	const BattleId battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+
+	// ★★ 源码 :3510 的 `CHAR_setWorkInt(attacker, CHAR_WORKMODCAPTURE, 0)` 在
+	//    **flg 判定之后、创建宠物之前无条件执行** ⇒ 抓失败也清零。
+	//    ⚠️ 此前这一条被记成"在成功分支里、且应推迟" —— 位置与条件都错了。
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->at(0).mods.capture_bonus == 0);
+	// 目标留场(判定失败无世界写),且没有宠物产生。
+	CHECK(fld->at(SA::Rules::kSideOffset).occupied);
+	CHECK(f.world.petCount() == 0);
+}
+
+TEST_CASE("骑宠 HP:pet_hp_delta 落到 ride_hp,并夹在 0 以上")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	// 己方带骑宠且防御低 ⇒ 敌方每回合都能打出分摊伤害(§3.6,DR-BT2 修正式)。
+	SA::Rules::BattleField field{};
+	SA::Rules::Combatant &me = field.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = 100000; // 主人打不死,让回合一直进行
+	me.max_hp = 100000;
+	me.attack = 1;
+	me.defense = 10;
+	me.quick = 1; // 敌方先动
+	me.luck = 0;
+	me.has_ride = true;
+	me.ride_defense = 10;
+	me.ride_hp = 50;
+	me.ride_max_hp = 50;
+
+	SA::Rules::Combatant &foe = field.at(SA::Rules::kSideOffset);
+	foe.occupied = true;
+	foe.kind = SA::Rules::CombatantKind::kEnemy;
+	foe.slot = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+	foe.level = 30;
+	foe.hp = 100000;
+	foe.max_hp = 100000;
+	foe.attack = 400;
+	foe.defense = 10;
+	foe.quick = 300;
+	foe.luck = 5;
+
+	const BattleId battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+
+	const int before = f.world.battleField(battle)->at(0).ride_hp;
+	REQUIRE(before == 50);
+
+	// 打若干回合。★★ 断言两件事:骑宠 HP **真的减了**,且**从不为负**。
+	//   ⚠️ 前者此前不成立 —— `pet_hp_delta` 一直被丢掉,而注释说的理由
+	//     (「Combatant 还没有骑宠的独立 HP 槽」)在写下它时就已经是假的。
+	bool dropped = false;
+	for (int i = 0; i < 12; ++i)
+	{
+		f.clock.advance(2000);
+		f.world.tick();
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		CHECK(fld->at(0).ride_hp >= 0); // ★ 夹取:每一回合都要成立
+		if (fld->at(0).ride_hp < before)
+			dropped = true;
+	}
+	CHECK(dropped);
 }

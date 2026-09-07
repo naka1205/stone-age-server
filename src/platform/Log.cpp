@@ -89,6 +89,10 @@ const char *eventName(LogEvent e) noexcept
 		return "battle_join_failed";
 	case LogEvent::kBattleJoined:
 		return "battle_joined";
+	case LogEvent::kCaptureCommitFailed:
+		return "capture_commit_failed";
+	case LogEvent::kEntityPoolExhausted:
+		return "entity_pool_exhausted";
 	}
 	return "unknown";
 }

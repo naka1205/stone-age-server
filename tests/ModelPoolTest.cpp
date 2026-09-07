@@ -23,8 +23,11 @@
 #include "model/EntityIndex.h"
 #include "model/EntityKind.h"
 #include "model/EntityPool.h"
+#include "model/Pet.h"
+#include "model/Player.h"
 
 #include <string>
+#include <type_traits>
 
 using namespace SA::Model;
 
@@ -217,4 +220,147 @@ TEST_CASE("EntityKind:五族值域完整且互不相等")
 	CHECK(EntityKind::kPet != EntityKind::kEnemy);
 	CHECK(EntityKind::kEnemy != EntityKind::kNpc);
 	CHECK(EntityKind::kNpc != EntityKind::kWorldObject);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  批次 M.1:Player / Pet 两族的结构约束
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ★ 这一组守的仍然是**结构**,不是玩法:族判别键、POD 性质、宠物槽的额度语义,
+//   以及一条**后果性**断言 —— 「释放 Pet 却不清主人的槽」会让那个槽永久占用。
+//   ⚠️ 最后那条不是理论洁癖:它在运行时的表现是「跑够久之后捕获突然开始失败」,
+//     而那时离真正的原因已经很远,且**没有任何一处会报错**。
+
+TEST_CASE("Player/Pet:族判别键在编译期与类型绑定(M2)")
+{
+	static_assert(Player::kKind == EntityKind::kPlayer, "");
+	static_assert(Pet::kKind == EntityKind::kPet, "");
+	// ★ 两族是**独立类型**,不是同一类型的两个 flag —— 03 §4.2 的 19 条
+	//   「玩家 vs 宠物」整体同槽异义(CHAR_MODAI=CHAR_CHARM 等)靠这一点在编译期挡住。
+	static_assert(!std::is_same<Player, Pet>::value, "");
+	CHECK(Player::kKind != Pet::kKind);
+}
+
+TEST_CASE("Player/Pet:POD —— 三根支柱与 DR-TS1 边界都依赖它")
+{
+	// ★ 池的存储是 std::array<Slot, N>,Slot 内嵌实体 ⇒ 实体必须可平凡拷贝,
+	//   否则「运行期零分配」会被构造/析构里的堆操作破掉(15 §9.1 支柱 ①)。
+	static_assert(std::is_trivially_copyable<Pet>::value, "");
+	static_assert(std::is_trivially_copyable<Player>::value, "");
+	static_assert(std::is_standard_layout<Pet>::value, "");
+	static_assert(std::is_standard_layout<Player>::value, "");
+	CHECK(true);
+}
+
+TEST_CASE("Player:空宠物槽从 0 开始给,依次推进")
+{
+	Player p{};
+	CHECK(p.findFreePetSlot() == 0);
+
+	// 占掉 0 号 ⇒ 下一个给 1 号。
+	p.pets[0] = EntityHandle{7, 1};
+	CHECK(p.findFreePetSlot() == 1);
+}
+
+TEST_CASE("Player:找第一个空槽 —— 不连续占用时回填中间的洞")
+{
+	Player p{};
+	p.pets[0] = EntityHandle{1, 1};
+	p.pets[1] = EntityHandle{2, 1};
+	p.pets[3] = EntityHandle{4, 1};
+	// ★ 源码 char_base.c:1564-1566 的第二段循环找的是**第一个** -1,不是末尾追加。
+	CHECK(p.findFreePetSlot() == 2);
+}
+
+TEST_CASE("Player:五槽全满 ⇒ −1(源码 CHAR_MAXPETHAVE 额度)")
+{
+	Player p{};
+	for (std::size_t i = 0; i < kMaxPetHave; ++i)
+		p.pets[i] = EntityHandle{static_cast<std::uint32_t>(i + 1), 1};
+
+	// ⚠️ 这是捕获的**门**:源码 pet.c:333 拿到 −1 就 return −1,
+	//   再由 battle_event.c:3513 把 flg 改回 0 ⇒ 客户端收到「抓失败」。
+	CHECK(p.findFreePetSlot() == -1);
+	CHECK(kMaxPetHave == 5);
+	// ★ 宠物槽 5 与宠技槽 7 **不是同一个上限**(03 §3.2:unionTable 保留但拆开)。
+	CHECK(kMaxPetSkillHave == 7);
+}
+
+TEST_CASE("Player:悬空句柄仍被算作占用 —— 这正是两步分工的代价")
+{
+	// ★ 与「EntityIndex 存的句柄可能悬空」同一条:本结构只管「哪个槽有引用」,
+	//   「引用还指向活宠物吗」是 EntityPool::resolve 的活。
+	// ⚠️ 所以**释放 Pet 的那一侧必须 clearPetSlot**,否则槽永久占用。
+	EntityPool<Pet, 4> pets;
+	Player p{};
+
+	for (std::size_t i = 0; i < kMaxPetHave; ++i)
+	{
+		const EntityHandle h = pets.allocate();
+		if (h.valid())
+			p.pets[i] = h;
+		else
+			p.pets[i] = EntityHandle{99, 1}; // 池只有 4 个,第 5 个用一个假句柄占位
+	}
+	REQUIRE(p.findFreePetSlot() == -1);
+
+	// 全部 release,但**不**清槽 ⇒ 槽位仍被算作占用。
+	for (std::size_t i = 0; i < kMaxPetHave; ++i)
+		(void)pets.release(p.pets[i]);
+	CHECK(p.findFreePetSlot() == -1); // ★ 这就是那个后果
+
+	// 清槽之后才真正腾出来。
+	for (std::size_t i = 0; i < kMaxPetHave; ++i)
+		CHECK(p.clearPetSlot(static_cast<int>(i)));
+	CHECK(p.findFreePetSlot() == 0);
+}
+
+TEST_CASE("Player:clearPetSlot 的越界与边界")
+{
+	Player p{};
+	CHECK_FALSE(p.clearPetSlot(-1));
+	CHECK_FALSE(p.clearPetSlot(static_cast<int>(kMaxPetHave)));
+	CHECK(p.clearPetSlot(0));
+	CHECK(p.clearPetSlot(static_cast<int>(kMaxPetHave) - 1));
+}
+
+TEST_CASE("Pet:主人引用带 generation —— 主人下线后 resolve 返回 nullptr(M10)")
+{
+	EntityPool<Player, 4> players;
+	EntityPool<Pet, 4> pets;
+
+	const EntityHandle owner_h = players.allocate();
+	REQUIRE(owner_h.valid());
+	const EntityHandle pet_h = pets.allocate();
+	REQUIRE(pet_h.valid());
+
+	Pet *pet = pets.resolve(pet_h);
+	REQUIRE(pet != nullptr);
+	pet->owner = owner_h;
+	CHECK(players.resolve(pet->owner) != nullptr);
+
+	// 主人下线 ⇒ 宠物手里的主人句柄当场作废,而**不是**指向下一个占用该槽的玩家。
+	REQUIRE(players.release(owner_h));
+	CHECK(players.resolve(pet->owner) == nullptr);
+
+	// ★ 关键:同一个 index 被新玩家复用后,旧的主人句柄**仍然**解析不到他。
+	const EntityHandle reused = players.allocate();
+	CHECK(reused.index == owner_h.index);
+	CHECK(reused.generation != owner_h.generation);
+	CHECK(players.resolve(pet->owner) == nullptr);
+}
+
+TEST_CASE("Pet:名字上限 31 字节(DR-TS5),超长即失败不截断")
+{
+	Pet pet{};
+	CHECK(NameStr::capacity() == kNameMaxBytes);
+	CHECK(kNameMaxBytes == 31);
+
+	CHECK(pet.name.assign("阿米格"));         // 9 字节
+	CHECK(pet.name.size() == 9);
+	// ★ 32 字节 ⇒ 拒绝,且**不改动原值**(截断会让"数据看起来正常但内容错了")。
+	CHECK_FALSE(pet.name.assign(std::string(32, 'x').c_str()));
+	CHECK(pet.name.size() == 9);
+	CHECK(pet.name.assign(std::string(31, 'x').c_str()));
+	CHECK(pet.name.size() == 31);
 }
