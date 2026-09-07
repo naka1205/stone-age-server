@@ -2195,6 +2195,46 @@ JSON 解析辅助类的 `s_`/`pos_` 尾下划线 —— **唯一没跟上 P3 的
 
 ---
 
+### 9.0.24 ★★ L2 实体池地基 —— 阶段 2 领域模型层起步(2026-09-07)
+
+> **关键路径在 1.4 双端跑通后转入阶段 2(L3 战斗批次 A–D + L2 实体族)。战斗批次 A.2/A.4
+> 反复撞到同一堵墙:捕获的「生成宠物入队」、打飞的 `pet_hp_delta` 落地、换宠 —— 这些世界写
+> 没有落脚点,因为 `shared/model/` 至今只有 `Handle.h`,没有实体池 / 实体族 / 索引。
+> 本节先搭 L2 的纯结构地基,把 M2 / M10 与「索引不得线性扫描」在结构上立住。**
+
+#### ① 交付形态:三个纯头 + 一个用例集,零新依赖
+
+| 文件 | 内容 | 守的约束 |
+|---|---|---|
+| `shared/model/EntityPool.h` | 定长池 `EntityPool<T,N>`:`std::array` 存储、空闲链、generation 句柄回收 | ★ M10 —— `release` 使槽 generation++ 作废旧句柄;`resolve` 校验不匹配返回 `nullptr`(悬空当场变空指针,不脏读复用槽)|
+| `shared/model/EntityKind.h` | 五族判别键 `EntityKind`(Player/Pet/Enemy/Npc/WorldObject)+ §2.2/§2.3 两条裁定的边界注释 | ★ M2 —— 和类型不是宽表;kNpc 是一个族不是 47 个类;不复刻字符串→函数指针运行期绑定 |
+| `shared/model/EntityIndex.h` | 标识符→句柄哈希索引 `EntityIndex<Key>` + 三个具名别名(Account/CharName/Conn) | ★ 索引不得线性扫描(§8.2)—— 原版四个 `getfdFrom*` 全表扫,`fdnum=1000` 下每条应答扫 1000 次 |
+| `tests/ModelPoolTest.cpp` | 11 用例 / 59 断言:池的分配/回收/generation、索引 O(1)、和类型值域 | 结构性硬约束,非公式 |
+
+★ 全部纯头(模板 + inline)⇒ **不改 `shared/CMakeLists.txt` 的 `sa_shared` 源列表**,随消费方编译。
+`EntityPool::allocate` 发**干净槽**(复用前 `value = T{}`,原地赋值非堆分配),否则新主人读到前主人脏值。
+
+#### ② 两处分工边界(写进注释,防后来者合并)
+
+- ★ **索引不做 generation 校验**:索引只管「名字→槽」,「槽还是不是那个主人」是 `EntityPool::resolve`
+  的活。索引命中的句柄**可能已悬空,这是正常的** —— 两步分工合并会让索引承担它管不了的世代事。
+  用例 `索引存的句柄可能悬空` 钉住这条。
+- ★ **`EntityKind` 与 `Rules::CombatantKind` 不合并**:一个是领域全集(五族)、一个是战斗输入子集
+  (Player/Pet/Enemy 三值)—— 照 `Combatant.h` 卷首「故意不复用同一个类型」的先例各自独立。
+
+#### ③ 复验(本地三工具链 + 反向验证)
+
+- Apple clang:`ctest` **12/12**(新增 `model_pool`)· `ci_verify` **六项全过** · `shared_purity` 扫 12 文件通过;
+- GCC 15.2:`ctest` **12/12**;
+- ★ **反向验证**:临时删掉 `resolve` 的 `s.generation != h.generation` 校验 ⇒ `model_pool` 转红
+  (11 例 9 过 2 红 / 4 断言红)⇒ 证明「回收后旧句柄 resolve==nullptr」真在读 generation,不是数分配次数。
+
+⚠️ **未做 / 显式推迟**(均非遗漏,记在各文件文末):① 脏槽跟踪 / 活跃集(三根支柱第③条要 tick 调度对齐,属接线阶段)· ② generation uint32 回绕(现实达不到量级,续体安全另有协议侧三元组兜底 02 §7.1)· ③ 各族的具体字段与池实例化(Pet 主人/融合码/技能槽、GoldLedger、捕获世界写接线 —— **挂在本地基上,是后续批次**)· ④ 未接线到 `World` 运行时,`applyEvents` 里捕获「生成宠物入队」等落脚点仍留注释待兑现。
+⚠️ **MSVC 交 CI**:本地单工具链 + macOS 大小写不敏感是已知双盲区(§9.0.23 两度证明)。
+⚠️ **锁定 ref 不前推**:本批次是新增 `shared/model/*.h`,而客户端真正编译的路径(`sa_shared` 只编 `rules/Battle.cpp`,不 include model 头)未触及 ⇒ 按「客户端真正编译的路径变没变」判据(§9.0.17)不推 tag。
+
+---
+
 ### 10.1 R-b:无解的结构性事实
 
 每条标【单源未交叉】/【8.5 源码推定】的规则,实现时**只能靠人工复核**,没有任何自动化验证手段。
@@ -2283,3 +2323,4 @@ JSON 解析辅助类的 `s_`/`pos_` 尾下划线 —— **唯一没跟上 P3 的
 | 2026-09-06 | ★★ **批次 A.4 —— 打飞 / 究极一击落地**(新增 **§9.0.22**;DR-BT18)。★ 与 A.3 同族:判定阈齐全、无 L2/L4 依赖,是普攻链路自身机制;`BATTLE_DamageSub` 打飞段(`:2060-2081`)1:1 移植。移植当场回源码核出三点须按源码而非文档概括:**门槛 `maxhp·1.2+20` 是 float 运算**(整数近似塌门槛)· **一击/累积互斥且只累积路径动累加器**(源码 `if/else if`)· **免疫在累加之后覆盖**(免疫单位照常累加、只是不判打飞不清零)。免疫直接建 `immune_knockback` 标志不比图号(未重蹈 A.3 图号弯路)。★ 累加器权威态**单开 8B 低频事件 `KnockbackState` 回写**,不塞 `Damage`(初版塞进去 `smoke.cpp` static_assert 当场转红:越 8 KB 零分配红线)、不在 ApplyEvents 重算(DR-BT5 双份实现,免疫+一击角落分叉)。**复验**:62 → **72 用例 / 2,394 断言**,新增打飞 9 条;★ 反向验证两处(门槛整数化 / 去免疫处置);服务端 × Apple clang **72/72**(`ctest` 11/11)· × GCC 15.2 **72/72** · 客户端 `d2-only` **72/72**。⚠️ **未做**:① MSVC 交 CI;② ★ `shared/`+IDL 有改动 ⇒ 锁定 ref 须前推 **shared-v0.8.0** + 客户端复验;③ 打飞下游后果(回合内目标排除 / 阵亡额外战果)有意推迟,依赖未移植子系统 |
 | 2026-09-07 | ★★ **命名改造 P0–P6 + 聚合头 `api.h`→`Api.h` —— 全盘对齐引擎 GameStudio**(新增 **§9.0.23**;`11` DR-TS7 §1.4 修订为「`SA::` 大写」)。用户 2026-09-07 裁定把服务端与 `shared/` 原 Google 风改成引擎款、命名空间提到大写 `SA::` 镜像 `SG::`。两仓对称:P0 clang 配置基建 · P1 `sa::`→`SA::`(服务端 578 处)· P2 去 I 前缀 · P3 成员 `_camelCase` · P4 方法 camelBack · P5 文件名 PascalCase + guard · P6 全仓格式化;附服务端 `api.h`→`Api.h`。★★ CI 三平台兜底抓到三类**只在非 macOS 暴露**的问题(macOS 大小写不敏感 + 单工具链双盲区):① `SaShared.cmake` 发布态 pin 停旧 tag ⇒ 改锁 server SHA `e5497eb`;② `ci_verify.py`/`win_validate.ps1` 硬编码 `constants.h` ⇒ 改 PascalCase(`3dee1dc`);③ `NetTcpTest.cpp` Windows 分支残留 `fd_`/`RawClose`(`719ed9c`)。收口后两仓×两远端全推,三平台 run 全绿(server `719ed9c` / client `8c5cb16`)。⚠️ **残留**(非改造目标):客户端 `ClientConfig.cpp` 一处尾下划线;`idl/generated/`+codegen 支撑的 snake_case 属生成链路例外 |
 | 2026-09-07 | ✅ **DR-TS5 裁定 = 角色名/称号/宠名长度上限 31 字节(用户拍板)**(`11` §1.2;全表最后一条待拍板出清)。`name`/`title`/`pet_name` 三字段统一 `(sa.max_len)=31`:原版 `>16` 告警 `print` 被注释掉从不生效,127 只是 `STRING128` 槽宽而非玩法上限;31B ≈ 10 汉字 / 15 ASCII,并把 20 人 `BattleSnapshot` 从 8,576 B 降到约 2.6 KB(3.3×)。落地:`battle_events.proto` 三处 `max_len` 127→31 + 重跑 `saidl_gen.py`(`FixedStr<31>`);`ci_verify.py` 六项全绿、`idl --check` 一致。⇒ **§14 待拍板清零**(93 条:87 ✅ / 6 ⏳ / 0 ⚠️) |
+| 2026-09-07 | ★★ **L2 实体池地基 —— 阶段 2 领域模型层起步**(新增 **§9.0.24**)。关键路径在 1.4 双端跑通后转入阶段 2,战斗批次 A.2/A.4 反推出「生成宠物入队 / `pet_hp_delta` / 换宠」世界写缺落脚点(`shared/model/` 至今只有 `Handle.h`)⇒ 先搭 L2 纯结构地基。三个纯头 + 一个用例集:`EntityPool.h`(定长池 + generation 句柄回收,M10:悬空 `resolve` 返 `nullptr` 不脏读)· `EntityKind.h`(五族和类型 + §2.2/§2.3 边界注释,M2)· `EntityIndex.h`(标识符→句柄 O(1),§8.2 索引不得线性扫描)· `ModelPoolTest.cpp`(11 用例 / 59 断言)。★ 全纯头 ⇒ 不改 `sa_shared` 源列表;`allocate` 发干净槽(复用前 `value=T{}`)。★ 两处分工边界写进注释防合并:索引不做 generation 校验(那是池的活)· `EntityKind` 与 `Rules::CombatantKind` 各自独立(领域全集 vs 战斗子集)。**复验**:Apple clang `ctest` **12/12** + `ci_verify` 6/6 + `shared_purity` 扫 12 文件 · GCC 15.2 **12/12** · ★ 反向验证删 generation 校验 ⇒ `model_pool` 转红。⚠️ **未做/推迟**:脏槽跟踪 / 各族字段与池实例化 / GoldLedger / 捕获世界写接线(挂本地基,后续批次)· 未接线 `World` · MSVC 交 CI · 锁定 ref 不前推(客户端编译路径未 include model 头,判据同 §9.0.17)|

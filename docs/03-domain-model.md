@@ -408,3 +408,4 @@ EntityHandle = { uint32 index; uint32 generation }
 | 日期 | 变更 |
 |---|---|
 | 2026-08-30 | 初稿:三个数字;两个形状必须同时成立;实体族划分(Player/Pet/Enemy/Interactive);65 条别名展开(高危 14 组 + `CHAR_PET` 19 条 + 隐式复用);80 死字段 + 预留槽位;位打包三处;石币 5 载体;句柄带 generation;M1–M10 硬约束 |
+| 2026-09-07 | ★ **L2 地基起步(结构层,非本文档内容变更)**:`shared/model/` 落三个纯头 —— `EntityPool.h`(§1 对内扁平池 + §8.1 generation 句柄,M10)· `EntityKind.h`(§2.1 五族和类型 + §2.2/§2.3 边界,M2)· `EntityIndex.h`(§8.2 索引不得线性扫描)+ `tests/ModelPoolTest.cpp`(11 用例 / 59 断言)。归因见 `00` §9.0.24。⚠️ 本批次**只立结构地基**,§4 的 65 条别名展开、§11 欠债 1(逐字段语义)/ 欠债 2(隐式 slot 复用)均**未动**,仍是后续批次 |

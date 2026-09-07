@@ -66,6 +66,7 @@ REPO = Path(__file__).resolve().parent.parent
 EXPECTED_TESTS = {
     "contract_smoke",   # 契约层冒烟(含相克矩阵重排保护,§5 的探针也打在它身上)
     "rules_battle",     # ★ L3 黄金用例集 —— ③ 层不可自证的唯一补偿手段
+    "model_pool",       # ★★ L2 实体池地基:M2/M10 + 索引不得线性扫描(结构性)
     "idl_smoke",        # IDL 生成物体积与编解码
     "shared_purity",    # ★★ D2 的守卫:shared/ 只依赖标准库
     "idl_verify",       # ★ schema 与生成物同步(需 protoc)

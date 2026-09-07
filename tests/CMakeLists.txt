@@ -71,6 +71,22 @@ sa_apply_warnings(sa_rules_battle_test)
 sa_enable_assertions(sa_rules_battle_test)
 add_test(NAME rules_battle COMMAND sa_rules_battle_test)
 
+# ── ★★ L2 实体池地基(阶段 2 起步)────────────────────────────────
+#
+# 守 03-domain-model.md §9 的 M2 / M10 与 §8.2「索引不得线性扫描」在**结构上**成立:
+# 定长池 + generation 句柄回收(悬空 ⇒ nullptr,不脏读)+ 标识符→句柄 O(1) 索引。
+#
+# ⚠️ 同锁 C++17 —— shared/model 与 shared/rules 一样要能在客户端工具链(C++17)下编译。
+add_executable(sa_model_pool_test ModelPoolTest.cpp)
+target_link_libraries(sa_model_pool_test PRIVATE sa_shared sa_doctest)
+set_target_properties(sa_model_pool_test PROPERTIES
+    CXX_STANDARD ${SA_SHARED_CXX_STANDARD}
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF)
+sa_apply_warnings(sa_model_pool_test)
+sa_enable_assertions(sa_model_pool_test)
+add_test(NAME model_pool COMMAND sa_model_pool_test)
+
 # ── IDL 生成物冒烟(与 idl/tests/run.sh 同源)──────────────────────
 #
 # 这个用 C++20:生成物只被服务端与客户端的**网络层**消费,不进 shared/。
