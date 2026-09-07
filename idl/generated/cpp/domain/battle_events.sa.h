@@ -111,15 +111,15 @@ enum class AttackKind : std::uint8_t {
 
 struct CombatantState {
   std::uint32_t slot;
-  SA::IDL::FixedStr<127> name;
-  SA::IDL::FixedStr<127> title;
+  SA::IDL::FixedStr<31> name;
+  SA::IDL::FixedStr<31> title;
   std::uint32_t image_id;
   std::uint32_t level;
   std::int32_t hp;
   std::int32_t max_hp;
   std::uint32_t flags;
   SA::Domain::RideState ride;
-  SA::IDL::FixedStr<127> pet_name;
+  SA::IDL::FixedStr<31> pet_name;
   std::uint32_t pet_level;
   std::int32_t pet_hp;
   std::int32_t pet_max_hp;
