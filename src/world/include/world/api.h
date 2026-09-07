@@ -22,10 +22,10 @@
 
 #include "net/api.h"
 #include "platform/api.h"
-#include "rules/battle.h"
-#include "rules/combatant.h"
-#include "rules/config.h"
-#include "rules/random.h"
+#include "rules/Battle.h"
+#include "rules/Combatant.h"
+#include "rules/Config.h"
+#include "rules/RandomSource.h"
 
 namespace SA::World {
 

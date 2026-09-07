@@ -26,7 +26,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
-#include "rules/battle.h"
+#include "rules/Battle.h"
 
 #include <cmath>
 #include <cstring>

@@ -28,8 +28,8 @@
 //     发出去的字节谁写进 socket,全在宿主侧(`src/net` 与客户端 `src/net`)。
 //     ⇒ 这条切分正是它能双端共享的原因。
 
-#ifndef SA_WIRE_FRAMING_H
-#define SA_WIRE_FRAMING_H
+#ifndef __SA_Framing_H__
+#define __SA_Framing_H__
 
 #include <cstddef>
 #include <cstdint>
@@ -158,4 +158,4 @@ bool encodeFramed(std::uint64_t corr_id, const M& msg,
 
 }  // namespace SA::Wire
 
-#endif  // SA_WIRE_FRAMING_H
+#endif  // __SA_Framing_H__

@@ -22,15 +22,15 @@
 //               socket / MySQL / Redis / 日志 / 任何 src/ 下的头
 //   ⇒ 由 tools/check_shared_purity.py 强制(CI 必跑)。
 
-#ifndef SA_SHARED_RULES_BATTLE_H
-#define SA_SHARED_RULES_BATTLE_H
+#ifndef __SA_Battle_H__
+#define __SA_Battle_H__
 
 #include "domain/battle_events.sa.h"
 #include "domain/battle_status.sa.h"
 
-#include "rules/combatant.h"
-#include "rules/config.h"
-#include "rules/random.h"
+#include "rules/Combatant.h"
+#include "rules/Config.h"
+#include "rules/RandomSource.h"
 
 namespace SA::Rules {
 
@@ -352,4 +352,4 @@ KnockbackKind rollKnockback(std::int32_t damage,
 
 }  // namespace SA::Rules
 
-#endif  // SA_SHARED_RULES_BATTLE_H
+#endif  // __SA_Battle_H__

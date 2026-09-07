@@ -34,7 +34,7 @@
 #include "transport/envelope.sa.h"
 #include "transport/handshake.sa.h"
 #include "ids.h"
-#include "wire/framing.h"
+#include "wire/Framing.h"
 
 namespace SA::Net {
 

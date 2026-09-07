@@ -10,7 +10,7 @@
 //   仅命名空间 `SA::Net` → `SA::Wire`。⇒ 18 条既有用例是这次重构的验收凭据:
 //   **断言一个都不改,全部仍绿**,否则就不是"移动"而是"重写"了。
 
-#include "wire/framing.h"
+#include "wire/Framing.h"
 
 #include <cstring>
 

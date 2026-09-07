@@ -17,8 +17,8 @@
 // ⚠️ 与之配套的另一半在协议侧:服务间续体带 (instance_id, generation, request_id)
 //    三元组(02 §7.1),缺一不可。本文件只管进程内。
 
-#ifndef SA_SHARED_MODEL_HANDLE_H
-#define SA_SHARED_MODEL_HANDLE_H
+#ifndef __SA_Handle_H__
+#define __SA_Handle_H__
 
 #include <cstdint>
 
@@ -46,4 +46,4 @@ inline constexpr EntityHandle kNullHandle{};
 
 }  // namespace SA::Model
 
-#endif  // SA_SHARED_MODEL_HANDLE_H
+#endif  // __SA_Handle_H__

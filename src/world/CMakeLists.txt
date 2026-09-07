@@ -3,7 +3,7 @@
 # ★★ 00 §3.1 的编译期隔离:只有 include/ 是 PUBLIC。
 
 add_library(sa_world STATIC
-    world.cpp
+    World.cpp
 )
 
 target_include_directories(sa_world

@@ -4,7 +4,7 @@
 //   「构造一个两万层嵌套的配置文件把服务端栈爆掉」的路径。
 //   配置文件的真实深度是 2(顶层对象 + tempo 子对象)。
 
-#include "internal/json.h"
+#include "internal/Json.h"
 
 #include <cstdlib>
 #include <utility>

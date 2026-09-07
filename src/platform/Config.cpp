@@ -9,7 +9,7 @@
 
 #include "platform/api.h"
 
-#include "internal/json.h"
+#include "internal/Json.h"
 
 #include <cmath>
 #include <fstream>

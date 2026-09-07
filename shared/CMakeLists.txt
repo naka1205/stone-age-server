@@ -31,7 +31,7 @@ if(NOT TARGET sa_idl)
 endif()
 
 add_library(sa_shared STATIC
-    rules/battle.cpp
+    rules/Battle.cpp
 )
 
 target_include_directories(sa_shared PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
@@ -55,7 +55,7 @@ target_compile_features(sa_shared PUBLIC cxx_std_17)
 #
 # ⚠️ 客户端只在需要网络时链它(1.4 的 `src/net`);D2 闸门只编 sa_shared ⇒ 两者互不牵连。
 add_library(sa_wire STATIC
-    wire/framing.cpp
+    wire/Framing.cpp
 )
 
 target_include_directories(sa_wire PUBLIC "${CMAKE_CURRENT_LIST_DIR}")

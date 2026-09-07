@@ -6,9 +6,9 @@
 #    成帧与信封是双端同一语义,客户端 1.4 也要 ⇒ 共编一份,不写第二份。
 #    ⇒ 本模块只留**宿主侧**:连接(socket / Loopback)与会话状态机。
 add_library(sa_net STATIC
-    loopback_transport.cpp
-    session.cpp
-    tcp_transport.cpp
+    LoopbackTransport.cpp
+    Session.cpp
+    TcpTransport.cpp
 )
 
 target_include_directories(sa_net

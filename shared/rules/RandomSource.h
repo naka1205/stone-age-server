@@ -14,8 +14,8 @@
 // ⚠️ 因此实现方**不得**在 L3 内部调用任何其他随机源(包括 std::rand、
 //    std::mt19937 的全局实例、时间戳)。一处漏网,整个用例集失去意义。
 
-#ifndef SA_SHARED_RULES_RANDOM_H
-#define SA_SHARED_RULES_RANDOM_H
+#ifndef __SA_RandomSource_H__
+#define __SA_RandomSource_H__
 
 #include <cstdint>
 
@@ -80,4 +80,4 @@ class SeededRandom final : public Random {
 
 }  // namespace SA::Rules
 
-#endif  // SA_SHARED_RULES_RANDOM_H
+#endif  // __SA_RandomSource_H__

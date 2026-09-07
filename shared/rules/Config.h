@@ -10,8 +10,8 @@
 //      (如 `_BATTLE_NEWPOWER`,见 constants.h 的 kDefenseCoefNewPower)
 //    ⇒ 把后者也做成开关,等于把"已经关掉的后路"重新打开。
 
-#ifndef SA_SHARED_RULES_CONFIG_H
-#define SA_SHARED_RULES_CONFIG_H
+#ifndef __SA_Config_H__
+#define __SA_Config_H__
 
 namespace SA::Rules {
 
@@ -61,4 +61,4 @@ struct RulesConfig {
 
 }  // namespace SA::Rules
 
-#endif  // SA_SHARED_RULES_CONFIG_H
+#endif  // __SA_Config_H__

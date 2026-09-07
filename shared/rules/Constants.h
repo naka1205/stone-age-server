@@ -13,8 +13,8 @@
 //
 // ⚠️ shared/ 只依赖标准库(01 §4)。本文件不得 #include 任何项目内的传输类型。
 
-#ifndef SA_SHARED_RULES_CONSTANTS_H
-#define SA_SHARED_RULES_CONSTANTS_H
+#ifndef __SA_Constants_H__
+#define __SA_Constants_H__
 
 #include <cstdint>
 
@@ -347,4 +347,4 @@ inline constexpr int    kCaptureLevelGate = 5;
 
 }  // namespace SA::Rules
 
-#endif  // SA_SHARED_RULES_CONSTANTS_H
+#endif  // __SA_Constants_H__

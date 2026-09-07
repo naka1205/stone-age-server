@@ -13,8 +13,8 @@
 //   ⇒ 上述任一出现都会**解析失败并给出位置**,不会被静默忽略。
 //     这与 00 §10.4「三类静默错误」的取向一致:宁可拒绝,不可装作看懂了。
 
-#ifndef SA_PLATFORM_INTERNAL_JSON_H
-#define SA_PLATFORM_INTERNAL_JSON_H
+#ifndef __SA_Json_H__
+#define __SA_Json_H__
 
 #include <cstdint>
 #include <map>
@@ -80,4 +80,4 @@ ParseOutcome parse(std::string_view text);
 
 }  // namespace SA::Platform::json
 
-#endif  // SA_PLATFORM_INTERNAL_JSON_H
+#endif  // __SA_Json_H__

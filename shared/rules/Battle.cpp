@@ -33,7 +33,7 @@
 //   `_PETSKILL_NEW_PASSIVE` `_MULTIPLAYER_` **为关** ⇒ 对应分支不实现
 //   (与 DR-BT14「被动宠技 B80 命中 0/12」一致)。
 
-#include "rules/battle.h"
+#include "rules/Battle.h"
 
 #include <cmath>
 

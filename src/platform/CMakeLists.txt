@@ -6,11 +6,11 @@
 #    ⇒ 「不得有共享内存捷径」从口头纪律变成 include 路径事实。
 
 add_library(sa_platform STATIC
-    clock.cpp
-    config.cpp
-    json.cpp
-    log.cpp
-    random.cpp
+    Clock.cpp
+    Config.cpp
+    Json.cpp
+    Log.cpp
+    Random.cpp
 )
 
 target_include_directories(sa_platform

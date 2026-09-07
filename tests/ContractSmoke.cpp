@@ -10,12 +10,12 @@
 // ⚠️ 不调用 battle.h 里尚未实现的函数 —— 它们是阶段 1.1 的交付物。
 //    本文件只保证**声明可编译、类型可互操作**。
 
-#include "model/handle.h"
-#include "rules/battle.h"
-#include "rules/combatant.h"
-#include "rules/config.h"
-#include "rules/constants.h"
-#include "rules/random.h"
+#include "model/Handle.h"
+#include "rules/Battle.h"
+#include "rules/Combatant.h"
+#include "rules/Config.h"
+#include "rules/Constants.h"
+#include "rules/RandomSource.h"
 
 #include <cassert>
 #include <cstdio>

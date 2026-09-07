@@ -24,12 +24,12 @@
 //
 // ⚠️ shared/ 只依赖标准库(01 §4)。
 
-#ifndef SA_SHARED_RULES_COMBATANT_H
-#define SA_SHARED_RULES_COMBATANT_H
+#ifndef __SA_Combatant_H__
+#define __SA_Combatant_H__
 
 #include <cstdint>
 
-#include "rules/constants.h"
+#include "rules/Constants.h"
 
 namespace SA::Rules {
 
@@ -315,4 +315,4 @@ struct BattleField {
 
 }  // namespace SA::Rules
 
-#endif  // SA_SHARED_RULES_COMBATANT_H
+#endif  // __SA_Combatant_H__

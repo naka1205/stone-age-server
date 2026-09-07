@@ -43,7 +43,7 @@ target_include_directories(sa_doctest SYSTEM INTERFACE "${doctest_SOURCE_DIR}")
 # ★ 故意用 **C++17** 编译:GameStudio 是 C++17,shared/ 必须在它下面能编译,
 #   否则 D2「一份规则两端编译」在客户端侧当场失败。
 #   ⇒ 让不兼容在服务端构建时就暴露,而不是等到客户端集成那天。
-add_executable(sa_contract_smoke contract_smoke.cpp)
+add_executable(sa_contract_smoke ContractSmoke.cpp)
 target_link_libraries(sa_contract_smoke PRIVATE sa_shared)
 set_target_properties(sa_contract_smoke PROPERTIES
     CXX_STANDARD ${SA_SHARED_CXX_STANDARD}
@@ -61,7 +61,7 @@ add_test(NAME contract_smoke COMMAND sa_contract_smoke)
 #
 # ⚠️ 同样锁 C++17 —— 用例集也要能在客户端工具链下跑,否则"双端同一份规则"
 #    只有实现是共享的、验证不是。
-add_executable(sa_rules_battle_test rules_battle_test.cpp)
+add_executable(sa_rules_battle_test RulesBattleTest.cpp)
 target_link_libraries(sa_rules_battle_test PRIVATE sa_shared sa_doctest)
 set_target_properties(sa_rules_battle_test PROPERTIES
     CXX_STANDARD ${SA_SHARED_CXX_STANDARD}
@@ -85,8 +85,18 @@ add_test(NAME idl_smoke COMMAND sa_idl_smoke)
 # ⚠️ 这三个用 **C++20**(D1),不锁 C++17 —— 它们测的是 src/ 各模块,
 #    那是服务端独有的东西,不参与 D2 的双端共享。
 #    ⇒ 只有 shared/ 与它的用例集才受 GameStudio 的 C++17 约束。
+# CTest / target 名保持 snake_case(文档与记忆按此 ID 引用);源文件名已 P5 Pascal 化。
 foreach(sa_t IN ITEMS net_framing net_tcp platform_config world_tick)
-  add_executable(sa_${sa_t}_test ${sa_t}_test.cpp)
+  # snake_case 基名 → PascalCase 源文件名(net_framing → NetFramingTest.cpp)
+  string(REPLACE "_" ";" _parts "${sa_t}")
+  set(_src "")
+  foreach(_p IN LISTS _parts)
+    string(SUBSTRING "${_p}" 0 1 _head)
+    string(TOUPPER "${_head}" _head)
+    string(SUBSTRING "${_p}" 1 -1 _tail)
+    string(APPEND _src "${_head}${_tail}")
+  endforeach()
+  add_executable(sa_${sa_t}_test ${_src}Test.cpp)
   sa_apply_warnings(sa_${sa_t}_test)
   sa_enable_assertions(sa_${sa_t}_test)
   add_test(NAME ${sa_t} COMMAND sa_${sa_t}_test)
