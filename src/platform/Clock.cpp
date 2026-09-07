@@ -7,7 +7,7 @@
 // ⚠️ steady_clock 而不是 system_clock:01 §3.1 明写「不用墙钟做逻辑判断」。
 //    墙钟会被 NTP 往回拨,而"时间往回走"会让一切基于差值的节拍判断出现负数。
 
-#include "platform/api.h"
+#include "platform/Api.h"
 
 #include <chrono>
 

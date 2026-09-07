@@ -25,7 +25,7 @@
 //   winsock 需要 WSAStartup / closesocket / ioctlsocket / WSAPoll / WSAEWOULDBLOCK
 //   POSIX  用 close / fcntl(O_NONBLOCK) / poll / EWOULDBLOCK,且要挡 SIGPIPE。
 
-#include "net/api.h"
+#include "net/Api.h"
 
 #include <cstring>
 #include <deque>

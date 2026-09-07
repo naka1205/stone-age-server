@@ -7,7 +7,7 @@
 //    理由:配置是人手写的,一次告诉他三处错比让他改一处再跑一次快三倍。
 //    这与"拒绝启动"不矛盾 —— 只要有一条错就不启动,但要一次说完。
 
-#include "platform/api.h"
+#include "platform/Api.h"
 
 #include "internal/Json.h"
 

@@ -9,7 +9,7 @@
 //    而 00 §9.0.4 已明确认下:1.5 是单模块,**不验证服务边界**,那留到阶段 3。
 //    ⇒ 别把"Loopback 能跑通"读成"进程内形态已经验过了"。
 
-#include "net/api.h"
+#include "net/Api.h"
 
 namespace SA::Net
 {

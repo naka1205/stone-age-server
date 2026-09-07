@@ -18,8 +18,8 @@
 //    ★ 但「任一项不合法 ⇒ 拒绝启动」这个性质**保留**(01 §11.1 的快速失败),
 //      那才是 §9 真正要的东西 —— 声明式只是手段。
 
-#ifndef SA_PLATFORM_API_H
-#define SA_PLATFORM_API_H
+#ifndef __SA_PlatformApi_H__
+#define __SA_PlatformApi_H__
 
 #include <cstdint>
 #include <initializer_list>
@@ -305,4 +305,4 @@ class RandomSource
 
 } // namespace SA::Platform
 
-#endif // SA_PLATFORM_API_H
+#endif // __SA_PlatformApi_H__

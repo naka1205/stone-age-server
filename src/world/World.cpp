@@ -8,7 +8,7 @@
 //      00 §0 又已认下 ④ 层「表现与手感永远无法验证」
 //      ⇒ 节拍是**玩法参数**,必须可配、只能靠人试。
 
-#include "world/api.h"
+#include "world/Api.h"
 
 #include <algorithm>
 #include <map>

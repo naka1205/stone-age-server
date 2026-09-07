@@ -13,15 +13,15 @@
 //        1.4 demo 的验收口径是**事件流端到端一致**(客户端 01 §12.1),
 //        BattleEvents 就是它要的东西。
 
-#ifndef SA_WORLD_API_H
-#define SA_WORLD_API_H
+#ifndef __SA_WorldApi_H__
+#define __SA_WorldApi_H__
 
 #include <cstdint>
 #include <memory>
 #include <vector>
 
-#include "net/api.h"
-#include "platform/api.h"
+#include "net/Api.h"
+#include "platform/Api.h"
 #include "rules/Battle.h"
 #include "rules/Combatant.h"
 #include "rules/Config.h"
@@ -110,4 +110,4 @@ class World final : public SA::Net::TransportEvents,
 
 } // namespace SA::World
 
-#endif // SA_WORLD_API_H
+#endif // __SA_WorldApi_H__

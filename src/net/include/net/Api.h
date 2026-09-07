@@ -21,8 +21,8 @@
 //    ⇒ LoopbackTransport 保留:它同时是 01 §5.1 列的 InProcTransport 的雏形
 //      (单容器形态下的模块间传输),也是全部非 socket 用例的载体。
 
-#ifndef SA_NET_API_H
-#define SA_NET_API_H
+#ifndef __SA_NetApi_H__
+#define __SA_NetApi_H__
 
 #include <cstddef>
 #include <cstdint>
@@ -322,4 +322,4 @@ class Session
 
 } // namespace SA::Net
 
-#endif // SA_NET_API_H
+#endif // __SA_NetApi_H__

@@ -3,7 +3,7 @@
 // ⚠️★ 关于「认证」这一步在 IDL 里不存在,见 net/api.h 里 SessionState 上方的说明。
 //    那不是本文件绕过去的问题,是一处**排期空白**,已在 docs 里登记。
 
-#include "net/api.h"
+#include "net/Api.h"
 
 namespace SA::Net
 {

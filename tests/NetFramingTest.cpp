@@ -7,7 +7,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
-#include "net/api.h"
+#include "net/Api.h"
 
 #include <cstring>
 #include <vector>

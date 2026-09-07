@@ -9,7 +9,7 @@
 //   ⇒ 补偿成立的前提是**事后能重放**,而重放的前提是**当时的种子还在**。
 //     种子若在栈上随手 rand() 出来又丢掉,那句话就只是一句话。
 
-#include "platform/api.h"
+#include "platform/Api.h"
 
 #include <chrono>
 

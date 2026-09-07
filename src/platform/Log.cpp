@@ -8,7 +8,7 @@
 //   选它不是因为好看,是因为它**同时**能被人扫和被机器切,
 //   而 1.5 阶段还没有日志收集端可言。
 
-#include "platform/api.h"
+#include "platform/Api.h"
 
 #include <cstdio>
 #include <string>

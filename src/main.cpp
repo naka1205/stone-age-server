@@ -25,9 +25,9 @@
 #include <string>
 #include <thread>
 
-#include "net/api.h"
-#include "platform/api.h"
-#include "world/api.h"
+#include "net/Api.h"
+#include "platform/Api.h"
+#include "world/Api.h"
 
 namespace
 {
