@@ -50,9 +50,10 @@ REPO = Path(__file__).resolve().parent.parent
 #
 # ⚠️★ **这个清单写死在这里是有意的,不是偷懒。**
 #
-# tests/CMakeLists.txt 里有两条检查是**条件注册**的:
+# tests/CMakeLists.txt 里有三条检查是**条件注册**的:
 #     shared_purity   需要 Python3
 #     idl_verify      需要 protoc
+#     code_format     需要 clang-format(2026-09-08 新增,01 §13 欠债 24)
 # 缺依赖时它们**不注册**(而不是常红 —— 常红会训练人忽略红色,00 §10.4)。
 #
 # ⇒ 于是有一个危险的失效:CI 镜像哪天不带 protoc 了,idl_verify 悄悄消失,
@@ -71,6 +72,7 @@ EXPECTED_TESTS = {
     "idl_smoke",        # IDL 生成物体积与编解码
     "shared_purity",    # ★★ D2 的守卫:shared/ 只依赖标准库
     "idl_verify",       # ★ schema 与生成物同步(需 protoc)
+    "code_format",      # ★★ .clang-format 纪律的执行者(需 clang-format,欠债 24)
     # ── 阶段 1.5(2026-09-04 接入构建时补齐)──────────────────────
     "net_framing",        # 帧层 / 信封层 / 会话状态机
     "net_tcp",            # ★ TcpTransport —— 1.5 收尾项,真 socket 上跑
@@ -206,6 +208,7 @@ def main():
     # ⚠️ 配置期的 message(WARNING) 是「某条检查不会注册」的**唯一预警**。
     #    它在 §2 会变成硬失败,这里先把它显式摘出来,让日志里能一眼看到原因。
     for pat, why in (("未找到 protoc", "idl_verify 不会注册"),
+                     ("未找到 clang-format", "code_format 不会注册"),
                      ("未找到 Python3", "shared_purity 与 idl_verify 都不会注册")):
         if pat in out:
             print(f"\n⚠️★ 配置期告警:{pat} ⇒ {why}", flush=True)

@@ -200,6 +200,50 @@ if(Python3_FOUND)
         "   本机若只消费生成物则无需安装(DR-TS2 已入库);改 schema 前请先装上,"
         "或设 PROTOC=<路径>。")
   endif()
+
+  # ── ★★ .clang-format 纪律的执行者(2026-09-08,01 §13 欠债 24)──────
+  #
+  # P6(00 §9.0.23)宣告「五仓字节一致、CI --Werror 强制」,⚠️ 而在本条落地之前
+  # **没有任何东西检查它** ⇒ 那句「强制」从来没有执行者,HEAD 上实测已漂到
+  # 10 处 / 5 个文件,而 ctest 全程 13/13 全绿。
+  # ★ 与 shared_purity / module_boundaries 同族:它守的不是"好看",
+  #   是「一个已宣告完成的状态还成不成立」。
+  #
+  # ⚠️ 按 protoc 的同一先例处理:**缺工具不注册 + 大声告警**,而不是常红
+  #    (常红会训练人忽略红色,00 §10.4)。
+  #    ⇒ CI 上必须有 clang-format,接住这件事的是 ci_verify.py §2 的
+  #      EXPECTED_TESTS 断言(code_format 少了就硬失败),不是这里。
+  find_program(SA_CLANG_FORMAT
+      NAMES clang-format
+      # ⚠️★★ 必须是 PATHS 而**不是** HINTS —— 这不是同义写法:
+      #   CMake 的搜索次序是 … → HINTS → 系统 PATH → PATHS,
+      #   ⇒ 写成 HINTS 就会**优先于 PATH**,而 CI 恰恰是用 pip 往 PATH 上
+      #     装了一个**钉死版本**的 clang-format(见 .github/workflows/ci.yml)。
+      #   在 macOS runner 上 Xcode 工具链那个路径是存在的 ⇒ HINTS 会让 CMake
+      #   挑中它、把 CI 的版本 pin **整个绕过**,而没有任何东西会报错。
+      #   ★ 与 00 §9.0.12 那族「开关静默失效」同形态。
+      #   ⇒ 语义要的是「先用 PATH 上的;本机没有再退回这些已知位置」= PATHS。
+      PATHS "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin"
+            "/opt/homebrew/opt/llvm/bin"
+            "/usr/local/opt/llvm/bin")
+  if(SA_CLANG_FORMAT)
+    add_test(NAME code_format
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_SOURCE_DIR}/tools/check_format.py)
+    # ★ 把工具路径传给脚本:CMake 已经找到了它(含上面那些 HINTS),
+    #   不该让脚本再独立找一遍 —— 两处各找一遍就会出现「ctest 绿而
+    #   手工跑红」这种用的不是同一个二进制的分叉。
+    set_tests_properties(code_format PROPERTIES
+        ENVIRONMENT "SA_CLANG_FORMAT=${SA_CLANG_FORMAT}")
+  else()
+    message(WARNING
+        "未找到 clang-format —— 格式检查(code_format)不会注册。\n"
+        "   ⚠️ 它守的是 P6 宣告的「三仓单一格式体系」(00 §9.0.23 / DR-TS7),"
+        "而该纪律在本检查之前**没有任何执行者**(01 §13 欠债 24)。\n"
+        "   **CI 上必须有 clang-format**;本机安装:brew install llvm  或\n"
+        "   python3 -m pip install clang-format==21.1.8,或设 "
+        "-DSA_CLANG_FORMAT=<路径>。")
+  endif()
 else()
   message(WARNING
       "未找到 Python3 —— shared/ 依赖纯度与 IDL 同步检查将不会运行。"

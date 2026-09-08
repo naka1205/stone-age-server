@@ -92,6 +92,30 @@ jobs:
       - name: protoc 版本
         run: protoc --version
 
+      # ── ★★ clang-format:三平台钉同一个版本 ─────────────────────
+      #
+      # 01 §13 欠债 24:P6 宣告「五仓字节一致、CI --Werror 强制」,而在
+      # code_format 落地之前**没有任何东西检查它** ⇒ HEAD 上实测已漂到 10 处。
+      #
+      # ★★ 为什么从 pip 装而不用 runner 自带的:
+      #   自带版本三平台各不相同(且会随镜像更新而变)。格式判定是**逐字节**的,
+      #   一旦某个平台的版本对某一行有不同想法,就会出现「只有一个平台红」而
+      #   代码毫无问题的局面 —— 那种红会训练人去放宽检查(00 §10.4)。
+      #   pip 的 clang-format 是同一份预编译二进制,三平台判定必然一致。
+      #
+      # ⚠️ 2026-09-08 交叉实测:Apple clang-format 21.0.0 / pip 21.1.8 /
+      #    Homebrew LLVM 22.1.4 在本仓给出**逐位一致**的判定(10 处、同 line:col)
+      #    ⇒ 跨版本漂移目前不是现实风险(ColumnLimit: 0 消掉了折行分歧)。
+      #    ★ 但那是**实测结论不是保证** ⇒ 仍然钉版本,让"换版本"是一次
+      #      显式升级,而不是某天镜像自己变了。升级时须全仓复跑一遍 --fix。
+      #
+      # ★ 装了也不等于生效 —— 接住这件事的是 ci_verify.py §2 的注册清单断言。
+      - name: 安装 clang-format(三平台同一版本)
+        run: python -m pip install --disable-pip-version-check clang-format==21.1.8
+
+      - name: clang-format 版本
+        run: clang-format --version
+
       # ★ Linux / macOS 用 Ninja(快);Windows 用 CMake 默认挑的 VS 生成器。
       #   ⚠️ 不在 Windows 上指定 -G Ninja:01 §13 欠债 11 记的那个坑
       #   (PATH 上的 ninja 可能是 depot_tools 的 ninja.bat)虽是本机环境问题,
