@@ -102,8 +102,23 @@ EXCLUDED_PREFIXES = ("idl/generated/", "idl/codegen/")
 #      平台间若真有分歧,诊断里一眼能看出是版本差异还是代码问题。
 MIN_MAJOR = 15
 
+# clang-format `--dry-run --Werror` 的诊断行:
+#     <file>:<line>:<col>: error: code should be clang-formatted [-Wclang-format-violations]
+#
+# ⚠️★ 措辞里的 `error:` **不是** `warning:`(欠债 24 落地时踩过:按 `warning:` grep
+#    会印出「0 违规」而那趟其实有 10 处)⇒ 两个都接,判据仍取退出码。
+#
+# ⚠️★★ **本行在 2026-09-09 被修复过一次,值得记**:欠债 24(`b6c718c`)做反向验证时
+#    把匹配串换成了一个故意不匹配的哨兵(`THIS-WORDING-NO-LONGER-MATCHES`)以确认
+#    下面那条一致性断言会转红 —— ★ **然后忘了改回来,并且连哨兵一起提交了**。
+#    后果:凡真有违规时,退出码非 0 而解析到 0 条 ⇒ 一致性断言抢先触发,
+#    打印的是「判据自相矛盾」而**不是违规清单**。
+#    ★ 为什么两天没人发现:那条一致性断言在**零违规**状态下(退出码 0 + 解析 0 条)
+#      两边同向 ⇒ 检查照常绿。⇒ **只有"该红的时候"才会暴露的缺陷,绿色证明不了它。**
+#    ⇒ 教训:反向验证的改动必须与恢复动作成对,而且**恢复后要再跑一次"该红"的场景**
+#      (本次即:先造一处违规确认打印出清单,再修掉它)。
 DIAG_RE = re.compile(
-    r"^(?P<loc>[^\n:]+:\d+:\d+):\s*(?:error|warning):\s*THIS-WORDING-NO-LONGER-MATCHES",
+    r"^(?P<loc>[^\n:]+:\d+:\d+):\s*(?:error|warning):\s*code should be clang-formatted",
     re.M)
 
 
