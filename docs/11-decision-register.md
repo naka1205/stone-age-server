@@ -257,6 +257,66 @@ P5 文件名 PascalCase + guard `__SA_<File>_H__` · P6 clang-format 引擎款�
 | DR-DT6 | `skillcode.txt` 真实路径 | ✅ **按现有文件迁移 + 记录该假设** | `06` §11-5;不可判定 | — |
 | DR-DT7 | 8.0 `LoadEXP` 的越界写 | ✅ **修正** | `06` §11-7:它没有任何玩法语义,是纯内存 bug | — |
 | **DR-DT8** | 骑乘三套表的合并规格与覆盖次序 | ⏳ **待数据** —— `08` §8 待补 5(1 天) | `06` 欠债 5 / 客户端 `08` §10-7 | 客户端 `08` |
+| **DR-DT9** | ★★ **属性推导 `CHAR_complianceParameter`**:原始四维(vital/str/tough/dex)→ 战斗三围(attack/defense/quick)+ max_hp 的公式与截断语义 | ✅ **1:1 移植 `CHAR_initcharWorkInt`(char.c:3419-3487)基础段 + 复刻整数截断**(2026-09-08 用户拍板截断语义)⇒ `shared/rules/Progression.h::deriveBaseStats`,批次 M.3 | 见 §2.9;关 `01` §13 欠债 23 上半(推导已通,下半 = 四维来源) |
+
+---
+
+
+### 2.9 DR-DT9 的公式与边界(属性推导,批次 M.3)
+
+**移植来源**:`CHAR_complianceParameter`(展开视图 `char/char.c:3525`)是**编排器**,真公式在它调的
+`CHAR_initcharWorkInt`(`:3419-3487`)。其产物 attack/defense/quick/max_hp 是 `CHAR_WORKDATAINT`
+**派生字段(不存档)**,而原始四维 vital/str/tough/dex 是存储字段 —— 印证「三围是推导量,不是存量」。
+
+**公式**(⚠️ 每个 `CHAR_setWorkInt` 第三参是 `int`,整表达式算完 `static_cast<int>` 截断一次):
+
+```
+attack  = (int)( str*0.01 + tough*0.001 + vital*0.001 + dex*0.0005 )
+defense = (int)( tough*0.01 + str*0.001 + vital*0.001 + dex*0.0005 )
+quick   = (int)( dex*0.01 )
+max_hp  = (int)( (vital*4 + str + tough + dex) * 0.01 )   ★ 原版经 float 中间变量(char.c:3397)
+max_mp  = 直接读 CHAR_MAXMP 字段,不推导(char.c:3488)
+```
+
+⚠️ 逐位复刻三条(「形状是公式的一部分」,同 `battle.cpp` ApplyElementMatrix):① 表达式保留原形
+`x*0.01*0.1` 不预乘成 `x*0.001`;② 三围中间是 `double`(无 float 变量);③ **max_hp 经 `float` 中间变量**
+先收窄再截断,与三围的纯 double 路径不同。依赖 `shared/CMakeLists.txt` 的 `-ffp-contract=off`。
+
+**三处回源码复核的分叉 / 裁剪**:
+
+1. ⚠️★ **公式不含 `level`** —— 欠债 23 / DR-BT19-21 均转述为「原始属性 **+ 等级** + 装备推导」,
+   但源码里三围推导**全程不读等级**。等级的作用在「四维随等级成长」(`PARAM_CAL` 成长率消费,另一批),
+   不在这一步。回源码复核纠正的又一处文档分叉(同 §9.0.19 族)。
+2. **装备 / 套装 / 技能加成不含** —— `ITEM_equipEffect` + `Other_DefcharWorkInt`(item.c:1599)全是
+   套装 / 武器 / 特技加成,对**无装备单位输入全 0 即恒等** ⇒ 本批不含,接口留待装备系统。
+   ★ `FreeComplianceParameter`(mylua/function.c:830)是 **Lua 回调**(自由属性扩展点,D6 脚本层)⇒ 不移植。
+3. **截断语义 = 复刻整数截断**(用户拍板)。⚠️ 与 **DR-DT1**(成长率 `E_T_LVUPPOINT` 默认**不**截断、
+   保留浮点设计意图)方向相反,**不矛盾**:那是连续的成长系数(atoi 是解析损失),这是本就为整数的战斗三围。
+
+**HP 夹取(char.c:3556 `HP = min(HP, WORKMAXHP)`)本批不接**:捕获宠 / 一般宠的四维当前**无非 0 来源**
+(欠债 23 下半)⇒ max_hp 恒 0 ⇒ 夹取 = 血清零 =「叫得出即死」,那是「四维无源」残缺与夹取叠加出的
+**新失真**,不是原版行为(原版宠物四维非 0)。⇒ 不在推导出的 0 上夹血;四维有来源后夹取随之接上。
+
+**实现 / 验证**:`shared/rules/Progression.{h,cpp}` 纯函数(比 Battle 更严,连 `rng` 都不要)·
+黄金用例 `tests/RulesProgressionTest.cpp` **5 例**(含「四维 < 100 截断为 0」边界 + 非对称验主项互换)·
+接线两处:`enterPetToField`(宠物入场据四维推三围)+ **`makeDemoField`**(demo 玩家 / 敌人的三围
+改由四维推出,不再硬编码)· `world_tick` **38 → 40 例 / 675 断言**(四维 0 仍 0 · 非 0 四维推出非 0 三围 ·
+demo 三围来自推导的守卫)。**13 target ctest 全绿 + `ci_verify` 6/6**(新 target `rules_progression`
+已进 `EXPECTED_TESTS`)。
+
+⚠️★★ **接 `makeDemoField` 时顺带证伪了旧的 demo 数值:`attack=300` 与 `max_hp=400` 这组硬编码
+在原版公式下不可达** —— `quick=200 ⇒ dex=20,000`、`attack=300 ⇒ str≈29,000`,而
+`max_hp=(vital*4+str+tough+dex)*0.01` 在这两者之下**至少 490**,不可能是 400
+(解方程得 `vital` 为负;敌人那组 `attack=260 / max_hp=260` 同样不可达)。
+⇒ 旧三围不只是「未推导」,它是一组**自相矛盾**的值:`attack` 与 `max_hp` 在源码里共享同一批四维,
+手填时把它们当成了独立旋钮。⇒ 接线**必然改变 demo 数值**(现 me `atk322/def88/qk200/hp860` ·
+foe `atk273/def57/qk150/hp590`),而 demo 要守的两条性质(有限回合结束 / 出招更快结束)由用例复验仍成立。
+
+**反向验证三处**(每处均先注入、报红点名、再还原复跑回绿):
+① demo 血量改回硬编码 400 ⇒ 新守卫红(`602 >= 860`);
+② `attack` 公式主项 `str ↔ tough` 写反 ⇒ 非对称用例红(`s.attack == 53`)—— 正是 A.3 那类照抄错误;
+③ `enterPetToField` 接上源码的 HP 夹取 ⇒ 两条投影用例红(`p.hp == 120`)⇒ 坐实上文「四维无源时夹取 = 叫出即死」。
+
 
 ---
 

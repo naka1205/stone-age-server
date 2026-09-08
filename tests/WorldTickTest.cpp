@@ -13,6 +13,7 @@
 #include "world/Api.h"
 
 #include "model/Player.h"
+#include "rules/Progression.h"
 
 #include <cstdint>
 #include <map>
@@ -599,6 +600,24 @@ TEST_CASE("端到端:客户端出招 ⇒ 敌方吃到伤害(上行链路的凭�
 	CHECK(active.turns < idle.turns);
 }
 
+// ★★ M.3(DR-DT9):**demo 玩家的三围不再是手填值,而是四维的推导像。**
+//    钉法:idle 场景玩家必然被打死 ⇒ 它累计吃到的伤害不可能少于自己的 max_hp,
+//    而那个 max_hp 由 `deriveBaseStats` 给出 —— 本用例**直接引用同一个函数**,
+//    ⇒ 有人把 `makeDemoField` 改回硬编码血量,这一条立刻红。
+//    ⚠️ 断言取 `>=` 而不是相等:最后一击会打过头(伤害不按剩余血量截断),
+//      而"打过头多少"是随机项,不可判定 ⇒ 只断言可判定的那一半。
+TEST_CASE("M.3:demo 玩家的三围来自属性推导,不是硬编码(DR-DT9)")
+{
+	const DemoRun idle = runDemo(false, 0x1111);
+	REQUIRE(idle.finished);
+
+	// makeDemoField 里 me 的四维(World.cpp)—— 两处必须同源,不同源就是这条用例的意义。
+	const SA::Rules::DerivedStats me = SA::Rules::deriveBaseStats(8000, 30000, 4000, 20000);
+	REQUIRE(me.max_hp > 0); // 先证推导本身没退化成 0(捕获宠那种残缺)
+
+	CHECK(idle.mirror.damageOf(0) >= static_cast<std::uint32_t>(me.max_hp));
+}
+
 // ⚠️ 默认关。理由见 platform/api.h 的 DemoBattleConfig:
 //   打开后握手即入场会把会话语义从 kAuthenticated 变成 kOnline,
 //   那是**可观察的语义变化**,不能是默认行为。
@@ -1020,20 +1039,46 @@ TEST_CASE("M.2:四属性按具名下标映射,绝不按位置(顺序陷阱)")
 	CHECK(p.elements[static_cast<int>(SA::Rules::Element::kWind)] == 44);
 }
 
-TEST_CASE("M.2:战斗三围是登记在案的零(complianceParameter 未移植)")
+TEST_CASE("M.3:四维无来源的宠物 ⇒ 推导出的三围仍为 0(DR-DT9,欠债 23 下一环)")
 {
 	SA::Rules::BattleField f = makeFieldWithOwnerAt(0);
-	const SA::Model::Pet pet = makeLivePet();
+	const SA::Model::Pet pet = makeLivePet(); // 四维默认 0(捕获宠 / 一般宠当前无来源)
 
 	REQUIRE(enterPetToField(f, 0, pet));
 	const SA::Rules::Combatant &p = f.at(SA::Rules::kBattlePlayerMax);
 
-	// ⚠️★ 钉住残缺本身,免得下一个人以为三围填上了:Pet 无 attack/defense/quick,
-	//    max_hp 由 complianceParameter 推导,均未移植(06 域)。
+	// ⚠️★ complianceParameter 已移植(DR-DT9),但四维全 0 是它的不动点 ⇒ 三围仍 0。
+	//    这不再是「未移植」,而是「四维无非 0 来源」(欠债 23 的下一环)—— 钉住它,免得下一个人
+	//    以为「接了推导宠物就有战力」。真正参战还需非 0 四维来源(敌人模板 / 成长率消费)。
 	CHECK(p.attack == 0);
 	CHECK(p.defense == 0);
 	CHECK(p.quick == 0);
 	CHECK(p.max_hp == 0);
+	// ★ hp 未被夹取(见 enterPetToField 注释):四维 0 ⇒ max_hp 0,若夹取则「叫出即死」。
+	//   ⚠️ 断言值取 makeLivePet 的 hp(120),它就是「未被夹取」的唯一证据 ——
+	//     写成任何别的数都会让这一条既不测夹取也不测投影。
+	CHECK(p.hp == 120);
+}
+
+TEST_CASE("M.3:非 0 四维的宠物 ⇒ enterPetToField 路径上推导出非 0 三围(DR-DT9)")
+{
+	SA::Rules::BattleField f = makeFieldWithOwnerAt(0);
+	SA::Model::Pet pet = makeLivePet();
+	// 给一组非 0 四维(与 rules_progression「非对称」用例同值,手算可核)。
+	pet.vital = 1000;
+	pet.str = 5000;
+	pet.tough = 1000;
+	pet.dex = 2000;
+
+	REQUIRE(enterPetToField(f, 0, pet));
+	const SA::Rules::Combatant &p = f.at(SA::Rules::kBattlePlayerMax);
+
+	// ★ 与 deriveBaseStats(1000,5000,1000,2000) 逐位一致(RulesProgressionTest 第 4 例):
+	//   attack 53 / defense 17 / quick 20 / max_hp 120 —— 验证推导确实跑在接线路径上。
+	CHECK(p.attack == 53);
+	CHECK(p.defense == 17);
+	CHECK(p.quick == 20);
+	CHECK(p.max_hp == 120);
 }
 
 TEST_CASE("M.2:死宠(hp<=0)不入场")

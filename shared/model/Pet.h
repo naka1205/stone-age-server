@@ -166,9 +166,11 @@ struct Pet
 // ② ★★ **Y 五项初值**(源码 :387-391:`CHAR_YHP` / `YATK` / `YDEF` / `YQUICK` / `YLV`)
 //    ⇒ 它们取自 `CHAR_getWorkInt(CHAR_WORKMAXHP / WORKFIXSTR / WORKFIXTOUGH /
 //    WORKFIXDEX)`,而那些 WORK 值是 `CHAR_complianceParameter` 的产物 ——
-//    **属性推导公式未移植**(属成长养成域,06)。
-//    ⇒ 建了也只能填 0,而 0 会被后续成长逻辑读成"初始值就是 0"，
-//      **比字段不存在更危险** ⇒ 不建,连带 `complianceParameter` 那一步也不做。
+//    ✅ **属性推导公式本身已移植**(DR-DT9,`shared/rules/Progression.h` 的 `deriveBaseStats`,
+//    批次 M.3):`enterPetToField` 入场时已据四维推出三围 + max_hp。
+//    ⇒ 但 Y 五项**仍不建**:它们是「初值快照」(升级 / 成长拿它做基线),而本批宠物四维
+//      **尚无非 0 来源**(捕获宠 = 0 / 一般宠创建未移植)⇒ 此刻算出的 Y 只能是 0,
+//      把 0 当初值快照存下来**比字段不存在更危险** ⇒ 待四维有来源后再建,与那批一起来。
 //
 // ③ `CHAR_RARE` / `CHAR_PETID` / `CHAR_PETENEMYID`(源码 :362-366)⇒ L4 内容导入(D 线)。
 //

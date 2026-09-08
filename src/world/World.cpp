@@ -18,6 +18,7 @@
 #include "model/EntityIndex.h"
 #include "model/EntityPool.h"
 #include "model/Player.h"
+#include "rules/Progression.h"
 
 namespace SA::World
 {
@@ -556,35 +557,55 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 //        否则 demo 挂起时分不清是"敌人打不动"还是"事件流断了";
 //     ② 客户端正常出招时,战斗**更快**结束 ⇒ 指令确实被采纳了。
 //        ★ 这一条才是 1.4 真正要证明的东西:上行链路是通的。
+//
+// ★★ **批次 M.3 起,三围不再硬编码,改由四维经 `deriveBaseStats` 推出**(DR-DT9)。
+//    欠债 23 把「demo 玩家三围硬编码」与「捕获宠 / 换宠入场宠三围恒 0」列为
+//    `complianceParameter` 的**三个共同依赖处** ⇒ 这里接上,那条欠债的上半才真正关闭。
+//    ⚠️ 换的是**数值的来源**,不是那两条性质:四维仍是脚手架取值(见下),
+//      但它们经过的是原版公式,而不再是我凭手感填的三围。
+//
+// ⚠️★ 一处顺带被证伪的东西:**原来硬编码的 `attack=300 / max_hp=400` 在原版公式下
+//    根本不可达** —— 300 的攻击需要 str≈30,000 量级,而那个量级的四维经
+//    `(vital*4+str+tough+dex)*0.01` 至少推出 300+ 的 max_hp,不可能只有 400。
+//    ⇒ 旧数字不只是"未推导",它是一组**自相矛盾**的三围。
 SA::Rules::BattleField makeDemoField()
 {
 	SA::Rules::BattleField f{};
 
+	// ★ 四维取值的判据只有两条(即上面 ① ②),**不是**"原版 20 级玩家该有多少" ——
+	//   那属 L4 内容导入。量级参照 `06` §3.1:原版四维是几千 ~ 几万,`*0.01` 后
+	//   三围才落到几十 ~ 几百的观感。
+	//   me:力量为主(攻高)· 体力垫底给出血量余量 · 速度 20,000 ⇒ quick 200 先手。
 	SA::Rules::Combatant &me = f.at(0);
 	me.occupied = true;
 	me.kind = SA::Rules::CombatantKind::kPlayer;
 	me.slot = 0;
 	me.level = 20;
-	me.hp = 400;
-	me.max_hp = 400;
 	me.mp = 100;
 	me.max_mp = 100;
-	me.attack = 300;
-	me.defense = 40;
-	me.quick = 200;
 	me.luck = 10;
+	const SA::Rules::DerivedStats me_stats =
+	    SA::Rules::deriveBaseStats(8000, 30000, 4000, 20000);
+	me.attack = me_stats.attack;   // 322
+	me.defense = me_stats.defense; // 88
+	me.quick = me_stats.quick;     // 200
+	me.max_hp = me_stats.max_hp;   // 860
+	me.hp = me.max_hp;             // ★ 满血入场:hp 不再是独立的手填值
 
+	// foe:各维按比例略低 ⇒ 攻防速血全弱一档,但**打得动**(性质 ① 要求它能打死玩家)。
 	SA::Rules::Combatant &foe = f.at(SA::Rules::kSideOffset);
 	foe.occupied = true;
 	foe.kind = SA::Rules::CombatantKind::kEnemy;
 	foe.slot = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
 	foe.level = 18;
-	foe.hp = 260;
-	foe.max_hp = 260;
-	foe.attack = 260;
-	foe.defense = 30;
-	foe.quick = 150;
 	foe.luck = 5;
+	const SA::Rules::DerivedStats foe_stats =
+	    SA::Rules::deriveBaseStats(4000, 26000, 2000, 15000);
+	foe.attack = foe_stats.attack;   // 273
+	foe.defense = foe_stats.defense; // 57
+	foe.quick = foe_stats.quick;     // 150
+	foe.max_hp = foe_stats.max_hp;   // 590
+	foe.hp = foe.max_hp;
 	return f;
 }
 
@@ -1297,8 +1318,20 @@ bool enterPetToField(SA::Rules::BattleField &field, int owner_field_slot,
 	dst.elements[static_cast<int>(SA::Rules::Element::kFire)] = pet.fire;
 	dst.elements[static_cast<int>(SA::Rules::Element::kWind)] = pet.wind;
 
-	// ★ attack / defense / quick / max_hp 留 0(Combatant{} 已置 0):Pet 无这些字段,
-	//   推导它们的 complianceParameter 未移植(06 域)⇒ 登记在案的残缺,见 Api.h 声明处。
+	// ── 属性推导:四维 → 基础三围 + max_hp(DR-DT9,批次 M.3)────────────
+	// ★ complianceParameter 已移植:Pet 的原始四维经 deriveBaseStats 推出战斗三围。
+	//   装备加成不含(Pet 无装备,原版 ITEM_equipEffect 对宠物输入全 0 即恒等,DR-DT9)。
+	const SA::Rules::DerivedStats stats =
+	    SA::Rules::deriveBaseStats(pet.vital, pet.str, pet.tough, pet.dex);
+	dst.attack = stats.attack;
+	dst.defense = stats.defense;
+	dst.quick = stats.quick;
+	dst.max_hp = stats.max_hp;
+	// ⚠️★ **HP 夹取(原版 char.c:3556 `HP = min(HP, WORKMAXHP)`)本批不做**,dst.hp 保留
+	//    上面投影的 pet.hp。理由:捕获宠 / 一般宠的四维当前**无非 0 来源**(欠债 23 的下一环)
+	//    ⇒ max_hp 恒 0 ⇒ 夹取 = 把血清零 =「叫得出即死」,那是「四维无源」残缺与夹取叠加出的
+	//    **新失真**,不是原版行为(原版宠物四维非 0)。⇒ 不在推导出的 0 上夹血(与欠债 23
+	//    「别在 0 三围上接计算」同理由)。四维有来源后夹取随之接上(DR-DT9 记明)。
 	return true;
 }
 

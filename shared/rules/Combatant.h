@@ -170,7 +170,9 @@ struct Combatant
 	//
 	// ⚠️ 这里是**本回合已重算完毕的值**,不是基础值。
 	//    05 §2.3:回合准备的第 4 件事是「逐角色重算三围」——
-	//    `CHAR_complianceParameter` 先把三围**重置为基础值**,再由 `BATTLE_TurnParam` 往上加。
+	//    `CHAR_complianceParameter` 先把三围**重置为基础值**(✅ 基础段已移植 =
+	//    `rules/Progression.h` 的 `deriveBaseStats`,DR-DT9),再由 `BATTLE_TurnParam`
+	//    往上加(战斗内临时增益,尚未移植)。
 	//    ★ 增益衰减器:`modparam *= 0.8` 每回合衰减 20%,且**只按 1% 折算**
 	//      (`最终值 += modparam * 0.01`)⇒ **战斗中的临时增益不会跨回合累积**。
 	//    ⇒ 重算发生在**调用 resolve_turn 之前**,L3 拿到的是已经算好的数。

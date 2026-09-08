@@ -71,6 +71,20 @@ sa_apply_warnings(sa_rules_battle_test)
 sa_enable_assertions(sa_rules_battle_test)
 add_test(NAME rules_battle COMMAND sa_rules_battle_test)
 
+# ── ★ 成长养成:属性推导黄金用例(DR-DT9,批次 M.3)──────────────────
+#
+# 与 rules_battle 同源同框架、同锁 C++17:deriveBaseStats 是 shared/rules 的纯函数,
+# 双端共编 ⇒ 用例也要能在客户端工具链下跑。四维 → 三围公式逐位钉死(Progression.h)。
+add_executable(sa_rules_progression_test RulesProgressionTest.cpp)
+target_link_libraries(sa_rules_progression_test PRIVATE sa_shared sa_doctest)
+set_target_properties(sa_rules_progression_test PROPERTIES
+    CXX_STANDARD ${SA_SHARED_CXX_STANDARD}
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF)
+sa_apply_warnings(sa_rules_progression_test)
+sa_enable_assertions(sa_rules_progression_test)
+add_test(NAME rules_progression COMMAND sa_rules_progression_test)
+
 # ── ★★ L2 实体池地基(阶段 2 起步)────────────────────────────────
 #
 # 守 03-domain-model.md §9 的 M2 / M10 与 §8.2「索引不得线性扫描」在**结构上**成立:

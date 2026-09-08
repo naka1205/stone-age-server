@@ -32,6 +32,7 @@ endif()
 
 add_library(sa_shared STATIC
     rules/Battle.cpp
+    rules/Progression.cpp
 )
 
 target_include_directories(sa_shared PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
