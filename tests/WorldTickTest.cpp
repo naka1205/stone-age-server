@@ -799,9 +799,9 @@ TEST_CASE("L2:捕获成功 ⇒ 宠物进池、挂进主人槽、计数 +1、目�
 	captureTurn(f, id, battle, SA::Rules::kSideOffset);
 
 	// ★★ 四个后果一起断言 —— 少任何一个都说明那条链没接上:
-	CHECK(f.world.petCount() == 1);              // ① 宠物进了池
-	CHECK(f.world.playerPetSlotsUsed(id) == 1);  // ② 挂进了主人的槽
-	CHECK(f.world.playerCaptureCount(id) == 1);  // ③ 捕获计数(源码 :3543)
+	CHECK(f.world.petCount() == 1);             // ① 宠物进了池
+	CHECK(f.world.playerPetSlotsUsed(id) == 1); // ② 挂进了主人的槽
+	CHECK(f.world.playerCaptureCount(id) == 1); // ③ 捕获计数(源码 :3543)
 	// ④ 目标离场(源码 :3546 BATTLE_Exit)—— occupied=false 而**不是** dead
 	const SA::Rules::BattleField *fld = f.world.battleField(battle);
 	REQUIRE(fld != nullptr);

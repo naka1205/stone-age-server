@@ -108,7 +108,7 @@ TEST_CASE("EntityPool:回收后重分配复用同一 index,但 generation 不同
 
 	// 自由链是 LIFO ⇒ 下一个分配拿回刚释放的那个 index。
 	const EntityHandle second = pool.allocate();
-	CHECK(second.index == first.index);       // ★ 同一物理槽复用
+	CHECK(second.index == first.index);           // ★ 同一物理槽复用
 	CHECK(second.generation != first.generation); // ★ 但世代已变
 	CHECK(second.valid());
 
@@ -166,7 +166,7 @@ TEST_CASE("EntityIndex:insert / find / erase 的基本语义")
 	const EntityHandle h{3, 5};
 
 	CHECK(idx.empty());
-	CHECK(idx.insert("alice", h));       // 新增返回 true
+	CHECK(idx.insert("alice", h)); // 新增返回 true
 	CHECK(idx.size() == 1);
 	CHECK(idx.contains("alice"));
 	CHECK(idx.find("alice") == h);
@@ -202,7 +202,7 @@ TEST_CASE("EntityIndex:索引存的句柄可能悬空 —— 校验交给池,不
 	REQUIRE(pool.release(h)); // 实体没了,但索引项还在(正常)
 
 	const EntityHandle looked_up = idx.find("npc");
-	CHECK(looked_up == h);                  // 索引照样命中
+	CHECK(looked_up == h);                     // 索引照样命中
 	CHECK(pool.resolve(looked_up) == nullptr); // 池负责发现它悬空
 }
 
@@ -356,7 +356,7 @@ TEST_CASE("Pet:名字上限 31 字节(DR-TS5),超长即失败不截断")
 	CHECK(NameStr::capacity() == kNameMaxBytes);
 	CHECK(kNameMaxBytes == 31);
 
-	CHECK(pet.name.assign("阿米格"));         // 9 字节
+	CHECK(pet.name.assign("阿米格")); // 9 字节
 	CHECK(pet.name.size() == 9);
 	// ★ 32 字节 ⇒ 拒绝,且**不改动原值**(截断会让"数据看起来正常但内容错了")。
 	CHECK_FALSE(pet.name.assign(std::string(32, 'x').c_str()));

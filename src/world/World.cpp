@@ -426,7 +426,7 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 					     {"actor", static_cast<std::uint64_t>(cap.actor)},
 					     {"target", static_cast<std::uint64_t>(cap.target)},
 					     {"reason", std::string_view(has_l2 ? "pet_create_failed"
-					                                       : "no_l2_context")}});
+					                                        : "no_l2_context")}});
 				}
 				break;
 			}

@@ -1325,7 +1325,7 @@ TEST_CASE("换宠:PET_OUT ⇒ PetSwitch 叫出事件(call_out=true,带槽号)")
 	Duel d = makeDuel();
 	setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::PET_OUT);
 	d.cmds.commands[0].command.pet_out.pet_slot = 2u; // 叫出第 2 槽宠
-	d.cmds.present[10] = false;                        // 敌方不动,只看换宠
+	d.cmds.present[10] = false;                       // 敌方不动,只看换宠
 
 	SA::Domain::BattleEvents ev{};
 	MaxRandom rng;

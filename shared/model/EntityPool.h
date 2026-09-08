@@ -89,7 +89,7 @@ class EntityPool
 		s->occupied = false;
 		++s->generation; // ★ 作废旧句柄;溢出回绕见文末说明
 		if (s->generation == 0)
-			s->generation = 1; // 跳过 0(0 = 空句柄),回绕后仍是合法世代
+			s->generation = 1;     // 跳过 0(0 = 空句柄),回绕后仍是合法世代
 		s->next_free = _free_head; // 入自由链
 		_free_head = h.index;
 		--_size;
