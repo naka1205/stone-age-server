@@ -157,4 +157,30 @@ SpawnStats rollSpawnStats(const SpawnTemplate &tmpl, std::int32_t level,
 	return out;
 }
 
+// ══ 评级档位(批次 M.4b)══════════════════════════════════════════════
+//
+// 1:1 移植 `ENEMY_getRank`(`char/enemy.c:802-840`)。判据与陷阱见 Progression.h 声明处
+// ——最要紧的一条:读的是**模板原始基数**,不是 `ENEMY_createEnemy` 里被 ±2 改过的局部拷贝。
+std::int32_t enemyRank(const SpawnTemplate &tmpl) noexcept
+{
+	// 源码 :825-828:四维基数直接相加(注释称其为「总成长率」)。
+	const std::int32_t sum = tmpl.base_vital + tmpl.base_str + tmpl.base_tough + tmpl.base_dex;
+
+	// 源码 :812-819 的 `ranktbl`。★ 只取 `num` 一列 —— `rank` 那列源码从未读(见声明处)。
+	static constexpr std::int32_t kRankThresholds[] = {100, 95, 90, 85, 80, 0};
+
+	// 源码 :830-836:`ranknum` 初值 0,首个满足即 break。
+	// ⚠️ 初值 0 兼作"循环走完也没命中"的结果(仅负和可能走到)⇒ 照抄。
+	std::int32_t ranknum = 0;
+	for (std::int32_t i = 0; i < static_cast<std::int32_t>(sizeof(kRankThresholds) / sizeof(kRankThresholds[0])); ++i)
+	{
+		if (sum >= kRankThresholds[i])
+		{
+			ranknum = i;
+			break;
+		}
+	}
+	return ranknum;
+}
+
 } // namespace SA::Rules

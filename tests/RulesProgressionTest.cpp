@@ -69,8 +69,19 @@ class ScriptedRandom final : public Random
 //
 // ★ 用真数据而不是编一组好算的数:模板列的语义(哪一列是 LVUPPOINT)本身就是
 //   被核过的结论(plan `05` §3.5 / 本仓 `04` §7.4),用例顺带把那个映射钉住。
-const SpawnTemplate kWuli{4.50, 10, 20, 12, 15, 25};     // 行 1「乌力」
-const SpawnTemplate kHolyStone{4.50, 10, 150, 0, 50, 0}; // 行 45「光之圣石」★ 两维基数为 0
+//
+// 字段序 = `SpawnTemplate{lvup_point, init_num, base_vital, base_str, base_tough, base_dex}`
+// 对应 1-based 列号 = 9, 8, 10, 11, 12, 13(int 列自第 7 列起,`06` §3.5)。
+//
+// ⚠️★★ **`kHolyStone` 的前两个数在 M.4a 写错了,M.4b 复核时改正**(2026-09-08):
+//    原值写的是 `{4.50, 10, …}`(照抄了乌力那一行的 lvup / init),
+//    而第 45 行实测是 **lvup = 2.00 / init = 150**。
+//    ★ 这条错误本身值得记:这两个常量的**声明目的**就是"把列映射钉住",
+//      而写错了值恰恰让它钉不住任何东西 —— 用真数据的价值全在**真**上。
+//    ⇒ 校验手段(此后照此办):`awk -F',' 'NR==45{print $9, $8, $10, $11, $12, $13}'`,
+//      名字列用 **GBK** 解(实测第 1 行 = 乌力、第 45 行 = 光之圣石;不是 Big5)。
+const SpawnTemplate kWuli{4.50, 10, 20, 12, 15, 25};      // 行 1「乌力」
+const SpawnTemplate kHolyStone{2.00, 150, 150, 0, 50, 0}; // 行 45「光之圣石」★ 两维基数为 0
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  1. 边界:四维全 0 ⇒ 三围全 0
@@ -267,11 +278,14 @@ TEST_CASE("四维生成:负基数 ⇒ 成长率独立截断、四维照抄为负
 	CHECK(s.growth_str == 254);
 	CHECK(s.growth_dex == 254);
 
-	// 四维:10 点全给 vital ⇒ 基数 [160, −2, 50, −2],coef = 10。
-	CHECK(s.vital == 1600);
-	CHECK(s.str == -20); // ★ 负四维照抄
-	CHECK(s.tough == 500);
-	CHECK(s.dex == -20);
+	// 四维:10 点全给 vital ⇒ 基数 [160, −2, 50, −2],coef = init_num = 150(level 1)。
+	// ⚠️★ 这四个数在 M.4b 复核模板列时**改过**:原用例按错的 `init_num = 10` 算,
+	//    期望值是 [1600, −20, 500, −20];真实 init 是 150 ⇒ 各乘 15 倍。
+	//    ★ 结构不变(负基数照抄为负、成长率不受影响),变的只是量级。
+	CHECK(s.vital == 24000);
+	CHECK(s.str == -300); // ★ 负四维照抄
+	CHECK(s.tough == 7500);
+	CHECK(s.dex == -300);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -339,4 +353,75 @@ TEST_CASE("四维生成:真实模板 18 级的战力量级(与 demo 手填值的
 	const DerivedStats demo_foe = deriveBaseStats(4000, 26000, 2000, 15000);
 	CHECK(demo_foe.attack == 273);
 	CHECK(demo_foe.attack > d.attack * 10);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  11. ★★ 评级档位 `enemyRank`(批次 M.4b)—— 判据是**模板原始基数**,与摇号无关
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 移植来源 `ENEMY_getRank`(`char/enemy.c:802-840`)。分档 100/95/90/85/80/0,0 = 最好。
+//
+// 两行真实模板逐值:
+//   乌力      基数 [20,12,15,25] ⇒ 和 **72** ⇒ 只满足末档(≥0)⇒ rank **5**
+//   光之圣石  基数 [150,0,50,0]  ⇒ 和 **200** ⇒ 满足首档(≥100)⇒ rank **0**
+//
+// ⚠️★ **实测分布(2026-09-08,`enemybase1.txt` 1,053 行)**:
+//      rank 0 = 799 行(75.9%)· 1 = 72 · 2 = 60 · 3 = 55 · 4 = 24 · 5 = 43;
+//      基数和 min 1 / max 405。
+//   ⇒ 阈值(80..100)是按"基数和落在 80–100"校准的,而**四分之三的模板都在 100 以上**
+//     ⇒ 这个字段在真实数据上**接近常量 0**。★ 记下来是因为它影响将来的判断:
+//     若有人拿 pet_rank 当"稀有度"做玩法,会发现 76% 的怪都是最好评级。
+TEST_CASE("评级档位:两行真实模板的分档(enemy.c:802-840)")
+{
+	CHECK(enemyRank(kWuli) == 5);      // 和 72 ⇒ 末档
+	CHECK(enemyRank(kHolyStone) == 0); // 和 200 ⇒ 首档
+}
+
+// ★★ 这一条钉的是**最容易照抄错的地方**:`ENEMY_getRank` 读的是全局模板数组
+//    `ENEMYTEMP_enemy[tarray]`(`:825-828`),**不是** `ENEMY_createEnemy` 里那份
+//    被 ±2 与撒 10 点改过的局部拷贝 `tp`(`:1013-1015` 拷、`:1045-1048` 改)。
+//    ⇒ 同模板同 rank,与本次摇号无关。⚠️ 抄错的表现是"同一种怪评级忽高忽低",
+//      而**没有任何一处会报错**。
+TEST_CASE("评级档位:与摇号无关 —— 摇多少次、摇成什么都不改 rank(enemy.c:825-828)")
+{
+	const std::int32_t expect = enemyRank(kWuli);
+
+	// 三种完全不同的摇号脚本:全 −2 抖动 / 全 +2 抖动 / 10 点全给 vital。
+	ScriptedRandom a({0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	ScriptedRandom b({4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3});
+	SeededRandom c(20260908u);
+	(void)rollSpawnStats(kWuli, 50, a, RulesConfig{});
+	(void)rollSpawnStats(kWuli, 50, b, RulesConfig{});
+	(void)rollSpawnStats(kWuli, 50, c, RulesConfig{});
+
+	// rank 是模板的函数 ⇒ 摇过多少次都不影响。
+	CHECK(enemyRank(kWuli) == expect);
+	CHECK(expect == 5);
+}
+
+// 分档边界逐点验:阈值是 `sum >= 门限`,首个命中即止。
+// ★ 用**合成基数**而不是真模板 —— 边界值(100/95/90/85/80)在 1,053 行里不一定都出现,
+//   而边界恰恰是照抄时最容易写成 `>` 的地方。
+TEST_CASE("评级档位:五个阈值的边界(enemy.c:812-819)")
+{
+	// 只动 base_vital,其余三维为 0 ⇒ 和 == base_vital,一眼可算。
+	const auto rank_of = [](std::int32_t sum)
+	{
+		SpawnTemplate t{};
+		t.base_vital = sum;
+		return enemyRank(t);
+	};
+
+	CHECK(rank_of(100) == 0); // 恰好命中首档(`>=` 不是 `>`)
+	CHECK(rank_of(99) == 1);
+	CHECK(rank_of(95) == 1);
+	CHECK(rank_of(94) == 2);
+	CHECK(rank_of(90) == 2);
+	CHECK(rank_of(89) == 3);
+	CHECK(rank_of(85) == 3);
+	CHECK(rank_of(84) == 4);
+	CHECK(rank_of(80) == 4);
+	CHECK(rank_of(79) == 5);
+	CHECK(rank_of(0) == 5);   // 末档阈值 0 ⇒ 非负必有归属
+	CHECK(rank_of(405) == 0); // 实测上界仍是首档
 }

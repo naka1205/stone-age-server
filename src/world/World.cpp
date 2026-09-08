@@ -47,8 +47,22 @@ namespace
 inline constexpr std::size_t kMaxPlayers = 100;
 inline constexpr std::size_t kMaxPets = 2000;
 
+// 敌人池容量(批次 M.4b)。
+//
+// ★ 同样有源码依据:`15` §2 实测 `csa8.0/setup.cf` 的 **othercharnum = 10000**
+//   —— 三段式角色数组 `CHAR_chara[fdnum + petnum + othercharnum]` 的第三段。
+//
+// ⚠️★★ **但这个数不能照抄进第二个族**:原版第三段是**敌人与 NPC 共用**的
+//    (`03` §2.1 的 kEnemy + kNpc 两族都落在里面,按 `CHAR_WHICHTYPE` 轮转分配)。
+//    ⇒ 我们按族拆成独立强类型池之后,**若将来给 NPC 也开一个 10000,两池之和
+//      就超过了原版的上界** —— 而没有任何一处会报错,只会多占内存。
+//    ⇒ 建 NPC 族那一批必须**按族切分这 10000 的预算**,不是各取 10000。
+//      本批只有敌人一族 ⇒ 暂取全额,这条留在这里等那一批来读。
+inline constexpr std::size_t kMaxEnemies = 10000;
+
 using PlayerPool = SA::Model::EntityPool<SA::Model::Player, kMaxPlayers>;
 using PetPool = SA::Model::EntityPool<SA::Model::Pet, kMaxPets>;
+using EnemyPool = SA::Model::EntityPool<SA::Model::Enemy, kMaxEnemies>;
 
 // 世界写的落脚点集合(批次 M.1)。
 //
@@ -63,6 +77,14 @@ struct WorldWriteContext
 	PetPool *pets = nullptr;
 	const std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> *player_of_slot =
 	    nullptr;
+	// ── 敌人侧的落脚点(批次 M.4b)────────────────────────────────
+	//
+	// ★ 捕获要从**被捕目标的 L2 `Enemy` 实体**拷四维(源码 `pet.c:343-346`),
+	//   而事件里只有槽号 ⇒ 需要「槽 → 敌人实体」这条映射,同 `player_of_slot`。
+	// ⚠️★ 非 const:捕获成功后要**释放**那只敌人的实体(源码 `battle.c:1114-1115`:
+	//    敌人离场即 `CHAR_endCharOneArray`)⇒ 池要可写,映射也要可清。
+	EnemyPool *enemies = nullptr;
+	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> *enemy_of_slot = nullptr;
 	SA::Platform::Logger *logger = nullptr;
 };
 
@@ -86,6 +108,16 @@ struct BattleInstance
 	// ⚠️ 空句柄 = 该槽没有 L2 实体 —— **这是正常状态**,不是错误:
 	//    1.5 的敌人本来就没有 `Player` 实体,观战席位也不会有。
 	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> player_of_slot{};
+
+	// ★ 槽号 → 该槽背后的 L2 `Enemy` 实体(批次 M.4b)。
+	//
+	// ⚠️ 与 `player_of_slot` 是**两条独立映射**,不是一条带 kind 的:同一个槽在
+	//    同一时刻只可能是其中一族,但"哪一族"在编译期就该分开(M2 的和类型)——
+	//    合成一条 `{handle, kind}` 会让每个消费点都得先判 kind 再转型,
+	//    而判错 kind 就是 M1 那类静默错误。
+	// ⚠️ 空句柄 = 该槽没有敌人实体 —— **正常状态**:玩家槽、观战席位、
+	//    以及 demo 里手填的那只 foe(见 `makeDemoField`)都没有。
+	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> enemy_of_slot{};
 };
 
 // 一侧是否已全灭。★ 这是**战斗结束**的判据,不是 L3 的事 ——
@@ -152,17 +184,23 @@ void fillEnemyCommands(const SA::Rules::BattleField &field,
 	}
 }
 
-// 从被捕目标造一只宠物并挂进主人的宠物槽(批次 M.1)。
+// 从被捕目标造一只宠物并挂进主人的宠物槽(批次 M.1;M.4b 补上敌人 L2 实体这一半)。
 //
-// ★★ **照抄** `PET_createPetFromCharaIndex`(展开视图 `char/pet.c:325-405`)的
+// ★★ **照抄** `PET_createPetFromCharaIndex`(展开视图 `char/pet.c:325-399`)的
 //    「门 → 拷字段 → 挂槽」三段结构。返回值对应源码的 `pindex != -1`。
 //
 // 源码三条失败路径,逐条对应:
 //   ① `:333` `CHAR_getCharPetElement() < 0`      ⇒ 主人宠物槽满
-//   ② `:336` `CHAR_getDefaultChar(&, 31010)` 失败 ⇒ ★ 本批**不适用且不伪造**:
-//      源码从宠物基础模板 31010 起、再逐字段覆盖,而模板属 L4 内容导入(D 线);
-//      我们直接按被捕目标构造 ⇒ 这条门恒不触发。记明,不写一个永假的判断。
-//   ③ `:382` `PET_initCharOneArray() < 0`        ⇒ 全局池满 = `allocate()` 返 kNullHandle
+//   ② `:336` `CHAR_getDefaultChar(&, 31010)` 失败 ⇒ ★ 本批**不适用且不伪造**。
+//      ⚠️★ **M.4b 补上了这条的第二半证据**:回源码核实 `CHAR_getDefaultChar`
+//        (`char/char_data.c:153-207`)—— 它**只有一条 `return TRUE`**,没有任何
+//        FALSE 出口 ⇒ **原版那道门本身也恒不触发**。而且 `31010` 在
+//        `CHAR_defaultCharacterGet[]` 里**查不到**(表里全是 `SPR_*` 图号,
+//        实测 `SPR_001em == 100000`,六位数)⇒ 走的是兜底分支:数值取**表末**那条
+//        (`include/defaultPlayer.h` 的 `player`),而 `CHAR_IMAGETYPE` 取**表首**那条
+//        (`defcharaindex` 仍是 0)—— 两者来自不同模板行,不报错。
+//      ⇒ 原结论(不写一个永假的判断)不变,但依据从"我们不适用"升级为"它本来就不判"。
+//   ③ `:378` `PET_initCharOneArray() < 0`        ⇒ 全局池满 = `allocate()` 返 kNullHandle
 //
 // ⚠️★★ **顺序要紧,而这正是本批最值得记的一点**:先找槽(可失败)、再 allocate
 //    (可失败)、**最后**才写主人的槽 —— 这是源码的形状,也恰好是「预留 → 提交」:
@@ -170,9 +208,25 @@ void fillEnemyCommands(const SA::Rules::BattleField &field,
 //    ⇒ 失败时世界状态**一个字节都没动**,不需要补偿逻辑。
 //    ★ 00 §6 那条「gmsv 进程内也需要工作单元边界」在本批第一次有了具体形状,
 //      而它不是我们设计出来的 —— **回源码核实时它已经在那里了**。
-bool createPetFromCombatant(const SA::Rules::Combatant &src,
-                            SA::Model::EntityHandle owner_handle,
-                            PlayerPool &players, PetPool &pets)
+//
+// ── ★★ 两个数据源的分工(M.4b 的核心,别合并)──────────────────────────
+//   原版里 `enemyindex` 是**一个完整的 `Char`**,`PET_createPetFromCharaIndex` 从它
+//   一处拷全部。我们把敌人拆成了**两半**,于是拷的时候要各取权威的那一半:
+//
+//   | 字段 | 取自 | 为什么不能取另一个 |
+//   |---|---|---|
+//   | hp / mp / max_mp | `tgt`(战场 `Combatant`) | 战斗中的血量写在战场投影上;L2 实体的 `hp` 是**入场时**的满血值,拿它会让"抓一只残血怪"变成"抓一只满血怪" |
+//   | vital/str/tough/dex · 成长率 · 名字 · 评级 · 图号 · mod_ai | `src_enemy`(L2 `Enemy`) | ★ `Combatant` 是**战斗输入子集**,里面根本没有这些(它存的是已推导完的三围) |
+//   | level · 四属 | 两边都有且一致 | 取 `tgt` —— 战场值是"此刻生效的",若将来有变身 / 属性变更,权威在战场侧 |
+//
+// ⚠️ `src_enemy == nullptr` = 该槽没有 L2 敌人实体(demo 手填的 foe / PvP 的玩家目标)
+//    ⇒ 上表第二行整组**留 0 / 留空**,并由调用方落一条日志。★ 这不是回退到"旧行为",
+//    是**显式记账**:抓一个没有 L2 实体的目标本来就抓不到四维,而那种目标只出现在
+//    脚手架里(`makeDemoField`)⇒ 真玩法路径上不会走到。
+bool createPetFromCapture(const SA::Rules::Combatant &tgt,
+                          const SA::Model::Enemy *src_enemy,
+                          SA::Model::EntityHandle owner_handle,
+                          PlayerPool &players, PetPool &pets)
 {
 	SA::Model::Player *owner = players.resolve(owner_handle);
 	// ★ 主人已下线 / 句柄悬空 ⇒ M10 让它当场变成空指针,而不是脏读一个被复用的槽。
@@ -197,40 +251,94 @@ bool createPetFromCombatant(const SA::Rules::Combatant &src,
 		return false;
 	}
 
-	// ── 拷字段(源码 :337-377 里我们**拿得到**的那些)──────────────
-	//
-	// ⚠️★ 拿不到的四项(vital / str / tough / dex)与名字**留 0 / 留空**,理由见
-	//    Pet.h 的「原始四维」注释:被捕目标在战场里只是 `Rules::Combatant`
-	//    (战斗输入子集),敌人侧没有 L2 实体。★ 这是登记在案的残缺,不是遗漏。
-	pet->hp = src.hp;
-	pet->mp = src.mp;
-	pet->max_mp = src.max_mp;
-	pet->luck = src.luck;
-	pet->level = src.level;
+	// ── 从战场投影拷:生命与"此刻生效"的那些(源码 :340-342, :348-351, :356)──
+	pet->hp = tgt.hp;
+	pet->mp = tgt.mp;
+	pet->max_mp = tgt.max_mp;
+	pet->level = tgt.level;
 
 	// ⚠️★★ 四属**按具名下标取,绝不按位置拷** —— 三套顺序两两不同
 	//    (原版 `CHAR_*AT` 火水地风 / `Rules::Element` 地水火风 / 相克表头 无火水地风),
 	//    详见 Pet.h 的顺序陷阱注释。本项目已在这一类上栽过两次。
-	pet->earth = src.elements[static_cast<int>(SA::Rules::Element::kEarth)];
-	pet->water = src.elements[static_cast<int>(SA::Rules::Element::kWater)];
-	pet->fire = src.elements[static_cast<int>(SA::Rules::Element::kFire)];
-	pet->wind = src.elements[static_cast<int>(SA::Rules::Element::kWind)];
+	pet->earth = tgt.elements[static_cast<int>(SA::Rules::Element::kEarth)];
+	pet->water = tgt.elements[static_cast<int>(SA::Rules::Element::kWater)];
+	pet->fire = tgt.elements[static_cast<int>(SA::Rules::Element::kFire)];
+	pet->wind = tgt.elements[static_cast<int>(SA::Rules::Element::kWind)];
 
-	// 捕获等级(源码 `battle_event.c:3518`:`PETGETLV` = 宠物 `CHAR_LV`)。
+	// ── 从 L2 敌人实体拷:`Combatant` 里根本没有的那些(M.4b)───────────
+	if (src_enemy != nullptr)
+	{
+		// 原始四维(源码 :343-346)★ **这就是欠债 23 要的那个非 0 来源**。
+		pet->vital = src_enemy->vital;
+		pet->str = src_enemy->str;
+		pet->tough = src_enemy->tough;
+		pet->dex = src_enemy->dex;
+
+		// 成长率(源码 :374,`CHAR_ALLOCPOINT` 整个 int 直接拷)。
+		// ⚠️ 一处夹取都没有,理由见 Pet.h 的 `growth_*`。
+		pet->growth_vital = src_enemy->growth_vital;
+		pet->growth_str = src_enemy->growth_str;
+		pet->growth_tough = src_enemy->growth_tough;
+		pet->growth_dex = src_enemy->growth_dex;
+
+		// 名字(源码 :375-377)。★ M.1 时"留空"是因为 `Combatant` 没有名字;现在有源了。
+		pet->name = src_enemy->name;
+
+		// 评级与 AI 模式(源码 :364, :355)。⚠️ 同槽异义:`mod_ai == CHAR_CHARM`。
+		pet->pet_rank = src_enemy->pet_rank;
+		pet->mod_ai = src_enemy->mod_ai;
+
+		// 图号(源码 :337-338:两个槽同值 = 敌人的**当前**图号)。
+		pet->origin_image = src_enemy->base_image;
+		pet->base_image = src_enemy->base_image;
+
+		// ⚠️★★ **`luck` 照抄 `variable_ai`,而这看着像 bug 却是原版行为**:
+		//    源码 :347 是 `CharNew.data[CHAR_LUCK] = CHAR_getInt(enemyindex, CHAR_LUCK)`,
+		//    而 `CHAR_LUCK == CHAR_VARIABLEAI`(同槽,`char_base.h:637`)——
+		//    敌人那个槽被 `enemy.c:1076` 写成了 **0**(以"AI 变量"的名义)。
+		//    ⇒ 拷过来必然是 0。★ 写成 `= src_enemy->variable_ai` 而不是 `= 0`,
+		//      是为了让这条**同槽异义在代码里看得见** —— 写 0 会让下一个人以为
+		//      "幸运没实现",写这一行他会顺着 `variable_ai` 找到 `Enemy.h` 卷首那条。
+		pet->luck = src_enemy->variable_ai;
+	}
+	// ⚠️ else:上面这一组**留 0 / 留空**(结构默认值)。不写 else 分支去"填点什么" ——
+	//    那正是 00 §10.4 第一类静默错误的做法。调用方落 `no_l2_enemy` 日志。
+
+	// 捕获等级(源码 `battle_event.c:3519`:`PETGETLV` 取的是**新宠**的 `CHAR_LV`)。
 	// ⚠️ 同槽异义:`CHAR_PETGETLV` == `CHAR_CHATVOLUME`(音量),见 Pet.h 卷首。
-	pet->capture_level = src.level;
+	pet->capture_level = pet->level;
 
-	// 主人反向引用(源码 :393 `WORKPLAYERINDEX` / :395-397 `OWNERCHARANAME`)。
+	// 主人反向引用(源码 :390 `WORKPLAYERINDEX` / :394-395 `OWNERCHARANAME`)。
 	// ★ 存句柄而不是下标:带 generation ⇒ 主人换人后旧引用作废(M10)。
 	pet->owner = owner_handle;
 	pet->owner_char_name = owner->name;
 
-	// `VARIABLEAI = 0`(源码 `battle_event.c:3549`)。★ 这一条不依赖任何未移植的东西,
-	//   照做。⚠️ 紧跟其后的 AI 修正段(`CHAR_DEFAULTMAXAI − WORKFIXAI`)需要 `WORKFIXAI`,
-	//   而那个字段本批未建 ⇒ 不做,见下方 applyEvents 第 8 步的记账。
+	// `VARIABLEAI = 0`(源码 `battle_event.c:3547`)。★ 这一条不依赖任何未移植的东西,
+	//   照做。⚠️ 紧跟其后的 AI 修正段(`CHAR_DEFAULTMAXAI − WORKFIXAI`,`:3548-3553`)
+	//   需要 `WORKFIXAI`,而那个字段本批未建 ⇒ 不做,见下方 applyEvents 第 8 步的记账。
+	// ⚠️★ **它在时序上晚于上面那次 `luck` 拷贝**(`pet.c:347` 拷 → `:3547` 清),
+	//    而两者是同一个物理槽 ⇒ 原版的净效果是"幸运被清零"。我们分成两个字段 ⇒
+	//    `luck` 保留拷来的值(恒 0)、`variable_ai` 独立置 0。★ 数值上等价,
+	//    而**语义分开了** —— 这正是 M1 要求"别名展开成独立字段"的收益。
 	pet->variable_ai = 0;
 
-	// ── 提交:挂进主人的槽(源码 :394 `CHAR_setCharPet`)──────────────
+	// ── Y 五项:初值快照(源码 :384-389,批次 M.4b)──────────────────
+	//
+	// ★ 顺序照源码::384 先推导(`CHAR_complianceParameter`),:385-389 再取 WORK 值
+	//   ⇒ Y 是**推导后**的快照,不是四维本身。
+	// ⚠️★ 用**新宠自己的四维**推,不是拷敌人的 Y —— 源码 `getWorkInt(newindex, ...)`
+	//    读的是 `newindex`(新宠)。⚠️ 敌人侧也有一份 Y(`enemy.c:1154-1158`),
+	//    数值上通常相同(四维刚拷过来),但**源不同** ⇒ 照源码走新宠,
+	//    否则将来若捕获路径上出现任何属性修正,两者就会分叉而没有一处报错。
+	const SA::Rules::DerivedStats snap =
+	    SA::Rules::deriveBaseStats(pet->vital, pet->str, pet->tough, pet->dex);
+	pet->y_hp = snap.max_hp;
+	pet->y_atk = snap.attack;
+	pet->y_def = snap.defense;
+	pet->y_quick = snap.quick;
+	pet->y_lv = pet->level;
+
+	// ── 提交:挂进主人的槽(源码 :391 `CHAR_setCharPet`)──────────────
 	// ★ 到这里已经没有可失败的动作 ⇒ 不会留下"宠物造好了却没挂上"的半成品。
 	owner->pets[static_cast<std::size_t>(pet_slot)] = pet_handle;
 	return true;
@@ -247,8 +355,9 @@ bool createPetFromCombatant(const SA::Rules::Combatant &src,
 //    但**没有任何人掉血** ⇒ 战斗永远打不完,而没有一处会报错。
 //    (2026-09-04 src/ 首次接入构建时就是这样暴露的。)
 //
-// ⚠️ 覆盖面(截至批次 M.1):HP / MP · 死亡 · 逃跑 · 打飞累加器 · ★ 骑宠 HP ·
-//    ★ 捕获(生成宠物 + 挂主人槽 + 捕获计数 + 目标离场)。
+// ⚠️ 覆盖面(截至批次 M.4b):HP / MP · 死亡 · 逃跑 · 打飞累加器 · ★ 骑宠 HP ·
+//    ★ 捕获(生成宠物 + **从敌人 L2 实体拷四维 / 成长率 / 名字** + Y 五项 + 挂主人槽 +
+//    捕获计数 + 目标离场 + **敌人实体回池**)· ★ 换宠(PET_IN / PET_OUT)。
 //    **仍不写**:状态附加(§4.3)· 换装 · 变身 —— 绑在批次 A–D 的链路上,
 //    L3 此刻也不产它们的事件 ⇒ **不猜**,与批次 0.5 对暴击/反击的处置同一条纪律。
 //
@@ -401,10 +510,35 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 			                    ctx.player_of_slot != nullptr &&
 			                    cap.actor < static_cast<std::uint32_t>(
 			                                    SA::Rules::kSlotCount);
+
+			// ★ 被捕目标的 L2 `Enemy` 实体(批次 M.4b)—— 四维 / 成长率 / 名字的源头。
+			// ⚠️ 可以为空,那是**登记在案的状态**而不是错误:demo 手填的 foe、
+			//    PvP 里的玩家目标都没有 Enemy 实体。⇒ 下面按 `no_l2_enemy` 记账。
+			SA::Model::Enemy *src_enemy = nullptr;
+			if (ctx.enemies != nullptr && ctx.enemy_of_slot != nullptr)
+			{
+				src_enemy =
+				    ctx.enemies->resolve((*ctx.enemy_of_slot)[cap.target]);
+			}
 			if (has_l2)
 			{
-				created = createPetFromCombatant(
-				    tgt, (*ctx.player_of_slot)[cap.actor], *ctx.players, *ctx.pets);
+				created = createPetFromCapture(
+				    tgt, src_enemy, (*ctx.player_of_slot)[cap.actor],
+				    *ctx.players, *ctx.pets);
+			}
+			if (created && src_enemy == nullptr && ctx.logger != nullptr)
+			{
+				// ⚠️★ **抓到了,但四维是 0** —— 这一条必须响,而且是 warn 不是 debug:
+				//    M.4b 之后"捕获宠四维为 0"不再是正常状态,而是"目标没有 L2 实体"
+				//    这条脚手架路径的症状。★ 不落日志的话,欠债 23 会在
+				//    demo 上悄悄复活而 `ctest` 全绿(那正是欠债 20/25 那一族的形态)。
+				ctx.logger->log(
+				    SA::Platform::LogLevel::kWarn,
+				    SA::Platform::LogEvent::kCaptureCommitFailed,
+				    {{"battle_id", field.battle_id},
+				     {"actor", static_cast<std::uint64_t>(cap.actor)},
+				     {"target", static_cast<std::uint64_t>(cap.target)},
+				     {"reason", std::string_view("no_l2_enemy")}});
 			}
 
 			if (!created)
@@ -431,19 +565,19 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 				break;
 			}
 
-			// ── 第 2 步(源码 :3518):`PETGETLV` ⇒ 已在 createPetFromCombatant 内 ──
+			// ── 第 2 步(源码 :3519):`PETGETLV` ⇒ 已在 createPetFromCapture 内 ──
 			//
 			// ⬜ **第 3 步** `LogPet(...)`(:3527)⇒ 挂阶段 2 的 **2.2 审计事件模型**
 			//    (00 §9 阶段 2 表;`08` 的 GoldLedger 第三步依赖同一个模型)。
 			//    ⚠️ 上面那条 error 日志**不是**它的替代:一条记的是失败,一条是成功审计。
-			// ⬜ **第 4 步** `CaptureOkFunction`(:3540)⇒ NPC 行为绑定。
+			// ⬜ **第 4 步** `CaptureOkFunction`(:3538)⇒ NPC 行为绑定。
 			//    ★ 03 §2.3 已裁定**不复刻**字符串→函数指针的运行期绑定
 			//      (原版三处可断且全部静默,18+16+6 例)⇒ 届时用接口 / 函数值直接注册。
-			// ⬜ **第 5 步** `BATTLE_CaptureItemDelAll`(:3541)⇒ 道具系统(DR-BT10「全删」)。
+			// ⬜ **第 5 步** `BATTLE_CaptureItemDelAll`(:3540)⇒ 道具系统(DR-BT10「全删」)。
 			//    ⚠️ 这一步做不了正是「捕获仍不完整」的最后一环:原版**扣了道具**才给宠物,
 			//      我们现在是白给。别把它读成"差不多做完了"。
 
-			// ── 第 6 步(源码 :3543):捕获计数 +1 ────────────────────────
+			// ── 第 6 步(源码 :3542):捕获计数 +1 ────────────────────────
 			if (SA::Model::Player *owner =
 			        ctx.players->resolve((*ctx.player_of_slot)[cap.actor]);
 			    owner != nullptr)
@@ -451,17 +585,36 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 				++owner->capture_count;
 			}
 
-			// ── 第 7 步(源码 :3546):`BATTLE_Exit` —— 目标离场 ────────────
+			// ── 第 7 步(源码 :3545):`BATTLE_Exit` —— 目标离场 ────────────
 			//
 			// ★ 置 occupied=false 让 sideWipedOut 视其"已不在场";**不置 dead** ——
 			//   被捕不是战死,记成阵亡会污染战果/经验结算(同逃跑成功那一条)。
-			// ⚠️ 必须在 createPetFromCombatant **之后**:那一步要读 tgt 的字段。
+			// ⚠️ 必须在 createPetFromCapture **之后**:那一步要读 tgt 与 src_enemy 的字段。
 			tgt.occupied = false;
 
-			// ⬜ **第 8 步**(源码 :3547-3555):`CHAR_complianceParameter(pindex)` ⇒
-			//    属性推导公式未移植(属成长养成域 06),见 Pet.h 文末 ②;
-			//    `VARIABLEAI = 0` 已在 createPetFromCombatant 内;
-			//    AI 修正段(`CHAR_DEFAULTMAXAI − WORKFIXAI`)需要未建的 `WORKFIXAI` ⇒ 不做。
+			// ★★ **敌人 L2 实体随离场一并释放(批次 M.4b)** ——
+			//    这不是我们加的清理,是源码的行为:`_BATTLE_Exit`(`battle.c:1114-1115`)
+			//    对 `CHAR_TYPEENEMY` 直接调 `CHAR_endCharOneArray`(销毁实体)。
+			//    ⇒ 敌人离场即销毁,与"玩家离场只是退出战斗"截然不同。
+			// ⚠️★ 漏掉这一步的后果与 M.1 那条一模一样:**池只增不减,而没有一处报错**,
+			//    跑够久之后表现为"刷怪突然失败"(池满),那时离真正的原因已经很远。
+			//    ⇒ 与 `onDisconnected` 释放宠物是同一条纪律的第三处兑现。
+			if (ctx.enemies != nullptr && ctx.enemy_of_slot != nullptr)
+			{
+				(void)ctx.enemies->release((*ctx.enemy_of_slot)[cap.target]);
+				(*ctx.enemy_of_slot)[cap.target] = SA::Model::kNullHandle;
+			}
+
+			// ── 第 8 步(源码 :3546-3553)—— 三条里两条已做、一条仍不做 ────────
+			//
+			// ✅ `CHAR_complianceParameter(pindex)`(:3546)⇒ **批次 M.4b 已落地**:
+			//    推导本身在 `createPetFromCapture` 里(算 Y 五项那次),而"宠物的战斗
+			//    三围"在它**入场**时由 `enterPetToField` 推(DR-DT9)。
+			//    ⚠️★ 分两处不是重复:一处是**存下来的初值快照**(Y 五项),
+			//      一处是**每次入场的战斗投影**;原版共用一个 WORK 面,我们分了两层。
+			// ✅ `VARIABLEAI = 0`(:3547)⇒ 已在 `createPetFromCapture` 内。
+			// ⬜ AI 修正段(`CHAR_DEFAULTMAXAI − WORKFIXAI`,:3548-3553)⇒ 需要未建的
+			//    `WORKFIXAI`(宠物 AI 值,属宠物养成面)⇒ 仍不做。
 			break;
 		}
 		case SA::Domain::BattleEvent::BodyKind::PET_SWITCH:
@@ -666,6 +819,11 @@ struct World::Impl
 	PlayerPool players{};
 	PetPool pets{};
 
+	// ★ 敌人池(批次 M.4b)。⚠️ 它比前两个大一个数量级(10,000 槽,见 kMaxEnemies)
+	//    ⇒ Impl 的 sizeof 随之涨,而 Impl 在 `unique_ptr` 里 ⇒ 仍是**启动期一次**堆分配,
+	//    运行期零分配不变(15 §9.1 支柱 ①)。
+	EnemyPool enemies{};
+
 	// 会话 → Player 实体。★ 03 §8.2 三条查找路径之一(原 `getCharindexFromFdid`
 	//   那族**全表扫** + 每格加解锁,`fdnum=1000` 下每条应答扫 1,000 次)。
 	// ⚠️ 索引里的句柄**可能悬空**,这是正常的 —— 验世代是 `EntityPool::resolve` 的活
@@ -740,6 +898,8 @@ void World::tick()
 			wctx.players = &s.players;
 			wctx.pets = &s.pets;
 			wctx.player_of_slot = &b.player_of_slot;
+			wctx.enemies = &s.enemies;
+			wctx.enemy_of_slot = &b.enemy_of_slot;
 			wctx.logger = &s.logger;
 			applyEvents(b.events, b.field, wctx);
 
@@ -799,6 +959,23 @@ void World::tick()
 			const auto it = s.battles.find(id);
 			if (it == s.battles.end())
 				continue;
+
+			// ★★ **战斗结束 ⇒ 该场剩下的敌人 L2 实体全部回池(批次 M.4b)**。
+			//
+			// ⚠️★ 这一步不是"顺手清理",它有源码依据也有前车之鉴:
+			//    · 源码依据:敌人离场即销毁(`battle.c:1114-1115` 的 `CHAR_endCharOneArray`),
+			//      而战斗结束是所有剩余单位一起离场;
+			//    · 前车之鉴:M.1 漏了"主人下线时一并释放宠物",症状是**池只增不减、
+			//      没有一处报错**,跑够久才表现为"捕获突然失败"。
+			//      ⇒ 敌人池同族,而它每场战斗都会分配 ⇒ 漏了泄漏得比宠物快得多。
+			// ⚠️ 被捕获的那只已在 `applyEvents` 里释放并把句柄清空 ⇒ 这里 `release`
+			//    对空句柄返回 false 且不做事(generation 校验),不会重复释放。
+			for (SA::Model::EntityHandle &h : it->second.enemy_of_slot)
+			{
+				(void)s.enemies.release(h);
+				h = SA::Model::kNullHandle;
+			}
+
 			s.logger.log(SA::Platform::LogLevel::kInfo,
 			             SA::Platform::LogEvent::kBattleFinished,
 			             {{"battle_id", id},
@@ -966,6 +1143,74 @@ bool World::joinBattle(BattleId battle, SA::Net::SessionId session,
 	             {{"battle_id", b.id},
 	              {"session_id", session},
 	              {"slot", static_cast<std::uint64_t>(slot)}});
+	return true;
+}
+
+// ══ 敌人生成入场(批次 M.4b)══════════════════════════════════════
+//
+// 详注见 world/Api.h 的声明处。★ 三道门,顺序 = 预留 → 提交:
+//   两个可失败的动作(池 / 入场)都排在任何不可回退的写之前
+//   ⇒ 失败时世界状态一个字节都没动(同 `createPetFromCapture` 的形状)。
+bool World::spawnEnemyToField(BattleId battle, std::uint8_t slot,
+                              const EnemyTemplate &tmpl, std::int32_t level)
+{
+	Impl &s = *_impl;
+
+	// ── 门 ①:战斗与槽号 ──────────────────────────────────────────
+	const auto bit = s.battles.find(battle);
+	if (bit == s.battles.end())
+		return false;
+	if (slot >= SA::Rules::kSlotCount)
+		return false;
+	BattleInstance &b = bit->second;
+
+	// ⚠️★ 该槽已有敌人实体 ⇒ 拒绝。**不是**因为槽被占(那是门 ③ 的事),
+	//    而是因为覆盖掉旧句柄就等于泄漏一个池槽 —— 与 M.1 那条漏释放同族。
+	if (b.enemy_of_slot[slot].valid())
+		return false;
+
+	// ── 门 ②:敌人池 ──────────────────────────────────────────────
+	const SA::Model::EntityHandle eh = s.enemies.allocate();
+	if (!eh.valid())
+	{
+		// ⚠️ 池满必须报出来(同 M.1 的 Player 池):容量是硬上限,`allocate` 不会扩容。
+		s.logger.log(SA::Platform::LogLevel::kError,
+		             SA::Platform::LogEvent::kEntityPoolExhausted,
+		             {{"battle_id", battle},
+		              {"pool", std::string_view("enemy")},
+		              {"capacity", static_cast<std::uint64_t>(kMaxEnemies)}});
+		return false;
+	}
+	SA::Model::Enemy *enemy = s.enemies.resolve(eh);
+	if (enemy == nullptr)
+	{
+		// ★ 走不到(刚 allocate 成功)。守它零成本,理由同 createPetFromCapture。
+		return false;
+	}
+
+	// ★ 生成:消耗**该场战斗的 rng** 14 次(可回放的凭据是战斗种子,见 Api.h 声明处)。
+	*enemy = spawnEnemy(tmpl, level, b.rng, s.rules_config);
+
+	// ── 门 ③:入场投影 ────────────────────────────────────────────
+	if (!enterEnemyToField(b.field, static_cast<int>(slot), *enemy))
+	{
+		// ⚠️★ **失败要把刚分配的实体还回去** —— 否则每次入场失败都泄漏一个槽,
+		//    而"入场失败"是完全正常的(槽被占 / 槽在宠位)⇒ 泄漏会累积得很快。
+		//    ★ 这一步就是"预留 → 提交"里的**回滚**:门 ② 的预留可撤销,所以能这样写。
+		(void)s.enemies.release(eh);
+		return false;
+	}
+
+	// ── 提交:记下「槽 → 敌人实体」的映射 ────────────────────────────
+	// ★ 到这里没有可失败的动作了。捕获要靠这条映射找到四维的源头。
+	b.enemy_of_slot[slot] = eh;
+
+	s.logger.log(SA::Platform::LogLevel::kDebug,
+	             SA::Platform::LogEvent::kBattleJoined,
+	             {{"battle_id", battle},
+	              {"slot", static_cast<std::uint64_t>(slot)},
+	              {"level", static_cast<std::uint64_t>(level)},
+	              {"kind", std::string_view("enemy")}});
 	return true;
 }
 
@@ -1236,6 +1481,35 @@ std::size_t World::playerCount() const noexcept { return _impl->players.size(); 
 
 std::size_t World::petCount() const noexcept { return _impl->pets.size(); }
 
+// ── 敌人池的观察面(批次 M.4b)────────────────────────────────────
+std::size_t World::enemyCount() const noexcept { return _impl->enemies.size(); }
+
+const SA::Model::Enemy *World::battleEnemyAt(BattleId id, std::uint8_t slot) const
+{
+	if (slot >= SA::Rules::kSlotCount)
+		return nullptr;
+	const auto it = _impl->battles.find(id);
+	if (it == _impl->battles.end())
+		return nullptr;
+	// ⚠️ 句柄可能悬空(敌人已被捕 / 战斗已结束回池)⇒ resolve 返 nullptr,
+	//    与"该槽本来就没有敌人"给出同一个答案。★ 这是有意的:调用方要区分
+	//    两者的话该看 `enemyCount()` 或战场投影,而不是让本函数返回两种空值。
+	return _impl->enemies.resolve(it->second.enemy_of_slot[slot]);
+}
+
+const SA::Model::Pet *World::playerPetAt(SA::Net::SessionId session,
+                                         int pet_slot) const
+{
+	if (pet_slot < 0 || static_cast<std::size_t>(pet_slot) >= SA::Model::kMaxPetHave)
+		return nullptr;
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return nullptr;
+	// ⚠️ 槽里的句柄可能悬空(宠物已回池)⇒ resolve 返 nullptr,与空槽同一个答案。
+	return _impl->pets.resolve(p->pets[static_cast<std::size_t>(pet_slot)]);
+}
+
 int World::playerCaptureCount(SA::Net::SessionId session) const
 {
 	const SA::Model::Player *p =
@@ -1327,11 +1601,17 @@ bool enterPetToField(SA::Rules::BattleField &field, int owner_field_slot,
 	dst.defense = stats.defense;
 	dst.quick = stats.quick;
 	dst.max_hp = stats.max_hp;
-	// ⚠️★ **HP 夹取(原版 char.c:3556 `HP = min(HP, WORKMAXHP)`)本批不做**,dst.hp 保留
-	//    上面投影的 pet.hp。理由:捕获宠 / 一般宠的四维当前**无非 0 来源**(欠债 23 的下一环)
-	//    ⇒ max_hp 恒 0 ⇒ 夹取 = 把血清零 =「叫得出即死」,那是「四维无源」残缺与夹取叠加出的
-	//    **新失真**,不是原版行为(原版宠物四维非 0)。⇒ 不在推导出的 0 上夹血(与欠债 23
-	//    「别在 0 三围上接计算」同理由)。四维有来源后夹取随之接上(DR-DT9 记明)。
+	// ⚠️★ **HP 夹取(原版 char.c:3555 `HP = min(HP, WORKMAXHP)`)本批不做**,dst.hp 保留
+	//    上面投影的 pet.hp。★★ **M.4b 后这条的理由换了,两条都记下来**:
+	//    · M.2/M.3 时的理由(**已不再成立**):宠物四维无非 0 来源 ⇒ max_hp 恒 0 ⇒
+	//      夹取 = 把血清零 =「叫得出即死」。M.4b 让捕获宠的四维有了源(从 `Model::Enemy` 拷)
+	//      ⇒ 那种单位再夹血不会清零。⚠️ 但**一般宠创建**(`PET_createPet`)仍未移植 ⇒
+	//      经那条路来的宠物四维照旧 0,所以旧风险只是缩小、没有消失。
+	//    · ★ **现在的主理由**:夹取根本不属于"入场投影"这一步 —— 它在
+	//      `CHAR_complianceParameter` 里,而那个函数在原版是**每回合准备阶段**
+	//      逐角色重算三围时调的(`05` §2.3 第 4 件事 = `BATTLE_TurnParam`,**未移植**)。
+	//      ⇒ 塞进入场是把回合准备的动作挪错了位置;等那一批落地时夹取跟它一起来。
+	//      ★ `enterEnemyToField` 同处、同理由(那边连旧理由都不适用,只有这一条)。
 	return true;
 }
 
@@ -1344,6 +1624,139 @@ void exitPetFromField(SA::Rules::BattleField &field, int owner_field_slot)
 	const int pet_field_slot = owner_field_slot + SA::Rules::kBattlePlayerMax;
 	// ★ 只清占位,不置 dead(撤下不是战死)。
 	field.at(pet_field_slot).occupied = false;
+}
+
+// ── 敌人生成与入场(批次 M.4b)────────────────────────────────────────
+//
+// 详注见 world/Api.h 的声明处。移植来源 `ENEMY_createEnemy`(展开视图
+// `char/enemy.c:994-1180`),建 / 不建逐条见 `shared/model/Enemy.h` 文末。
+SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, std::int32_t level,
+                            SA::Rules::Random &rng,
+                            const SA::Rules::RulesConfig &cfg)
+{
+	SA::Model::Enemy out{};
+
+	// ── 图号(源码 :1023-1024):两个槽同值 ──────────────────────────
+	out.origin_image = tmpl.image;
+	out.base_image = tmpl.image;
+
+	// ── 等级(源码 :1077)★ 入参,不在此摇(见 Api.h 声明处)──────────
+	out.level = level;
+
+	// ── 四维 + 成长率(源码 :1045-1070)= DR-DT10 的 `rollSpawnStats` ───
+	//
+	// ★★ **这一行是欠债 25 的关闭点**:公式自 M.4a 起就在 `shared/rules`,
+	//    但在此之前**没有任何调用方**。
+	// ⚠️ 四步顺序(±2 → 打包成长率 → 撒 10 点 → PARAM_CAL)整个封在那个纯函数里,
+	//    这里不得拆开或重排 —— 详见 `Progression.cpp` 的四步说明。
+	const SA::Rules::SpawnStats rolled =
+	    SA::Rules::rollSpawnStats(tmpl.stats, level, rng, cfg);
+	out.vital = rolled.vital;
+	out.str = rolled.str;
+	out.tough = rolled.tough;
+	out.dex = rolled.dex;
+	out.growth_vital = rolled.growth_vital;
+	out.growth_str = rolled.growth_str;
+	out.growth_tough = rolled.growth_tough;
+	out.growth_dex = rolled.growth_dex;
+
+	// ── 四属性(源码 :1071-1074)────────────────────────────────────
+	// ★ 模板侧已按 **地水火风** 具名(见 EnemyTemplate),此处逐字段对拷 ⇒
+	//   顺序陷阱在类型层面就没有发生的余地。
+	out.earth = tmpl.earth;
+	out.water = tmpl.water;
+	out.fire = tmpl.fire;
+	out.wind = tmpl.wind;
+
+	// ── AI(源码 :1075-1076)────────────────────────────────────────
+	out.mod_ai = tmpl.mod_ai;
+	// ★ `VARIABLEAI = 0` 照抄。⚠️ 它与"幸运"是同一个物理槽 —— 捕获会以幸运的名义
+	//   把这个 0 拷进宠物(见 `Enemy.h` 卷首与 `createPetFromCapture` 同处)。
+	out.variable_ai = 0;
+
+	// ── 评级(源码 :1096-1097)──────────────────────────────────────
+	// ★ 判据是**模板原始基数之和**,与本次摇号无关 ⇒ 传 `tmpl.stats` 而不是 `rolled`。
+	//   ⚠️ 传 rolled 会让同模板摇出不同 rank 而没有一处报错,详见 `enemyRank` 声明处。
+	out.pet_rank = SA::Rules::enemyRank(tmpl.stats);
+
+	// ── 名字(源码 :1108-1110)──────────────────────────────────────
+	out.name = tmpl.name;
+
+	// ── 捕获相关(源码 :1165-1166)★ 两个 WORK 字段,来源两张表 ─────────
+	out.capturable = tmpl.capturable;
+	out.capture_difficulty = tmpl.capture_difficulty;
+
+	// ── 生命(源码 :1153 推导 → :1159 满血)──────────────────────────
+	//
+	// ★ `hp = deriveBaseStats(四维).max_hp` —— **不存 max_hp**(不造第二真源,
+	//   同 `Model::Pet`);投影到战场时再推一次(`enterEnemyToField`)。
+	// ⚠️★ 推导只吃四维、不吃等级(DR-DT9:公式里没有 level)⇒ 等级的作用**全部**
+	//    发生在上面 `rollSpawnStats` 那一步。这条已在 M.3 纠正过一次文档分叉,别再写反。
+	out.hp = SA::Rules::deriveBaseStats(out.vital, out.str, out.tough, out.dex).max_hp;
+
+	// ⚠️ `mp` / `max_mp` 留 0 —— 源码从不写它们,默认模板里也是 0(见 `Enemy.h`)。
+	return out;
+}
+
+bool enterEnemyToField(SA::Rules::BattleField &field, int field_slot,
+                       const SA::Model::Enemy &enemy)
+{
+	// ── 门 ①:必须落在某一 side 的玩家段(宠位留给 enterPetToField)────────
+	if (field_slot < 0 || field_slot >= SA::Rules::kSlotCount)
+		return false;
+	if (field_slot % SA::Rules::kSideOffset >= SA::Rules::kBattlePlayerMax)
+		return false;
+
+	// ── 门 ②:目标槽未被占(源码 `NewEntry:975` ⇒ ENTRYMAX)────────────
+	SA::Rules::Combatant &dst = field.at(field_slot);
+	if (dst.occupied)
+		return false;
+
+	// ── 投影 Enemy → Combatant ────────────────────────────────────────
+	// ★ 先清成干净单位,不留前一个占据该槽者的脏值(同 enterPetToField)。
+	dst = SA::Rules::Combatant{};
+	dst.occupied = true;
+	dst.kind = SA::Rules::CombatantKind::kEnemy;
+	dst.slot = static_cast<std::uint8_t>(field_slot);
+	dst.level = enemy.level;
+	dst.hp = enemy.hp;
+	dst.mp = enemy.mp;
+	dst.max_mp = enemy.max_mp;
+
+	// ⚠️★ `luck` **留 0** —— 敌人没有幸运这个属性(同槽异义,`Enemy.h` 卷首)。
+	//    ★ 不写 `dst.luck = 0;` 这一行:结构默认就是 0,写出来反而像"我们决定填 0"。
+	//    ⚠️ 后果是可观察的:`luck` 参与 DR-BT1 的量化前提(上限 25)⇒ 敌人在那些
+	//      公式里恒取幸运 0。这是原版行为,不是我们省事。
+
+	// ⚠️★★ 四属**按具名下标写,绝不按位置拷**(三套顺序两两不同,已栽过两次)。
+	dst.elements[static_cast<int>(SA::Rules::Element::kEarth)] = enemy.earth;
+	dst.elements[static_cast<int>(SA::Rules::Element::kWater)] = enemy.water;
+	dst.elements[static_cast<int>(SA::Rules::Element::kFire)] = enemy.fire;
+	dst.elements[static_cast<int>(SA::Rules::Element::kWind)] = enemy.wind;
+
+	// ── 属性推导:四维 → 基础三围 + max_hp(DR-DT9)────────────────────
+	const SA::Rules::DerivedStats stats =
+	    SA::Rules::deriveBaseStats(enemy.vital, enemy.str, enemy.tough, enemy.dex);
+	dst.attack = stats.attack;
+	dst.defense = stats.defense;
+	dst.quick = stats.quick;
+	dst.max_hp = stats.max_hp;
+	// ⚠️ HP 不夹取 —— 理由**与 enterPetToField 不同**,见 Api.h 声明处:
+	//    夹取属回合准备阶段的 complianceParameter(`BATTLE_TurnParam`,未移植)。
+
+	// ── ★★ 捕获修正:两个字段第一次有了真数据(源码 :1165-1166)──────────
+	//
+	// `Combatant.h` 里写着「1.5 无敌人数值表 ⇒ 调用方按 30 兜底 / 一律 false」,
+	// 本函数就是那个"将来的调用方"。⇒ 兜底值从此不该再出现在这条路径上。
+	dst.mods.capturable = enemy.capturable;
+	dst.mods.capture_difficulty = enemy.capture_difficulty;
+
+	// ⚠️ `immune_critical` / `immune_knockback`(DR-BT11 的数据驱动标志)**仍留 false**:
+	//    它们的来源是敌人数值表里的免疫标记,而那属 L4 内容导入(D 线)——
+	//    ★ 与 `capturable` 不同,后者在 `enemy.txt` / `enemybase1.txt` 里有明确的列
+	//    (`ENEMY_PETFLG` / `E_T_GET`),前者在原版**根本没有列**(原版硬编码图号)
+	//    ⇒ 那一列是 DR-BT11 要求**新造**的,得等内容表定型,不是从模板里读出来的。
+	return true;
 }
 
 } // namespace SA::World

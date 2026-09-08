@@ -20,6 +20,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
+#include "model/Enemy.h"
 #include "model/EntityIndex.h"
 #include "model/EntityKind.h"
 #include "model/EntityPool.h"
@@ -28,6 +29,7 @@
 
 #include <string>
 #include <type_traits>
+#include <utility>
 
 using namespace SA::Model;
 
@@ -363,4 +365,83 @@ TEST_CASE("Pet:名字上限 31 字节(DR-TS5),超长即失败不截断")
 	CHECK(pet.name.size() == 9);
 	CHECK(pet.name.assign(std::string(31, 'x').c_str()));
 	CHECK(pet.name.size() == 31);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  批次 M.4b:Enemy 族的结构约束
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ★ 与上面 Player/Pet 那一组同一取向:守**结构**不守玩法。
+//   Enemy 是第三个落地的族,它加进来的新约束只有一条,但那一条很值钱 ——
+//   ⚠️★ **Enemy 与 Pet 的字段名有一对是"同名不同义、同义不同名"的**:
+//        Enemy 有 `variable_ai` 而**没有 `luck`**;Pet 两个都有。
+//      原版里那是**同一个物理槽**(`CHAR_VARIABLEAI == CHAR_LUCK`,`char_base.h:637`),
+//      捕获时以"幸运"的名义读、以"AI 变量"的名义写 ⇒ 净效果恒 0。
+//      ⇒ 若哪天有人"统一"两族字段(把 Enemy 也加个 luck、或把 Pet 的 luck 删掉),
+//        这条同槽异义就重新隐形了。本组用编译期断言把两族的差别钉住。
+
+TEST_CASE("Enemy:族判别键在编译期与类型绑定(M2)")
+{
+	static_assert(Enemy::kKind == EntityKind::kEnemy, "");
+	static_assert(!std::is_same<Enemy, Pet>::value, "");
+	static_assert(!std::is_same<Enemy, Player>::value, "");
+	CHECK(Enemy::kKind != Pet::kKind);
+	CHECK(Enemy::kKind != Player::kKind);
+}
+
+TEST_CASE("Enemy:POD —— 与 Player/Pet 同一条支柱")
+{
+	static_assert(std::is_trivially_copyable<Enemy>::value, "");
+	static_assert(std::is_standard_layout<Enemy>::value, "");
+	CHECK(true);
+}
+
+// ★★ 这条断言的是**字段面的差别本身**,不是某个值。
+//    `luck` 只在 Pet 上、`variable_ai` 两族都有 —— 三个 SFINAE 探针把它固定下来。
+//    ⚠️ 若有人给 Enemy 加了 `luck`,第一条会转红并把人引到 `Enemy.h` 卷首那条同槽异义。
+namespace
+{
+template <typename T, typename = void>
+struct HasLuck : std::false_type
+{
+};
+template <typename T>
+struct HasLuck<T, decltype(void(sizeof(std::declval<T &>().luck)))> : std::true_type
+{
+};
+} // namespace
+
+TEST_CASE("Enemy:★★ 没有 luck 字段 —— 那是同槽异义,不是遗漏(char_base.h:637)")
+{
+	static_assert(HasLuck<Pet>::value, "Pet 有 luck(源码 pet.c:347 以幸运的名义拷)");
+	static_assert(!HasLuck<Enemy>::value,
+	              "Enemy 不该有 luck —— ENEMY_createEnemy:1076 写的是 VARIABLEAI,"
+	              "而两者同槽;给 Enemy 加 luck 会让这条同槽异义重新隐形");
+	// `variable_ai` 两族都有:它是那个槽在敌人身上的**真名**。
+	Enemy e{};
+	Pet p{};
+	CHECK(e.variable_ai == 0);
+	CHECK(p.variable_ai == 0);
+}
+
+TEST_CASE("Enemy:池的分配 / 回收 / 悬空与前两族一致(M10)")
+{
+	// ★ 容量取 4 而不是真实的 10,000:本例验的是**语义**,不是容量。
+	EntityPool<Enemy, 4> pool;
+	const EntityHandle a = pool.allocate();
+	REQUIRE(a.valid());
+	Enemy *e = pool.resolve(a);
+	REQUIRE(e != nullptr);
+	e->vital = 1989; // 乌力 18 级的实测四维之一(rules_progression 用例 10)
+	CHECK(pool.resolve(a)->vital == 1989);
+
+	REQUIRE(pool.release(a));
+	CHECK(pool.resolve(a) == nullptr); // 悬空即 nullptr,不脏读
+
+	// ★ 复用同一槽必须发**干净**的实体 —— 否则新敌人会带着上一只的四维入场,
+	//   而那是"看起来正常、数值是错的"那一类静默错误(00 §10.4 第一类)。
+	const EntityHandle b = pool.allocate();
+	REQUIRE(b.index == a.index);
+	REQUIRE(pool.resolve(b) != nullptr);
+	CHECK(pool.resolve(b)->vital == 0);
 }

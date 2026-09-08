@@ -1274,3 +1274,575 @@ TEST_CASE("DR-BT21:joinBattle 自动带出出战宠(default_pet 跨战斗)")
 	CHECK(fld2->at(SA::Rules::kBattlePlayerMax).occupied);
 	CHECK(fld2->at(SA::Rules::kBattlePlayerMax).kind == SA::Rules::CombatantKind::kPet);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  批次 M.4b:敌人 L2 实体族接线(01 §13 欠债 23 + 25)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ★★ 这一组的判据不是"函数返回对了",而是**欠债 23 与 25 的关闭条件**:
+//    · 欠债 25:`rollSpawnStats` 有真实调用方,且**有观察面能断言它被调过**
+//      (`enemyCount()` / `battleEnemyAt()`)—— 立案原话是「地基绿而运行时不接,
+//      ctest 一样全过」,所以每条用例都断言一个池 / 战场上可观察的后果;
+//    · 欠债 23:**捕获出的宠物四维非 0**,并且那些数**等于敌人实体里的那一份**。
+//      ⇒ "四维有源"这件事被逐字段比对,不是靠"看起来不是 0"。
+
+namespace
+{
+
+// 用例集专用 rng 存根 —— 与 RulesProgressionTest 同一取向:
+// ★ 生成路径要断言**逐值**,而 SeededRandom 的取值不可手算 ⇒ 喂脚本。
+class ScriptedRandom final : public SA::Rules::Random
+{
+  public:
+	explicit ScriptedRandom(std::vector<int> script) : _script(std::move(script)) {}
+	int rand(int lo, int hi) override
+	{
+		++_calls;
+		const int v = next();
+		return v < lo ? lo : (v > hi ? hi : v);
+	}
+	int randMod(int n) override
+	{
+		++_calls;
+		return n <= 0 ? 0 : next() % n;
+	}
+	int calls() const { return _calls; }
+
+  private:
+	int next()
+	{
+		if (_script.empty())
+			return 0;
+		if (_cursor >= _script.size())
+			return _script.back();
+		return _script[_cursor++];
+	}
+	std::vector<int> _script;
+	std::size_t _cursor = 0;
+	int _calls = 0;
+};
+
+// 「乌力」= `enemybase1.txt` **第 1 行的全部实测列**(2026-09-08 核,名字列按 GBK 解)。
+//
+// ★ 与 `rules_progression` 的 `kWuli` 是同一行的两个视图:那边只要 L3 用的 6 列,
+//   这边要 world 侧完整的 `EnemyTemplate`。⇒ 两处的 6 列必须一致,
+//   ⚠️ 不一致的表现是"同一只怪在两个测试里四维不同",而没有一处会报错。
+//
+// 逐列出处(1-based 列号 = 7 + E_T_* 枚举序,`06` §3.5):
+//   c9 lvup=4.50 · c8 init=10 · c10-13 基数=[20,12,15,25] · c14 MODAI=150 ·
+//   c15 GET=11 · c16 EARTH=80 · c17 WATER=20 · c18 FIRE=0 · c19 WIND=0 · c37 IMG=100250
+// ⚠️★ `capturable` **不在这张表里** —— 它来自遇敌表 `enemy.txt` 的 `ENEMY_PETFLG`
+//    (源码 `enemy.c:1165` 读 `*(p + ENEMY_PETFLG)`)。模板表 c38 也叫 E_T_PETFLG(=1),
+//    但 `ENEMY_createEnemy` **读的不是它** ⇒ 这里由调用方给,见 world/Api.h 卷首那条。
+EnemyTemplate makeWuliTemplate(bool capturable)
+{
+	EnemyTemplate t{};
+	t.stats = SA::Rules::SpawnTemplate{4.50, 10, 20, 12, 15, 25};
+	t.mod_ai = 150;
+	t.capture_difficulty = 11; // ★ 实测最常见的取值(276/1053 行)
+	t.earth = 80;
+	t.water = 20;
+	t.fire = 0;
+	t.wind = 0;
+	t.image = 100250;
+	REQUIRE(t.name.assign("乌力"));
+	t.capturable = capturable;
+	return t;
+}
+
+// 只有玩家的战场:高魅力(捕获乘性主因子)、高防低攻(打不死也不被打死)。
+// ★ 敌方槽**留空**,由 `spawnEnemyToField` 填 —— 这正是本组要验的路径。
+SA::Rules::BattleField makePlayerOnlyField()
+{
+	SA::Rules::BattleField f{};
+	SA::Rules::Combatant &me = f.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = 5000;
+	me.max_hp = 5000;
+	me.attack = 1; // ★ 不要打死敌人 —— 本组要抓活的
+	me.defense = 500;
+	me.quick = 200;
+	me.luck = 10;
+	me.charm = 200;
+	return f;
+}
+
+// 握手 + 入场 + 据模板刷 n 只敌人,返回战斗号。
+BattleId joinWithSpawnedEnemies(Fixture &f, SA::Net::ConnectionId id, int n,
+                                std::int32_t level)
+{
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	const BattleId battle = f.world.startBattle(makePlayerOnlyField());
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	for (int i = 0; i < n; ++i)
+	{
+		REQUIRE(f.world.spawnEnemyToField(
+		    battle, static_cast<std::uint8_t>(SA::Rules::kSideOffset + i),
+		    makeWuliTemplate(true), level));
+	}
+	return battle;
+}
+
+} // namespace
+
+// ── spawnEnemy:纯生成函数,逐值可算 ─────────────────────────────────────
+
+// 脚本:前 4 次 `rand(0,4)` 全取 2 ⇒ 抖动 0;后 10 次 `rand(0,3)` 全取 0 ⇒ 10 点全给 vital。
+// ⇒ coef = (18−1)×4.5 + 10 = **86.5**,基数 [30,12,15,25]
+//   ⇒ 四维 = [2595, 1038, 1297(1297.5 截断), 2162(2162.5 截断)]
+//   ⇒ 三围 = attack 15 · defense 17 · quick 21 · max_hp 148,**hp = max_hp(满血入场)**
+TEST_CASE("M.4b:spawnEnemy 逐值 —— 四维 / 满血 / 评级 / 两张表的列都落对")
+{
+	ScriptedRandom rng({2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	const SA::Model::Enemy e =
+	    spawnEnemy(makeWuliTemplate(true), 18, rng, SA::Rules::RulesConfig{});
+
+	// ★★ 四维非 0 且逐值 —— 这就是欠债 23 找的那个"来源"(源码 :1067-1070)。
+	CHECK(e.vital == 2595);
+	CHECK(e.str == 1038);
+	CHECK(e.tough == 1297);
+	CHECK(e.dex == 2162);
+
+	// 成长率取「+10 之前」的基数(源码 :1052-1056 在撒点循环之前)。
+	CHECK(e.growth_vital == 20);
+	CHECK(e.growth_str == 12);
+	CHECK(e.growth_tough == 15);
+	CHECK(e.growth_dex == 25);
+
+	// ★ 满血入场 = 推导出的 max_hp(源码 :1153 推导 → :1159 `HP = WORKMAXHP`)。
+	const SA::Rules::DerivedStats d =
+	    SA::Rules::deriveBaseStats(e.vital, e.str, e.tough, e.dex);
+	CHECK(d.max_hp == 148);
+	CHECK(e.hp == d.max_hp);
+
+	// ⚠️ MP 恒 0 —— 源码从不写它,默认模板 `player` 里也是 0(Enemy.h 记明)。
+	CHECK(e.mp == 0);
+	CHECK(e.max_mp == 0);
+
+	// 评级:模板基数和 72 ⇒ 末档 5。★ 与摇号无关(用的是未扰动的模板基数)。
+	CHECK(e.pet_rank == 5);
+
+	// 模板表那几列。
+	CHECK(e.mod_ai == 150);
+	CHECK(e.base_image == 100250);
+	CHECK(e.origin_image == 100250); // 源码 :1023-1024 两槽同值
+	CHECK(e.capture_difficulty == 11);
+	CHECK(std::string(e.name.c_str()) == "乌力");
+	// ★ 遇敌表那一列。
+	CHECK(e.capturable);
+
+	// ⚠️★ `variable_ai` 恒 0(源码 :1076)—— 它与"幸运"同槽,捕获会以幸运的名义
+	//    把这个 0 拷进宠物。★ Enemy **没有** luck 字段,理由见 Enemy.h 卷首。
+	CHECK(e.variable_ai == 0);
+
+	// ★ rng 消耗恰好 14 次 —— `spawnEnemy` 自己不摇任何数(见 Api.h 声明处)。
+	CHECK(rng.calls() == 14);
+}
+
+TEST_CASE("M.4b:等级是入参 —— 同模板不同等级 ⇒ 四维按 coef 成比例(enemy.c:1040)")
+{
+	const std::vector<int> script{2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+	ScriptedRandom r1(script), r18(script);
+	const SA::Model::Enemy lo =
+	    spawnEnemy(makeWuliTemplate(true), 1, r1, SA::Rules::RulesConfig{});
+	const SA::Model::Enemy hi =
+	    spawnEnemy(makeWuliTemplate(true), 18, r18, SA::Rules::RulesConfig{});
+
+	// level 1 ⇒ coef = init_num = 10;level 18 ⇒ 86.5 ⇒ 基数 30 各乘之。
+	CHECK(lo.vital == 300);
+	CHECK(hi.vital == 2595);
+	CHECK(lo.level == 1);
+	CHECK(hi.level == 18);
+	// ★ 成长率与等级无关(它在 PARAM_CAL 之前就定了)。
+	CHECK(lo.growth_vital == hi.growth_vital);
+	// ★ 评级也与等级无关(模板基数的函数)。
+	CHECK(lo.pet_rank == hi.pet_rank);
+}
+
+// ── enterEnemyToField:投影 + 两道门 ───────────────────────────────────
+
+TEST_CASE("M.4b:enterEnemyToField 投影 —— 三围由四维推出,捕获两列第一次有真数据")
+{
+	ScriptedRandom rng({2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	const SA::Model::Enemy e =
+	    spawnEnemy(makeWuliTemplate(true), 18, rng, SA::Rules::RulesConfig{});
+
+	SA::Rules::BattleField f{};
+	REQUIRE(enterEnemyToField(f, SA::Rules::kSideOffset, e));
+	const SA::Rules::Combatant &c = f.at(SA::Rules::kSideOffset);
+
+	CHECK(c.occupied);
+	CHECK(c.kind == SA::Rules::CombatantKind::kEnemy);
+	CHECK(c.slot == SA::Rules::kSideOffset);
+	CHECK(c.level == 18);
+	CHECK(c.attack == 15);
+	CHECK(c.defense == 17);
+	CHECK(c.quick == 21);
+	CHECK(c.max_hp == 148);
+	CHECK(c.hp == 148); // 满血
+
+	// ⚠️★★ 四属**按具名下标**核 —— 模板是 地 80 / 水 20 / 火 0 / 风 0。
+	//    按位置拷会把 80 写进 `elements[0]` 恰好也对(kEarth==0),但水火会互换 ⇒
+	//    这里逐个具名断言才接得住。
+	CHECK(c.elements[static_cast<int>(SA::Rules::Element::kEarth)] == 80);
+	CHECK(c.elements[static_cast<int>(SA::Rules::Element::kWater)] == 20);
+	CHECK(c.elements[static_cast<int>(SA::Rules::Element::kFire)] == 0);
+	CHECK(c.elements[static_cast<int>(SA::Rules::Element::kWind)] == 0);
+
+	// ★★ `Combatant.h` 里「1.5 无敌人数值表 ⇒ 调用方按 30 兜底」那条,到此兑现。
+	CHECK(c.mods.capturable);
+	CHECK(c.mods.capture_difficulty == 11);
+	CHECK(c.mods.capture_difficulty != SA::Rules::kCaptureDifficultyDefault);
+
+	// ⚠️★ `luck` 留 0 —— 敌人没有幸运这个属性(同槽异义),不是"忘了拷"。
+	CHECK(c.luck == 0);
+	// ⚠️ DR-BT11 的两个免疫标志仍 false:它们在原版**没有模板列**,是新造的数据面。
+	CHECK_FALSE(c.mods.immune_critical);
+	CHECK_FALSE(c.mods.immune_knockback);
+}
+
+TEST_CASE("M.4b:enterEnemyToField 两道门 —— 宠位 / 越界 / 已占槽都不入场")
+{
+	ScriptedRandom rng({2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	const SA::Model::Enemy e =
+	    spawnEnemy(makeWuliTemplate(true), 18, rng, SA::Rules::RulesConfig{});
+	SA::Rules::BattleField f{};
+
+	// 门 ①:宠位(每 side 的后 5 槽)与越界。
+	CHECK_FALSE(enterEnemyToField(f, SA::Rules::kBattlePlayerMax, e));
+	CHECK_FALSE(enterEnemyToField(f, SA::Rules::kSideOffset + SA::Rules::kBattlePlayerMax, e));
+	CHECK_FALSE(enterEnemyToField(f, SA::Rules::kSlotCount, e));
+	CHECK_FALSE(enterEnemyToField(f, -1, e));
+
+	// ★ 玩家半场的玩家段**允许** —— 站位由调用方决定,不由本函数猜(见 Api.h)。
+	CHECK(enterEnemyToField(f, 1, e));
+
+	// 门 ②:已占槽不覆盖。
+	CHECK_FALSE(enterEnemyToField(f, 1, e));
+	CHECK(f.at(1).occupied);
+}
+
+// ── spawnEnemyToField:World 侧接线(欠债 25 的关闭判据)──────────────────
+
+TEST_CASE("M.4b:spawnEnemyToField 建 L2 实体并可观察(欠债 25)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	CHECK(f.world.enemyCount() == 0);
+
+	const BattleId battle = joinWithSpawnedEnemies(f, id, 2, 18);
+
+	// ★★ 三个后果一起断言 —— 少任何一个都说明"生成公式有了调用方"这句话不成立:
+	CHECK(f.world.enemyCount() == 2); // ① 实体真的进了池
+	const SA::Model::Enemy *e0 =
+	    f.world.battleEnemyAt(battle, SA::Rules::kSideOffset);
+	REQUIRE(e0 != nullptr); // ② 槽 → 实体的映射建起来了
+	CHECK(e0->vital > 0);   // ③ 四维**非 0** —— rollSpawnStats 真的被调了
+
+	// ④ 战场投影与实体一致:三围是从**那一份**四维推出来的。
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	const SA::Rules::DerivedStats d =
+	    SA::Rules::deriveBaseStats(e0->vital, e0->str, e0->tough, e0->dex);
+	CHECK(fld->at(SA::Rules::kSideOffset).attack == d.attack);
+	CHECK(fld->at(SA::Rules::kSideOffset).max_hp == d.max_hp);
+	CHECK(fld->at(SA::Rules::kSideOffset).hp == d.max_hp);
+
+	// ⑤ 四维落在**手算的边界**内:基数 b ∈ [20−2, 20+2+10] ⇒ vital = 86.5 × b。
+	//    ★ rng 由战斗种子驱动、逐值不可手算,但**区间可以** ⇒ 用区间守住量级,
+	//      逐值那部分由上面 spawnEnemy 的脚本用例负责。
+	CHECK(e0->vital >= 18 * 865 / 10);
+	CHECK(e0->vital <= 32 * 865 / 10);
+}
+
+TEST_CASE("M.4b:同一槽重复 spawn ⇒ 拒绝,且不泄漏池槽")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinWithSpawnedEnemies(f, id, 1, 18);
+	REQUIRE(f.world.enemyCount() == 1);
+
+	// ⚠️★ 覆盖旧句柄等于泄漏一个池槽 ⇒ 直接拒绝(门 ① 的第二半)。
+	CHECK_FALSE(f.world.spawnEnemyToField(
+	    battle, static_cast<std::uint8_t>(SA::Rules::kSideOffset),
+	    makeWuliTemplate(true), 18));
+	CHECK(f.world.enemyCount() == 1); // ★ 没有多出一个孤儿
+}
+
+TEST_CASE("M.4b:入场失败要把实体还回池 —— 预留可回滚,不留孤儿")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	const BattleId battle = f.world.startBattle(makePlayerOnlyField());
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	REQUIRE(f.world.enemyCount() == 0);
+
+	// 槽 0 已被玩家占 ⇒ enterEnemyToField 门 ② 失败。
+	CHECK_FALSE(f.world.spawnEnemyToField(battle, 0, makeWuliTemplate(true), 18));
+	// ★★ 这一条是本用例的全部意义:allocate 成功、入场失败 ⇒ 必须 release 回去。
+	//    ⚠️ 漏了它,每次"槽被占"都泄漏一个槽,而入场失败是完全正常的事件。
+	CHECK(f.world.enemyCount() == 0);
+
+	// 宠位同理(门 ①)。
+	CHECK_FALSE(f.world.spawnEnemyToField(
+	    battle, static_cast<std::uint8_t>(SA::Rules::kSideOffset + SA::Rules::kBattlePlayerMax),
+	    makeWuliTemplate(true), 18));
+	CHECK(f.world.enemyCount() == 0);
+
+	// 不存在的战斗 / 越界槽号(门 ①)⇒ 连 allocate 都不该发生。
+	CHECK_FALSE(f.world.spawnEnemyToField(9999, 0, makeWuliTemplate(true), 18));
+	CHECK_FALSE(f.world.spawnEnemyToField(battle, SA::Rules::kSlotCount,
+	                                      makeWuliTemplate(true), 18));
+	CHECK(f.world.enemyCount() == 0);
+}
+
+// ── ★★ 捕获链路:欠债 23 的关闭判据 ────────────────────────────────────
+
+TEST_CASE("M.4b★★:捕获从敌人 L2 实体拷四维 ⇒ 宠物四维非 0 且逐字段相等(欠债 23)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	// 2 只:抓 1 只后敌方仍有存活 ⇒ 战斗不结束,实体不被战斗结束那段回收。
+	const BattleId battle = joinWithSpawnedEnemies(f, id, 2, 1);
+
+	// 先把敌人实体的四维记下来 —— 捕获后它会回池,拿不到了。
+	const SA::Model::Enemy *src =
+	    f.world.battleEnemyAt(battle, SA::Rules::kSideOffset);
+	REQUIRE(src != nullptr);
+	const SA::Model::Enemy expect = *src; // 值拷贝一份做基线
+
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+	REQUIRE(f.world.petCount() == 1);
+
+	const SA::Model::Pet *pet = f.world.playerPetAt(id, 0);
+	REQUIRE(pet != nullptr);
+
+	// ★★★ **这四行就是欠债 23 的关闭**:M.1–M.4a 期间它们必然全是 0。
+	CHECK(pet->vital == expect.vital);
+	CHECK(pet->str == expect.str);
+	CHECK(pet->tough == expect.tough);
+	CHECK(pet->dex == expect.dex);
+	CHECK(pet->vital > 0); // ★ 显式钉住"非 0"这件事本身
+
+	// 成长率整组拷(源码 :374)。
+	CHECK(pet->growth_vital == expect.growth_vital);
+	CHECK(pet->growth_str == expect.growth_str);
+	CHECK(pet->growth_tough == expect.growth_tough);
+	CHECK(pet->growth_dex == expect.growth_dex);
+
+	// 名字(源码 :375-377)★ M.1 时留空,现在有源了。
+	CHECK(std::string(pet->name.c_str()) == "乌力");
+	// 评级 / AI 模式 / 图号。
+	CHECK(pet->pet_rank == expect.pet_rank);
+	CHECK(pet->mod_ai == 150);
+	CHECK(pet->base_image == 100250);
+
+	// ⚠️★★ `luck` **恒 0,而这是原版行为**:源码 `pet.c:347` 以"幸运"的名义读的是
+	//    `CHAR_LUCK`,而它与 `CHAR_VARIABLEAI` 同槽、被 `enemy.c:1076` 写成了 0。
+	//    ★ 这条断言的措辞很重要:它钉的不是"我们没实现幸运",是"原版就是 0"。
+	CHECK(pet->luck == 0);
+	CHECK(pet->luck == expect.variable_ai);
+	CHECK(pet->variable_ai == 0); // 源码 battle_event.c:3547 再清一次
+
+	// HP / MP 取**战场当前值**,不是实体里那份满血(两个数据源的分工,见实现处)。
+	CHECK(pet->level == expect.level);
+	CHECK(pet->capture_level == pet->level); // 源码 :3519 读的是新宠的 LV
+}
+
+TEST_CASE("M.4b:Y 五项 = 用新宠自己的四维推出的三围(源码 pet.c:384-389)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinWithSpawnedEnemies(f, id, 2, 1);
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+	REQUIRE(f.world.petCount() == 1);
+
+	const SA::Model::Pet *pet = f.world.playerPetAt(id, 0);
+	REQUIRE(pet != nullptr);
+
+	// ★ 顺序照源码::384 先推导,:385-389 再取 WORK 值 ⇒ Y 是**推导后**的快照。
+	const SA::Rules::DerivedStats d =
+	    SA::Rules::deriveBaseStats(pet->vital, pet->str, pet->tough, pet->dex);
+	CHECK(pet->y_hp == d.max_hp);
+	CHECK(pet->y_atk == d.attack);
+	CHECK(pet->y_def == d.defense);
+	CHECK(pet->y_quick == d.quick);
+	CHECK(pet->y_lv == pet->level);
+
+	// ★★ 非 0 —— M.1/M.2/M.3 三批"有意不建"的理由正是"此刻算出来只能是 0"。
+	//    ⇒ 这一条同时是那三批那句话的**解除凭据**。
+	CHECK(pet->y_hp > 0);
+	CHECK(pet->y_quick > 0);
+}
+
+TEST_CASE("M.4b★:捕获宠叫出后战场三围非 0 —— 欠债 23 端到端")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinWithSpawnedEnemies(f, id, 2, 1);
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+	REQUIRE(f.world.petCount() == 1);
+
+	petOutTurn(f, id, battle, 0);
+
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	const SA::Rules::Combatant &p = fld->at(SA::Rules::kBattlePlayerMax);
+	REQUIRE(p.occupied);
+	REQUIRE(p.kind == SA::Rules::CombatantKind::kPet);
+
+	// ★★★ **这就是欠债 23 从头到尾要的那句话**:「叫得出、而且打得动」。
+	//    M.2 落地时这里是 attack 0 / max_hp 0;M.3 补了公式仍是 0(0 是不动点);
+	//    M.4b 补上来源之后才不是 0。
+	CHECK(p.attack > 0);
+	CHECK(p.defense > 0);
+	CHECK(p.quick > 0);
+	CHECK(p.max_hp > 0);
+	// ⚠️ 三围必须与宠物自己的四维一致,不是"随便一个非 0"。
+	const SA::Model::Pet *pet = f.world.playerPetAt(id, 0);
+	REQUIRE(pet != nullptr);
+	const SA::Rules::DerivedStats d =
+	    SA::Rules::deriveBaseStats(pet->vital, pet->str, pet->tough, pet->dex);
+	CHECK(p.attack == d.attack);
+	CHECK(p.max_hp == d.max_hp);
+}
+
+TEST_CASE("M.4b:捕获成功 ⇒ 敌人 L2 实体回池(源码 battle.c:1114-1115)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinWithSpawnedEnemies(f, id, 2, 1);
+	REQUIRE(f.world.enemyCount() == 2);
+
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+	REQUIRE(f.world.petCount() == 1);
+
+	// ★★ 源码依据不是"顺手清理":`_BATTLE_Exit` 对 `CHAR_TYPEENEMY` 直接
+	//    `CHAR_endCharOneArray` ⇒ 敌人离场即销毁。
+	// ⚠️ 漏掉的表现与 M.1 那条一模一样:池只增不减、没有一处报错。
+	CHECK(f.world.enemyCount() == 1);
+	CHECK(f.world.battleEnemyAt(battle, SA::Rules::kSideOffset) == nullptr);
+	// 另一只还在。
+	CHECK(f.world.battleEnemyAt(battle, SA::Rules::kSideOffset + 1) != nullptr);
+}
+
+TEST_CASE("M.4b:战斗结束 ⇒ 该场剩余敌人实体全部回池")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	// 1 只、level 1(满血高级怪抓不到,见本组末尾那条用例):抓掉它 ⇒ 敌方全灭 ⇒ 战斗结束。
+	const BattleId battle = joinWithSpawnedEnemies(f, id, 1, 1);
+	REQUIRE(f.world.enemyCount() == 1);
+
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+	REQUIRE(f.world.stats(battle)->finished);
+
+	// ★ 被捕那只在 applyEvents 里已释放;这里验的是"结束那段不会重复释放、
+	//   也不会漏掉剩下的"—— release 对空句柄返回 false 且不做事。
+	CHECK(f.world.enemyCount() == 0);
+}
+
+TEST_CASE("M.4b:战斗结束时未被捕的敌人也回池(打死的那条路径)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	// 玩家攻击力拉高 ⇒ 几个回合内打死敌人,战斗自然结束(不经捕获路径)。
+	SA::Rules::BattleField field = makePlayerOnlyField();
+	field.at(0).attack = 5000;
+	const BattleId battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	REQUIRE(f.world.spawnEnemyToField(
+	    battle, static_cast<std::uint8_t>(SA::Rules::kSideOffset),
+	    makeWuliTemplate(false), 1));
+	REQUIRE(f.world.enemyCount() == 1);
+
+	// 敌方 AI 会打玩家、玩家无指令 ⇒ 玩家不动;所以让敌人自己耗死不行 ⇒ 发普攻。
+	for (int i = 0; i < 20 && !f.world.stats(battle)->finished; ++i)
+	{
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = f.world.battleField(battle)->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd.command.attack.target = static_cast<std::uint32_t>(SA::Rules::kSideOffset);
+		f.world.onBattleCommand(id, cmd);
+		f.clock.advance(2000);
+		f.world.tick();
+	}
+	REQUIRE(f.world.stats(battle)->finished);
+	CHECK(f.world.enemyCount() == 0);
+}
+
+TEST_CASE("M.4b:没有 L2 实体的目标 ⇒ 宠物四维仍 0(记账路径,不是回归)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	// ★ 沿用 M.1 的手填战场:那里的 foe 是直接写进 `field` 的 `Combatant`,
+	//   **没有** Enemy 实体 ⇒ 捕获走 `src_enemy == nullptr` 那一支。
+	const BattleId battle = joinCapturable(f, id, 2);
+	CHECK(f.world.enemyCount() == 0); // 手填的 foe 不占敌人池
+
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+	REQUIRE(f.world.petCount() == 1);
+
+	const SA::Model::Pet *pet = f.world.playerPetAt(id, 0);
+	REQUIRE(pet != nullptr);
+
+	// ⚠️★★ 这条用例**有意保留"四维为 0"**,它钉的是那条脚手架路径的症状,
+	//    不是欠债 23 的复活:目标没有 L2 实体 ⇒ 四维无源 ⇒ 只能是 0,
+	//    实现处会落一条 `no_l2_enemy` 的 warn。
+	//    ★ 与上面那条 M.4b 用例并排放着才有意义:同一个捕获链路,
+	//      **目标有 L2 实体则四维非 0、没有则为 0** —— 差别只在目标那一侧。
+	CHECK(pet->vital == 0);
+	CHECK(pet->str == 0);
+	CHECK(pet->name.empty()); // 名字同样无源
+	CHECK(pet->y_hp == 0);    // Y 五项是推导后的快照 ⇒ 0 四维 ⇒ 0
+	// ★ 但"拿得到的那一半"仍然拷了 —— 门 + 挂槽整条链路是通的。
+	CHECK(pet->level == 5); // makeCapturableField 的 foe 等级
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+}
+
+// ★★ 一条**回源码算出来的性质**,顺手钉住 —— 它解释了上面几条捕获用例
+//    为什么用 **level 1** 的敌人而不是 level 18。
+//
+// `Df_HpPer = 10 − HP²/MaxHp`(源码 `battle_event.c:3852`)是**二次式** ⇒
+// 目标满血时该项恒为 `10 − MaxHp`:
+//     level 18 的乌力  MaxHp 148 ⇒ Df_HpPer = **−138** ⇒ work = −416 ⇒ 必失败
+//     level 1  的乌力  MaxHp 15  ⇒ Df_HpPer = **−5**   ⇒ work = 155 ⇒ 夹到 99
+// ⇒ ★ **原版的捕获设计要求先把怪打残**:满血怪几乎抓不到,而且 MaxHp 越高越抓不到。
+//   ⚠️ 这不是我们的实现限制,是公式本身 —— A.2 落地时用的是手填的 `hp = 1` 残血目标
+//     (`makeCapturableField`),所以这条性质此前**从未被暴露**;
+//     接上真实模板生成的满血敌人之后它立刻显形。
+TEST_CASE("M.4b★★:满血敌人几乎抓不到 —— Df_HpPer 二次式的直接后果(:3852)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	// level 18 ⇒ MaxHp 约 148 ⇒ Df_HpPer ≈ −138 ⇒ work 深负 ⇒ `rand(1,100) < work` 恒假。
+	const BattleId battle = joinWithSpawnedEnemies(f, id, 2, 18);
+	REQUIRE(f.world.enemyCount() == 2);
+
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+
+	// ★ 抓不到:没有宠物、目标留场、敌人实体也不回池。
+	CHECK(f.world.petCount() == 0);
+	CHECK(f.world.enemyCount() == 2);
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->at(SA::Rules::kSideOffset).occupied);
+	// ⚠️ 但 capture_bonus 仍被无条件清零(源码 :3510,A.2 那条用例的性质在此复现)。
+	CHECK(fld->at(0).mods.capture_bonus == 0);
+
+	// ★ 反面由上面几条 level 1 的用例给出:同一模板、同一玩家,只有 MaxHp 不同就抓得到。
+	//   ⇒ 这一对用例合起来说明"抓不到"来自 MaxHp,不是来自接线出了错。
+}

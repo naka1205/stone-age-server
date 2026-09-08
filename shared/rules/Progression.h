@@ -142,6 +142,27 @@ struct SpawnStats
 SpawnStats rollSpawnStats(const SpawnTemplate &tmpl, std::int32_t level,
                           Random &rng, const RulesConfig &cfg) noexcept;
 
+// 生成模板的**评级档位**(原 `CHAR_PETRANK`)—— 1:1 移植 `ENEMY_getRank`
+// (`char/enemy.c:802-840`)。0 = 最好,5 = 最差(源码注释:「总成长率 >= 100 petrank=0」)。
+//
+// ★★ **判据是模板的原始四维基数之和,与本次摇号无关** —— 这一点必须回源码才看得出:
+//    `ENEMY_getRank:825-828` 读的是 `ENEMYTEMP_enemy[tarray].intdata`,
+//    **不是** `ENEMY_createEnemy` 里被 `±2` 改过的那份局部拷贝 `tp`
+//    (源码 :1013-1015 才把模板拷进 `tp`,:1045-1048 改的是 `tp`)。
+//    ⇒ 同一模板的两只敌人 rank **恒等**,不受 ±2 与撒 10 点影响。
+//    ⚠️ 若照着 `ENEMY_createEnemy` 的行序想当然用扰动后的基数,同模板会摇出不同 rank,
+//      **而没有任何一处会报错** —— 只有回源码看它读的是哪份数组才能发现。
+//
+// ⚠️★ 源码那张表里还有一列 `float rank`(`{100, 2.5}` / `{95, 2.0}` / …)——
+//    **从未被使用**,函数只返回下标 `ranknum`。⇒ 本实现不建那一列(死数据,
+//    照建等于把一个不存在的语义固化)。
+//
+// ★ 分档阈值 100 / 95 / 90 / 85 / 80 / 0 照抄:首个满足 `sum >= 阈值` 的下标即结果,
+//   末档阈值 0 ⇒ 非负输入必有归属。⚠️ **负和会落空**(源码循环走完 `ranknum` 保持
+//   初值 0 ⇒ 最好评级),这是原版行为,照抄并记明:模板基数可为 0 但不为负
+//   (`enemybase1.txt` 实测 1,053 行无负基数)⇒ 现实中走不到。
+std::int32_t enemyRank(const SpawnTemplate &tmpl) noexcept;
+
 } // namespace SA::Rules
 
 #endif // __SA_Progression_H__
