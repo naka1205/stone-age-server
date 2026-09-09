@@ -1,0 +1,93 @@
+// ★ 本文件由 idl/codegen 从 schema 生成，请勿手工编辑。
+// 来源：domain/world_map.proto
+//
+// 修改方式：改 schema → 重跑 `python3 idl/codegen/saidl_gen.py` → 提交生成物
+// （DR-TS2：生成产物入库，客户端连 protoc 都不需要）。
+
+#ifndef SA_IDL_DOMAIN_WORLD_MAP_SA_H
+#define SA_IDL_DOMAIN_WORLD_MAP_SA_H
+
+#include "sa_idl_runtime.h"
+
+namespace SA {
+namespace Domain {
+
+struct WalkRequest {
+  std::int32_t x;
+  std::int32_t y;
+  SA::IDL::FixedStr<32> direction;
+};
+
+inline void encode(SA::IDL::Writer& w, const WalkRequest& m) {
+  w.i32(m.x);
+  w.i32(m.y);
+  SA::IDL::write_str(w, m.direction);
+}
+
+inline void decode(SA::IDL::Reader& r, WalkRequest& m) {
+  m.x = r.i32();
+  m.y = r.i32();
+  SA::IDL::read_str(r, m.direction);
+}
+
+struct CharAppear {
+  std::uint64_t entity_id;
+  std::int32_t floor;
+  std::int32_t x;
+  std::int32_t y;
+  std::uint32_t dir;
+};
+
+inline void encode(SA::IDL::Writer& w, const CharAppear& m) {
+  w.u64(m.entity_id);
+  w.i32(m.floor);
+  w.i32(m.x);
+  w.i32(m.y);
+  w.u32(m.dir);
+}
+
+inline void decode(SA::IDL::Reader& r, CharAppear& m) {
+  m.entity_id = r.u64();
+  m.floor = r.i32();
+  m.x = r.i32();
+  m.y = r.i32();
+  m.dir = r.u32();
+}
+
+struct CharMove {
+  std::uint64_t entity_id;
+  std::int32_t x;
+  std::int32_t y;
+  std::uint32_t dir;
+};
+
+inline void encode(SA::IDL::Writer& w, const CharMove& m) {
+  w.u64(m.entity_id);
+  w.i32(m.x);
+  w.i32(m.y);
+  w.u32(m.dir);
+}
+
+inline void decode(SA::IDL::Reader& r, CharMove& m) {
+  m.entity_id = r.u64();
+  m.x = r.i32();
+  m.y = r.i32();
+  m.dir = r.u32();
+}
+
+struct CharDisappear {
+  std::uint64_t entity_id;
+};
+
+inline void encode(SA::IDL::Writer& w, const CharDisappear& m) {
+  w.u64(m.entity_id);
+}
+
+inline void decode(SA::IDL::Reader& r, CharDisappear& m) {
+  m.entity_id = r.u64();
+}
+
+}  // namespace Domain
+}  // namespace SA
+
+#endif  // SA_IDL_DOMAIN_WORLD_MAP_SA_H

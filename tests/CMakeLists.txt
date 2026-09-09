@@ -116,7 +116,7 @@ add_test(NAME idl_smoke COMMAND sa_idl_smoke)
 #    那是服务端独有的东西,不参与 D2 的双端共享。
 #    ⇒ 只有 shared/ 与它的用例集才受 GameStudio 的 C++17 约束。
 # CTest / target 名保持 snake_case(文档与记忆按此 ID 引用);源文件名已 P5 Pascal 化。
-foreach(sa_t IN ITEMS net_framing net_tcp platform_config world_tick)
+foreach(sa_t IN ITEMS net_framing net_tcp platform_config world_tick world_map)
   # snake_case 基名 → PascalCase 源文件名(net_framing → NetFramingTest.cpp)
   string(REPLACE "_" ";" _parts "${sa_t}")
   set(_src "")
@@ -134,6 +134,7 @@ endforeach()
 target_link_libraries(sa_net_framing_test      PRIVATE sa_net sa_doctest)
 target_link_libraries(sa_platform_config_test  PRIVATE sa_platform sa_doctest)
 target_link_libraries(sa_world_tick_test       PRIVATE sa_world sa_doctest)
+target_link_libraries(sa_world_map_test        PRIVATE sa_world sa_doctest)
 
 # ── ★ TcpTransport 的用例要自己开 socket(2026-09-04)─────────────
 #

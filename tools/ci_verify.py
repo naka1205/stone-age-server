@@ -79,6 +79,7 @@ EXPECTED_TESTS = {
     "net_tcp",            # ★ TcpTransport —— 1.5 收尾项,真 socket 上跑
     "platform_config",    # 配置装载与快速失败
     "world_tick",         # ★ 最小 tick 与「战斗速度 ≠ tick 频率」
+    "world_map",          # ★ 移动系统:地图通行性 / 玩家移动 / 视野广播(W.1)
     "module_boundaries",  # ★★ 00 §3.1 的守卫:进程内捷径(需 Python3)
     # ── 1.5 收尾(2026-09-05,TcpTransport 接入入口)────────────────
     "server_self_test",   # ★ 入口自检:启动 → 绑端口 → tick → 关闭,退出码即判据

@@ -24,6 +24,10 @@ enum class MsgId : std::uint32_t {
   BattleEvents = 0x0205,
   BattleResult = 0x0206,
   BattleCommand = 0x0210,
+  WalkRequest = 0x0301,
+  CharAppear = 0x0302,
+  CharMove = 0x0303,
+  CharDisappear = 0x0304,
   WindowOpen = 0x0601,
   WindowReply = 0x0602,
 };
@@ -42,6 +46,7 @@ constexpr std::uint32_t msg_id_of() {
 
 #include "transport/handshake.sa.h"
 #include "domain/battle_events.sa.h"
+#include "domain/world_map.sa.h"
 #include "domain/window.sa.h"
 
 namespace SA {
@@ -117,6 +122,30 @@ template <>
 struct MsgTraits<SA::Domain::BattleCommand> {
   static constexpr MsgId kId = MsgId::BattleCommand;
   static constexpr const char* kName = "sa.domain.BattleCommand";
+};
+
+template <>
+struct MsgTraits<SA::Domain::WalkRequest> {
+  static constexpr MsgId kId = MsgId::WalkRequest;
+  static constexpr const char* kName = "sa.domain.WalkRequest";
+};
+
+template <>
+struct MsgTraits<SA::Domain::CharAppear> {
+  static constexpr MsgId kId = MsgId::CharAppear;
+  static constexpr const char* kName = "sa.domain.CharAppear";
+};
+
+template <>
+struct MsgTraits<SA::Domain::CharMove> {
+  static constexpr MsgId kId = MsgId::CharMove;
+  static constexpr const char* kName = "sa.domain.CharMove";
+};
+
+template <>
+struct MsgTraits<SA::Domain::CharDisappear> {
+  static constexpr MsgId kId = MsgId::CharDisappear;
+  static constexpr const char* kName = "sa.domain.CharDisappear";
 };
 
 template <>

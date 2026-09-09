@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <map>
+#include <string>
 #include <vector>
 
 #include "model/EntityIndex.h"
@@ -783,12 +784,26 @@ struct World::Impl
 		SA::Net::FrameReader reader{};
 		std::unique_ptr<SA::Net::Session> session;
 		std::vector<std::uint8_t> outbound{};
+
+		// ── 走路的运行时态(批次 W.1。原 work 区 CHAR_WORKWALKARRAY / WORKWALKSTARTSEC)──
+		//   方向串:每字符一步(小写移动 / 大写转身,CHAR_ctodirmode),首字符是下一步;
+		//   kCharLoop 玩家段按 walksendinterval 间隔逐字符消费(CHAR_walkcall)。
+		std::string walk_seq{};
+		// 下次可走一步的最早时刻(节拍判断,原 WORKWALKSTARTSEC/MSEC + walksendinterval)。
+		//   ⚠️ 用"下次可走"而非"上次走过"的时刻:ManualClock 从 0 起,后者无法区分
+		//      "尚未走过"与"在 t=0 走过"(同 BattleInstance::next_turn_at_ms 的取向)。
+		SA::Platform::Millis next_walk_at_ms = 0;
 	};
 
 	Impl(const SA::Platform::ServerConfig &cfg, SA::Platform::Clock &clk,
 	     SA::Platform::Logger &log, SA::Platform::RandomSource &rnd,
 	     SA::Net::Transport &tp)
-	    : config(cfg), clock(clk), logger(log), random(rnd), transport(tp) {}
+	    : config(cfg), clock(clk), logger(log), random(rnd), transport(tp)
+	{
+		// olink 按 fixture 地图尺寸分配(map 已在成员初始化中建好,声明在 olink 之前)。
+		olink.assign(static_cast<std::size_t>(map.width) * static_cast<std::size_t>(map.height),
+		             {});
+	}
 
 	SA::Platform::ServerConfig config;
 	SA::Platform::Clock &clock;
@@ -829,6 +844,31 @@ struct World::Impl
 	// ⚠️ 索引里的句柄**可能悬空**,这是正常的 —— 验世代是 `EntityPool::resolve` 的活
 	//   (EntityIndex.h 卷首的两步分工)。
 	SA::Model::ConnIndex player_of_session{};
+
+	// ── 地图(批次 W.1)。fixture,真实地图(LS2MAP,1,235 图)走 D 线导入(见 Api.h 地图节)──
+	//   ⚠️ 单张 fixture:1.4/demo 只有一个场景;多 floor 表留到内容导入(那时按 floor 索引)。
+	GridMap map = makeFixtureMap(64, 64);
+	TileAttrTable map_attr = makeFixtureAttr();
+
+	// ── 视野的运行时对象索引(里程碑②。原版 Map::olink,10 §3.1)──────────────
+	//   每格挂着**当前在该格的玩家会话**;视野广播扫 529 格遍历它(§5.2)。
+	//   ⚠️ size == map.width*height,构造时按 fixture 尺寸分配(见构造函数体)。
+	//   ★ 本批只放玩家(kEnemy/NPC 未进场);真实大地图时换稀疏结构(现 64×64 够)。
+	std::vector<std::vector<SA::Net::ConnectionId>> olink;
+
+	// ── 视野广播(里程碑②)。★ 作为成员而非自由函数:要访问 olink/conns/players 等私有状态,
+	//   而 conns 的 value(Conn)是 Impl 私有嵌套 ⇒ context struct(如 WorldWriteContext)装不下,
+	//   只能做成员。声明在此,定义在文件后半(「World::Impl 的视野广播方法」一节)。
+	std::vector<SA::Net::ConnectionId> collectVisible(std::int32_t cx, std::int32_t cy,
+	                                                  SA::Net::ConnectionId self) const;
+	template <typename M>
+	void sendTo(SA::Net::ConnectionId to, const M &msg);
+	void appearBetween(SA::Net::ConnectionId a, const SA::Model::Player &pa,
+	                   SA::Net::ConnectionId b);
+	void broadcastMove(SA::Net::ConnectionId mover, std::int32_t ox, std::int32_t oy,
+	                   const SA::Model::Player &p);
+	void broadcastSpawn(SA::Net::ConnectionId who, const SA::Model::Player &p);
+	void broadcastDespawn(SA::Net::ConnectionId who, std::int32_t x, std::int32_t y);
 };
 
 World::World(const SA::Platform::ServerConfig &config,
@@ -841,6 +881,195 @@ World::World(const SA::Platform::ServerConfig &config,
 }
 
 World::~World() = default;
+
+namespace
+{
+
+// ── 走路辅助(批次 W.1)────────────────────────────────────────────────
+//
+// 走路间隔:原版 CHAR_walk_check(char.c:4590)判 `time_diff_us >= walksendinterval*100`,
+//   csa8.0 setup.cf `walkinterval=2500` ⇒ 2500 × 100us = 250ms 一格。
+constexpr SA::Platform::Millis kWalkIntervalMs = 250;
+
+// 方向 0-7 → 坐标增量。★ 照抄 CHAR_dxdy[8](char.c:2325):北起顺时针,含四斜向。
+struct DirDelta
+{
+	std::int32_t dx;
+	std::int32_t dy;
+};
+constexpr DirDelta kDirDelta[8] = {
+    {0, -1},
+    {1, -1},
+    {1, 0},
+    {1, 1},
+    {0, 1},
+    {-1, 1},
+    {-1, 0},
+    {-1, -1},
+};
+
+// 方向字符解码 —— 移植 CHAR_ctodirmode(char_walk.c:1398):
+//   小写 'a'-'h' ⇒ 移动(is_turn=false);其余(大写 'A'-'H')⇒ 转身;dir = tolower-'a'。
+// 返回 false = 非法字符(dir 越界),调用方跳过该字符。
+bool decodeDirChar(char moji, std::uint8_t &dir, bool &is_turn)
+{
+	is_turn = !(moji >= 'a' && moji <= 'h'); // 小写 a-h 才是移动(:1401)
+	const char lower =
+	    (moji >= 'A' && moji <= 'Z') ? static_cast<char>(moji - 'A' + 'a') : moji;
+	const int d = lower - 'a';
+	if (d < 0 || d > 7)
+		return false;
+	dir = static_cast<std::uint8_t>(d);
+	return true;
+}
+
+// 走一步 —— 移植 CHAR_walk_move(char_walk.c:195)的**地图碰撞 + 坐标更新**核心。
+// ⚠️ 本批不做(各有归属):目标格对象碰撞(notover,:350,需 olink)· 进出格 on/off 事件
+//    (RunCharOverlapEvent,:281-449,依赖 NPC/Lua)· 视野广播(:469,视野批次)· 遇敌(:585,遇敌批次)。
+// 返回 true = 位置真的变了(供视野批次决定是否广播)。
+bool walkStep(SA::Model::Player &p, const GridMap &map, const TileAttrTable &attr,
+              std::uint8_t dir, bool is_turn)
+{
+	// 转向或移动都先落朝向(原版 :218/:250/:259 一律 CHAR_setInt(CHAR_DIR,dir))。
+	p.dir = dir;
+	if (is_turn)
+		return false; // 大写 ⇒ 只转身,不移动(ctodirmode mode==1)
+
+	const std::int32_t fx = p.x + kDirDelta[dir].dx;
+	const std::int32_t fy = p.y + kDirDelta[dir].dy;
+
+	// 直线:看目标格(:258)。斜向:额外看 x/y 两分量,墙角不穿(:263-278)。
+	if (!mapWalkable(map, attr, fx, fy))
+		return false; // 撞墙,朝向已落(:259)
+	if (kDirDelta[dir].dx != 0 && kDirDelta[dir].dy != 0)
+	{
+		if (!mapWalkable(map, attr, p.x + kDirDelta[dir].dx, p.y) ||
+		    !mapWalkable(map, attr, p.x, p.y + kDirDelta[dir].dy))
+			return false; // 墙角
+	}
+	p.x = fx;
+	p.y = fy;
+	return true;
+}
+
+// ── 视野广播辅助(里程碑②)────────────────────────────────────────────────
+//
+// 视野常量。★ 决策取 23(10 §9 决策1 / 05 §5.1),⚠️ 而展开视图 unifdef_80 的
+//   CHAR_DEFAULTSEESIZ 是 **20**(char_base.h:58,8.5 血统 —— unifdef 不改 #define 字面值);
+//   8.0 血统源码取 23、与数据基线一致,但 **#define 不进符号表 ⇒ 无二进制证据**
+//   (00 §10.2 六项不可判定之一)⇒ 取 23 是裁定不是观测。
+// 扫格公式 (2*(c/2)+1)² = 23² = 529(10 §5.1;c/2 是整数除,c 为奇数时 ≠ (c+1)²)。
+constexpr std::int32_t kSeeSize = 23;
+constexpr std::int32_t kSeeRadius = kSeeSize / 2; // 11
+
+bool visContains(const std::vector<SA::Net::ConnectionId> &v, SA::Net::ConnectionId c)
+{
+	return std::find(v.begin(), v.end(), c) != v.end();
+}
+
+SA::Domain::CharAppear makeAppear(SA::Net::ConnectionId who, const SA::Model::Player &p)
+{
+	SA::Domain::CharAppear a{};
+	a.entity_id = who;
+	a.floor = p.floor;
+	a.x = p.x;
+	a.y = p.y;
+	a.dir = static_cast<std::uint32_t>(p.dir);
+	return a;
+}
+
+} // namespace
+
+// ══ World::Impl 的视野广播方法(里程碑②)══════════════════════════════════
+
+// 扫 (cx,cy) 周围 529 格的 olink,收集其中的玩家会话(除 self)。
+//   ★ 10 §5.3 决策5:先扫格 + 聚合,不做订阅(视野连续变化,订阅维护成本可能更高,
+//     留到有实测数据之后)。
+std::vector<SA::Net::ConnectionId> World::Impl::collectVisible(std::int32_t cx, std::int32_t cy,
+                                                               SA::Net::ConnectionId self) const
+{
+	std::vector<SA::Net::ConnectionId> out;
+	for (std::int32_t j = cy - kSeeRadius; j <= cy + kSeeRadius; ++j)
+		for (std::int32_t i = cx - kSeeRadius; i <= cx + kSeeRadius; ++i)
+		{
+			if (!map.inBounds(i, j))
+				continue;
+			for (const SA::Net::ConnectionId c : olink[map.index(i, j)])
+				if (c != self)
+					out.push_back(c);
+		}
+	return out;
+}
+
+// 给一个会话 push 一条下行消息(找不到 / 无 session 则跳过;字节聚合由 kOutboundFlush 统一发)。
+template <typename M>
+void World::Impl::sendTo(SA::Net::ConnectionId to, const M &msg)
+{
+	const auto it = conns.find(to);
+	if (it == conns.end() || it->second.session == nullptr)
+		return;
+	(void)it->second.session->push(msg, it->second.outbound);
+}
+
+// 某会话进入视野 ⇒ 双向 CharAppear(视野对称:我看到你出现,你也看到我出现,char.c:4100)。
+void World::Impl::appearBetween(SA::Net::ConnectionId a, const SA::Model::Player &pa,
+                                SA::Net::ConnectionId b)
+{
+	const SA::Model::Player *pb = players.resolve(player_of_session.find(b));
+	if (pb == nullptr)
+		return;
+	sendTo(b, makeAppear(a, pa));  // b 看到 a 出现
+	sendTo(a, makeAppear(b, *pb)); // a 看到 b 出现
+}
+
+// A 移动 (ox,oy)→(p.x,p.y) 后的视野广播(扫格 diff,10 §5.2)。⚠️ olink 须**已更新到新位置**。
+void World::Impl::broadcastMove(SA::Net::ConnectionId mover, std::int32_t ox, std::int32_t oy,
+                                const SA::Model::Player &p)
+{
+	const auto old_vis = collectVisible(ox, oy, mover);
+	const auto new_vis = collectVisible(p.x, p.y, mover);
+
+	SA::Domain::CharMove mv{};
+	mv.entity_id = mover;
+	mv.x = p.x;
+	mv.y = p.y;
+	mv.dir = static_cast<std::uint32_t>(p.dir);
+
+	for (const SA::Net::ConnectionId b : new_vis)
+	{
+		if (visContains(old_vis, b))
+			sendTo(b, mv); // 一直可见 ⇒ b 看到 a 移动
+		else
+			appearBetween(mover, p, b); // 新进入 ⇒ 双向出现
+	}
+	for (const SA::Net::ConnectionId b : old_vis)
+	{
+		if (visContains(new_vis, b))
+			continue;
+		SA::Domain::CharDisappear dis{}; // 离开 ⇒ 双向消失
+		dis.entity_id = mover;
+		sendTo(b, dis); // b 看到 a 消失
+		SA::Domain::CharDisappear dis2{};
+		dis2.entity_id = b;
+		sendTo(mover, dis2); // a 看到 b 消失
+	}
+}
+
+// 出生 / 进图:与视野内每个玩家双向 CharAppear(原版进图 CHAR_sendCToArroundCharacter)。
+void World::Impl::broadcastSpawn(SA::Net::ConnectionId who, const SA::Model::Player &p)
+{
+	for (const SA::Net::ConnectionId b : collectVisible(p.x, p.y, who))
+		appearBetween(who, p, b);
+}
+
+// 离场 / 断线:给视野内每个玩家发 CharDisappear(who)。⚠️ 须在 olink 移除**之前**调(要 who 的位置)。
+void World::Impl::broadcastDespawn(SA::Net::ConnectionId who, std::int32_t x, std::int32_t y)
+{
+	SA::Domain::CharDisappear dis{};
+	dis.entity_id = who;
+	for (const SA::Net::ConnectionId b : collectVisible(x, y, who))
+		sendTo(b, dis);
+}
 
 // ══ tick(01 §3.1)═══════════════════════════════════════════════
 void World::tick()
@@ -1098,7 +1327,50 @@ void World::tick()
 		}
 	}
 
-	// ── 5. 角色循环 ──   ⬜ 阶段 2
+	// ── 5. 角色循环 —— 玩家段(批次 W.1。原 CHAR_Loop:4667 玩家 for + CHAR_walk_check:4583)──
+	//   ★ 全扫在线玩家:走路串非空 且距上次走够 walksendinterval ⇒ 走一步(CHAR_walkcall)。
+	//   ⚠️ 非玩家段(NPC/敌人 AI 摊还,CHAR_Loop:4712 游标 + EnemyMoveNum)留 W.3(依赖 kNpcSpawn);
+	//      视野广播 / 遇敌骰子 / 组队跟随各留其批。
+	for (auto &kv : s.conns)
+	{
+		Impl::Conn &c = kv.second;
+		if (c.session == nullptr || c.walk_seq.empty())
+			continue;
+		// 间隔门(CHAR_walk_check:4590):到点才走一步,走完把下次时刻推后 kWalkIntervalMs。
+		if (s.now_ms < c.next_walk_at_ms)
+			continue;
+		SA::Model::Player *p = s.players.resolve(s.player_of_session.find(kv.first));
+		if (p == nullptr)
+		{
+			c.walk_seq.clear(); // 无实体 ⇒ 丢弃走路串(不会再有落点)
+			continue;
+		}
+		// 消费首字符(CHAR_walkcall:730 ctodirmode + :849 &tmp[1])。
+		std::uint8_t dir = 0;
+		bool is_turn = false;
+		const std::int32_t ox = p->x;
+		const std::int32_t oy = p->y;
+		bool moved = false;
+		if (decodeDirChar(c.walk_seq.front(), dir, is_turn))
+			moved = walkStep(*p, s.map, s.map_attr, dir, is_turn);
+		// ⚠️ 非法字符也消费掉,不卡住整串(原版 ctodirmode 不校验,越界由 VALIDATEDIR 兜)。
+		c.walk_seq.erase(c.walk_seq.begin());
+		c.next_walk_at_ms = s.now_ms + kWalkIntervalMs;
+
+		// 里程碑②:位置变了 ⇒ 更新 olink(旧格摘、新格挂)+ 视野广播(扫格 diff)。
+		if (moved)
+		{
+			if (s.map.inBounds(ox, oy))
+			{
+				auto &oldcell = s.olink[s.map.index(ox, oy)];
+				oldcell.erase(std::remove(oldcell.begin(), oldcell.end(), kv.first),
+				              oldcell.end());
+			}
+			s.olink[s.map.index(p->x, p->y)].push_back(kv.first);
+			s.broadcastMove(kv.first, ox, oy, *p);
+		}
+	}
+
 	// ── 6. 定时业务 ──   ⬜ 阶段 2
 	// ── 7. 出站聚合 ──   ⬜ 阶段 2(CA/CD 视野聚合;1.5 无视野)
 	//
@@ -1432,6 +1704,13 @@ void World::onDisconnected(SA::Net::ConnectionId id)
 	const SA::Model::EntityHandle ph = s.player_of_session.find(id);
 	if (SA::Model::Player *p = s.players.resolve(ph); p != nullptr)
 	{
+		// 里程碑②:先给视野内玩家发 CharDisappear + 从 olink 摘除(都要 p 的位置,须在释放前)。
+		s.broadcastDespawn(id, p->x, p->y);
+		if (s.map.inBounds(p->x, p->y))
+		{
+			auto &cell = s.olink[s.map.index(p->x, p->y)];
+			cell.erase(std::remove(cell.begin(), cell.end(), id), cell.end());
+		}
 		for (std::size_t i = 0; i < SA::Model::kMaxPetHave; ++i)
 		{
 			if (!p->pets[i].valid())
@@ -1497,6 +1776,19 @@ void World::onSessionReady(SA::Net::SessionId id)
 		else
 		{
 			s.player_of_session.insert(id, ph);
+			// ── 出生点(批次 W.1)──────────────────────────────────────
+			//   ⚠️★ 与名字同族的临时形态:真出生点来自存档 / 登录点(阶段 2)。
+			//     1.5 没有 ⇒ 给 fixture 地图中心,让玩家有个能走的合法落点;
+			//     ⇒ 阶段 2 接选角时由登录点坐标取代(与下面名字留空同期删/换)。
+			if (SA::Model::Player *np = s.players.resolve(ph); np != nullptr)
+			{
+				np->floor = 0;
+				np->x = s.map.width / 2;
+				np->y = s.map.height / 2;
+				// 里程碑②:入 olink + 与视野内玩家双向 CharAppear(原版进图 sendCToArround)。
+				s.olink[s.map.index(np->x, np->y)].push_back(id);
+				s.broadcastSpawn(id, *np);
+			}
 			// ⚠️★ 名字**留空**:1.5 没有选角 ⇒ 没有名字的来源。
 			//    ★ 不编一个 "player_1" 之类的占位 —— 那会让「名字是哪来的」看起来
 			//      已经有答案了。11 §14 记的 DR-TS5 正是这么被撞出来的:定长 POD 强制
@@ -1559,6 +1851,48 @@ void World::onBattleCommand(SA::Net::SessionId id,
 
 	b.commands.commands[slot] = cmd;
 	b.commands.present[slot] = true;
+}
+
+void World::onWalk(SA::Net::SessionId id, const SA::Domain::WalkRequest &req)
+{
+	// 移植 lssproto_W_recv(callfromcli.c:503)的净核:防瞬移 + 碰撞预检 + 排走路串。
+	//   ⚠️ 划外(各有归属):nuke 反作弊(:517,自由服魔改)· 交易模式门(:513,交易系统)·
+	//      组队分支(walk_init:947,组队系统)。
+	Impl &s = *_impl;
+	const auto it = s.conns.find(id); // 1.5:SessionId == ConnectionId
+	if (it == s.conns.end())
+		return;
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(id));
+	if (p == nullptr)
+		return;
+
+	// (0,0) 门(lssproto_W_recv:532):照抄 —— 原版历史调试门,坐标(0,0)直接忽略。
+	//   ⚠️ 纪律⓪「照抄不声称要紧」:fixture 出生点在地图中心、用例避开(0,0),
+	//      真实地图出生点也不在(0,0)。
+	if (req.x == 0 && req.y == 0)
+		return;
+
+	// 防瞬移(:543):客户端声明坐标离服务端当前 >1 格 ⇒ 不信,按当前坐标处理。
+	std::int32_t cx = req.x;
+	std::int32_t cy = req.y;
+	const std::int32_t ddx = p->x - cx;
+	const std::int32_t ddy = p->y - cy;
+	if (ddx > 1 || ddx < -1 || ddy > 1 || ddy < -1)
+	{
+		cx = p->x;
+		cy = p->y;
+	}
+	// 碰撞预检(:552):声明的目标格不可走 ⇒ 忽略本次请求。
+	//   ⚠️ 原版拉回当前后仍排串(direction 串会走回合法处);我们更严:目标非法直接不排,
+	//      理由是 fixture 期无预测回滚需求,严格拒绝更好定位问题。真实客户端预测接入时再放宽。
+	if (!mapWalkable(s.map, s.map_attr, cx, cy))
+		return;
+
+	// 排走路串(walk_init:948 → walk_start:891 setWorkChar WALKARRAY)。
+	//   ⚠️ FixedStr<32> 已保证 ≤32(原版 walk_init:939 的长度门);实际逐步移动由
+	//      kCharLoop 玩家段按 walksendinterval 消费(CHAR_walkcall)。
+	it->second.walk_seq = std::string(req.direction.c_str());
+	it->second.next_walk_at_ms = 0; // 立即可走第一步(now_ms >= 0)
 }
 
 void World::onSessionClosed(SA::Net::SessionId id)
@@ -1650,6 +1984,15 @@ int World::playerExp(SA::Net::SessionId session) const
 	const SA::Model::Player *p =
 	    _impl->players.resolve(_impl->player_of_session.find(session));
 	return p == nullptr ? -1 : static_cast<int>(p->exp);
+}
+
+World::PlayerPos World::playerPos(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return PlayerPos{}; // valid == false
+	return PlayerPos{true, p->floor, p->x, p->y, p->dir};
 }
 
 int World::playerPetSlotsUsed(SA::Net::SessionId session) const

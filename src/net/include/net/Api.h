@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "domain/battle_events.sa.h"
+#include "domain/world_map.sa.h"
 #include "ids.h"
 #include "transport/envelope.sa.h"
 #include "transport/handshake.sa.h"
@@ -264,6 +265,8 @@ class SessionHost
 	// 客户端上行的战斗指令(0x0210)。
 	virtual void onBattleCommand(SessionId id,
 	                             const SA::Domain::BattleCommand &cmd) = 0;
+	// 客户端上行的走路请求(0x0301,批次 W.1)。★ 防瞬移与碰撞是世界态判定 ⇒ 归宿主。
+	virtual void onWalk(SessionId id, const SA::Domain::WalkRequest &req) = 0;
 	virtual void onSessionClosed(SessionId id) = 0;
 
   protected:
@@ -310,6 +313,7 @@ class Session
 	bool handleHandshake(const EnvelopeView &env, std::vector<std::uint8_t> &out);
 	bool handlePing(const EnvelopeView &env, std::vector<std::uint8_t> &out);
 	bool handleBattleCommand(const EnvelopeView &env);
+	bool handleWalkRequest(const EnvelopeView &env);
 
 	SessionId _id;
 	std::uint32_t _protocolVersion;

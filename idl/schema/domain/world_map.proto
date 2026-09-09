@@ -1,0 +1,63 @@
+// domain/world_map.proto —— 地图与移动(批次 W.1)
+//
+// 归属:schema/domain/(与 battle_events / window 同级)。
+//
+// ★ 本文件的顶层消息:
+//   · WalkRequest —— **上行**,玩家走路请求,1:1 对应原版 W 协议
+//     (lssproto_W_recv,展开视图 callfromcli.c:503)。
+//   ⚠️ 视野**下行**(CharAppear / CharDisappear / CharMove,原版 CA/CD)留里程碑②,
+//     届时一并加进本文件 —— 那是"能看到彼此移动"的下行契约。
+
+syntax = "proto3";
+
+package sa.domain;
+
+import "sa_options.proto";
+
+// 玩家走路请求(上行,原版 W)。
+//   x / y      = 客户端声明的目标坐标。★ 服务端权威:防瞬移(|Δ|>1 拉回)+ 碰撞校验
+//                (10 §4.1;lssproto_W_recv:552 `MAP_walkAble` 失败即拉回),不信客户端坐标。
+//   direction  = 方向串,每字符一步 —— ctodirmode(char_walk.c:1398)解码:
+//                小写 a-h = 移动 8 方向 / 大写 A-H = 转身。kCharLoop 玩家段按
+//                walksendinterval 间隔逐字符消费(CHAR_walkcall)。
+//   ⚠️ 不含 floor:原版从当前角色取(lssproto_W_recv:552 `CHAR_getInt(_,CHAR_FLOOR)`)。
+message WalkRequest {
+  option (sa.msg_id) = 0x0301;
+
+  sint32 x         = 1;
+  sint32 y         = 2;
+  // 原版 CHAR_walk_init(char_walk.c:939)对 `strlen(direction) > 32` 直接拒。
+  string direction = 3 [(sa.max_len) = 32];
+}
+
+// ── 视野下行(里程碑②)。★ 对应原版扫 529 格逐格发的 C / ACTWALK / CD ──────────
+//   entity_id = 该角色的会话标识(客户端据此新建 / 更新 / 移除角色)。
+//   ⚠️ 视野对称(同视野常量 23):A 见 B ⟺ B 见 A(CHAR_sendCToArroundCharacter:4100)。
+
+// 角色进入视野(原版 lssproto_C_send,char_walk.c:1019 / char.c:4151)。
+//   ⚠️★ 只带位置:原版 C 串还含图号 / 名字 / 各种 effect,但 1.5 的 Player 无选角 ⇒
+//      无图号、名字恒空(同 BattleSelfInfo.menu_flags 恒 0 那族登记残缺)⇒ 客户端画占位角色。
+//      有选角(阶段 2)后再扩字段,不在此建恒空的名字 / 图号。
+message CharAppear {
+  option (sa.msg_id) = 0x0302;
+  uint64 entity_id = 1;
+  sint32 floor     = 2;
+  sint32 x         = 3;
+  sint32 y         = 4;
+  uint32 dir       = 5;
+}
+
+// 视野内角色移动一步(原版 CHAR_ACTWALK 广播,char_walk.c:469)。
+message CharMove {
+  option (sa.msg_id) = 0x0303;
+  uint64 entity_id = 1;
+  sint32 x         = 2;
+  sint32 y         = 3;
+  uint32 dir       = 4;
+}
+
+// 角色离开视野(原版 CD,CHAR_sendCDArroundChar:4241)。
+message CharDisappear {
+  option (sa.msg_id) = 0x0304;
+  uint64 entity_id = 1;
+}

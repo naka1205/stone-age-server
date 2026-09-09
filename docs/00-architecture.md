@@ -3914,6 +3914,86 @@ watched 路径」求值 ⇒ 只因 R.1 一笔前推**。⚠️ 不判「我这�
 
 ---
 
+### 9.0.42 ★★ 批次 W.1 —— 移动系统:玩家移动 + 529 格视野广播(2026-09-09)
+
+> 遇敌链 + 战果结算之后,补上「玩家如何在世界里移动」—— tick 的 `kCharLoop`(第 5 步)
+> 与 `kOutboundFlush`(第 7 步)从占位变实装。⚠️ 用户裁定验证边界含**视野**(能看到彼此移动),
+> 故一个批次里连做两个里程碑:① 玩家移动 + 碰撞 · ② 529 格视野广播。
+
+交付面(一个 commit,~500 行):
+- **① 玩家移动 + 碰撞**:`Model::Player` 加位置(`floor/x/y/dir`)· `world/Map`(数据结构 + `mapWalkable`
+  —— 1:1 移植 `MAP_walkAbleFromPoint`(展开视图 `map/map_deal.c:24`)的地面三值分支 —— + fixture)·
+  `WalkRequest`(0x0301,新 `domain/world_map.proto`)上行 + `Session::handleWalkRequest` + `World::onWalk`
+  (移植 `lssproto_W_recv`(`callfromcli.c:503`)净核:防瞬移 + 碰撞预检 + 排走路串)· `kCharLoop` 玩家段
+  (`CHAR_Loop:4667` + `CHAR_walk_check:4583` + `walk_move` 的碰撞/坐标更新核心)· `playerPos` 观察面。
+- **② 529 格视野广播**:`olink` 格子对象索引 · `CharAppear/CharMove/CharDisappear`(0x0302-0x0304)下行 ·
+  出生 / 移动 / 断线三处维护 olink + 扫格 diff 广播(视野对称 ⇒ 进出双向 CA/CD)· `kOutboundFlush` 复用既有 flush。
+- 用例 `world_map` **10 例 / 63 断言**(地图 3 · 移动 5 · 视野 2),含 `VisMirror`(仿 §9.0.16 `ClientMirror`,只解 CA/CD/Move)。
+
+#### ① 两步移动机制正是「前置是 kCharLoop」的实证
+
+原版走路是**两步**:`lssproto_W_recv` → `CHAR_walk_init`(char_walk.c:937)把 direction 串排进 work 区
+(`CHAR_WORKWALKARRAY`);`CHAR_Loop` 玩家段每 tick 全扫在线玩家 → `CHAR_walk_check` 按 `walksendinterval`
+间隔逐字符消费(`CHAR_walkcall`)→ `walk_move` 走一格。⇒ 玩家移动执行确实在 `kCharLoop`,这是「遇敌前置是
+移动系统 + kCharLoop」的实证。走路间隔 = `csa8.0/setup.cf` `walkinterval=2500` × 100us(char.c:4590 判据)
+= **250ms**。方向字符 `CHAR_ctodirmode`(char_walk.c:1398):小写 `a`-`h` 移动 / 大写 `A`-`H` 转身,
+`dir` 0-7 照 `CHAR_dxdy[8]`(char.c:2325,北起顺时针)。⚠️ 走路串是运行时态(work 区)⇒ 放 `World::Impl::Conn`
+不放 `Model::Player`(后者只依赖标准库,且是持久态)。
+
+#### ② 碰撞可 fixture,地图放 world/(同 EnemyEncounter)
+
+`MAP_walkAble` = 两个查表(`getTileAndObjData` 取 tile/obj 图元号 + `getImageInt(WALKABLE)` 查图元属性表)
+⇒ fixture 地图(小网格 + walkable 属性表)接口不变,真实地图(LS2MAP,1,235 图)走 **D 线内容导入**(终点入库,
+非运行时读 txt)。★ 地图数据放 `world/`(Api.h)而非 `shared/`:内容数据形状、服务端权威碰撞、客户端只预测
+(10 §4.1),同 `EnemyEncounter`(M.5)的判据。
+
+#### ③ ★ 视野常量 23 是裁定不是观测(落在 §10.2 不可判定项上)
+
+展开视图 unifdef_80 的 `CHAR_DEFAULTSEESIZ` 是 **20**(char_base.h:58 —— 8.5 血统,unifdef 只处理条件编译、
+**不改 #define 字面值**),而 §5.1 / 10-world-map §9 决策取 **23**(8.0 血统源码 + 与数据基线一致)。
+⚠️ #define 不进符号表 ⇒ **无二进制证据**,正是 §10.2 六项不可判定之一(「视野常量 20 vs 23」)⇒ 取 23 是
+**裁定不是观测**,代码注释标明。扫格公式 `(2*(c/2)+1)²`(c/2 整数除,c=23 奇数 ⇒ ≠ (c+1)²)= 23² = **529**。
+
+#### ④ 视野对称 ⇒ CA/CD 双向;扫格 diff(§5.3 决策5:先扫格不订阅)
+
+A 移动后,扫 A **旧**位置与**新**位置周围 529 格的 olink,diff 两个可见集:仍可见 ⇒ B 收 A 的 `CharMove`·
+新进入 ⇒ 双向 `CharAppear`(A 见 B 出现、B 见 A 出现,因视野对称)· 离开 ⇒ 双向 `CharDisappear`。
+出生 / 断线同理(单向 appear / disappear)。⚠️ `CharAppear` **只带位置**:1.5 的 Player 无选角 ⇒ 无图号、
+名字恒空(同 §9.0.16 ③ `menu_flags` 恒 0 那族登记残缺)⇒ 客户端画占位角色。
+
+#### ⑤ 两处守卫 / 自查抓到的问题
+
+- ★ **`module_boundaries` 抓到 `Map.h` 违反「include/ 只暴露 Api.h」**(§3.1)⇒ 把 Map 的公开类型并入
+  `Api.h`(同 `EnemyEncounter`),视野广播 helper 做成 **`World::Impl` 成员方法**(要访问 olink/conns/players
+  等私有状态,而 `conns` 的 value `Conn` 是 Impl 私有嵌套 ⇒ context struct 装不下,不能像 `applyEvents`
+  那样用自由函数)。
+- **`next_walk_at_ms` 修一个时序 bug**:初版用「上次走一步的时刻」+ `last==0` 表示「没走过」,而 ManualClock
+  从 0 起 ⇒ **t=0 走完后 last 仍是 0**,与「没走过」无法区分、间隔门失效 ⇒ 改用「下次可走的最早时刻」
+  (同 `BattleInstance::next_turn_at_ms`)。★ 这个 bug 是**写用例时**发现的(第二 tick 不该走却走了)。
+
+#### ⑥ 复验
+
+`ctest` **16/16** · `ci_verify` 六项全过(`SA_WERROR` 清洁构建 **0 告警**)· `code_format` · `dr_table` ·
+`module_boundaries`。★ **反向验证 4 处逐条精确转红后回绿**:① 方向反向(`+dx`→`-dx`,移动系用例)· ② 间隔门
+失效(串消费用例的「第二 tick 不走」)· ③ 不发 `CharMove`(视野 move)· ④ 不发 `CharDisappear`(视野 disappear);
+每处只让对应用例红、其余全绿(注入精确)。⚠️ 又踩 §9.0.39 的 **make 秒级 mtime 坑**,`sleep` 隔秒 + `touch`
+确认重编才采信。
+
+#### ⑦ ⚠️ 未做 / 登记残缺
+
+| 项 | 归属 |
+|---|---|
+| NPC/敌人 AI 摊还(`CHAR_Loop` 非玩家段:游标滑动窗口 + `getCharLoopTime` 时间片 + `EnemyMoveNum` **8.0=10**)| **W.3**(依赖 `kNpcSpawn` 敌人实体来源)|
+| 遇敌触发(`char_walk.c:585` `rand()%(120*getEnemyAction())` + 传送点抑制)→ 接 M.5–M.7 → `spawnEnemyToField` 批量入场 | **W.4** ⇒ **「走动 → 遇敌 → 战斗 → 拿经验」闭环** |
+| 脏槽跟踪(`01` §13 欠债 20②)| `kCharLoop` 实装后可对齐 `EntityPool.h` 文末,建议独立小批 |
+| `CharAppear` 无名字 / 图号 | Player 无选角来源 ⇒ 客户端画占位(同 `menu_flags` 恒 0 族)|
+| 客户端地图场景表现层(消费 CA/CD/Move)| 客户端批次;本批服务端侧 `VisMirror` 断言线上契约自洽(同 1.4 分工)|
+| 组队移动(`CHAR_PARTY_CLIENT`)· 重叠事件(`RunCharOverlapEvent`)· nuke 反作弊 | 各依赖组队 / NPC-Lua 系统;nuke 是自由服魔改非 8.0 净核 ⇒ 划外 |
+| 真实地图导入(LS2MAP)| D 线内容导入(替换 fixture 数据源,接口不变)|
+| ★★ **锁定 ref 前推** | `shared/model/Player.h`(位置字段)+ `idl/generated`(world_map)= watched 路径 ⇒ **必须前推 `shared-v0.16.0`** + 客户端换 pin 复验(推送窗口待办)· 只在 Apple clang 21 跑过,GCC/MSVC 交 CI |
+
+---
+
 ### 10.1 R-b:无解的结构性事实
 
 每条标【单源未交叉】/【8.5 源码推定】的规则,实现时**只能靠人工复核**,没有任何自动化验证手段。
@@ -4019,3 +4099,4 @@ watched 路径」求值 ⇒ 只因 R.1 一笔前推**。⚠️ 不判「我这�
 | 2026-09-09 | ★★ **批次 M.6 —— 遇敌:坐标 → 区域 → 编组**(新增 **§9.0.37**;`11` 新增 **DR-DT13** + §2.15,主表 124 → **125** 行)。补 M.5 留下的「选哪几行」的前两跳:`EncountArea`(`encount.txt` 33 列)+ `EnemyGroup`(`group1.txt` 24 列)+ `findEncountArea` / `findEnemyGroup` / `pickEnemyGroup`;`world_tick` 62 → **66 例 / 979 断言**。★ **切分点**:原版 `ENEMY_getEnemy` 195 行做四件事,而后两段需要**敌人表全表 + 模板表全表 + NPC 旗标**三个数据源(大怪布阵要查 `E_T_SIZE`)⇒ 本批做前两段,界面是**选中的编组行下标** —— 同 M.5「切在函数入参上,不切在做一半」。★ **四条裁定**(DR-DT13):道具门**完整实现**(判据只需「持有哪些道具 ID」= 快照 ⇒ 入参,不破 D2;调用方暂传空背包 ⇒ ★ 对空背包玩家**与原版 100% 一致**,是**依赖未就绪不是留空的门**;实测连带 **25/969 个区域(2.58%)在空背包下完全不遇敌**、104 个组合变化)· 坏组**跳过不照抄**(原版依赖 `GROUP_getInt` **越界返回 -1** 的防御性副作用 ⇒ 两道门被读成「无门」而坏组入选;实测该情形 0 次)· NPC 事件三列**建字段门不实现**(0.76%,8 行)· 两处线性扫**照原样保留**(`01` §8.2 约束的是**实体索引**;⚠️ `findEnemyGroup` 单次遇敌最多调 11 次 × 1220 行,将来值得换 `unordered_map`)。★★ **`zorder` 兼任启用开关**:坐标匹配后还有`if (curZorder > 0)` 不满足就整行跳过,多个匹配取最大且判据是**严格 `>`** ⇒ 相等时保留先遇到的 ⇒ **顺序敏感,D 线入库不得重排行**;⚠️ 实测 1050 行 zorder **全部 > 0** ⇒ 那半个语义一次都不触发,**只能靠手造数据钉住**。★ 另一处配对:载入期 `width = max−min`(**不 +1**)而 `PointInRect` 是**闭区间** ⇒ 语义是「两端都含」,**单点区域也匹配**;⚠️★ 同一个 `RECT` 在同一文件里被两种口径解读(`clipRect` 用 `x+width−1`)。⚠️★★★ **本批最该被读的一段(§9.0.37 ④):两处我当成行为判据的细节,实测是等价写法** —— 抽签上界 `found−1` 与半个条件 `wr[i] != 0`,反向验证注入**各 0 条转红**,穷举(1..4 槽 × 权重 {−1,0,1,2,3} × r 遍历 [0,Σ−1],**2,580 组**)**差异均为 0** ⇒ 上界等价、`wr[i] != 0` **冗余**(权重 0 不让 acc 增长,而 `r < acc_prev` 若成立前一轮已 break;i==0 要求 r<0 而 r>=0)。⚠️ 而我的注释原文写的是「那半个条件要紧:少了它会选中权重 0 的槽」—— **那句话是错的**,用例也据此写了一条没有区分力的断言。⇒ ★★★ **同一族教训第三次,而三次形态各不相同**:§9.0.35 ⑤ 是**数据的形状**掩盖错误 · §9.0.36 ⑥ 是**断言的形状**没有区分力 · **本批是理由本身** —— 我把「不理解为什么这么写」补完成「它一定有理由」,而那个理由不经检验。⇒ 处置不是删源码原文,而是把注释改成**「实测等价,照抄但不声称要紧」**,并让用例明说它守的是**性质**;⚠️ **别再给冗余分支补断言** —— 冗余的分支没有能区分它的输入。★ 另核出一处「形式相同、作用域不同」:`encount.c` 里 c1-c10/c31-c33 的 `continue` 跳 `while`(**丢整行**)而 c11-c30 那个跳内层 `for`(**只跳该列**),⚠️ **两处代码看起来一模一样** ⇒ 按「看起来一样」处理会错误地丢掉合法行;★ 这是「名字在骗人」的互补形态:**名字对、形式对,作用域不对**。★ 顺带核出原版一处复制粘贴缺陷(`encountprob_min` 被赋两次、`_max` 从未获默认值,实际无后果)。**复验**:`ctest` 15/15 · `ci_verify` 六项全过 · `dr_table` 125 行 · `code_format` 过 · ★ **反向验证八处**(六处精确转红:闭区间改半开 3 · zorder 门删掉 2 · zorder 比较改 >= 2 · 道具门反向 6 · 无候选也摇一次 5 · 返回槽号而非行下标 10;另两处**经穷举证明等价** ⇒ 不红是正确的),恢复后逐字节比对无残留并复跑回绿。⚠️★ 落地时被守卫抓到 **19 处格式违规** ⇒ 欠债 24 第二次兑现。⚠️★ **顺带补上 R.1 的一处漏项,而它正是 R.1 自己预言的那类缺陷**:R.1 把「M.5 归一理由失效」改在三处代码注释 + `00` + `11` §2.14,**漏了 `11` §2 主表 DR-DT12 那一行** —— 而 §9.0.36 ④ 的原话正是「注释里留着被推翻的理由和代码里留着失效逻辑是同一类缺陷」⇒ ★★ **「我已经全改了」这个判断本身需要一次搜索,不是回忆**。⚠️ **未做**:第三跳(收候选 + `entrymax` 摇号 ⇒ **`CREATEMAXNUM` 的第一个消费点** + 逐只抽 + 同族上限 + 大怪布阵)· 「要不要遇敌」整个不在这条链上(遇敌率在 `char_walk.c`,前置是移动系统 + `kCharLoop` 占位;★ `06` §F:`EN` **不是网络入口**,玩家无法主动请求遇敌)· 表的**载入器不做**(判据同 M.5:D 线终点是入库)· 本批改动全在 `src/world/` ⇒ watched 路径零改动,但 R.1 已改 `shared/rules/` ⇒ **推送窗口仍要打 tag**(欠债 26),两批合一个窗口 · 只在 Apple clang 21 跑过 |
 | 2026-09-09 | ★★ **批次 M.7 —— 遇敌:编组 → 敌人列表**(新增 **§9.0.39**;`11` 新增 **DR-DT14** + §2.16,主表 125 → **126** 行)。遇敌链(`ENEMY_getEnemy` 四段)收尾:移植第三、四段(`:1356-1466`)—— 收候选 + `entrymax=RAND(1,min(enemymaxnum,ΣCREATEMAXNUM))` + 逐只抽 + 同族上限门 + 大怪布阵。交付 `EnemyTemplate` 加 `temp_no`/`size` · `EnemyEncounter` 加 `create_max_num`(c8,兑现 M.5 文末 ① 预告)· `findEnemyEncounter`/`findEnemyTemplate`/`rollEnemyList` 三个自由函数;`world_tick` 66 → **74 例 / 1033 断言**。★ **四条裁定**(DR-DT14):外键运行时线性扫(原版载入期缓存,我们无载入期 ⇒ 找不到 → -1 等价)· 大怪布阵完整实现 · `ENEMY_RandomEnemyArray` 不移植(M.5 登记)· 产出紧凑 `vector` 替代定长数组。⚠️★★★ **本批最该被读的一段(§9.0.39 ③):反向验证注入「删 `bigcnt>=5` 门」0 条转红** —— 第 6 只大怪走 `i>4` 换位、而此时前 5 位必全大怪(无 NORMAL 可换)⇒ `continue`,out **同样 5 只** ⇒ 门与「i>4 换位失败」在 out 层面**等效**,唯一独立可观察后果是 **rng 取数次数**(门 `entrymax--` 让循环 9 次结束,删掉空转到 101 次)⇒ 补 `calls()` 断言后转红;★★ 同 §9.0.36 ⑥,形态新:两个看似独立的条件在数据结构约束下退化等效。★★ **大怪布阵是真实主路径**:实测 `enemybase1.txt` **BIG 占 533/1053 = 50.6%**,与 M.6 `zorder`(全不触发)相反 ⇒ 逐分支覆盖。★ 实测边界:`CREATEMAXNUM` **min=1/max=63 无 0 无负** ⇒ `entrymax` 不触发退化区间;随机区间 `[945,956]∪[964,969]` 被 group1.txt 引用 **18 槽/6 行(0.49%)**。⚠️★ **反向验证过程踩到 make 秒级 mtime 坑**:连续「sed→build→跑」落同一秒 ⇒ make 复用陈旧 `.o` ⇒ 跑上一个注入的二进制(注入 5 假报转红);同族「陈旧构建目录钉 CACHE」,处置每次注入 `touch` 源 + 确认编译日志出现 `World.cpp.o`。**复验**:`ctest` 15/15 · `ci_verify` 六项全过(全新目录 build/m7 · SA_WERROR=ON 0 告警)· `code_format` 过 · `dr_table` **126 行** · ★ **反向验证六处**(四处真判据精确转红 · 两处等价/冗余 0 转红,与 DR-DT13 ④ 同)。★ 本批全在 `src/world/` ⇒ watched 路径零改动 ⇒ 锁定 ref 不前推。 |
 | 2026-09-09 | ★★ **批次 战果结算 —— EXP + 战斗结束经验分配 + BattleResult 下发**(新增 **§9.0.40**;`11` 新增 **DR-DT15** + §2.17,主表 126 → **127** 行;`01` §13 欠债表补残留)。遇敌链收尾后第一条「打赢有回报」的闭环。**敌人 EXP/DUELPOINT 判定树**(`enemy.c:1101-1107`,落 `spawnEnemy`;⚠️★ 哨兵是 -1 ⇒ `EnemyEncounter::exp` 默认取 -1 而非 0)· **`enemyExp` + `enemybaseexptbl` 全放 world**(用户裁定 —— 客户端不算经验、服务端权威;★ 74 级递减异常 959→956 照抄不修)· **玩家实拿走等级差衰减**(`BATTLE_AddExp` `EXPGET_MAXLEVEL=5`/`DIV=15`,累加 `Player.exp`,**战斗结束统一结算** ⇒ 总量与逐死亡等价、时机在回合末)· 下发独立顶层消息 **`BattleResult`**(`0x0206`,不进 `BattleEvent` union,避 8KB 红线)。⚠️★ **`enemyExp` 是 world 首个本地浮点公式**(`x*y+z`,GCC/clang 会 FMA 合并、MSVC 不)⇒ 给 `sa_world` 补 `-ffp-contract=off`(照 `sa_shared`,让三平台 CI 逐位一致从运气变纪律)。★★ **战果链耦合三类不可移植项,边界据证据划(非偷懒)**:升级(走 `exp.txt`、D 线未导入 + 成长域,**不撞** `fmdplevelexp` —— 那是家族声望)· 金钱(经济域 `GoldLedger`)· 掉落(道具域)· 决斗点分配(PvP/saac 域,只建初值 + `dpbattle` 判定)· 自由服魔改(VIP/`getBattleexp`/`Free*`/`EXPUP`,非 8.0 净核 ⇒ 恒等)—— 全部划出登记。⚠️★ `dpbattle` 门在「决斗点怪 exp=0」下无独立可观察后果(同 DR-DT13④/DR-DT14③ 等效族),保留因是源码语义。**复验**:`ctest` **15/15** · `ci_verify` 六项全过(SA_WERROR 清洁构建 0 告警,GCC `-Wshadow` 一处 `br` 改名)· `code_format` 过 · `dr_table` **127 行** · ★ **反向验证三处逐条精确转红**(异常值 956→985 · 衰减 `<=5`→`<=99` · 判定树 `<=0`→`<0`,恢复后绿、源码逐字节一致;⚠️ 恢复又踩 make 秒级 mtime 坑 ⇒ `sleep` 隔秒重编才采信)+ idl smoke 加 `BattleResult` 往返/截断。★★ **`shared/model`(Enemy/Player 加字段)+ `idl/generated`(BattleResult)有改动 ⇒ watched 路径变动 ⇒ 锁定 ref 必须前推 `shared-v0.15.0`**(推送窗口待办)。 |
+| 2026-09-09 | ★★ **批次 W.1 —— 移动系统:玩家移动 + 529 格视野广播**(新增 **§9.0.42**;`11` 新增 **DR-DT16** + §2.18,主表 127 → **128** 行;`01` §13 欠债 20② 推进 + 新增登记残缺)。tick 的 `kCharLoop`(第 5 步)+ `kOutboundFlush`(第 7 步)从占位变实装;用户裁定验证边界含视野 ⇒ 一批做两个里程碑。① **玩家移动**:`Player` 加位置 · `world/Map`(fixture + `mapWalkable` 移植 `MAP_walkAbleFromPoint`)· `WalkRequest`(0x0301)+ `onWalk`(移植 `lssproto_W_recv` 净核:防瞬移 + 碰撞预检 + 排走路串)· `kCharLoop` 玩家段按 `walkinterval=2500×100us=250ms` 逐字符消费(`CHAR_walk_check`/`walkcall`;`ctodirmode` 小写移动 / 大写转身,`CHAR_dxdy[8]` 八方向)。② **529 格视野**:`olink` 格子索引 + `CharAppear/Move/Disappear`(0x0302-04)+ 扫格 diff 双向广播(视野对称)。用例 `world_map` **10 例 / 63 断言**(含 `VisMirror`)。★ **视野常量取 23 是裁定**(§5.1/§10.2):展开视图 `CHAR_DEFAULTSEESIZ=20`(8.5 血统,unifdef 不改 #define),8.0 血统取 23、无二进制证据。⚠️★ **两处守卫抓到**:`module_boundaries` 抓 `Map.h` 违反「只暴露 Api.h」⇒ Map 并入 Api.h + 视野 helper 做成 `Impl` 成员;`next_walk_at_ms` 修 ManualClock t=0 时序 bug(写用例时发现)。**复验**:`ctest` **16/16** · `ci_verify` 六项 · `SA_WERROR` 0 告警 · ★ **反向验证 4 处**(方向反向 · 间隔门 · 不发 Move · 不发 Disappear)逐条精确转红后回绿(踩 make 秒级 mtime 坑,`sleep` 隔秒)。⚠️ **未做**:AI 摊还(W.3,依赖 `kNpcSpawn` + `EnemyMoveNum` 8.0=10)· 遇敌触发(W.4 ⇒ 闭环)· 客户端表现层 · 真实地图(D 线)· ★★ **`shared/model` + `idl/generated` 改 ⇒ 前推 `shared-v0.16.0`**(推送窗口待办)· GCC/MSVC 交 CI。 |

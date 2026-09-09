@@ -30,11 +30,17 @@ class RecordingHost final : public SessionHost
 		commands.push_back(cmd);
 		last_command_session = id;
 	}
+	void onWalk(SessionId id, const SA::Domain::WalkRequest &req)
+	{
+		walks.push_back(req);
+		last_command_session = id;
+	}
 	void onSessionClosed(SessionId id) { closed.push_back(id); }
 
 	std::vector<SessionId> ready;
 	std::vector<SessionId> closed;
 	std::vector<SA::Domain::BattleCommand> commands;
+	std::vector<SA::Domain::WalkRequest> walks;
 	SessionId last_command_session = 0;
 };
 

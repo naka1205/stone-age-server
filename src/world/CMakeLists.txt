@@ -4,6 +4,7 @@
 
 add_library(sa_world STATIC
     World.cpp
+    Map.cpp
 )
 
 target_include_directories(sa_world

@@ -89,6 +89,8 @@ bool Session::handleFrame(const std::uint8_t *frame, std::uint32_t len,
 		return handlePing(env, out);
 	case SA::IDL::MsgId::BattleCommand:
 		return handleBattleCommand(env);
+	case SA::IDL::MsgId::WalkRequest:
+		return handleWalkRequest(env);
 	default:
 		// ⚠️ 未知或方向错的消息 ⇒ 协议违规,关闭连接。
 		//   不"忽略并继续":那会让客户端的 bug 表现为"服务端没反应",
@@ -184,6 +186,28 @@ bool Session::handleBattleCommand(const EnvelopeView &env)
 	//   net 只负责"这条消息在这个状态下允不允许出现"。
 	if (_host != nullptr)
 		_host->onBattleCommand(_id, cmd);
+	return true;
+}
+
+bool Session::handleWalkRequest(const EnvelopeView &env)
+{
+	// ⚠️ 只有在世(kOnline)的会话能走路 —— 同 handleBattleCommand 的取向。
+	if (_state != SessionState::kOnline)
+	{
+		_lastRejectMsgId = env.msg_id;
+		return false;
+	}
+
+	SA::IDL::Reader r(env.body, env.body_len);
+	SA::Domain::WalkRequest req;
+	decode(r, req);
+	if (!r.ok())
+		return false;
+
+	// ★ 防瞬移与碰撞校验是**世界态**判定(要读地图与角色位置)⇒ 归宿主的 onWalk,
+	//   net 只负责"这条消息在这个状态下允不允许出现"(同 onBattleCommand)。
+	if (_host != nullptr)
+		_host->onWalk(_id, req);
 	return true;
 }
 

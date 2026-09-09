@@ -70,6 +70,16 @@ struct Player
 	//   见 `World.cpp` finished 段;M.1 起「不建没人用的字段」,真做升级那批再建)。
 	std::int32_t exp = 0;
 
+	// ── 位置(批次 W.1。原 CHAR_FLOOR / CHAR_X / CHAR_Y / CHAR_DIR)──────────
+	//
+	// ★ 服务端权威(10 §4.1):客户端只做预测,服务端校验碰撞后写这里。
+	// ⚠️ 走路的**运行时**态(方向串 + 上次走一步的时刻)不在此 —— 那是原版 work 区
+	//    (CHAR_WORKWALKARRAY / WORKWALKSTARTSEC),不存档、生命周期随连接 ⇒ 放 World::Impl::Conn。
+	std::int32_t floor = 0;
+	std::int32_t x = 0;
+	std::int32_t y = 0;
+	std::uint8_t dir = 0; // 0-7 八方向(CHAR_ctodirmode 的 dir 值域)
+
 	// ── 宠物槽操作 ────────────────────────────────────────────────
 
 	// 找一个空宠物槽,满则返回 −1。

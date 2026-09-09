@@ -17,6 +17,7 @@
 #define __SA_WorldApi_H__
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -35,6 +36,68 @@ namespace SA::World
 {
 
 using BattleId = std::uint64_t;
+
+// ══ 地图与通行性(批次 W.1)═══════════════════════════════════════════════
+//
+// ★ 地图是**内容数据的形状**,不是双端共享规则 —— 通行性由服务端权威判定,客户端只预测
+//   (10 §4.1)。同 EnemyEncounter(M.5)放 world/。真实地图(LS2MAP,1,235 图)走 D 线导入
+//   (终点入库,非运行时读 txt);本批用 fixture,两个查表的接口不变、数据源将来可换。
+// ⚠️ 本批只做地面通行(isfly=false)与 WALKABLE 一项;飞行 / 角色 flag 短路(透明/公交,
+//   MAP_walkAble:73)随 onWalk 接;olink(每格对象链)留视野批次。
+
+using TileId = std::int32_t;
+
+// 图元通行性(原图元属性表 MAP_WALKABLE 列,三值)。值与源码 switch 分支一一对应(map_deal.c:40-57)。
+enum class WalkKind : std::uint8_t
+{
+	kBlocked = 0,  // obj 层此值 ⇒ 不可走
+	kNeedBoth = 1, // obj 层此值 ⇒ 需 tile 层也是 kNeedBoth 才可走
+	kFree = 2,     // obj 层此值 ⇒ 可走
+};
+
+// 一张地图的运行时形状(10 §3.1)。★ 每格只存图元号,属性另查(§3.3)。
+struct GridMap
+{
+	std::int32_t width = 0;
+	std::int32_t height = 0;
+	std::vector<TileId> tile; // 地表层图元号,size == width*height(行主序)
+	std::vector<TileId> obj;  // 物件层图元号,同上
+
+	bool inBounds(std::int32_t x, std::int32_t y) const noexcept
+	{
+		return x >= 0 && x < width && y >= 0 && y < height;
+	}
+	// ★ 调用前须 inBounds:越界索引是调用方的错,不在此静默兜底(与 EntityPool 同取向)。
+	std::size_t index(std::int32_t x, std::int32_t y) const noexcept
+	{
+		return static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+		       static_cast<std::size_t>(x);
+	}
+	TileId tileAt(std::int32_t x, std::int32_t y) const noexcept { return tile[index(x, y)]; }
+	TileId objAt(std::int32_t x, std::int32_t y) const noexcept { return obj[index(x, y)]; }
+};
+
+// 图元属性表(原图元属性文件,10 §3.2 共 17 项;本批只建 WALKABLE 一列)。按图元号索引。
+// ⚠️ 越界图元号 ⇒ kBlocked(原版 getTileAndObjData 取不到即 FALSE,map_deal.c:28)。
+struct TileAttrTable
+{
+	std::vector<WalkKind> walkable; // walkable[tileId]
+
+	WalkKind kindOf(TileId id) const noexcept
+	{
+		if (id < 0 || static_cast<std::size_t>(id) >= walkable.size())
+			return WalkKind::kBlocked;
+		return walkable[static_cast<std::size_t>(id)];
+	}
+};
+
+// 地面通行性 —— 1:1 移植 MAP_walkAbleFromPoint(map_deal.c:24)的 isfly==FALSE 分支。越界即不可走。
+bool mapWalkable(const GridMap &map, const TileAttrTable &attr, std::int32_t x,
+                 std::int32_t y) noexcept;
+
+// fixture(供联调与用例,真实地图走 D 线)。图元号:0 墙 / 1 需双 / 2 地面;全填地面。
+GridMap makeFixtureMap(std::int32_t width, std::int32_t height);
+TileAttrTable makeFixtureAttr();
 
 // tick 的阶段。★ 顺序**照抄** 01 §3.1,连未实现的四步也占位 ——
 //   原版 mainloop() 的顺序是"整个服务端行为的骨架"(01 §2),
@@ -546,6 +609,7 @@ class World final : public SA::Net::TransportEvents,
 
 	// ── SessionHost ──
 	void onSessionReady(SA::Net::SessionId id) override;
+	void onWalk(SA::Net::SessionId id, const SA::Domain::WalkRequest &req) override;
 	void onBattleCommand(SA::Net::SessionId id,
 	                     const SA::Domain::BattleCommand &cmd) override;
 	void onSessionClosed(SA::Net::SessionId id) override;
@@ -606,6 +670,18 @@ class World final : public SA::Net::TransportEvents,
 	// ★ 关闭判据 = 可断言:战斗胜利后玩家经验涨没涨、涨多少,靠它对着 `enemyExp()`
 	//   × 等级差衰减比 —— 没有它,「打赢涨经验」这条闭环无从证明(同欠债 20 / 25 那族)。
 	int playerExp(SA::Net::SessionId session) const;
+
+	// 某会话背后 Player 的位置(批次 W.1)。valid == false ⇒ 该会话无 L2 实体。
+	//   ★ 移动用例的观察面:走一步坐标变化 / 撞墙不变 / 转身只改 dir。
+	struct PlayerPos
+	{
+		bool valid = false;
+		std::int32_t floor = 0;
+		std::int32_t x = 0;
+		std::int32_t y = 0;
+		std::uint8_t dir = 0;
+	};
+	PlayerPos playerPos(SA::Net::SessionId session) const;
 
 	// 某场战斗的战场快照(只读)。不存在返回 nullptr。
 	//
