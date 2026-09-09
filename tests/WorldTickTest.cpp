@@ -1331,10 +1331,10 @@ class ScriptedRandom final : public SA::Rules::Random
 // 逐列出处(1-based 列号 = 7 + E_T_* 枚举序,`06` §3.5):
 //   c9 lvup=4.50 · c8 init=10 · c10-13 基数=[20,12,15,25] · c14 MODAI=150 ·
 //   c15 GET=11 · c16 EARTH=80 · c17 WATER=20 · c18 FIRE=0 · c19 WIND=0 · c37 IMG=100250
-// ⚠️★ `capturable` **不在这张表里** —— 它来自遇敌表 `enemy.txt` 的 `ENEMY_PETFLG`
+// ⚠️★ `capturable` **不在这张表里** —— 它来自敌人表 `enemy1.txt` 的 `ENEMY_PETFLG`
 //    (源码 `enemy.c:1165` 读 `*(p + ENEMY_PETFLG)`)。模板表 c38 也叫 E_T_PETFLG(=1),
-//    但 `ENEMY_createEnemy` **读的不是它** ⇒ 这里由调用方给,见 world/Api.h 卷首那条。
-EnemyTemplate makeWuliTemplate(bool capturable)
+//    但 `ENEMY_createEnemy` **读的不是它** ⇒ 由 `EnemyEncounter` 给,见下方 fixture。
+EnemyTemplate makeWuliTemplate()
 {
 	EnemyTemplate t{};
 	t.stats = SA::Rules::SpawnTemplate{4.50, 10, 20, 12, 15, 25};
@@ -1346,8 +1346,69 @@ EnemyTemplate makeWuliTemplate(bool capturable)
 	t.wind = 0;
 	t.image = 100250;
 	REQUIRE(t.name.assign("乌力"));
-	t.capturable = capturable;
 	return t;
+}
+
+// ── 敌人表 fixture(批次 M.5)= `enemy1.txt` 的三行**实测真值** ────────────────
+//
+// ★★ 三行**共用模板 tempno=1**(就是上面那只乌力)—— 这不是为了省事,而是这张表
+//    最要紧的性质:实测 `enemy1.txt` 里 tempno=1 出现在 **28 行**不同配置上,
+//    等级区间与可捕性各不相同 ⇒ "一个模板 × 多个敌人表行"是常态,不是特例。
+//    ★ 佐证:第 75 行的 `ENEMY_NAME` 是 `sai_w_001_2/3乌力` —— 配表人把等级区间
+//      写进了名字,而生成路径根本不读那一列(见 `EnemyTemplate::name` 那条)。
+//
+// ⚠️★★ **选行本身要避开三类"有隐藏行为"的 `ENEMY_ID`**,否则将来接了那些机制,
+//    这几条用例的期望值会**无声地**变掉(2026-09-09 回源码核出,两处形参名都在骗人):
+//      ① `ENEMY_RandomChange(enemyindex, tempno)` —— ★ 形参名叫 `tempno`,而 `:1152`
+//         传的实参是 **`ENEMY_ID`** ⇒ 判据六段区间 564-580 · 739-750 · 895-906 ·
+//         655-720 · 859-894 · 907-940 都是 **ID** 区间(改图号 / 四属 / 宠技)。
+//      ② `ENEMY_RandomEnemyArray(e_array, ...)` —— ★ 形参名叫 `e_array`(行下标),
+//         而 `:1384` 传的也是 **`ENEMY_ID`** ⇒ 945-956 · 964-969 会被整行换掉。
+//    ⇒ 下面三个 id(9 / 142 / 1309)**都不在那八段区间内**,已逐段核过。
+//    ★ 教训与 M.4b ④ 同族但方向相反:那次是"手填数据掩盖了公式值域",
+//      这次是**真数据也要选对** —— 挑到一行带隐藏机制的,真实性反而成了陷阱。
+
+// `enemy1.txt` **第 5 行**:id=9 · tempno=1 · lv 1-1 · petflg=1。
+// ★ 固定等级(lv_min == lv_max,实测这种占 1142/2154 行 = 53%)+ 可捕。
+EnemyEncounter makeWuliEncounterFixedLv1()
+{
+	EnemyEncounter e{};
+	e.enemy_id = 9;
+	e.temp_no = 1;
+	e.lv_min = 1;
+	e.lv_max = 1;
+	e.capturable = true;
+	return e;
+}
+
+// `enemy1.txt` **第 76 行**:id=142 · tempno=1 · lv 3-5 · petflg=1。
+// ★ 真区间(宽度 2,实测最常见的非零宽度 = 291 行)+ 可捕。
+EnemyEncounter makeWuliEncounterRange3to5()
+{
+	EnemyEncounter e{};
+	e.enemy_id = 142;
+	e.temp_no = 1;
+	e.lv_min = 3;
+	e.lv_max = 5;
+	e.capturable = true;
+	return e;
+}
+
+// `enemy1.txt` **第 941 行**:id=1309 · tempno=1 · lv 60-80 · petflg=**0**。
+//
+// ★★ 它是"同一模板、不同敌人表配置 ⇒ 可捕性不同"的**真数据**对照 ——
+//    与上面两行同模板(tempno=1)而 `capturable` 相反。⇒ 断言 `capturable`
+//    取自 `enc` 而不是 `tmpl` 时不必手造数据。
+// ★ 顺带给出一个宽区间(60-80),摇号断言用它比 1-1 更有区分力。
+EnemyEncounter makeWuliEncounterWideNoCapture()
+{
+	EnemyEncounter e{};
+	e.enemy_id = 1309;
+	e.temp_no = 1;
+	e.lv_min = 60;
+	e.lv_max = 80;
+	e.capturable = false;
+	return e;
 }
 
 // 只有玩家的战场:高魅力(捕获乘性主因子)、高防低攻(打不死也不被打死)。
@@ -1383,7 +1444,7 @@ BattleId joinWithSpawnedEnemies(Fixture &f, SA::Net::ConnectionId id, int n,
 	{
 		REQUIRE(f.world.spawnEnemyToField(
 		    battle, static_cast<std::uint8_t>(SA::Rules::kSideOffset + i),
-		    makeWuliTemplate(true), level));
+		    makeWuliTemplate(), makeWuliEncounterFixedLv1(), level));
 	}
 	return battle;
 }
@@ -1400,7 +1461,8 @@ TEST_CASE("M.4b:spawnEnemy 逐值 —— 四维 / 满血 / 评级 / 两张表的
 {
 	ScriptedRandom rng({2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
 	const SA::Model::Enemy e =
-	    spawnEnemy(makeWuliTemplate(true), 18, rng, SA::Rules::RulesConfig{});
+	    spawnEnemy(makeWuliTemplate(), makeWuliEncounterFixedLv1(), 18, rng,
+	               SA::Rules::RulesConfig{});
 
 	// ★★ 四维非 0 且逐值 —— 这就是欠债 23 找的那个"来源"(源码 :1067-1070)。
 	CHECK(e.vital == 2595);
@@ -1449,9 +1511,11 @@ TEST_CASE("M.4b:等级是入参 —— 同模板不同等级 ⇒ 四维按 coef 
 	const std::vector<int> script{2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 	ScriptedRandom r1(script), r18(script);
 	const SA::Model::Enemy lo =
-	    spawnEnemy(makeWuliTemplate(true), 1, r1, SA::Rules::RulesConfig{});
+	    spawnEnemy(makeWuliTemplate(), makeWuliEncounterFixedLv1(), 1, r1,
+	               SA::Rules::RulesConfig{});
 	const SA::Model::Enemy hi =
-	    spawnEnemy(makeWuliTemplate(true), 18, r18, SA::Rules::RulesConfig{});
+	    spawnEnemy(makeWuliTemplate(), makeWuliEncounterFixedLv1(), 18, r18,
+	               SA::Rules::RulesConfig{});
 
 	// level 1 ⇒ coef = init_num = 10;level 18 ⇒ 86.5 ⇒ 基数 30 各乘之。
 	CHECK(lo.vital == 300);
@@ -1464,13 +1528,188 @@ TEST_CASE("M.4b:等级是入参 —— 同模板不同等级 ⇒ 四维按 coef 
 	CHECK(lo.pet_rank == hi.pet_rank);
 }
 
+// ── 等级摇号:敌人表的 LV_MIN/LV_MAX(批次 M.5)────────────────────────────
+//
+// ★★ 本组的整体判据:M.4b 把 `level` 与 `capturable` 记成"入参,待敌人表移植"。
+//    ⇒ 关闭它的凭据不是"加了个函数",而是**这两个值现在真的从敌人表来**,
+//      且"从入参来"那一支**没有被推翻**(源码里两支都在)。
+
+TEST_CASE("M.5:baselevel <= 0 ⇒ 据敌人表区间摇号(enemy.c:1034)")
+{
+	// 区间 3-5 ⇒ 闭区间三个取值。★ 脚本第一个数被等级摇号吃掉,
+	//   后面 14 个才是 `rollSpawnStats` 的 ⇒ 顺序即语义(见 spawnEnemy 声明处)。
+	SUBCASE("摇出下界")
+	{
+		ScriptedRandom rng({3, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+		const SA::Model::Enemy e =
+		    spawnEnemy(makeWuliTemplate(), makeWuliEncounterRange3to5(), 0, rng,
+		               SA::Rules::RulesConfig{});
+		CHECK(e.level == 3);
+		// ★★ rng 共 **15** 次:1 次摇等级 + 14 次摇四维(M.4b 那条断言的是 14)。
+		CHECK(rng.calls() == 15);
+	}
+	SUBCASE("摇出上界 —— 闭区间,取得到 lv_max")
+	{
+		ScriptedRandom rng({5, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+		const SA::Model::Enemy e =
+		    spawnEnemy(makeWuliTemplate(), makeWuliEncounterRange3to5(), 0, rng,
+		               SA::Rules::RulesConfig{});
+		CHECK(e.level == 5);
+	}
+}
+
+TEST_CASE("M.5★:baselevel > 0 ⇒ 覆盖摇号,且一次 rng 都不为它花(两支都是原版)")
+{
+	// ⚠️★ 用**宽区间 60-80** 的那行做对照:若实现误走摇号,等级会落在 60-80,
+	//    与期望的 7 差得一眼可见 ⇒ 这条断言有区分力,不是同义反复。
+	ScriptedRandom rng({2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	const SA::Model::Enemy e =
+	    spawnEnemy(makeWuliTemplate(), makeWuliEncounterWideNoCapture(), 7, rng,
+	               SA::Rules::RulesConfig{});
+	CHECK(e.level == 7);
+	// ★★ 14 次 —— 摇号那一次**没有发生** ⇒ 同种子下 baselevel 分支的四维
+	//    与摇号分支不同,而这是顺序造成的、不是缺陷(见 spawnEnemy 声明处)。
+	CHECK(rng.calls() == 14);
+}
+
+TEST_CASE("M.5:固定等级的行(lv_min == lv_max)照样摇一次 —— 序列长度不能因数据而变")
+{
+	// ★★ 实测 1142/2154 行是 `lv_min == lv_max`。这条钉的是**不能"优化"掉那次摇号**:
+	//    结果恒等于 lv_min,但 rng 必须被消耗 —— 否则固定等级的怪与区间等级的怪
+	//    走出不同长度的随机序列 ⇒ 回放对不上,而两者的四维看起来都"正常"。
+	ScriptedRandom rng({1, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	const SA::Model::Enemy e =
+	    spawnEnemy(makeWuliTemplate(), makeWuliEncounterFixedLv1(), 0, rng,
+	               SA::Rules::RulesConfig{});
+	CHECK(e.level == 1);
+	CHECK(rng.calls() == 15); // ★ 15 而不是 14
+}
+
+TEST_CASE("M.5★★:摇出的等级真的喂进四维生成 —— 逐值,不是只看非 0")
+{
+	// ★★ **这条用例是反向验证逼出来的**(2026-09-09):原先此处只断言 `vital > 0`,
+	//    而注入「把 `baselevel` 而不是已决定的 `out.level` 喂给 `rollSpawnStats`」
+	//    **一条都没红**。⚠️ 算一下就知道为什么:
+	//      coef = (level − 1) × lvup + init ⇒ level 0 时 = −4.5 + 10 = **5.5**,
+	//    仍是正数 ⇒ 四维只是**偏小**(165 而不是 840),不是负数、更不是 0。
+	//    ⇒ 「> 0」这种量级断言对这类错误完全没有区分力,必须逐值。
+	//    ★ 教训与 M.4b ④ 同族但更细:那次是"手填数据掩盖值域",
+	//      这次是**断言的形状掩盖了错误**——「非 0」和「对」之间差着一个数量级。
+	//
+	// 脚本:等级摇 5(区间 3-5 的上界)· 4 次抖动取 2(⇒ 0)· 10 点全给 vital。
+	// ⇒ coef = (5−1) × 4.5 + 10 = **28**,基数 [30, 12, 15, 25]
+	ScriptedRandom rng({5, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	const SA::Model::Enemy e =
+	    spawnEnemy(makeWuliTemplate(), makeWuliEncounterRange3to5(), 0, rng,
+	               SA::Rules::RulesConfig{});
+
+	CHECK(e.level == 5);
+	CHECK(e.vital == 840); // 30 × 28 ⇒ 若误用 baselevel(0) 会是 165
+	CHECK(e.str == 336);   // 12 × 28
+	CHECK(e.tough == 420); // 15 × 28
+	CHECK(e.dex == 700);   // 25 × 28
+}
+
+TEST_CASE("M.5★★:capturable 来自敌人表,不是模板表 —— 同模板两行,一可捕一不可捕")
+{
+	// ★★ 全真数据对照(`enemy1.txt` 第 5 行 vs 第 941 行):两行 `temp_no` 都是 1
+	//    ⇒ 喂给 `spawnEnemy` 的 `tmpl` **完全相同**,唯一的差别在 `enc`。
+	//    ⇒ 若实现回头去读 `tmpl`(模板表 c38 那个同名的 `E_T_PETFLG`),这两条必有一条红。
+	const std::vector<int> script{2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+	ScriptedRandom ra(script), rb(script);
+	const SA::Model::Enemy yes =
+	    spawnEnemy(makeWuliTemplate(), makeWuliEncounterFixedLv1(), 18, ra,
+	               SA::Rules::RulesConfig{});
+	const SA::Model::Enemy no =
+	    spawnEnemy(makeWuliTemplate(), makeWuliEncounterWideNoCapture(), 18, rb,
+	               SA::Rules::RulesConfig{});
+
+	CHECK(yes.capturable);
+	CHECK_FALSE(no.capturable);
+	// ★ 其余一切相同 —— 坐实差别只来自那一列(同模板 + 同 baselevel + 同脚本)。
+	CHECK(yes.vital == no.vital);
+	CHECK(yes.capture_difficulty == no.capture_difficulty); // ★ 难度跟模板走
+	CHECK(yes.level == no.level);
+}
+
+TEST_CASE("M.5:载入期两条归一 —— 实测数据一次都不触发,只能手造数据钉住")
+{
+	// ⚠️★★ 这一条用的是**手造数据**,而这是有判据的:实测 `enemy1.txt` 2154 行里
+	//    `lv_min == 0` 与 `lv_min > lv_max` **各 0 行** ⇒ 真数据永远走不到这两条分支。
+	//    ★ 而它们**必须移植**,因为 `Rules::Random::rand` 的契约把 `lo <= hi`
+	//      的责任交给调用方 ⇒ 缺了归一就是把实现定义行为放进运行期。
+	//    ⇒ 这正是 M.4b ④ 那条教训的反面:真数据能暴露公式值域,
+	//      但**防御性分支只有手造数据能覆盖**,两者都要有。
+	SUBCASE("归一①:lv_min == 0 ⇒ 固定为 lv_max,不是 RAND(0, lv_max)")
+	{
+		EnemyEncounter enc = makeWuliEncounterFixedLv1();
+		enc.lv_min = 0;
+		enc.lv_max = 18;
+		// ★ 脚本给 0:若实现漏了归一而摇 `RAND(0,18)`,会取到 0 ⇒ 这条转红。
+		ScriptedRandom rng({0, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+		CHECK(rollEncounterLevel(enc, rng) == 18);
+	}
+	SUBCASE("归一②:lv_min > lv_max ⇒ 交换后再摇")
+	{
+		EnemyEncounter enc = makeWuliEncounterFixedLv1();
+		enc.lv_min = 20;
+		enc.lv_max = 10;
+		ScriptedRandom rng({10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+		// ★ 归一后区间是 [10, 20];脚本取 10 ⇒ 结果 10。
+		//   ⚠️ 若不归一,`rand(20, 10)` 的行为由实现定义 —— 这条断言的价值不在
+		//     "结果是 10",而在**它有一个确定的期望值**。
+		CHECK(rollEncounterLevel(enc, rng) == 10);
+	}
+	SUBCASE("归一① + ②:两条同时适用(lv_min == 0 且 lv_max 也是 0)")
+	{
+		EnemyEncounter enc = makeWuliEncounterFixedLv1();
+		enc.lv_min = 0;
+		enc.lv_max = 0;
+		ScriptedRandom rng({0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+		// ★ 归一后 [0,0] ⇒ 恒 0。⚠️ 这是**原版行为**:0 级敌人在原版里是可配的,
+		//   `PARAM_CAL` 的 `level-1` 会取到 −1 ⇒ 四维为负。不替它修(不猜)。
+		CHECK(rollEncounterLevel(enc, rng) == 0);
+	}
+}
+
+TEST_CASE("M.5:World 侧摇号端到端 —— 摇出的等级落在区间内且可观察")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	const BattleId battle = f.world.startBattle(makePlayerOnlyField());
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+
+	// ★ 走真 rng(战斗自己的),不是脚本 ⇒ 断言的是**区间**而不是具体值。
+	//   ⚠️ 这一条要的正是"不知道会摇出几"—— 那才是摇号路径真的接上了。
+	REQUIRE(f.world.spawnEnemyToField(
+	    battle, static_cast<std::uint8_t>(SA::Rules::kSideOffset),
+	    makeWuliTemplate(), makeWuliEncounterRange3to5(), 0));
+
+	const SA::Model::Enemy *e = f.world.battleEnemyAt(
+	    battle, static_cast<std::uint8_t>(SA::Rules::kSideOffset));
+	REQUIRE(e != nullptr);
+	CHECK(e->level >= 3);
+	CHECK(e->level <= 5);
+	// ★★ 四维非 0 —— 摇号出来的等级真的喂进了 `rollSpawnStats`。
+	//    ⚠️★ 但**这条断言的区分力很弱**:误传 `baselevel`(0)算出的四维照样是正数
+	//      (coef = 5.5),只是小一个数量级 ⇒ 逐值那条在上面单开一个用例,
+	//      本处保留量级断言是因为它走的是**真 rng**(摇出几不确定,逐值无从写)。
+	CHECK(e->vital > 0);
+	CHECK(e->hp > 0);
+	CHECK(e->capturable); // 该行 petflg=1
+}
+
 // ── enterEnemyToField:投影 + 两道门 ───────────────────────────────────
 
 TEST_CASE("M.4b:enterEnemyToField 投影 —— 三围由四维推出,捕获两列第一次有真数据")
 {
 	ScriptedRandom rng({2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
 	const SA::Model::Enemy e =
-	    spawnEnemy(makeWuliTemplate(true), 18, rng, SA::Rules::RulesConfig{});
+	    spawnEnemy(makeWuliTemplate(), makeWuliEncounterFixedLv1(), 18, rng,
+	               SA::Rules::RulesConfig{});
 
 	SA::Rules::BattleField f{};
 	REQUIRE(enterEnemyToField(f, SA::Rules::kSideOffset, e));
@@ -1510,7 +1749,8 @@ TEST_CASE("M.4b:enterEnemyToField 两道门 —— 宠位 / 越界 / 已占槽�
 {
 	ScriptedRandom rng({2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
 	const SA::Model::Enemy e =
-	    spawnEnemy(makeWuliTemplate(true), 18, rng, SA::Rules::RulesConfig{});
+	    spawnEnemy(makeWuliTemplate(), makeWuliEncounterFixedLv1(), 18, rng,
+	               SA::Rules::RulesConfig{});
 	SA::Rules::BattleField f{};
 
 	// 门 ①:宠位(每 side 的后 5 槽)与越界。
@@ -1570,7 +1810,7 @@ TEST_CASE("M.4b:同一槽重复 spawn ⇒ 拒绝,且不泄漏池槽")
 	// ⚠️★ 覆盖旧句柄等于泄漏一个池槽 ⇒ 直接拒绝(门 ① 的第二半)。
 	CHECK_FALSE(f.world.spawnEnemyToField(
 	    battle, static_cast<std::uint8_t>(SA::Rules::kSideOffset),
-	    makeWuliTemplate(true), 18));
+	    makeWuliTemplate(), makeWuliEncounterFixedLv1(), 18));
 	CHECK(f.world.enemyCount() == 1); // ★ 没有多出一个孤儿
 }
 
@@ -1586,7 +1826,8 @@ TEST_CASE("M.4b:入场失败要把实体还回池 —— 预留可回滚,不留�
 	REQUIRE(f.world.enemyCount() == 0);
 
 	// 槽 0 已被玩家占 ⇒ enterEnemyToField 门 ② 失败。
-	CHECK_FALSE(f.world.spawnEnemyToField(battle, 0, makeWuliTemplate(true), 18));
+	CHECK_FALSE(f.world.spawnEnemyToField(battle, 0, makeWuliTemplate(),
+	                                      makeWuliEncounterFixedLv1(), 18));
 	// ★★ 这一条是本用例的全部意义:allocate 成功、入场失败 ⇒ 必须 release 回去。
 	//    ⚠️ 漏了它,每次"槽被占"都泄漏一个槽,而入场失败是完全正常的事件。
 	CHECK(f.world.enemyCount() == 0);
@@ -1594,13 +1835,15 @@ TEST_CASE("M.4b:入场失败要把实体还回池 —— 预留可回滚,不留�
 	// 宠位同理(门 ①)。
 	CHECK_FALSE(f.world.spawnEnemyToField(
 	    battle, static_cast<std::uint8_t>(SA::Rules::kSideOffset + SA::Rules::kBattlePlayerMax),
-	    makeWuliTemplate(true), 18));
+	    makeWuliTemplate(), makeWuliEncounterFixedLv1(), 18));
 	CHECK(f.world.enemyCount() == 0);
 
 	// 不存在的战斗 / 越界槽号(门 ①)⇒ 连 allocate 都不该发生。
-	CHECK_FALSE(f.world.spawnEnemyToField(9999, 0, makeWuliTemplate(true), 18));
+	CHECK_FALSE(f.world.spawnEnemyToField(9999, 0, makeWuliTemplate(),
+	                                      makeWuliEncounterFixedLv1(), 18));
 	CHECK_FALSE(f.world.spawnEnemyToField(battle, SA::Rules::kSlotCount,
-	                                      makeWuliTemplate(true), 18));
+	                                      makeWuliTemplate(),
+	                                      makeWuliEncounterFixedLv1(), 18));
 	CHECK(f.world.enemyCount() == 0);
 }
 
@@ -1763,9 +2006,13 @@ TEST_CASE("M.4b:战斗结束时未被捕的敌人也回池(打死的那条路径
 	field.at(0).attack = 5000;
 	const BattleId battle = f.world.startBattle(field);
 	REQUIRE(f.world.joinBattle(battle, id, 0));
+	// ★ 用不可捕的那行(id=1309)+ `baselevel = 1` —— 两点都是有意的:
+	//   ① 不可捕 ⇒ 这条路径不会拐进捕获(本用例要验的是"打死"那条);
+	//   ② `baselevel > 0` ⇒ 走源码 :1031 那支,**敌人表的 60-80 区间不生效**,
+	//      等级仍是 1 ⇒ 顺带钉住"入参优先于摇号"(M.5)。
 	REQUIRE(f.world.spawnEnemyToField(
 	    battle, static_cast<std::uint8_t>(SA::Rules::kSideOffset),
-	    makeWuliTemplate(false), 1));
+	    makeWuliTemplate(), makeWuliEncounterWideNoCapture(), 1));
 	REQUIRE(f.world.enemyCount() == 1);
 
 	// 敌方 AI 会打玩家、玩家无指令 ⇒ 玩家不动;所以让敌人自己耗死不行 ⇒ 发普攻。

@@ -77,15 +77,18 @@ struct BattleStats
 //     `Progression.h` 的 `SpawnTemplate` 有意只取 6 列的理由,本结构不去破坏它。
 //
 // ⚠️★★ **两张表,别当成一张**(源码 `ENEMY_createEnemy(array, baselevel)` 的两个下标):
-//      `array`  → **遇敌表** `enemy.txt`      —— `ENEMY_LV_MIN/MAX` · `ENEMY_PETFLG` ·
+//      `array`  → **敌人表** `enemy1.txt`     —— `ENEMY_LV_MIN/MAX` · `ENEMY_PETFLG` ·
 //                                                掉落 · 战术 · 经验 · `ENEMY_ID`
 //      `tarray` → **模板表** `enemybase1.txt` —— `E_T_*` 全部列
-//   ⇒ 本结构里 `capturable` 是**唯一**来自遇敌表的一列(源码 :1165 读
-//     `*(p + ENEMY_PETFLG)`),其余都来自模板表。★ 同一只怪在不同遇敌配置下
-//     可捕 / 不可捕,而捕获难度跟着模板走 —— 合并两张表会把这个区分抹掉。
+//   ⇒ 本结构**只装模板表的列**;敌人表那一半见下方 `EnemyEncounter`。
+//     ★ 同一只怪在不同敌人表配置下可捕 / 不可捕,而捕获难度跟着模板走 ——
+//     合并两张表会把这个区分抹掉。
 //
-// ⚠️ 遇敌表本身**未移植**(等级区间 / 掉落 / 战术 / 经验都在它上面)
-//    ⇒ 本批 `level` 是入参、`capturable` 是入参,不在生成函数里摇 / 查。
+// ✅ **批次 M.5 已把敌人表建起来**(`EnemyEncounter`)⇒ M.4b 那句「`capturable` 是入参」
+//    到此兑现:该字段**已从本结构移走**,它从来不属于模板表(源码 :1165 读的是
+//    `*(p + ENEMY_PETFLG)`,而模板表 c38 那个同名的 `E_T_PETFLG` **没有一处读它**)。
+//    ⚠️ 别因为模板表里也有个 `PETFLG` 列就把它加回来 —— 那是本项目已栽过四次的
+//    「同名不同源」,而这一对的两个值在真数据里**常常相同** ⇒ 加回来测试也未必抓到。
 struct EnemyTemplate
 {
 	// 参与四维生成的 6 列(DR-DT10)。★ 直接复用 L3 的结构,不另立一份 ——
@@ -111,11 +114,131 @@ struct EnemyTemplate
 	std::int32_t capture_difficulty = 0;
 
 	// 名字(`E_T_NAME`,源码 :1108-1110)。★ 模板表里唯一的非 ASCII 列(`04` §7.2)。
+	//
+	// ⚠️★★ **敌人的名字取的是这一列,不是敌人表的 `ENEMY_NAME`** —— 这是 M.5 回源码
+	//    核出来的,此前四份文档都没记:`ENEMY_createEnemy:1108-1110` 拷的是
+	//    `ENEMYTEMP_enemy[tarray].chardata[E_T_NAME]`,而敌人表那一列 `ENEMY_NAME`
+	//    在**整个生成路径上一次都没被读**(它只出现在 GM 制作宠物 / 宠物领取 / 问答
+	//    奖励的提示串里)。★ 实测印证:`enemy1.txt` 第 75 行的 `ENEMY_NAME` 是
+	//    `sai_w_001_2/3乌力` —— 把等级区间写进了名字,那是**给配表人看的标签**,
+	//    不是玩家看到的名字。⇒ `EnemyEncounter` 因此**不建 name**(见那边文末 ⑧)。
 	SA::Model::NameStr name{};
+};
 
-	// ★ **来自遇敌表**(`ENEMY_PETFLG` → `CHAR_WORK_PETFLG`,源码 :1165),见卷首。
+// 敌人表(`enemy1.txt`)的一行 —— 批次 M.5。
+//
+// ★★ 这一批补的是 M.4b 明确留下的两个入参:`level` 与 `capturable`。
+//    ⇒ 刷怪从「调用方指定等级」变成「据配置摇号」,而这**不是**把旧路径推翻:
+//    源码 :1030-1035 是 `baselevel > 0 ? baselevel : RAND(LV_MIN, LV_MAX)`,
+//    ★ 两个分支**都是原版**,而分流靠一个**局部变量的初值**:
+//    `battle.c:2178` 声明 `baselevel = 0`,**只有 NPC 触发时才被赋值**
+//    (`:2225` 取 `CHAR_getInt(npcindex, CHAR_LV)`),最后统一传入(`:2250`)
+//    ⇒ 野外遇敌那支(`:2228` 的 `npcindex == -1`)**一路保持 0** ⇒ 走摇号。
+//    ⇒ M.4b 的接口对应的是前一支,本批补的是后一支。
+//
+// ── 文件与列的对应(★ 用错文件会整表错位一列)──────────────────────────
+//   `setup.cf` 的 `enemyfile` 指向 **`enemy1.txt`(34 列 = 3 char + 31 int)**,
+//   ⚠️ **不是**同目录那个 `enemy.txt`(33 列)—— 后者是宏关闭时代的旧数据。
+//   判据:`ENEMY_STARTINTNUM` 在 `_BATTLENPC_WARP_PLAYER` 开启时是 **4**
+//   (展开视图 `char/enemy.c:458`,而 `include/version.h:103` 该宏已定义)
+//   ⇒ 多一列 `ENEMY_ACT_CONDITION`。`stoneage-plan/docs/05` §3.1 把这一对
+//   新旧文件称作「宏状态的天然标尺」。
+//   ⇒ 1-based 列号:c1 NAME · c2 TACTICSOPTION · c3 ACT_CONDITION ·
+//     c4 ID · c5 TEMPNO · c6 LV_MIN · c7 LV_MAX · c8 CREATEMAXNUM ·
+//     c9 CREATEMINNUM · c10 TACTICS · c11 EXP · c12 DUELPOINT · c13 STYLE ·
+//     c14 PETFLG · c15-24 ITEM1-10 · c25-34 ITEMPROB1-10。
+//
+// ★ 为什么和 `EnemyTemplate` 一样放在 `world/` 而不是 `shared/`:同一条判据 ——
+//   内容表的形状不是双端共享的规则,客户端不刷怪(见 `EnemyTemplate` 卷首)。
+struct EnemyEncounter
+{
+	// 本行的身份(`ENEMY_ID`,c4)。
+	//
+	// ★ 它是这张表的主键:全树 44 处引用靠它查行(GM 制作宠物 `chatmagic.c` ·
+	//   宠物领取 `callfromac.c:1551` · 问答奖励 `playerquestion.c:83`)。
+	// ⚠️ 本批**不把它写进 `Model::Enemy`**(源码 :1090 写 `CHAR_PETENEMYID`,
+	//    而捕获 `pet.c:366` 会拷给宠物)—— 理由不是"做不到"而是**没有消费方**:
+	//    读它的那三个功能都未移植,而 D 线入库后 ID 的权威在库里。
+	//    ⇒ 保持 `Enemy.h` 文末 ② 的裁定不变;届时接经验结算(`ENEMY_getExp` 要行下标)
+	//      时一并决定,那时才有真读者。
+	std::int32_t enemy_id = 0;
+
+	// 模板号(`ENEMY_TEMPNO`,c5)⇒ 指向 `enemybase1.txt` 的 `E_T_TEMPNO`。
+	//
+	// ⚠️★ **原版在载入期把它解析成行下标并缓存**(`:469-478`:遍历模板表找相等的
+	//    `E_T_TEMPNO`,存进 `ENEMY_enemy[i].enemytemparray`),★ 而且**找不到就整行丢弃**
+	//    (`:474-477` 打「文件语法错误」+ `continue`)⇒ **运行期不存在"配了个不存在的
+	//    模板"的敌人行**。⇒ 那道门属 D 线导入器(入库时校验外键),不是运行期检查。
+	// ⇒ 本字段留着是为了让这条外键在代码里看得见:`spawnEnemyToField` 收 tmpl + enc
+	//   两个参数,而**谁保证它们是配对的**这个问题必须有个明确的回答(答案:导入期)。
+	std::int32_t temp_no = 0;
+
+	// 等级区间(`ENEMY_LV_MIN` / `ENEMY_LV_MAX`,c6 / c7)。
+	//
+	// ⚠️★★ **载入期有两条归一,而它们在 8.0 投产数据上一次都不触发**(源码 :479-486):
+	//      ① `if (lv_min == 0) lv_min = lv_max;`   ⇒ 0 是「固定为 max」,不是「从 0 级起」
+	//      ② `LV_MIN = min(a,b)` · `LV_MAX = max(a,b)` ⇒ 写反了自动纠正
+	//    实测 `enemy1.txt` 2154 行:`lv_min == 0` **0 行** · `lv_min > lv_max` **0 行**
+	//    ⇒ 两条都是防御性代码。★ **但仍然移植**,判据是第三条而不是"照抄源码":
+	//      `Rules::Random::rand` 的契约写明「lo > hi 的行为由实现定义,调用方须自行
+	//      保证 lo <= hi」⇒ 不归一就是把一个**原版永不出现**的状态引入我们的运行期。
+	//    ⇒ 归一落在 `rollEncounterLevel` 里(位置与原版不同,等价性判据见那里)。
+	//
+	// ★ 实测分布(2154 行):`lv_min == lv_max` **1142 行(53%)** 是固定等级,
+	//   其余 1012 行是真区间(宽度 top:2 → 291 行 · 10 → 173 · 1 → 162 · 3 → 120)。
+	std::int32_t lv_min = 0;
+	std::int32_t lv_max = 0;
+
+	// 可否被捕(`ENEMY_PETFLG`,c14 → `CHAR_WORK_PETFLG`,源码 :1165)。
+	//
+	// ★★ **这一列是本结构存在的第二个理由**(第一个是等级区间):它从 M.4b 的
+	//    `EnemyTemplate` 移到这里,因为它从来属于敌人表 —— 见 `EnemyTemplate`
+	//    卷首那条「别因为模板表里也有个 PETFLG 就加回去」。
+	// ★ 实测分布:**1277/2154 行可捕(59%)**,877 行不可捕 ⇒ `Combatant.h` 那句
+	//   「并非所有敌人都可捕(BOSS / 事件怪不带此标记)」第一次有了量。
 	bool capturable = false;
 };
+
+// ── 敌人表里源码写了、本批**有意不建**的列(逐条记明,均非遗漏)───────────────
+//
+// ① `ENEMY_CREATEMAXNUM`(c8)⇒ **敌人编组**批次:它是"这一行最多刷几只"，
+//    消费点在 `ENEMY_getEnemy` 的编组摇号里(`:1394` 累加上限 · `:1426` 同种计数),
+//    而那条路要连 `group1.txt` + `encount.txt` 一起做(见 `spawnEnemyToField` 声明处)。
+//
+// ② ⚠️★ `ENEMY_CREATEMINNUM`(c9)—— **死列,全树 0 处引用**(2026-09-09 实测:
+//    展开视图全树 grep 只命中 `include/enemy.h` 的枚举声明本身)。
+//    ★ 这不是"我们暂不用",是**原版从来不用** ⇒ 它属 `03` §11 那族死字段,
+//    D 线入库时**不该为它建列**。⚠️ 别看名字对称就以为 MAX 有 MIN 也有。
+//
+// ③ `ENEMY_TACTICS`(c10)· `ENEMY_TACTICSOPTION`(c2)· `ENEMY_ACT_CONDITION`(c3)
+//    ⇒ **敌人 AI 战术**(源码 :1160-1164 写三个 WORK 字段),L4。
+//    ★ 实测一条能缩小这个缺口的事实:`ENEMY_TACTICS` 在 2154 行里**全是 1**
+//    (单一值)⇒ 战术**号**无变化,有变化的是 `TACTICSOPTION` 那个字符串
+//    (`at:10;1;1|gu:1|es:1|wa:0;...`)⇒ 将来接 AI 时要解析的是它,不是那个号。
+//
+// ④ `ENEMY_EXP`(c11)· `ENEMY_DUELPOINT`(c12)⇒ **战果结算**。
+//    ⚠️★ 两者有**依赖顺序**,别分开移植:源码 :1101-1107 是
+//    `DUELPOINT` 先无条件写,然后**只有 `DUELPOINT <= 0` 时才给 EXP**,
+//    且 `EXP == -1` 是"不覆盖"哨兵 ⇒ 走 `ENEMY_getExp(array, tarray, level, rank)`。
+//    ⇒ 三个值构成一棵判定树,拆开移植会得到一个"看起来对"的错经验值。
+//
+// ⑤ `ENEMY_STYLE`(c13)⇒ 敌人武器(源码 :1132-1150 的 switch → `ITEM_makeItemAndRegist`)。
+//    ⚠️★★ **实测把 M.4b 登记的那条偏差缩小了一个数量级,值得改口径**:
+//    `ENEMY_STYLE` 在 2154 行里 **2112 行是 0**(98%),而 `switch(0)` 落 `default`
+//    ⇒ `wepon` 保持 −1 ⇒ **不发武器** ⇒ **原版 98% 的敌人本来就是空手的**。
+//    ⇒ 「我们的敌人一律空手 ⇒ 比原版更容易触发空手多段」这条偏差**仍然成立,
+//      但只影响 42 行(2%)**,不是全部敌人。★ M.4b 写它时没有数据,现在有了。
+//
+// ⑥ `ENEMY_ITEM1-10`(c15-24)· `ENEMY_ITEMPROB1-10`(c25-34)⇒ 掉落,道具系统。
+//    ★ 实测 **948/2154 行(44%)配了掉落**;概率是千分数(源码 :1121 `RAND(0,999) <  prob`)。
+//    ⚠️ 源码的循环上界写成 `(ENEMY_ITEMPROB10 - ENEMY_ITEM1 + 1) / 2`(:1119)——
+//      即"两段列宽的一半" ⇒ 它**要求两段等长且相邻**,这个隐含约束在改表结构时会断。
+//
+// ⑦ `ENEMY_ID` 写进 `Model::Enemy`(`CHAR_PETENEMYID`)⇒ 见 `enemy_id` 字段那条。
+//
+// ⑧ `ENEMY_NAME`(c1)⇒ **不建,而这不是推迟,是它在生成路径上根本不被读** ——
+//    见 `EnemyTemplate::name` 那条。★ 建了它就会有人拿它当敌人名字用,
+//    而真名在模板表 ⇒ 那会是一个"显示正确了 99% 的行"的静默错误。
 
 class World final : public SA::Net::TransportEvents,
                     public SA::Net::SessionHost
@@ -151,7 +274,13 @@ class World final : public SA::Net::TransportEvents,
 	// ★ 与 `joinBattle` 对称:那个把**会话**接进槽(玩家侧),这个把**模板**接进槽(敌人侧)。
 	//   ⚠️ 两者都不是"真玩法入口" —— 真入口是 tick 第 3 步 `kNpcSpawn`(遇敌 / 刷怪,
 	//     阶段 2)。⇒ 本函数是那一步落地前的**显式入口**,不是脚手架:
-	//     刷怪逻辑将来只需决定"何时、在哪、用哪个模板、什么等级",生成与入场就是这里。
+	//     刷怪逻辑将来只需决定"何时、在哪、用哪几行",生成与入场就是这里。
+	//   ✅ **M.5 把"什么等级"从待答变成已答**:等级不再由调用方硬给,而是据敌人表
+	//     的区间摇号(`baselevel <= 0` 那支)⇒ 上面那句原本写的是"用哪个模板、什么等级"。
+	//   ⬜ 仍未答的是"**用哪几行**",而那需要两张表接力(都不在本批):
+	//       `encount.txt`(1050 行,坐标 → 编组;源码 `ENEMY_getEnemy(charaindex, x, y)`)
+	//       → `group1.txt`(1220 行,编组 → 最多 10 个 `ENEMY_ID` + 各自 `CREATEPROB`)
+	//       → 逐行本函数。★ 切分点就在本函数的入参:**行以内**是本批,**选哪几行**是下一批。
 	//
 	// 三道门,失败即**世界一个字节都没动**(顺序 = 预留→提交,同 `createPetFromCombatant`):
 	//   ① 战斗不存在 / 槽号越界;
@@ -161,11 +290,15 @@ class World final : public SA::Net::TransportEvents,
 	//
 	// ⚠️ 随机源取的是**该场战斗的 rng**(`b.rng`),不是 `Platform::RandomSource` ——
 	//    可回放的凭据是"战斗种子 + 事件流"(`01` §10),敌人四维是那场战斗状态的一部分。
-	//    ★ 后果:同一颗战斗种子下,先摇的 14 个数会被敌人生成用掉 ⇒ **入场顺序影响
+	//    ★ 后果:同一颗战斗种子下,敌人生成会先把若干个数摇掉 ⇒ **入场顺序影响
 	//      后续所有取值**。这不是缺陷(原版同理:刷怪也在同一个全局 rng 上),
 	//      但它意味着"改变刷怪时机"会改变回放 ⇒ 回放必须连刷怪调用序一起重现。
+	//    ⚠️★ **摇掉几个数取决于走哪个分支**(M.5):`baselevel > 0` ⇒ 14 次
+	//      (只有 `rollSpawnStats`);`baselevel <= 0` ⇒ **15 次**,多的那一次是等级摇号,
+	//      而且它在 14 次**之前** —— 顺序即语义,详见 `rollEncounterLevel`。
 	bool spawnEnemyToField(BattleId battle, std::uint8_t slot,
-	                       const EnemyTemplate &tmpl, std::int32_t level);
+	                       const EnemyTemplate &tmpl, const EnemyEncounter &enc,
+	                       std::int32_t baselevel);
 
 	// ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
 	void requestShutdown() noexcept;
@@ -294,24 +427,50 @@ void exitPetFromField(SA::Rules::BattleField &field, int owner_field_slot);
 //   而这两个函数放在这里 —— 与 `enterPetToField` / `exitPetFromField` 并排,
 //   因为它们是同一类东西:**纯投影 + 站位判定**,不碰 World 的运行时所有权。
 
-// 据模板 + 等级生成一只敌人 —— 1:1 移植 `ENEMY_createEnemy`(`char/enemy.c:994-1180`)
-// 里**本批做得到**的那一段。建 / 不建逐条见 `shared/model/Enemy.h` 文末。
+// 据敌人表的等级区间摇一个等级 —— 1:1 移植 `ENEMY_createEnemy:1034` 的
+// `RAND(ENEMY_LV_MIN, ENEMY_LV_MAX)`,**外加载入期的两条归一**(`:479-486`)。批次 M.5。
+//
+// ⚠️★★ **归一的位置与原版不同,这是有意的,等价性判据在此**:
+//    原版在**载入期**归一并**写回表**(`ENEMY_setInt`)—— 一次归一、多次摇号;
+//    我们没有载入期(本批不做文件加载器,`04` §7.1 的终点是入库)⇒ 归一落在这里,
+//    每次摇号前对**局部副本**做一遍。三条判据保证等价:
+//      ① 归一**幂等** ⇒ 做一次和做 N 次结果相同;
+//      ② 归一**不消耗 rng** ⇒ 不影响可回放序列;
+//      ③ 归一**只碰这两列** ⇒ 不影响其他列的取值。
+//    ⚠️ 代价说清:归一结果**不写回** `enc` ⇒ 若将来有别处读 `enc.lv_min`(例如
+//      运维显示"这只怪 3-5 级"),读到的是**未归一**值。本批无第二个读者;
+//      ★ D 线导入器落地时若选择在入库时归一,本函数的归一因幂等而不必删。
+//
+// ★ 为什么不省掉归一(实测它一次都不触发):见 `EnemyEncounter::lv_min` 那条 ——
+//   判据不是"照抄源码",是 `Random::rand` 的 `lo <= hi` 契约由**调用方**负责。
+std::int32_t rollEncounterLevel(const EnemyEncounter &enc, SA::Rules::Random &rng);
+
+// 据模板 + 敌人表行生成一只敌人 —— 1:1 移植 `ENEMY_createEnemy`
+// (`char/enemy.c:994-1180`)里**做得到**的那一段。建 / 不建逐条见
+// `shared/model/Enemy.h` 文末(模板侧)与 `EnemyEncounter` 文末(敌人表侧)。
 //
 // ★ 纯函数(不碰池、不碰战场)⇒ 可被单元测直接喂模板验证,同 `enterPetToField` 的取向。
 //
-// ⚠️★ **`level` 是入参,不在函数里摇**:源码 :1030-1035 是
-//    `baselevel > 0 ? baselevel : RAND(ENEMY_LV_MIN, ENEMY_LV_MAX)`,而那次摇号读的是
-//    **遇敌表**(未移植)⇒ 摇号属遇敌逻辑,不进生成函数(同 `rollSpawnStats` 同处的裁定)。
+// ⚠️★★ **`baselevel` 的语义照抄源码 :1030-1035,两个分支都是原版**:
+//      `baselevel > 0`  ⇒ 用它(NPC 触发的战斗,`battle.c:2250` 传 NPC 的等级);
+//      `baselevel <= 0` ⇒ `rollEncounterLevel(enc, rng)`(野外遇敌:`battle.c:2178`
+//                         的初值 0 一路没被赋值,见 `EnemyEncounter` 卷首)。
+//    ⇒ M.4b 的"等级是入参"**不是权宜**,它就是前一支;M.5 补的是后一支。
+//    ⚠️ 因此**不要**把参数改成"必须 > 0"再另开一个函数 —— 那会把原版的一个
+//      `if/else` 拆成两个入口,而调用方(将来的刷怪)本来就是按这个条件分流的。
 //
-// ★ rng 消耗 = `rollSpawnStats` 的 **14 次**,一次不多:本函数自己不摇任何数。
+// ★ rng 消耗:`baselevel > 0` ⇒ **14 次**(全在 `rollSpawnStats` 里);
+//   `baselevel <= 0` ⇒ **15 次**,★ 多的那次在**最前面**(源码 :1034 的摇号在
+//   :1045 的 ±2 扰动之前)⇒ 同种子下两条分支的四维**不同**,而这不是缺陷:
+//   顺序即语义(同 M.4b 成长率取"扰动后、撒点前"那一刻的理由)。
 //   ⚠️ 原版在此之后还有 `ENEMY_RandomChange`(会摇)与掉落 / 武器(会摇)——
 //     均未移植 ⇒ 同种子下我们的序列与原版不同,而原版不可运行(P1)、无可比对序列。
 //
 // ⚠️★ **满血入场是推导的产物,不是模板列**:源码 :1153 先 `CHAR_complianceParameter`,
 //    :1159 再 `CHAR_HP = CHAR_getWorkInt(WORKMAXHP)` ⇒ 本函数用
 //    `deriveBaseStats(四维).max_hp` 填 `hp`,而**不存 max_hp**(不造第二真源)。
-SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, std::int32_t level,
-                            SA::Rules::Random &rng,
+SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, const EnemyEncounter &enc,
+                            std::int32_t baselevel, SA::Rules::Random &rng,
                             const SA::Rules::RulesConfig &cfg);
 
 // 把一只 L2 `Model::Enemy` 投影成战场态 `Rules::Combatant`,放进 `slots[field_slot]`。

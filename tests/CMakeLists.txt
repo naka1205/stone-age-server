@@ -213,6 +213,22 @@ if(Python3_FOUND)
   #    (常红会训练人忽略红色,00 §10.4)。
   #    ⇒ CI 上必须有 clang-format,接住这件事的是 ci_verify.py §2 的
   #      EXPECTED_TESTS 断言(code_format 少了就硬失败),不是这里。
+  # ── ★★ DR 登记表的可数性(批次 M.5,00 §9.0.35 ⑦)──────────────────
+  #
+  # `11` §14 的口径是「要问还有几条没定,就数 §1–§12 里的 ⚠️ 与 ⏳ 标记」
+  # ⇒ 那句话架在一个前提上:**每条 DR 都在主表里有一行**。
+  # ⚠️ 而该前提此前没有执行者 —— 实测三条 DR 只有展开小节、主表无行
+  #   (DR-DT11 / DR-BT22 / DR-DT12),且那个行数**已经记错三次**。
+  # ★★ 后果不是格式:若某条新 DR 是 ⚠️ 待拍板却只写在小节里,
+  #   「待拍板 0 条」会是错的**而且不会有任何东西发现** ——
+  #   而"没有决策挡住开工"这个判断正是建立在那个数上的。
+  #
+  # ★ 与 code_format 不同,本检查**只读仓内文档、不依赖任何外部工具**
+  #   ⇒ 无条件注册,不需要"缺工具则不注册 + 告警"那一套。
+  add_test(NAME dr_table
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_SOURCE_DIR}/tools/check_dr_table.py)
+
   find_program(SA_CLANG_FORMAT
       NAMES clang-format
       # ⚠️★★ 必须是 PATHS 而**不是** HINTS —— 这不是同义写法:

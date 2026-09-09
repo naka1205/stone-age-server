@@ -1152,7 +1152,8 @@ bool World::joinBattle(BattleId battle, SA::Net::SessionId session,
 //   两个可失败的动作(池 / 入场)都排在任何不可回退的写之前
 //   ⇒ 失败时世界状态一个字节都没动(同 `createPetFromCapture` 的形状)。
 bool World::spawnEnemyToField(BattleId battle, std::uint8_t slot,
-                              const EnemyTemplate &tmpl, std::int32_t level)
+                              const EnemyTemplate &tmpl, const EnemyEncounter &enc,
+                              std::int32_t baselevel)
 {
 	Impl &s = *_impl;
 
@@ -1188,8 +1189,10 @@ bool World::spawnEnemyToField(BattleId battle, std::uint8_t slot,
 		return false;
 	}
 
-	// ★ 生成:消耗**该场战斗的 rng** 14 次(可回放的凭据是战斗种子,见 Api.h 声明处)。
-	*enemy = spawnEnemy(tmpl, level, b.rng, s.rules_config);
+	// ★ 生成:消耗**该场战斗的 rng**(可回放的凭据是战斗种子,见 Api.h 声明处)。
+	// ⚠️★ 消耗次数**取决于分支**:`baselevel > 0` ⇒ 14 次;`<= 0` ⇒ 15 次
+	//    (多的那次是等级摇号,且在最前面)。改动这里的调用序会改变回放。
+	*enemy = spawnEnemy(tmpl, enc, baselevel, b.rng, s.rules_config);
 
 	// ── 门 ③:入场投影 ────────────────────────────────────────────
 	if (!enterEnemyToField(b.field, static_cast<int>(slot), *enemy))
@@ -1205,11 +1208,15 @@ bool World::spawnEnemyToField(BattleId battle, std::uint8_t slot,
 	// ★ 到这里没有可失败的动作了。捕获要靠这条映射找到四维的源头。
 	b.enemy_of_slot[slot] = eh;
 
+	// ⚠️★ 记的是 `enemy->level`(**实际生效**的等级)而不是入参 `baselevel` ——
+	//    摇号分支下入参是 0,记它等于什么都没记。★ 同时记 `enemy_id`,
+	//    否则"这只怪是哪一行配出来的"在日志里无从追溯(敌人表 44 处引用都靠它)。
 	s.logger.log(SA::Platform::LogLevel::kDebug,
 	             SA::Platform::LogEvent::kBattleJoined,
 	             {{"battle_id", battle},
 	              {"slot", static_cast<std::uint64_t>(slot)},
-	              {"level", static_cast<std::uint64_t>(level)},
+	              {"level", static_cast<std::uint64_t>(enemy->level)},
+	              {"enemy_id", static_cast<std::uint64_t>(enc.enemy_id)},
 	              {"kind", std::string_view("enemy")}});
 	return true;
 }
@@ -1626,12 +1633,44 @@ void exitPetFromField(SA::Rules::BattleField &field, int owner_field_slot)
 	field.at(pet_field_slot).occupied = false;
 }
 
-// ── 敌人生成与入场(批次 M.4b)────────────────────────────────────────
+// ── 敌人生成与入场(批次 M.4b · 等级摇号 M.5)──────────────────────────
 //
 // 详注见 world/Api.h 的声明处。移植来源 `ENEMY_createEnemy`(展开视图
 // `char/enemy.c:994-1180`),建 / 不建逐条见 `shared/model/Enemy.h` 文末。
-SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, std::int32_t level,
-                            SA::Rules::Random &rng,
+
+// 等级摇号 —— 源码 :1034 的 `RAND(LV_MIN, LV_MAX)` + 载入期归一 :479-486。
+//
+// ★ 归一在此而非载入期的三条等价判据(幂等 / 不耗 rng / 只碰这两列)见 Api.h 声明处。
+std::int32_t rollEncounterLevel(const EnemyEncounter &enc, SA::Rules::Random &rng)
+{
+	// ── 归一 ①(源码 :483):`lv_min == 0` ⇒ **取 lv_max**,不是"从 0 级起" ────
+	//
+	// ⚠️★ 这一条最容易被漏掉,而漏掉它的表现是**整批低等级怪变弱**而不报错:
+	//    配 `0,18` 的行原版给固定 18 级,漏了归一就变成 `RAND(0,18)`。
+	//    ★ 实测 `enemy1.txt` 2154 行里这条**一次都不触发**(`lv_min == 0` 为 0 行)——
+	//      正因为如此,它只能靠手造数据的用例钉住;而"真数据跑得过"证明不了它。
+	std::int32_t lo = enc.lv_min;
+	const std::int32_t hi_raw = enc.lv_max;
+	if (lo == 0)
+		lo = hi_raw;
+
+	// ── 归一 ②(源码 :484-485):写反了自动纠正 ──────────────────────────
+	//
+	// ⚠️ 这一步是 `Rules::Random::rand` 的 `lo <= hi` 前提的**唯一**保证者
+	//    (那个契约明写"调用方须自行保证")⇒ 删掉它就是把实现定义行为放进运行期。
+	const std::int32_t lv_min = lo < hi_raw ? lo : hi_raw;
+	const std::int32_t lv_max = lo < hi_raw ? hi_raw : lo;
+
+	// ★ 闭区间 —— 原版 `RAND(x,y)` 展开后是 `x + (int)((y-x+1)*rand()/(RAND_MAX+1))`
+	//   (`include/util.h:79`)⇒ 取得到 y。`Random::rand` 同语义,不必换算。
+	// ⚠️ `lv_min == lv_max` 时**照样摇一次**(实测 1142/2154 行是这种):
+	//    结果恒等于它,但**rng 被消耗了一次** ⇒ 不能"优化"成直接 return,
+	//    那会让固定等级的怪与区间等级的怪走出不同长度的随机序列 ⇒ 回放对不上。
+	return rng.rand(lv_min, lv_max);
+}
+
+SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, const EnemyEncounter &enc,
+                            std::int32_t baselevel, SA::Rules::Random &rng,
                             const SA::Rules::RulesConfig &cfg)
 {
 	SA::Model::Enemy out{};
@@ -1640,8 +1679,13 @@ SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, std::int32_t level,
 	out.origin_image = tmpl.image;
 	out.base_image = tmpl.image;
 
-	// ── 等级(源码 :1077)★ 入参,不在此摇(见 Api.h 声明处)──────────
-	out.level = level;
+	// ── 等级(源码 :1030-1035)★ 两个分支都是原版 ─────────────────────
+	//
+	// ⚠️★★ **摇号必须在 `rollSpawnStats` 之前**(源码 :1034 早于 :1045 的 ±2 扰动)——
+	//    顺序即语义:调换会让同种子下的四维整体变化,而**没有一处会报错**
+	//    (同 M.4b 成长率取"扰动后、撒点前"那一刻的理由)。
+	// ★ 因此这一段放在这里而不是函数开头:它必须在四维之前、图号之后无所谓。
+	out.level = baselevel > 0 ? baselevel : rollEncounterLevel(enc, rng);
 
 	// ── 四维 + 成长率(源码 :1045-1070)= DR-DT10 的 `rollSpawnStats` ───
 	//
@@ -1649,8 +1693,14 @@ SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, std::int32_t level,
 	//    但在此之前**没有任何调用方**。
 	// ⚠️ 四步顺序(±2 → 打包成长率 → 撒 10 点 → PARAM_CAL)整个封在那个纯函数里,
 	//    这里不得拆开或重排 —— 详见 `Progression.cpp` 的四步说明。
+	// ⚠️★ 喂给它的是 `out.level`(**已决定的**等级)而不是 `baselevel` ——
+	//    ★★ 传后者的后果**不是"算出 0 或负数"而是"算小一个数量级"**:
+	//      coef = (level − 1) × lvup + init ⇒ level 0 时 = −4.5 + 10 = **5.5**(仍为正)
+	//      ⇒ 乌力的 vital 会是 165 而不是 840。⚠️ 因此「四维 > 0」这种量级断言
+	//      **抓不到这个错**,必须逐值 —— 这一条是 M.5 反向验证逼出来的
+	//      (注入它时七条断言一条都没红,详见 `WorldTickTest` 同名用例)。
 	const SA::Rules::SpawnStats rolled =
-	    SA::Rules::rollSpawnStats(tmpl.stats, level, rng, cfg);
+	    SA::Rules::rollSpawnStats(tmpl.stats, out.level, rng, cfg);
 	out.vital = rolled.vital;
 	out.str = rolled.str;
 	out.tough = rolled.tough;
@@ -1683,7 +1733,15 @@ SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, std::int32_t level,
 	out.name = tmpl.name;
 
 	// ── 捕获相关(源码 :1165-1166)★ 两个 WORK 字段,来源两张表 ─────────
-	out.capturable = tmpl.capturable;
+	//
+	// ⚠️★★ **左右两边的来源不同,这一行是那个区分的落点**(M.5 把它接对了):
+	//      `capturable`         ← 敌人表 `ENEMY_PETFLG`(c14,源码 :1165)
+	//      `capture_difficulty` ← 模板表 `E_T_GET`     (源码 :1166)
+	//    ⇒ 同一只怪在不同敌人表配置下可捕 / 不可捕,而难度跟着模板走。
+	//    ★ M.4b 时 `capturable` 权宜地挂在 `EnemyTemplate` 上(敌人表未移植),
+	//      现在归位。⚠️ 别把 `enc` 换成 `tmpl` —— 模板表 c38 也有个叫 `E_T_PETFLG`
+	//      的列,而 `ENEMY_createEnemy` **从不读它**(见 Api.h 那条)。
+	out.capturable = enc.capturable;
 	out.capture_difficulty = tmpl.capture_difficulty;
 
 	// ── 生命(源码 :1153 推导 → :1159 满血)──────────────────────────
