@@ -1754,6 +1754,175 @@ std::int32_t pickEnemyGroup(const EncountArea &area, const std::vector<EnemyGrou
 	return row[static_cast<std::size_t>(pick)];
 }
 
+// ── 遇敌:编组 → 敌人列表(批次 M.7)──────────────────────────────────────
+//
+// 详注见 world/Api.h 的声明处。移植来源 `ENEMY_getEnemy` 第三、四段
+// (`char/enemy.c:1356-1466`)· `ENEMY_getEnemyArrayFromId`(`:519-528`)·
+// `ENEMYTEMP_getEnemyTempArrayFromTempNo`(`:337-347`)。
+
+std::int32_t findEnemyEncounter(const std::vector<EnemyEncounter> &encounters,
+                                std::int32_t enemy_id)
+{
+	for (std::size_t i = 0; i < encounters.size(); ++i)
+		if (encounters[i].enemy_id == enemy_id)
+			return static_cast<std::int32_t>(i);
+	return -1;
+}
+
+std::int32_t findEnemyTemplate(const std::vector<EnemyTemplate> &templates,
+                               std::int32_t temp_no)
+{
+	for (std::size_t i = 0; i < templates.size(); ++i)
+		if (templates[i].temp_no == temp_no)
+			return static_cast<std::int32_t>(i);
+	return -1;
+}
+
+std::vector<std::int32_t> rollEnemyList(const EnemyGroup &group,
+                                        const std::vector<EnemyEncounter> &encounters,
+                                        const std::vector<EnemyTemplate> &templates,
+                                        std::int32_t enemy_max_num, SA::Rules::Random &rng)
+{
+	// ── 第三段:收候选(源码 :1356-1401)──────────────────────────────
+	// work[] = 候选敌人表行下标;wr[] = 各自权重(CREATEPROB);
+	// createenemynum = Σ CREATEMAXNUM(出场数上界的一半)。
+	// ⚠️ NPC 事件改组(:1367-1383)与 ENEMY_RandomEnemyArray(:1385)均不做,理由见 Api.h 卷首。
+	std::array<std::int32_t, kEnemyGroupSlotMaxNum> work{};
+	std::array<std::int32_t, kEnemyGroupSlotMaxNum> wr{};
+	int found = 0;
+	std::int32_t total = 0;
+	std::int32_t createenemynum = 0;
+
+	for (std::size_t s = 0; s < static_cast<std::size_t>(kEnemyGroupSlotMaxNum); ++s)
+	{
+		const std::int32_t eid = group.enemy_id[s];
+		if (eid == -1)
+			continue;
+		// ENEMY_ID → 敌人表行下标(原版运行期读载入缓存,我们现扫)。找不到 ⇒ 跳过该槽,
+		// 等价原版载入期把该槽置 -1(`enemy.c:690-710`)。
+		const std::int32_t e = findEnemyEncounter(encounters, eid);
+		if (e < 0)
+			continue;
+		work[static_cast<std::size_t>(found)] = e;
+		wr[static_cast<std::size_t>(found)] = group.create_prob[s];
+		total += group.create_prob[s];
+		createenemynum += encounters[static_cast<std::size_t>(e)].create_max_num;
+		++found;
+	}
+
+	// ★ 源码在 RAND 之前就 return(:1399)⇒ 无候选时不消耗 rng(同 pickEnemyGroup)。
+	if (found <= 0)
+		return {};
+
+	// 出场数上界 = min(区域上限, Σ CREATEMAXNUM);出场数 = RAND(1, 上界)(源码 :1400-1401)。
+	// ★ 实测 CREATEMAXNUM min=1 ⇒ createenemynum ≥ 1 ⇒ 上界 ≥ 1 ⇒ 不触发退化区间。
+	const std::int32_t cap =
+	    enemy_max_num < createenemynum ? enemy_max_num : createenemynum;
+	std::int32_t entrymax = rng.rand(1, cap);
+
+	// ── 第四段:逐只抽 + 同族上限门 + 大怪布阵(源码 :1402-1465)──────────────
+	// ⚠️ 产出保留定长 16 槽(kEnemyIndexTableMaxSize)+ -1 空位 —— 大怪换位要按位置
+	//    读写(见 Api.h),vector 一路 push 做不到。末尾再裁成紧凑序列。
+	std::array<std::int32_t, kEnemyIndexTableMaxSize> indextable{};
+	indextable.fill(-1);
+	const std::int32_t r_max = total - 1; // 源码 :1397 的 r_max--
+	int bigcnt = 0;
+	int i = 0;
+	for (int loopcounter = 0; i < entrymax && loopcounter < 100; ++loopcounter)
+	{
+		// 权重抽签 —— 与 pickEnemyGroup 同构(found-1 兜底 + wr!=0,等价/冗余见 DR-DT13 ④)。
+		const std::int32_t r = rng.rand(0, r_max);
+		int pick = found - 1;
+		std::int32_t acc = 0;
+		for (int j = 0; j < found - 1; ++j)
+		{
+			acc += wr[static_cast<std::size_t>(j)];
+			if (wr[static_cast<std::size_t>(j)] != 0 && r < acc)
+			{
+				pick = j;
+				break;
+			}
+		}
+		const std::int32_t row = work[static_cast<std::size_t>(pick)];
+
+		// 同族上限门(源码 :1418-1428):
+		//   cnt       = 索引表里已放入几只该行;
+		//   samecount = 候选 work[] 里该行出现几次。
+		//   cnt >= CREATEMAXNUM * samecount ⇒ 不再放它(i 不推进,loopcounter 推进)。
+		int cnt = 0;
+		for (int j = 0;
+		     j < kEnemyIndexTableMaxSize && indextable[static_cast<std::size_t>(j)] != -1; ++j)
+			if (indextable[static_cast<std::size_t>(j)] == row)
+				++cnt;
+		int samecount = 0;
+		for (int k = 0; k < found; ++k)
+			if (work[static_cast<std::size_t>(k)] == row)
+				++samecount;
+		if (cnt >= encounters[static_cast<std::size_t>(row)].create_max_num * samecount)
+			continue;
+
+		// 大怪布阵(源码 :1430-1464):查模板 E_T_SIZE。
+		// ★ 模板查不到 ⇒ 整只不放(源码 i++ 在 ENEMYTEMP_CHECKINDEX 块内 ⇒ 此处 continue)。
+		const std::int32_t t = findEnemyTemplate(
+		    templates, encounters[static_cast<std::size_t>(row)].temp_no);
+		if (t < 0)
+			continue;
+
+		if (templates[static_cast<std::size_t>(t)].size == kEnemySizeBig)
+		{
+			if (bigcnt >= 5)
+			{
+				// 前 5 位已满大怪 ⇒ 减少总出场数并跳过(源码 :1433-1436)。
+				--entrymax;
+				continue;
+			}
+			if (i > 4)
+			{
+				// 要放到第 6 位起 ⇒ 去前 5 位找第一只 NORMAL,与之交换(源码 :1437-1454)。
+				int j = 0;
+				bool swap_ready = false;
+				for (; j < 5; ++j)
+				{
+					const std::int32_t front = indextable[static_cast<std::size_t>(j)];
+					if (front == -1)
+						break; // 对应 ENEMY_CHECKINDEX 失败
+					const std::int32_t ft = findEnemyTemplate(
+					    templates, encounters[static_cast<std::size_t>(front)].temp_no);
+					if (ft < 0)
+						break; // 对应 ENEMYTEMP_CHECKINDEX 失败
+					if (templates[static_cast<std::size_t>(ft)].size == kEnemySizeNormal)
+					{
+						swap_ready = true;
+						break;
+					}
+				}
+				if (!swap_ready)
+					continue; // 前 5 位无 NORMAL 可换出 ⇒ 本轮不放
+				indextable[static_cast<std::size_t>(i)] = indextable[static_cast<std::size_t>(j)];
+				indextable[static_cast<std::size_t>(j)] = row;
+			}
+			else
+			{
+				indextable[static_cast<std::size_t>(i)] = row;
+			}
+			++bigcnt;
+		}
+		else
+		{
+			indextable[static_cast<std::size_t>(i)] = row;
+		}
+
+		++i; // ★ 只在模板有效(t >= 0)时推进 —— 源码 :1463 在 CHECKINDEX 块内。
+	}
+
+	// 裁成实际长度(原版返回 int* + -1 结尾,我们返回紧凑 vector)。
+	std::vector<std::int32_t> out;
+	out.reserve(static_cast<std::size_t>(i));
+	for (int k = 0; k < i; ++k)
+		out.push_back(indextable[static_cast<std::size_t>(k)]);
+	return out;
+}
+
 // ── 敌人生成与入场(批次 M.4b · 等级摇号 M.5)──────────────────────────
 //
 // 详注见 world/Api.h 的声明处。移植来源 `ENEMY_createEnemy`(展开视图

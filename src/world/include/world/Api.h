@@ -90,8 +90,22 @@ struct BattleStats
 //    `*(p + ENEMY_PETFLG)`,而模板表 c38 那个同名的 `E_T_PETFLG` **没有一处读它**)。
 //    ⚠️ 别因为模板表里也有个 `PETFLG` 列就把它加回来 —— 那是本项目已栽过四次的
 //    「同名不同源」,而这一对的两个值在真数据里**常常相同** ⇒ 加回来测试也未必抓到。
+
+// 敌人体型(`E_T_SIZE` 的取值,源码枚举 `include/enemy.h:4-8`)。批次 M.7 用于大怪布阵。
+inline constexpr std::int32_t kEnemySizeNormal = 0;
+inline constexpr std::int32_t kEnemySizeBig = 1;
+
 struct EnemyTemplate
 {
+	// 模板号(`E_T_TEMPNO`,c7 = int 列第 1 个,源码枚举 `include/enemy.h:12`)。批次 M.7。
+	//
+	// ⚠️★ **M.7 之前本结构没有它**:M.4b/M.5 的 `spawnEnemy` 由调用方直接传配对好的
+	//    (tmpl, enc),不必按号解析。M.7 的第三跳要**运行时**把敌人表行的 `temp_no`
+	//    解析成模板行(`findEnemyTemplate`)⇒ 这一列是那条外键的被引用端。
+	// ★ 原版在载入期靠它把 `ENEMY_TEMPNO` 解析成模板行下标并缓存(`enemy.c:469-478`,
+	//   ★ 找不到就丢弃整行)⇒ 我们没有载入期,改为运行时线性扫(判据同 M.6 的 `findEnemyGroup`)。
+	std::int32_t temp_no = 0;
+
 	// 参与四维生成的 6 列(DR-DT10)。★ 直接复用 L3 的结构,不另立一份 ——
 	//   两份会漂移,而漂移的表现是"四维算出来不一样"而没有一处报错。
 	SA::Rules::SpawnTemplate stats{};
@@ -109,6 +123,15 @@ struct EnemyTemplate
 
 	// 图号(`E_T_IMGNUMBER`,源码 :1023-1024)。
 	std::int32_t image = 0;
+
+	// 体型(`E_T_SIZE`,c39;源码枚举 `include/enemy.h:6-8` = 0:NORMAL / 1:BIG)。批次 M.7。
+	//
+	// ⚠️★★ **它决定大怪布阵**(`ENEMY_getEnemy:1430-1464`):大怪(BIG)只能站前 5 位,
+	//    第 6 只起放不下就减少出场数;要放后排时去前 5 位换一只 NORMAL 顶到后排。
+	// ★★ **实测 enemybase1.txt 1053 行:NORMAL 520 / BIG 533 ⇒ BIG 占 50.6%** ——
+	//    ⇒ 与 M.6 的 `zorder`(1050 行全 > 0、那半个语义一次都不触发)**恰好相反**:
+	//    大怪布阵是**真实主路径**而非防御代码 ⇒ `rollEnemyList` 的用例必须重度覆盖它。
+	std::int32_t size = kEnemySizeNormal;
 
 	// 捕获难度(`E_T_GET` → `CHAR_WORKMODCAPTUREDEFAULT`,源码 :1166)。
 	// ⚠️ 载入器对空列保持 `-1`(`06` §3.5)⇒ 这里可以是 −1,照传不兜底。
@@ -196,6 +219,18 @@ struct EnemyEncounter
 	std::int32_t lv_min = 0;
 	std::int32_t lv_max = 0;
 
+	// 本行一次最多刷几只(`ENEMY_CREATEMAXNUM`,c8)。批次 M.7。
+	//
+	// ★ 两个消费点都在第三跳 `ENEMY_getEnemy`:
+	//   ① `createenemynum += CREATEMAXNUM`(:1394)⇒ 出场数上界的一半
+	//      (`entrymax = RAND(1, min(enemymaxnum, Σ CREATEMAXNUM))`);
+	//   ② 同族上限门 `cnt >= CREATEMAXNUM * samecount`(:1426):同一敌人行放够这么多就不再放。
+	// ★★ **实测 enemy1.txt 2154 行:min=1 / max=63,无 0 无负** ⇒ `createenemynum ≥ 1`
+	//    ⇒ `entrymax = RAND(1, ≥1)` **不触发** DR-BT23 的退化区间,同族门阈 ≥ 1 不会恒真。
+	//    ⚠️ 默认值取 **1** 而非 0:0 会让门 `cnt >= 0` 恒真 ⇒ 漏填一行就整组刷不出;
+	//      1 是真数据的下界 —— 同 M.6 的 `enemy_max_num` 默认 4 的取向(给安全默认)。
+	std::int32_t create_max_num = 1;
+
 	// 可否被捕(`ENEMY_PETFLG`,c14 → `CHAR_WORK_PETFLG`,源码 :1165)。
 	//
 	// ★★ **这一列是本结构存在的第二个理由**(第一个是等级区间):它从 M.4b 的
@@ -208,9 +243,9 @@ struct EnemyEncounter
 
 // ── 敌人表里源码写了、本批**有意不建**的列(逐条记明,均非遗漏)───────────────
 //
-// ① `ENEMY_CREATEMAXNUM`(c8)⇒ **敌人编组**批次:它是"这一行最多刷几只"，
-//    消费点在 `ENEMY_getEnemy` 的编组摇号里(`:1394` 累加上限 · `:1426` 同种计数),
-//    而那条路要连 `group1.txt` + `encount.txt` 一起做(见 `spawnEnemyToField` 声明处)。
+// ① ✅ `ENEMY_CREATEMAXNUM`(c8)—— **批次 M.7 已建为上方 `create_max_num`**:
+//    它是"这一行最多刷几只",两个消费点(`:1394` 累加出场上限 · `:1426` 同族上限门)
+//    都在第三跳 `ENEMY_getEnemy` 里,M.7 的 `rollEnemyList` 兑现了 M.5/M.6 的这处预告。
 //
 // ② ⚠️★ `ENEMY_CREATEMINNUM`(c9)—— **死列,全树 0 处引用**(2026-09-09 实测:
 //    展开视图全树 grep 只命中 `include/enemy.h` 的枚举声明本身)。
@@ -274,6 +309,14 @@ inline constexpr int kEncountGroupMaxNum = 10;
 // ★ 源码用这个减法表达"两段等长且相邻",而不是写个 10 ——
 //   ⚠️ 那个隐含约束同样出现在掉落列上(`EnemyEncounter` 文末 ⑥),改表结构时会断。
 inline constexpr int kEnemyGroupSlotMaxNum = 10;
+
+// 单次遇敌的敌人索引表长度(`ENEMY_INDEXTABLEMAXSIZE`,`char/enemy.c:25`)。批次 M.7。
+//
+// ★ 它是 `ENEMY_getEnemy` 的产出数组 `ENEMY_indextable[]` 与候选 `work[]/wr[]` 的定长上限。
+//   ⚠️ 大怪布阵要按**位置索引**读写(把大怪换到前排、NORMAL 顶后排)⇒ `rollEnemyList`
+//     内部保留这个定长数组 + 末尾裁剪,而不是一路 `push_back` —— 后者做不到按位置换。
+// ★ 出场数 `entrymax ≤ enemy_max_num ≤ 10 < 16` ⇒ 16 是安全余量,不会越界。
+inline constexpr int kEnemyIndexTableMaxSize = 16;
 
 // `encount.txt` 的一行(33 列,`ENCOUNT_Table`,`include/encount.h:20`)。
 //
@@ -664,22 +707,73 @@ std::int32_t pickEnemyGroup(const EncountArea &area, const std::vector<EnemyGrou
                             const std::vector<std::int32_t> &player_item_ids,
                             SA::Rules::Random &rng);
 
-// ── 本批**不做**的第三跳(编组 → 敌人列表),逐条记明 ─────────────────────────
+// ── 遇敌:编组 → 敌人列表(批次 M.7,移植 `ENEMY_getEnemy` 的第三、四段)──────────
 //
-// ① `ENEMY_getEnemy` 第三段(`:1363-1401`):收候选敌人 + `entrymax = rand(1, min(
-//    enemymaxnum, Σ CREATEMAXNUM))`。⇒ **`ENEMY_CREATEMAXNUM` 的第一个消费点在这里**
-//    (`EnemyEncounter` 文末 ① 预告的就是它)。
-// ② 第四段(`:1403-1465`):逐只抽 + 同族上限门 `cnt >= CREATEMAXNUM * samecount`
-//    + ⚠️★ **大怪布阵**(`E_T_SIZE == E_T_SIZE_BIG`:`bigcnt >= 5` 时 `entrymax--`;
-//    要放到后排时去前 5 位换一个 NORMAL 出来)⇒ 需要**模板表全表**查 `E_T_SIZE`。
-// ③ ⚠️ NPC 事件改组(`:1367-1383`)—— 见 `EncountArea::event_now`,影响 8 行(0.76%)。
-// ④ ⚠️ `ENEMY_RandomEnemyArray`(`:1385`)—— M.5 已登记未移植;★ 注意它的实参是
-//    **`ENEMY_ID`** 而形参名叫 `e_array`(M.5 抓到的"名字骗人"第三例)。
-// ⑤ ⚠️★ 「要不要遇敌」**整个不在这条链上**:遇敌率骰子在 `char/char_walk.c`
-//    (分母 `rand()%(120*getEnemyAction())`),消费的是 `EncountArea::prob_min/max`。
-//    ★ 而 `06` §F 有一条相关实测:`EN`(遇敌)**不是网络入口** —— 两代服务端都没有
-//    `EN_RECV` 分发分支 ⇒ **玩家无法主动请求遇敌**,遇敌完全由服务端在移动时判定。
-//    ⇒ 那一批的前置是移动系统 + tick 的 `kCharLoop`(现仍是阶段 2 占位)。
+// ★ 切分点续 M.6:M.6 做完前两跳(坐标 → 区域 → 编组),本批做后两段 ——
+//   ③ 收候选敌人 + 摇出场数(`:1356-1401`)· ④ 逐只抽 + 同族上限门 + 大怪布阵(`:1402-1465`)。
+//   界面是**选中的敌人表行下标序列**(接 M.5 的 `spawnEnemy`/`spawnEnemyToField` 逐行生成)。
+//
+// ★ 三条与 M.5/M.6 一致的裁定(逐条依据见 `11` §2.16 DR-DT14):
+//   · 外键解析:原版载入期缓存(`GROUP_group[].enemyarray[]` / `ENEMY_enemy[].enemytemparray`),
+//     我们无载入期 ⇒ 运行时线性扫(`findEnemyEncounter` / `findEnemyTemplate`),找不到 → -1,等价;
+//   · NPC 事件改组(`:1367-1383`)**不实现**:依赖 NPC 旗标(同 M.6,`EncountArea::event_now`);
+//   · `ENEMY_RandomEnemyArray`(`:1385`)**不移植**:M.5 已登记 ⇒ 等价于"所有 ENEMY_ID 都不在
+//     随机区间 `[945,956]∪[964,969]`",★ 实测该区间被 group1.txt 引用 **18 槽 / 6 行(0.49%)**,
+//     ⚠️ 且它命中时会摇一次 rng ⇒ 不移植使序列偏差(P1:原版不可运行,无可比对序列)。
+
+// ENEMY_ID → 敌人表行下标;`-1` = 找不到。1:1 移植 `ENEMY_getEnemyArrayFromId`(`enemy.c:519-528`)。
+//
+// ★ 原版在**载入期**就把 group 的 `ENEMY_ID` 解析成敌人表行下标缓存(`:690-710`),
+//   运行期直接读 `GROUP_group[].enemyarray[]`(`ENEMY_getEnemyArrayFromIndex`:510)。
+//   我们没有载入期 ⇒ 遇敌时现扫,语义等价(找不到 → -1,原版载入期同样置 -1)。
+// ⚠️★ 线性扫全表(实测 2154 行),而单次遇敌最多扫 10 次 ⇒ 同 `findEnemyGroup` 登记为
+//    性能事实(阶段 3 可换等值查询的 `unordered_map`),不是缺陷。
+std::int32_t findEnemyEncounter(const std::vector<EnemyEncounter> &encounters,
+                                std::int32_t enemy_id);
+
+// TEMPNO → 模板表行下标;`-1` = 找不到。1:1 移植 `ENEMYTEMP_getEnemyTempArrayFromTempNo`
+// (`enemy.c:337-347`)。★ 与 `findEnemyEncounter` 同族:原版载入期缓存,我们运行时扫。
+std::int32_t findEnemyTemplate(const std::vector<EnemyTemplate> &templates,
+                               std::int32_t temp_no);
+
+// 选中的编组 → 敌人表行下标序列(含大怪布阵顺序;空 = 本次不刷出任何敌人)。
+// 1:1 移植 `ENEMY_getEnemy` 的第三、四段(`char/enemy.c:1356-1466`)。批次 M.7。
+//
+// 入参:选中的 `group`(M.6 的 `pickEnemyGroup` 产出行)· 敌人表全表 · 模板表全表 ·
+//       `enemy_max_num`(选中区域的 `EncountArea::enemy_max_num`,∈ [1,10]) · 战斗 rng。
+//
+// ── 第三段:收候选(`:1356-1401`)────────────────────────────────────────────
+//   遍历编组 10 个 `ENEMY_ID` 槽,解析成敌人表行下标,收进候选 `work[]`(权重 = `CREATEPROB`),
+//   同时累加 `createenemynum += CREATEMAXNUM`。出场数 `entrymax = RAND(1, min(enemy_max_num,
+//   createenemynum))` —— ★ `CREATEMAXNUM` 的**第一个消费点**(M.5 文末 ① 预告的)。
+//   ⚠️ 无候选(全部 `ENEMY_ID` 解析失败或槽全空)⇒ 在 `RAND` **之前**返回空 ⇒ 不消耗 rng(源码 :1399)。
+//
+// ── 第四段:逐只抽 + 同族上限门 + 大怪布阵(`:1402-1465`)────────────────────────
+//   循环 `i < entrymax`(★ 兜底 `loopcounter < 100`,源码 :1403:同族门 / 大怪换位失败会
+//   `continue` 而不推进 `i` ⇒ 无兜底会死循环)。每轮:
+//     · 权重抽签(同 `pickEnemyGroup`:`found-1` 兜底 + `wr!=0`,等价/冗余见 DR-DT13 ④);
+//     · **同族上限门**(`:1426`):已放入 `cnt` 只该行 ≥ `CREATEMAXNUM × samecount` ⇒ 跳过
+//       (`samecount` = 候选里该行出现几次;`cnt` = 索引表里已有几只该行);
+//     · **大怪布阵**(`:1430-1464`,查模板 `E_T_SIZE`;★ 模板查不到 ⇒ 整只不放,`i` 不推进):
+//         - `bigcnt >= 5` ⇒ `entrymax--` 并跳过(★ **减少总出场数**,前 5 位已满大怪);
+//         - 要放到第 6 位起(`i > 4`)⇒ 去前 5 位找第一只 NORMAL,把大怪换到它的位置、
+//           NORMAL 顶到 `i`(★ 保证大怪永远站前排);前 5 位无 NORMAL 可换 ⇒ 跳过;
+//         - `i <= 4` ⇒ 直接放到 `i`。
+//   ⚠️★ **大怪布阵是真实主路径**(模板表 BIG 占 50.6%,见 `EnemyTemplate::size`)——
+//      不是 M.6 那种"实测一次不触发"的防御分支,用例必须逐条覆盖上面每个分支。
+//
+// ⚠️★ **仍不做**(留给后续批次,逐条记明):
+//   · NPC 事件改组 / `ENEMY_RandomEnemyArray` —— 见本组卷首那两条(未移植依赖);
+//   · 「要不要遇敌」**整个不在这条链上**:遇敌率骰子在 `char/char_walk.c`(分母
+//     `rand()%(120*getEnemyAction())`,消费 `EncountArea::prob_min/max`),★ `06` §F 实测
+//     `EN`(遇敌)**不是网络入口**(无 `EN_RECV` 分支)⇒ 玩家无法主动请求遇敌,由服务端在
+//     移动时判定 ⇒ 那一批的前置是移动系统 + tick 的 `kCharLoop`(现仍阶段 2 占位);
+//   · **接进 tick / `spawnEnemyToField` 批量入场**:本函数是纯函数(产出行下标),不碰池与战场
+//     —— 同 M.6 的 `pickEnemyGroup`,靠用例断言,不接 `kNpcSpawn`(那需要移动系统先落地)。
+std::vector<std::int32_t> rollEnemyList(const EnemyGroup &group,
+                                        const std::vector<EnemyEncounter> &encounters,
+                                        const std::vector<EnemyTemplate> &templates,
+                                        std::int32_t enemy_max_num, SA::Rules::Random &rng);
 
 // 据模板 + 敌人表行生成一只敌人 —— 1:1 移植 `ENEMY_createEnemy`
 // (`char/enemy.c:994-1180`)里**做得到**的那一段。建 / 不建逐条见

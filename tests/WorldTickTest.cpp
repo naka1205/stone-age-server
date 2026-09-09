@@ -2360,3 +2360,190 @@ TEST_CASE("M.6:pickEnemyGroup 的三条门与两处不消耗 rng")
 		CHECK(pickedGroupId(a, gs, {}, top) == 91);
 	}
 }
+
+// ══ 批次 M.7:遇敌第三跳(编组 → 敌人列表)═══════════════════════════════════
+//
+// 详注见 world/Api.h 的 `rollEnemyList` 声明处;裁定见 `11` §2.16(DR-DT14)。
+// ⚠️★ 与 M.6 相反:大怪布阵(BIG 占模板表 50.6%)是**真实主路径**,逐分支覆盖。
+
+namespace
+{
+
+// 模板表:NORMAL(tempno=1,乌力)+ BIG(tempno=1001)。★ 复用 M.5 的乌力模板,只改 tempno/size。
+std::vector<SA::World::EnemyTemplate> makeTemplatesM7()
+{
+	SA::World::EnemyTemplate normal = makeWuliTemplate();
+	normal.temp_no = 1;
+	normal.size = SA::World::kEnemySizeNormal;
+	SA::World::EnemyTemplate big = makeWuliTemplate();
+	big.temp_no = 1001;
+	big.size = SA::World::kEnemySizeBig;
+	return {normal, big};
+}
+
+// 敌人表一行:id / 指向的模板 tempno / CREATEMAXNUM。★ 纯逻辑 fixture,id 任取。
+SA::World::EnemyEncounter encRow(std::int32_t id, std::int32_t tempno, std::int32_t cmax)
+{
+	SA::World::EnemyEncounter e{};
+	e.enemy_id = id;
+	e.temp_no = tempno;
+	e.lv_min = 1;
+	e.lv_max = 1;
+	e.create_max_num = cmax;
+	return e;
+}
+
+// 编组:引用若干 ENEMY_ID + 各自权重(CREATEPROB)。
+SA::World::EnemyGroup groupOf(std::vector<std::int32_t> eids, std::vector<std::int32_t> probs)
+{
+	SA::World::EnemyGroup g{};
+	g.group_id = 1;
+	g.enemy_id.fill(-1);
+	g.create_prob.fill(-1);
+	for (std::size_t i = 0; i < eids.size(); ++i)
+		g.enemy_id[i] = eids[i];
+	for (std::size_t i = 0; i < probs.size(); ++i)
+		g.create_prob[i] = probs[i];
+	return g;
+}
+
+} // namespace
+
+TEST_CASE("M.7:findEnemyEncounter / findEnemyTemplate —— 命中与找不到")
+{
+	const std::vector<SA::World::EnemyEncounter> encs{encRow(9, 1, 2), encRow(142, 1, 3),
+	                                                  encRow(1309, 1001, 1)};
+	const std::vector<SA::World::EnemyTemplate> tmpls = makeTemplatesM7();
+
+	CHECK(SA::World::findEnemyEncounter(encs, 142) == 1);
+	CHECK(SA::World::findEnemyEncounter(encs, 9) == 0);
+	CHECK(SA::World::findEnemyEncounter(encs, 999) == -1); // 不存在 ⇒ -1
+	CHECK(SA::World::findEnemyTemplate(tmpls, 1001) == 1);
+	CHECK(SA::World::findEnemyTemplate(tmpls, 1) == 0);
+	CHECK(SA::World::findEnemyTemplate(tmpls, 42) == -1); // 不存在 ⇒ -1
+}
+
+TEST_CASE("M.7:无候选 ⇒ 返回空且不消耗 rng(源码 :1399 在 RAND 之前 return)")
+{
+	const std::vector<SA::World::EnemyEncounter> encs{encRow(9, 1, 2)};
+	const std::vector<SA::World::EnemyTemplate> tmpls = makeTemplatesM7();
+
+	SUBCASE("编组全空槽")
+	{
+		const SA::World::EnemyGroup g = groupOf({}, {});
+		ScriptedRandom rng({5});
+		CHECK(SA::World::rollEnemyList(g, encs, tmpls, 10, rng).empty());
+		CHECK(rng.calls() == 0); // ★ 一次都没摇
+	}
+	SUBCASE("编组引用的 ENEMY_ID 全部解析失败")
+	{
+		const SA::World::EnemyGroup g = groupOf({777, 888}, {10, 10});
+		ScriptedRandom rng({5});
+		CHECK(SA::World::rollEnemyList(g, encs, tmpls, 10, rng).empty());
+		CHECK(rng.calls() == 0);
+	}
+}
+
+TEST_CASE("M.7★:出场数上界 = min(enemy_max_num, Σ CREATEMAXNUM)")
+{
+	// 单敌人 idA(NORMAL,cmax=3),Σcmax=3。★ ScriptedRandom 给超大值被 rand 钳到上界,
+	//    上界直接体现在产出数量上(同族门阈 = 3*1 = 3,与上界持平 ⇒ 不额外挡)。
+	const std::vector<SA::World::EnemyEncounter> encs{encRow(9, 1, 3)};
+	const std::vector<SA::World::EnemyTemplate> tmpls = makeTemplatesM7();
+	const SA::World::EnemyGroup g = groupOf({9}, {10});
+
+	SUBCASE("enemy_max_num 更小 ⇒ 上界 = enemy_max_num")
+	{
+		ScriptedRandom rng({99}); // entrymax = rand(1,2) 钳到 2
+		const auto out = SA::World::rollEnemyList(g, encs, tmpls, 2, rng);
+		CHECK(out.size() == 2);
+	}
+	SUBCASE("Σ CREATEMAXNUM 更小 ⇒ 上界 = Σ CREATEMAXNUM")
+	{
+		ScriptedRandom rng({99}); // entrymax = rand(1,3) 钳到 3
+		const auto out = SA::World::rollEnemyList(g, encs, tmpls, 10, rng);
+		REQUIRE(out.size() == 3);
+		CHECK(out[0] == 0); // 都是 idA 的行下标
+	}
+}
+
+TEST_CASE("M.7★★:同族上限门 —— 放够 CREATEMAXNUM*samecount 就不再放它")
+{
+	const std::vector<SA::World::EnemyTemplate> tmpls = makeTemplatesM7();
+
+	SUBCASE("★ A(cmax=1)被门挡在 1 只,名额让给 B")
+	{
+		const std::vector<SA::World::EnemyEncounter> encs{encRow(9, 1, 1), encRow(142, 1, 5)};
+		const SA::World::EnemyGroup g = groupOf({9, 142}, {100, 1});
+		// rng:[0]=entrymax=3 · [1]=0(A,放) · [2]=0(A,cnt=1>=1 挡) · [3]=100(B) · 重复 100(B)
+		ScriptedRandom rng({3, 0, 0, 100});
+		const auto out = SA::World::rollEnemyList(g, encs, tmpls, 10, rng);
+		REQUIRE(out.size() == 3);
+		CHECK(out[0] == 0);
+		CHECK(out[1] == 1);
+		CHECK(out[2] == 1); // ★ A 只 1 只(门挡第 2 只),B 补 2 只
+	}
+	SUBCASE("★ 抽中的行一直被门挡 ⇒ loopcounter 兜底退出,不死循环")
+	{
+		const std::vector<SA::World::EnemyEncounter> encs{encRow(9, 1, 1), encRow(142, 1, 1)};
+		const SA::World::EnemyGroup g = groupOf({9, 142}, {100, 1});
+		ScriptedRandom rng({2}); // entrymax=2;抽签恒 0 ⇒ 恒选 A,A 放 1 只后永远被挡
+		const auto out = SA::World::rollEnemyList(g, encs, tmpls, 10, rng);
+		CHECK(out.size() == 1); // ★ 靠 loopcounter<100 退出,否则死循环
+	}
+}
+
+TEST_CASE("M.7★:大怪布阵 —— 前 5 只 BIG 直接放前排(i<=4)")
+{
+	const std::vector<SA::World::EnemyEncounter> encs{encRow(500, 1001, 5)}; // BIG
+	const std::vector<SA::World::EnemyTemplate> tmpls = makeTemplatesM7();
+	const SA::World::EnemyGroup g = groupOf({500}, {10});
+	ScriptedRandom rng({3}); // entrymax=3;单候选恒选它
+	const auto out = SA::World::rollEnemyList(g, encs, tmpls, 10, rng);
+	REQUIRE(out.size() == 3);
+	for (auto row : out)
+		CHECK(row == 0); // 都是那只 BIG 的行下标
+}
+
+TEST_CASE("M.7★★:大怪布阵 —— 第 6 只起 BIG 放不下,减少出场数(bigcnt>=5)")
+{
+	const std::vector<SA::World::EnemyEncounter> encs{encRow(500, 1001, 10)}; // BIG,cmax 够大
+	const std::vector<SA::World::EnemyTemplate> tmpls = makeTemplatesM7();
+	const SA::World::EnemyGroup g = groupOf({500}, {10});
+	ScriptedRandom rng({8}); // 想出 8 只,但全是 BIG ⇒ 满 5 只后每多抽一只就 entrymax--
+	const auto out = SA::World::rollEnemyList(g, encs, tmpls, 10, rng);
+	CHECK(out.size() == 5); // 大怪上限 5,超出的名额被 entrymax-- 吃掉
+	// ⚠️★★ **单靠 size 无区分力**:删掉 `bigcnt>=5` 门后,第 6 只 BIG 走 i>4 换位、
+	//    因前 5 位全是 BIG(无 NORMAL 可换)而 continue ⇒ out **同样是 5 只**。
+	//    ⇒ `bigcnt>=5` 门的**独立可观察后果是 rng 取数次数**:它 `entrymax--` 让循环在
+	//    第 8 轮结束(摇号 1 + 抽签 8 = 9 次);删掉后靠 `loopcounter<100` 兜底 ⇒ 空转到 101 次。
+	//    ★ 这正是 §9.0.36 ⑥ 那族(反向验证逼出"断言的形状要能区分被注入的那处")——
+	//      2026-09-09 反向验证注入 `bigcnt>=99` 时 size 断言 0 转红,补此条后立刻转红。
+	CHECK(rng.calls() == 9);
+}
+
+TEST_CASE("M.7★★★:大怪布阵 —— 第 6 只 BIG 换到前排,被顶出的 NORMAL 落到后排(i>4)")
+{
+	// idN(NORMAL,行 0)+ idC(BIG,行 1)。权重 N=100 / C=1 ⇒ r<100 选 N、r>=100 选 C。
+	const std::vector<SA::World::EnemyEncounter> encs{encRow(300, 1, 10), encRow(500, 1001, 10)};
+	const std::vector<SA::World::EnemyTemplate> tmpls = makeTemplatesM7();
+	const SA::World::EnemyGroup g = groupOf({300, 500}, {100, 1});
+	// rng:[0]=entrymax=6 · 前 5 抽选 N(r=0)· 第 6 抽选 C(r=100)
+	ScriptedRandom rng({6, 0, 0, 0, 0, 0, 100});
+	const auto out = SA::World::rollEnemyList(g, encs, tmpls, 10, rng);
+	REQUIRE(out.size() == 6);
+	CHECK(out[0] == 1); // ★ BIG(idC 行下标 1)被换到最前排
+	for (std::size_t k = 1; k < 6; ++k)
+		CHECK(out[k] == 0); // 其余是 NORMAL;被顶出的那只 NORMAL 落到位置 5
+}
+
+TEST_CASE("M.7:敌人行的模板查不到 ⇒ 整只不放(i 不推进,靠 loopcounter 退出)")
+{
+	// idX 指向不存在的模板 tempno=9999 ⇒ findEnemyTemplate 返 -1。
+	const std::vector<SA::World::EnemyEncounter> encs{encRow(700, 9999, 5)};
+	const std::vector<SA::World::EnemyTemplate> tmpls = makeTemplatesM7();
+	const SA::World::EnemyGroup g = groupOf({700}, {10});
+	ScriptedRandom rng({3});
+	const auto out = SA::World::rollEnemyList(g, encs, tmpls, 10, rng);
+	CHECK(out.empty()); // ★ 候选有效(收进了)但模板缺失 ⇒ 一只都放不出
+}
