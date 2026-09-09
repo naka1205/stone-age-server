@@ -1633,6 +1633,127 @@ void exitPetFromField(SA::Rules::BattleField &field, int owner_field_slot)
 	field.at(pet_field_slot).occupied = false;
 }
 
+// ── 遇敌:坐标 → 区域 → 编组(批次 M.6)──────────────────────────────────
+//
+// 详注见 world/Api.h 的声明处。移植来源 `ENCOUNT_getEncountAreaArray`
+// (`char/encount.c:370-392`)· `GROUP_getGroupArray`(`char/enemy.c:745-755`)·
+// `ENEMY_getEnemy` 的前两段(`char/enemy.c:1289-1355`)。
+
+std::int32_t findEncountArea(const std::vector<EncountArea> &areas, std::int32_t floor,
+                             std::int32_t x, std::int32_t y)
+{
+	std::int32_t index = -1;
+	for (std::size_t i = 0; i < areas.size(); ++i)
+	{
+		const EncountArea &a = areas[i];
+		if (a.floor != floor)
+			continue;
+
+		// 闭区间 —— `PointInRect`(`util.c:1363`)是 `x <= px && px <= x + width`,
+		// 而载入期的 width 不 +1 ⇒ 两者配对后语义是「x1..x2 两端都含」。
+		// ⚠️ 写成 `px < a.x + a.width` 会让单点区域(width==0)永不匹配。
+		if (x < a.x || x > a.x + a.width)
+			continue;
+		if (y < a.y || y > a.y + a.height)
+			continue;
+
+		// ⚠️★★ `zorder <= 0` 整行跳过 —— 那一列兼任启用开关(源码 :378)。
+		//    实测 1050 行全部 > 0 ⇒ 本判据一次都不触发,仍然移植(理由见 Api.h)。
+		if (a.zorder <= 0)
+			continue;
+
+		// ★ 严格 `>` ⇒ zorder 相等时保留**先遇到**的(源码 :382)。
+		//   ⚠️ 顺序敏感,而表的顺序就是文件行序 ⇒ D 线入库时**不得重排行**。
+		if (index < 0 || a.zorder > areas[static_cast<std::size_t>(index)].zorder)
+			index = static_cast<std::int32_t>(i);
+	}
+	return index;
+}
+
+std::int32_t findEnemyGroup(const std::vector<EnemyGroup> &groups, std::int32_t group_id)
+{
+	for (std::size_t i = 0; i < groups.size(); ++i)
+		if (groups[i].group_id == group_id)
+			return static_cast<std::int32_t>(i);
+	return -1;
+}
+
+std::int32_t pickEnemyGroup(const EncountArea &area, const std::vector<EnemyGroup> &groups,
+                            const std::vector<std::int32_t> &player_item_ids,
+                            SA::Rules::Random &rng)
+{
+	// 候选三元组:编组槽号 / 该槽权重 / 已解析的 group 行下标。
+	// ★ 缓存行下标是**有意偏离**源码:原版抽中后又调一次 `GROUP_getGroupArray`
+	//   (`:1354`)⇒ 第二次线性扫 1220 行。缓存不改变任何行为,只省那一次扫。
+	std::array<std::int32_t, kEncountGroupMaxNum> weight{};
+	std::array<std::int32_t, kEncountGroupMaxNum> row{};
+	int found = 0;
+	std::int32_t total = 0;
+
+	const auto holds = [&player_item_ids](std::int32_t item_id)
+	{
+		return std::find(player_item_ids.begin(), player_item_ids.end(), item_id) != player_item_ids.end();
+	};
+
+	for (std::size_t i = 0; i < static_cast<std::size_t>(kEncountGroupMaxNum); ++i)
+	{
+		const std::int32_t gid = area.group_id[i];
+		if (gid == -1)
+			continue;
+
+		const std::int32_t g = findEnemyGroup(groups, gid);
+		if (g < 0)
+			continue; // ★ 不照抄原版"坏组仍入选"那条路径,理由见 Api.h 声明处 ③
+
+		const EnemyGroup &grp = groups[static_cast<std::size_t>(g)];
+
+		// 两道道具门(源码 :1307-1332)。⚠️ 道具系统未移植 ⇒ 调用方传空背包,
+		//    对空背包玩家与原版 100% 一致;后果规模见 `EnemyGroup` 那两条注释。
+		if (grp.appear_by_item_id != -1 && !holds(grp.appear_by_item_id))
+			continue;
+		if (grp.not_appear_by_item_id != -1 && holds(grp.not_appear_by_item_id))
+			continue;
+
+		weight[static_cast<std::size_t>(found)] = area.group_prob[i];
+		row[static_cast<std::size_t>(found)] = g;
+		total += area.group_prob[i];
+		++found;
+	}
+
+	// ★ 源码在 `RAND` **之前**就 `return NULL`(`:1342`)⇒ 无候选时**不消耗 rng**。
+	if (found <= 0)
+		return -1;
+
+	// 抽签:`r = RAND(0, Σ − 1)`(源码 :1340 的 `r_max--` + :1346)。
+	// ⚠️★ 本表实测权重和恒 ≥ 1(min=1)⇒ 不会走到 DR-BT23 的退化区间;
+	//    ★ 而下一批的 group 侧**会**(4 行权重和为 0)—— 那是 R.1 排在本批前的理由。
+	const std::int32_t r = rng.rand(0, total - 1);
+
+	// ⚠️★★ 上界是 `found - 1`:最后一个候选不参与判定,落空即取它兜底(源码 :1347)。
+	// ★★ **实测这两处细节都是「等价写法」而不是行为判据**(2026-09-09 穷举验证,
+	//    1..4 个槽 × 权重 {−1,0,1,2,3} × r 遍历 [0, Σ−1],共 2,580 组):
+	//      · 上界写 `found - 1` 还是 `found` ⇒ **差异 0 组**
+	//        (因为 `r <= Σ−1 < acc(最后)` ⇒ 最后一个必然命中);
+	//      · `weight != 0` 这半个条件 ⇒ **差异 0 组**(它是**冗余**的:权重 0 的槽
+	//        不会让 acc 增长,而 `r < acc_prev` 若成立,前一轮就已经 break 了)。
+	//    ⇒ ★ 两者**照抄源码**(它们是源码原文),但**不要声称它们要紧** ——
+	//      ⚠️ 本注释初稿写的是「`weight != 0` 那半个条件要紧:权重 0 的槽不该被选中,
+	//      少了它就会选中它」,**那句话是错的**,由反向验证 + 穷举当场揭穿(`00` §9.0.37 ⑥)。
+	int pick = found - 1;
+	std::int32_t acc = 0;
+	for (int i = 0; i < found - 1; ++i)
+	{
+		acc += weight[static_cast<std::size_t>(i)];
+		if (weight[static_cast<std::size_t>(i)] != 0 && r < acc)
+		{
+			pick = i;
+			break;
+		}
+	}
+
+	return row[static_cast<std::size_t>(pick)];
+}
+
 // ── 敌人生成与入场(批次 M.4b · 等级摇号 M.5)──────────────────────────
 //
 // 详注见 world/Api.h 的声明处。移植来源 `ENEMY_createEnemy`(展开视图

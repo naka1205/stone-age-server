@@ -16,6 +16,7 @@
 #ifndef __SA_WorldApi_H__
 #define __SA_WorldApi_H__
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -246,6 +247,160 @@ struct EnemyEncounter
 //    见 `EnemyTemplate::name` 那条。★ 建了它就会有人拿它当敌人名字用,
 //    而真名在模板表 ⇒ 那会是一个"显示正确了 99% 的行"的静默错误。
 
+// ── 遇敌坐标表与敌人编组表(批次 M.6)────────────────────────────────────
+//
+// ★ 两张表接力回答 M.5 留下的那个问题:「刷哪几行敌人」。
+//     玩家坐标 ──encount.txt──▶ 区域(最多 10 个编组 + 各自权重)
+//              ──group1.txt──▶ 编组(最多 10 个 `ENEMY_ID` + 各自权重)
+//              ──enemy1.txt──▶ M.5 的 `EnemyEncounter` 逐行
+//   ⚠️ **本批只做前两跳**(坐标 → 编组),第三跳(编组 → 敌人列表)见文末「本批不做」。
+//
+// ★ 放 `world/` 而非 `shared/`:同 `EnemyTemplate` / `EnemyEncounter` 的判据 ——
+//   内容表的形状不是双端共享的规则,**客户端不刷怪**。
+//
+// ⚠️★★ **数据基准是 `csa8.0/gmsv/data/`,不是 `StoneAge/gmsv/data/`** ——
+//    两棵树**文件名完全相同而内容不同**,且**两份 `setup.cf` 都指向同名文件**
+//    ⇒ 无法靠文件名区分,只能靠路径。实测行数(csa8.0 / StoneAge):
+//    `encount.txt` **1051** / 1199 · `group1.txt` **1220** / 1395 · `enemy1.txt` **2154** / 2998。
+//    ★ 这比 M.5 踩的 `enemy.txt` vs `enemy1.txt` 更隐蔽:那次靠文件名可分。
+//    ⚠️ 且 `group.txt`(旧版)恰好是 1220 行 —— 与 csa8.0 的 `group1.txt` **撞数**
+//    ⇒ 拿错基准时行数校验**会通过**。
+
+// 一个区域最多挂几个编组(`ENCOUNT_GROUPMAXNUM`,`include/encount.h:4`)。
+inline constexpr int kEncountGroupMaxNum = 10;
+
+// 一个编组最多挂几个敌人(`CREATEPROB1 - ENEMY_ID1`,`include/enemy.h:129-148`)。
+//
+// ★ 源码用这个减法表达"两段等长且相邻",而不是写个 10 ——
+//   ⚠️ 那个隐含约束同样出现在掉落列上(`EnemyEncounter` 文末 ⑥),改表结构时会断。
+inline constexpr int kEnemyGroupSlotMaxNum = 10;
+
+// `encount.txt` 的一行(33 列,`ENCOUNT_Table`,`include/encount.h:20`)。
+//
+// ⚠️ 结构体整体在 `#ifdef _ADD_ENCOUNT` 下,而 `version.h:93` **已定义**
+//    ⇒ 末三列(`event_now` / `event_end` / `enemy_group`)存在,列数是 33 不是 30。
+struct EncountArea
+{
+	std::int32_t index = -1; // c1:表内编号(仅标识,查表不用它)
+	std::int32_t floor = 0;  // c2:地图号,与 `CHAR_FLOOR` 比对
+
+	// c3-c6(`x1,y1,x2,y2`)⇒ 载入期归一成**左上 + 宽高**(源码 `encount.c:222-226`):
+	//   `x = min(x1,x2)` · `width = max(x1,x2) - min(x1,x2)`(⚠️ **不 +1**)
+	//
+	// ★★ 判定用 `PointInRect`(`util.c:1363`),而它是**闭区间**:
+	//      `rect.x <= px && px <= rect.x + rect.width`
+	//    ⇒ 与"宽度不 +1"正好配对 ⇒ 语义是「`x1..x2` 两端都含」,单点区域(x1==x2)也匹配。
+	// ⚠️★ 同一个 `RECT` 在**同一个文件**里被两种口径解读:`clipRect`(`util.c:1379`)
+	//    用的是 `x + width - 1`(把 width 当格数)。⇒ 本项目只走 `PointInRect` 那条口径;
+	//    将来若复用这两个字段做别的事,**两种口径会打架**。
+	std::int32_t x = 0;
+	std::int32_t y = 0;
+	std::int32_t width = 0;
+	std::int32_t height = 0;
+
+	// c7 / c8:遇敌**概率**区间(千分比语义待下一批核)。
+	//
+	// ⚠️★ **本批不消费这两列** —— 它们属「要不要遇敌」(遇敌率骰子在 `char_walk.c`,
+	//    分母 `rand()%(120*getEnemyAction())`),而本批做的是「遇到什么」。
+	//    ⇒ 建它们只为让那条外键在代码里看得见,和 `EnemyEncounter::temp_no` 同理。
+	// ⚠️★★ 载入期有一处**原版缺陷**,移植时不要照抄:`encount.c:214-215` 与 `:271-272`
+	//    两处都写着 `encountprob_min = 1; encountprob_min = 50;`
+	//    ⇒ **第二行本该是 `_max`** ⇒ `encountprob_max` 从未获得默认值。
+	//    ★ 实际无后果(33 列全给,默认值被逐行覆盖),但它是"复制粘贴传播"的活样本。
+	// ★ 另有一条载入期归一**要移植**:`min/max` 写反了自动纠正(`:245-253`),
+	//   与敌人表 `lv_min/lv_max` 完全同族。
+	std::int32_t prob_min = 0;
+	std::int32_t prob_max = 0;
+
+	// c9:本区域一次最多刷几只(`enemymaxnum`)。
+	//
+	// ⚠️ 载入期有**范围门**:`maxnum < 1 || maxnum > 10` ⇒ 打「文件语法错误」并**丢弃整行**
+	//    (`:262-266`)⇒ 运行期该值恒在 `[1,10]`。⇒ 那道门属 D 线导入器。
+	// ⚠️★ 它在本批**不被消费**:消费点是下一批的 `min(enemymaxnum, Σ CREATEMAXNUM)`
+	//    ⇒ 与 `EnemyEncounter` 文末 ① 说的 `CREATEMAXNUM` 消费点是**同一处**。
+	std::int32_t enemy_max_num = 4;
+
+	// c10:`zorder` —— ⚠️★★ **它兼任"启用开关",而名字完全看不出这件事**。
+	//
+	// 源码 `ENCOUNT_getEncountAreaArray`(`:377-381`):坐标匹配之后还有一道
+	// `if (curZorder > 0)`,**不满足就整行跳过**;多个区域都匹配时取 `zorder` **最大**的。
+	// ⇒ 语义是两件事:① 重叠区域的优先级;② **`zorder <= 0` 的行永不生效**。
+	//
+	// ★ 实测 1050 行**全部 > 0**(取值分布:1 → 588 行 · 10 → 144 · 50 → 69 · 5 → 59 · 100 → 50)
+	//   ⇒ ② 那一半**一次都不触发**。⚠️ **仍然移植** —— 判据同 M.5 两条归一(经 DR-BT23 改口径后):
+	//   **原版就是这么做的**,不移植就是让原本不生效的行生效,而**真实数据里没有这种行
+	//   ⇒ 也就没有任何用例会因为漏掉它而变红**(只能靠手造数据钉住)。
+	std::int32_t zorder = 0;
+
+	// c11-c20:本区域可能出现的编组号(`GROUP_ID`),`-1` = 空槽。
+	// c21-c30:与上一一对应的**权重**。
+	//
+	// ⚠️★★ **它不是百分比** —— 实测「权重和 == 100」的行只有 **2/1051(0.2%)**;
+	//    抽签是 `r = RAND(0, Σ−1)` 再累加找区间(`enemy.c:1346-1350`)⇒ 任意正整数权重即可。
+	//    ★ 实测权重和 min=1 / max=801 / 均值 34.8,**无一行为 0** ⇒ 本表不会触发退化区间。
+	// ⚠️ 载入期对 `group_id` 查重(`checkRedundancy`,`:304-310`)⇒ 重复即**丢弃整行**;
+	//    ★ 该函数**显式跳过 -1**(`util.c:1606`)⇒ 多个空槽不算重复。
+	std::array<std::int32_t, kEncountGroupMaxNum> group_id{};
+	std::array<std::int32_t, kEncountGroupMaxNum> group_prob{};
+
+	// c31-c33:NPC 事件改组(`event_now` / `event_end` / `enemy_group`)。
+	//
+	// ⚠️★ **本批建字段但不实现那道门** —— 它依赖 NPC 旗标系统(`NPC_NowEventCheckFlg` /
+	//    `NPC_EventCheckFlg`,`enemy.c:1376-1377`),整个 NPC 事件系统未移植(`07`)。
+	// ★ 规模实测:`event_now != -1` **8/1051 行(0.76%)** · `event_end != -1` **0 行** ·
+	//   `enemy_group != -1` **8 行** ⇒ 影响面 0.76%,且**恰好就是那 8 行**。
+	// ⇒ 与「不建」的区别要紧:建了字段,那道门将来接上时**不需要改表结构**,
+	//   而现在它是一个**在代码里看得见的缺口**(见 `pickEnemyGroup` 文末)。
+	std::int32_t event_now = -1;
+	std::int32_t event_end = -1;
+	std::int32_t enemy_group = -1;
+};
+
+// `group1.txt` 的一行(24 列 = 1 char + 23 int,枚举见 `include/enemy.h:126-155`)。
+//
+// ⚠️★ **列序与枚举序不一致**:文件第 1 列是 `GROUP_NAME`(char),而枚举里它排在
+//    全部 int 之后。载入器靠 `GROUP_STARTINTNUM = 2` 把文件第 2 列对到枚举 0
+//    (`enemy.c:677-688`)⇒ 读表时**不能按枚举序数文件列**。
+struct EnemyGroup
+{
+	std::int32_t group_id = -1; // c2:被 `EncountArea::group_id` 引用的键
+
+	// c3 / c4:两道**道具门**(`GROUP_APPEARBYITEMID` / `GROUP_NOTAPPEARBYITEMID`)。
+	//
+	// 源码 `enemy.c:1307-1332`:
+	//   · `appear_by_item_id != -1` 且玩家**没有**该道具 ⇒ 本组不参与抽签;
+	//   · `not_appear_by_item_id != -1` 且玩家**持有**该道具 ⇒ 本组不参与抽签。
+	//
+	// ★ 实测:`APPEARBY != -1` **139/1220 行(11.4%)** · `NOTAPPEARBY != -1` **47 行(3.9%)**。
+	// ★★ **本批完整实现这两道门**(不是留空)—— 判据只需要「玩家持有哪些道具 ID」,
+	//    那是一个**快照**,不是运行时状态 ⇒ 作为入参传入即可,不破 D2。
+	// ⚠️★★ 而道具系统未移植 ⇒ 调用方目前传**空**背包 ⇒ 后果要精确说:
+	//    · 对**空背包玩家**,我们的行为与原版 **100% 一致**(原版对没带道具的人也排除);
+	//    · 偏差只在"玩家其实带着那个道具"这一情形 ⇒ 那 139 组暂时永不出现。
+	//    · 实测连带后果:**25/969 个有编组的区域(2.58%)** 在空背包下**完全不遇敌**
+	//      (它们的全部编组都要求持有道具),另 **104 个(10.7%)** 编组组合发生变化。
+	//    ⇒ ★ 这是**依赖未就绪**,不是留空的门:道具系统接上后那 25 个区域自动恢复。
+	std::int32_t appear_by_item_id = -1;
+	std::int32_t not_appear_by_item_id = -1;
+
+	// c5-c14:本组的敌人(`ENEMY_ID`),`-1` = 空槽。c15-c24:各自权重(`CREATEPROB`)。
+	//
+	// ⚠️★ 载入期把 `ENEMY_ID` 解析成敌人表行下标并缓存(`enemy.c:690-710`),
+	//    ★ **找不到就把该槽置 -1**(不是丢整行);而**一个都没解析成功**才丢整行,
+	//    重复 `ENEMY_ID` 也丢整行 ⇒ 三种处置各不相同,别混。
+	// ★ 实测敌人槽:平均 **1.79** 个 / 最多 9 个 / **只配 1 个的占 52.6%**。
+	// ⚠️★★ 权重和实测 **4 行为 0** ⇒ 下一批的 `r = RAND(0, Σ−1)` 会拿到 `RAND(0,−1)`
+	//    ⇒ **那正是 DR-BT23 的退化区间**(确定返回 0 且照常消耗一次);
+	//    其中 **3 行被 `encount.txt` 引用 ⇒ 可达**,不是死数据。
+	//    ⇒ ★ 本批不消费权重,但这条实测**是 R.1 排在本批之前的直接理由**。
+	std::array<std::int32_t, kEnemyGroupSlotMaxNum> enemy_id{};
+	std::array<std::int32_t, kEnemyGroupSlotMaxNum> create_prob{};
+
+	// ⚠️ c1 `GROUP_NAME` **不建** —— 同 `EnemyEncounter` 文末 ⑧ 与 `EnemyTemplate::name`:
+	//    它是配表人的标签(实测 `sai_e_113_1` / `dan_1_04_44_32/33` 这种),
+	//    ★ 生成路径一次都不读它,建了就会有人拿它当显示名。
+};
+
 class World final : public SA::Net::TransportEvents,
                     public SA::Net::SessionHost
 {
@@ -451,6 +606,80 @@ void exitPetFromField(SA::Rules::BattleField &field, int owner_field_slot);
 //   判据不是"照抄源码"也**不再是** `Random::rand` 的契约(DR-BT23 后退化区间已有定义),
 //   而是**原版在载入期就做了**(`enemy.c:479-486`)⇒ 位置可换、行为须等价。
 std::int32_t rollEncounterLevel(const EnemyEncounter &enc, SA::Rules::Random &rng);
+
+// ── 遇敌:坐标 → 区域 → 编组(批次 M.6,移植 `ENEMY_getEnemy` 的前两段)────────
+//
+// ★ 切分点说明:原版 `ENEMY_getEnemy`(`char/enemy.c:1273-1467`,**195 行**)一口气做四件事
+//   —— ① 坐标定区域 · ② 抽编组 · ③ 收候选敌人 · ④ 逐只放入阵列(含大怪布阵)。
+//   ⚠️ ③④ 需要**敌人表全表 + 模板表全表 + NPC 旗标**三个数据源,而 ①② 只需要两张表
+//   ⇒ 本批做 ①②,界面是**选中的编组行下标**(一个清晰、可断言的产出)。
+//   ★ 这与 M.5 的切分同一思路:**切在函数入参上**,而不是切在"做一半"。
+
+// 坐标 → `encount` 表行下标;`-1` = 该坐标不遇敌。
+//
+// 1:1 移植 `ENCOUNT_getEncountAreaArray`(`char/encount.c:370-392`)。三条语义:
+//   ① `floor` 相等 **且** 坐标落在闭区间矩形内(`PointInRect`);
+//   ② ⚠️★★ 还要 `zorder > 0` —— 见 `EncountArea::zorder`,那一列**兼任启用开关**;
+//   ③ 多个区域都匹配时取 `zorder` **最大**的(★ 相等时保留**先遇到**的,
+//      源码判据是严格 `>` ⇒ **顺序敏感**,而表的顺序就是文件行序)。
+//
+// ⚠️★ 它是**线性扫全表**(实测 1051 行),而原版每次移动判遇敌都调一次。
+//    ⇒ 本批**照原样保留**:`01` §8.2 那条「索引不得线性扫描」约束的是**实体索引**,
+//      内容表按坐标查没有等价的 O(1) 结构(矩形包含查询要空间索引)。
+//    ⇒ 登记为性能事实而非缺陷,属阶段 3 的优化面(同欠债 13 `poll` 那条的性质)。
+std::int32_t findEncountArea(const std::vector<EncountArea> &areas, std::int32_t floor,
+                             std::int32_t x, std::int32_t y);
+
+// `GROUP_ID` → `group` 表行下标;`-1` = 找不到。
+//
+// 1:1 移植 `GROUP_getGroupArray`(`char/enemy.c:745-755`)。⚠️★ 同样是线性扫(1220 行),
+// 而**原版每次遇敌最多调它 11 次**(编组循环里最多 10 次 + 抽中后 1 次)⇒ 单次遇敌
+// 最坏 13,420 次比较。★ 照原样保留,理由同 `findEncountArea`;⚠️ 但这条更值得将来动手 ——
+// 按 `group_id` 查是**等值查询**,建 `unordered_map` 就够,不需要空间索引。
+std::int32_t findEnemyGroup(const std::vector<EnemyGroup> &groups, std::int32_t group_id);
+
+// 区域 → 选中的 `group` 表行下标;`-1` = 无可用编组(该坐标本次不遇敌)。
+//
+// 1:1 移植 `ENEMY_getEnemy` 的第二段(`char/enemy.c:1301-1355`):
+//   ① 遍历 10 个编组槽,跳过 `-1`;
+//   ② 两道**道具门**(见 `EnemyGroup::appear_by_item_id`)—— `player_item_ids` 是玩家
+//      背包里的道具 ID **快照**;⚠️ 道具系统未移植 ⇒ 调用方传空,后果见那条注释;
+//   ③ ⚠️★ 编组号查不到对应 group 行时**照原版跳过**(源码 `GROUP_getGroupArray` 返 -1
+//      后 `GROUP_getInt` 会撞 `GROUP_CHECKINDEX` 返回 -1 ⇒ 两道门都视作"无门"⇒ 该组
+//      仍会入选,而它是个**坏组**)。★★ **这一处我们不照抄**:直接跳过该槽,
+//      理由是原版那条路径依赖 `GROUP_getInt` 越界返回 -1 的**防御性副作用**,
+//      而它在我们这里是 `std::vector::at` ⇒ 照抄等于把"越界即 -1"这个约定移植过来。
+//      ⚠️ 实测该情形 **0 次**(全部 `group_id` 都能查到),⇒ 是防御而非行为差异。
+//   ④ 按权重抽签:`r = rand(0, Σ−1)`,累加找第一个 `w != 0 && r < 累加` 的槽。
+//      ⚠️★★ **这一行里有两处细节是「等价写法」而不是行为判据**,别把它们当成判据去验:
+//        · 上界 `found - 1`(最后一个候选不参与判定,落空即兜底);
+//        · `w != 0` 这半个条件。
+//      ★ 2026-09-09 穷举验证(1..4 槽 × 权重 {−1,0,1,2,3} × r 遍历 [0,Σ−1],2,580 组):
+//        两处各自改掉、以及同时改掉,**结果差异均为 0 组** ⇒ 上界等价、`w != 0` **冗余**。
+//      ⇒ ★ 仍**照抄源码**(它们是源码原文),但**不为它们编造"要紧"的理由** ——
+//        ⚠️ 本注释初稿正是这么写的(「少了它会选中权重 0 的槽」),而那句话是错的:
+//        权重 0 的槽不让 acc 增长,而 `r < acc_prev` 若成立、前一轮就 break 了。
+//        ⇒ 反向验证 + 穷举当场揭穿(`00` §9.0.37 ⑥,与 §9.0.35 ⑤ / §9.0.36 ⑥ 同族第三次)。
+std::int32_t pickEnemyGroup(const EncountArea &area, const std::vector<EnemyGroup> &groups,
+                            const std::vector<std::int32_t> &player_item_ids,
+                            SA::Rules::Random &rng);
+
+// ── 本批**不做**的第三跳(编组 → 敌人列表),逐条记明 ─────────────────────────
+//
+// ① `ENEMY_getEnemy` 第三段(`:1363-1401`):收候选敌人 + `entrymax = rand(1, min(
+//    enemymaxnum, Σ CREATEMAXNUM))`。⇒ **`ENEMY_CREATEMAXNUM` 的第一个消费点在这里**
+//    (`EnemyEncounter` 文末 ① 预告的就是它)。
+// ② 第四段(`:1403-1465`):逐只抽 + 同族上限门 `cnt >= CREATEMAXNUM * samecount`
+//    + ⚠️★ **大怪布阵**(`E_T_SIZE == E_T_SIZE_BIG`:`bigcnt >= 5` 时 `entrymax--`;
+//    要放到后排时去前 5 位换一个 NORMAL 出来)⇒ 需要**模板表全表**查 `E_T_SIZE`。
+// ③ ⚠️ NPC 事件改组(`:1367-1383`)—— 见 `EncountArea::event_now`,影响 8 行(0.76%)。
+// ④ ⚠️ `ENEMY_RandomEnemyArray`(`:1385`)—— M.5 已登记未移植;★ 注意它的实参是
+//    **`ENEMY_ID`** 而形参名叫 `e_array`(M.5 抓到的"名字骗人"第三例)。
+// ⑤ ⚠️★ 「要不要遇敌」**整个不在这条链上**:遇敌率骰子在 `char/char_walk.c`
+//    (分母 `rand()%(120*getEnemyAction())`),消费的是 `EncountArea::prob_min/max`。
+//    ★ 而 `06` §F 有一条相关实测:`EN`(遇敌)**不是网络入口** —— 两代服务端都没有
+//    `EN_RECV` 分发分支 ⇒ **玩家无法主动请求遇敌**,遇敌完全由服务端在移动时判定。
+//    ⇒ 那一批的前置是移动系统 + tick 的 `kCharLoop`(现仍是阶段 2 占位)。
 
 // 据模板 + 敌人表行生成一只敌人 —— 1:1 移植 `ENEMY_createEnemy`
 // (`char/enemy.c:994-1180`)里**做得到**的那一段。建 / 不建逐条见

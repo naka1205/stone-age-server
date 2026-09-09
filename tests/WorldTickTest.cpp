@@ -2065,3 +2065,298 @@ TEST_CASE("M.4b★★:满血敌人几乎抓不到 —— Df_HpPer 二次式的�
 	// ★ 反面由上面几条 level 1 的用例给出:同一模板、同一玩家,只有 MaxHp 不同就抓得到。
 	//   ⇒ 这一对用例合起来说明"抓不到"来自 MaxHp,不是来自接线出了错。
 }
+
+// ── ★★ 批次 M.6:遇敌坐标表 → 编组(findEncountArea / pickEnemyGroup)────────
+//
+// ★ 两套数据各钉不同的东西(M.5 ⑤ 立的那条):
+//   · **真数据**(`encount.txt` 第 1 行 + 它引用的 5 个编组)钉「配置怎么被解释」;
+//   · **手造数据**钉那些真数据里**一次都不出现**的防御分支(`zorder <= 0` / 权重 0)——
+//     ★ 它们只能靠手造覆盖,而"真数据跑得过"证明不了它们。
+
+// `encount.txt` 第 1 行的**全部实测列**(csa8.0 数据包,2026-09-09):
+//   21,100,582,399,783,560,1,5,2,40,88,91,89,92,1230,,,,,,50,50,10,10,100,,,,,,,,
+//
+// ⚠️★ 注意 `group_id` 的槽序是 **88,91,89,92,1230** —— 与 `group1.txt` 里的表序
+//    (88,89,91,92,1230)**不同**。★ 抽签遍历的是**这个槽序**,不是表序;
+//    ⇒ 实现若按表序遍历,权重就会对错组,而两种顺序下"总权重"完全相同 ⇒ 只有逐值断言抓得到。
+SA::World::EncountArea makeArea21()
+{
+	SA::World::EncountArea a{};
+	a.index = 21;
+	a.floor = 100;
+	// c3-c6 = 582,399,783,560 ⇒ 载入期归一成左上 + 宽高(⚠️ 宽高不 +1)
+	a.x = 582;
+	a.y = 399;
+	a.width = 783 - 582;  // 201
+	a.height = 560 - 399; // 161
+	a.prob_min = 1;
+	a.prob_max = 5;
+	a.enemy_max_num = 2;
+	a.zorder = 40;
+	a.group_id = {88, 91, 89, 92, 1230, -1, -1, -1, -1, -1};
+	a.group_prob = {50, 50, 10, 10, 100, -1, -1, -1, -1, -1};
+	return a;
+}
+
+// 区域 21 引用的 5 个编组的**实测行**。
+// ★★ 其中 `GROUP_ID=1230` 带 `APPEARBYITEMID=1961`,而它的权重是 **100 —— 5 个里最大**
+//    (总 220,占 **45%**)⇒ 这一行让「道具系统未移植」这个偏差的规模**在用例里看得见**:
+//    空背包下它整个消失,该区域的总权重从 220 掉到 120。
+std::vector<SA::World::EnemyGroup> makeGroups21()
+{
+	auto g = [](std::int32_t id, std::int32_t appear, std::vector<std::int32_t> eids,
+	            std::vector<std::int32_t> probs)
+	{
+		SA::World::EnemyGroup r{};
+		r.group_id = id;
+		r.appear_by_item_id = appear;
+		r.not_appear_by_item_id = -1;
+		r.enemy_id.fill(-1);
+		r.create_prob.fill(-1);
+		for (std::size_t i = 0; i < eids.size(); ++i)
+			r.enemy_id[i] = eids[i];
+		for (std::size_t i = 0; i < probs.size(); ++i)
+			r.create_prob[i] = probs[i];
+		return r;
+	};
+	// 表序(= group1.txt 的行序),★ 与区域 21 的槽序不同
+	return {g(88, -1, {119}, {1}), g(89, -1, {120}, {1}), g(91, -1, {122}, {1}),
+	        g(92, -1, {123}, {1}),
+	        g(1230, 1961, {2250, 2251, 2249, 2252, 2253}, {1, 1, 1, 1, 1})};
+}
+
+// 取选中编组的 `GROUP_ID`(函数返回的是**行下标**,断言写 id 才读得懂)。
+std::int32_t pickedGroupId(const SA::World::EncountArea &a,
+                           const std::vector<SA::World::EnemyGroup> &gs,
+                           const std::vector<std::int32_t> &bag, SA::Rules::Random &rng)
+{
+	const std::int32_t row = SA::World::pickEnemyGroup(a, gs, bag, rng);
+	return row < 0 ? -1 : gs[static_cast<std::size_t>(row)].group_id;
+}
+
+TEST_CASE("M.6:findEncountArea —— 闭区间矩形,四条边与四个角都算命中")
+{
+	const std::vector<SA::World::EncountArea> areas{makeArea21()};
+
+	SUBCASE("矩形内部")
+	{
+		CHECK(SA::World::findEncountArea(areas, 100, 600, 450) == 0);
+	}
+	SUBCASE("★ 四个角 —— 闭区间的判据")
+	{
+		CHECK(SA::World::findEncountArea(areas, 100, 582, 399) == 0); // 左上
+		CHECK(SA::World::findEncountArea(areas, 100, 783, 399) == 0); // 右上
+		CHECK(SA::World::findEncountArea(areas, 100, 582, 560) == 0); // 左下
+		CHECK(SA::World::findEncountArea(areas, 100, 783, 560) == 0); // ★ 右下
+	}
+	SUBCASE("★ 越界一格即不命中 —— 与上一条成对,单独看任一条都证明不了闭区间")
+	{
+		CHECK(SA::World::findEncountArea(areas, 100, 581, 450) == -1);
+		CHECK(SA::World::findEncountArea(areas, 100, 784, 450) == -1);
+		CHECK(SA::World::findEncountArea(areas, 100, 600, 398) == -1);
+		CHECK(SA::World::findEncountArea(areas, 100, 600, 561) == -1);
+	}
+	SUBCASE("floor 不同 ⇒ 坐标再对也不命中")
+	{
+		CHECK(SA::World::findEncountArea(areas, 101, 600, 450) == -1);
+	}
+	SUBCASE("★★ 单点区域(x1==x2)照样命中 —— 宽高不 +1 与闭区间必须配对")
+	{
+		// ⚠️ 若把判据写成 `px < x + width`,width==0 的区域**永不命中**,
+		//    而这种区域在真数据里存在(把宽高写成 0 就是"一格")。
+		SA::World::EncountArea dot = makeArea21();
+		dot.x = 700;
+		dot.y = 500;
+		dot.width = 0;
+		dot.height = 0;
+		const std::vector<SA::World::EncountArea> one{dot};
+		CHECK(SA::World::findEncountArea(one, 100, 700, 500) == 0);
+		CHECK(SA::World::findEncountArea(one, 100, 701, 500) == -1);
+	}
+}
+
+TEST_CASE("M.6★★:zorder 的双重身份 —— 既是优先级,也是启用开关")
+{
+	// ★★ 实测 `encount.txt` 1050 行**全部 zorder > 0** ⇒ 「<= 0 就跳过」这一支
+	//    在真数据上一次都不触发 ⇒ **只能靠手造数据钉住**,而它是源码行为(`:378`)。
+	SUBCASE("zorder <= 0 ⇒ 整行跳过,哪怕坐标完全匹配")
+	{
+		SA::World::EncountArea off = makeArea21();
+		off.zorder = 0;
+		const std::vector<SA::World::EncountArea> areas{off};
+		CHECK(SA::World::findEncountArea(areas, 100, 600, 450) == -1);
+
+		off.zorder = -1;
+		const std::vector<SA::World::EncountArea> neg{off};
+		CHECK(SA::World::findEncountArea(neg, 100, 600, 450) == -1);
+	}
+
+	SUBCASE("重叠区域取 zorder 最大")
+	{
+		SA::World::EncountArea lo = makeArea21();
+		lo.index = 1;
+		lo.zorder = 10;
+		SA::World::EncountArea hi = makeArea21();
+		hi.index = 2;
+		hi.zorder = 99;
+		CHECK(SA::World::findEncountArea({lo, hi}, 100, 600, 450) == 1); // 后者胜
+		CHECK(SA::World::findEncountArea({hi, lo}, 100, 600, 450) == 0); // 换序仍是它
+	}
+
+	SUBCASE("★ zorder 相等 ⇒ 保留先遇到的(源码判据是严格 >,顺序敏感)")
+	{
+		// ⚠️ 后果:D 线入库时**不得重排行** —— 重排会静默改变重叠区域的胜者。
+		SA::World::EncountArea a = makeArea21();
+		a.index = 1;
+		SA::World::EncountArea b = makeArea21();
+		b.index = 2; // zorder 同为 40
+		CHECK(SA::World::findEncountArea({a, b}, 100, 600, 450) == 0);
+		CHECK(SA::World::findEncountArea({b, a}, 100, 600, 450) == 0);
+	}
+}
+
+TEST_CASE("M.6★★:pickEnemyGroup 按权重抽签 —— 逐值,且槽序不是表序")
+{
+	const SA::World::EncountArea a = makeArea21();
+	const std::vector<SA::World::EnemyGroup> gs = makeGroups21();
+	const std::vector<std::int32_t> empty_bag{};
+
+	// 空背包 ⇒ 编组 1230(要道具 1961)被排除 ⇒ 候选 4 个,总权重 50+50+10+10 = 120
+	// 累加边界:50 → 槽0(88) · 100 → 槽1(91) · 110 → 槽2(89) · 落空 → 槽3(92)
+	SUBCASE("★ 四段边界逐值 —— 每段取首尾两个值")
+	{
+		const std::vector<std::pair<int, std::int32_t>> cases{
+		    {0, 88},
+		    {49, 88}, // 第一段 [0,50)
+		    {50, 91},
+		    {99, 91}, // 第二段 [50,100)
+		    {100, 89},
+		    {109, 89}, // 第三段 [100,110)
+		    {110, 92},
+		    {119, 92}, // ★ 兜底段 —— 最后一个候选不参与判定
+		};
+		for (const auto &c : cases)
+		{
+			ScriptedRandom rng({c.first});
+			CHECK(pickedGroupId(a, gs, empty_bag, rng) == c.second);
+			CHECK(rng.calls() == 1); // ★ 恰好摇一次
+		}
+	}
+
+	SUBCASE("★★ 带上道具 1961 ⇒ 第 5 组回归,总权重 120 → 220")
+	{
+		// ⚠️★ 这一条把「道具系统未移植」的偏差规模钉成断言:那一组权重 100,
+		//    占带道具时总权重的 **45%** ⇒ 空背包下它整个消失。
+		const std::vector<std::int32_t> bag{1961};
+		{
+			ScriptedRandom rng({119}); // 空背包时这个值落兜底段 → 92
+			CHECK(pickedGroupId(a, gs, bag, rng) == 92);
+		}
+		{
+			ScriptedRandom rng({120}); // ★ 带道具后 120 起才进第 5 组
+			CHECK(pickedGroupId(a, gs, bag, rng) == 1230);
+		}
+		{
+			ScriptedRandom rng({219}); // 上界
+			CHECK(pickedGroupId(a, gs, bag, rng) == 1230);
+		}
+		// ⇒ 同一个 r=120 在两种背包下结果不同,而**唯一差别是背包**
+		{
+			ScriptedRandom rng({120});
+			CHECK(pickedGroupId(a, gs, empty_bag, rng) == 92); // 空背包:仍是兜底
+		}
+	}
+
+	SUBCASE("★★ 槽序 ≠ 表序 —— 实现若按表序遍历,总权重不变而结果全错")
+	{
+		// 槽序 88,91,89,92 ⇒ r=50 落槽1 = **91**
+		// 若按表序 88,89,91,92 遍历 ⇒ r=50 会落到 **89**
+		ScriptedRandom rng({50});
+		CHECK(pickedGroupId(a, gs, empty_bag, rng) == 91);
+	}
+}
+
+TEST_CASE("M.6:pickEnemyGroup 的三条门与两处不消耗 rng")
+{
+	const std::vector<SA::World::EnemyGroup> gs = makeGroups21();
+
+	SUBCASE("★ 无候选 ⇒ 返回 -1 且**不消耗 rng**(源码在 RAND 之前就 return)")
+	{
+		SA::World::EncountArea a = makeArea21();
+		a.group_id.fill(-1); // 一个编组都没配
+		ScriptedRandom rng({0});
+		CHECK(SA::World::pickEnemyGroup(a, gs, {}, rng) == -1);
+		CHECK(rng.calls() == 0); // ★ 这一条钉住"提前返回"的位置
+	}
+
+	SUBCASE("★★ 全部编组都被道具门排除 ⇒ -1(实测 25/969 个区域是这个状态)")
+	{
+		SA::World::EncountArea a = makeArea21();
+		a.group_id = {1230, -1, -1, -1, -1, -1, -1, -1, -1, -1}; // 只留要道具那组
+		a.group_prob = {100, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+		ScriptedRandom rng({0});
+		CHECK(SA::World::pickEnemyGroup(a, gs, {}, rng) == -1);
+		CHECK(rng.calls() == 0);
+		// ★ 带上道具就回来了 —— 坐实这 -1 来自道具门而不是别的
+		ScriptedRandom rng2({0});
+		CHECK(pickedGroupId(a, gs, {1961}, rng2) == 1230);
+	}
+
+	SUBCASE("NOTAPPEARBYITEMID:持有则排除,不持有则入选")
+	{
+		std::vector<SA::World::EnemyGroup> g2 = gs;
+		g2[0].not_appear_by_item_id = 777; // 编组 88 加一道"禁入"门
+		SA::World::EncountArea a = makeArea21();
+		a.group_id = {88, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+		a.group_prob = {50, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+
+		ScriptedRandom r1({0});
+		CHECK(pickedGroupId(a, g2, {}, r1) == 88); // 没那道具 ⇒ 照常
+		ScriptedRandom r2({0});
+		CHECK(SA::World::pickEnemyGroup(a, g2, {777}, r2) == -1); // 有 ⇒ 排除
+	}
+
+	SUBCASE("★ 编组号查不到对应 group 行 ⇒ 跳过(有意不照抄原版的坏组入选)")
+	{
+		SA::World::EncountArea a = makeArea21();
+		a.group_id = {999999, 88, -1, -1, -1, -1, -1, -1, -1, -1};
+		a.group_prob = {50, 50, -1, -1, -1, -1, -1, -1, -1, -1};
+		ScriptedRandom rng({0});
+		// 候选只剩 88 ⇒ 总权重 50,必中它
+		CHECK(pickedGroupId(a, gs, {}, rng) == 88);
+	}
+
+	SUBCASE("权重为 0 的槽不被选中 —— ⚠️★★ 但这条断言**区分不了**实现有没有那个条件")
+	{
+		// ⚠️★★ **本 SUBCASE 的注释初稿是错的**,原文写着「源码判据是 `wr[i] != 0 && r < aaa`,
+		//    少了前半个条件时权重 0 的槽会被选中」。反向验证注入「删掉 `weight != 0`」
+		//    **一条都没红**,穷举随后证明了为什么:
+		//      1..4 槽 × 权重 {−1,0,1,2,3} × r 遍历 [0,Σ−1] 共 2,580 组,
+		//      删掉该条件与保留它 **结果差异 0 组** ⇒ 它是**冗余**的。
+		//    ★ 道理:权重 0 的槽不让 `acc` 增长,而 `r < acc_prev` 若成立,前一轮就已 break;
+		//      i == 0 那种情形要求 `r < 0`,而 `r >= 0` 恒成立。
+		// ⇒ ★ 这条断言**仍然有价值**(它钉住"权重 0 不被选中"这个**性质**),
+		//   但它**不是**那个条件的守卫 —— 那个条件没有守卫,因为它没有可观察后果。
+		//   ⚠️ 别在这里再加断言去"覆盖"它:冗余的分支没有能区分它的输入。
+		SA::World::EncountArea a = makeArea21();
+		a.group_id = {88, 91, 89, -1, -1, -1, -1, -1, -1, -1};
+		a.group_prob = {0, 50, 50, -1, -1, -1, -1, -1, -1, -1};
+		ScriptedRandom rng({0});
+		CHECK(pickedGroupId(a, gs, {}, rng) == 91);
+	}
+
+	SUBCASE("★ 抽签上界 found-1 的兜底段 —— 同样是等价写法,不是判据")
+	{
+		// ★ 注入「上界改 found」也是 0 条转红,穷举同样 0 差异 ⇒ 两种写法等价。
+		//   ⇒ 本条断言的是**兜底段真的会被取到**(这是性质),而不是"上界必须写 found-1"。
+		SA::World::EncountArea a = makeArea21();
+		a.group_id = {88, 91, -1, -1, -1, -1, -1, -1, -1, -1};
+		a.group_prob = {50, 50, -1, -1, -1, -1, -1, -1, -1, -1};
+		ScriptedRandom lo({49}); // 落第一段
+		CHECK(pickedGroupId(a, gs, {}, lo) == 88);
+		ScriptedRandom hi({50}); // ★ 落兜底段(最后一个候选)
+		CHECK(pickedGroupId(a, gs, {}, hi) == 91);
+		ScriptedRandom top({99}); // 上界
+		CHECK(pickedGroupId(a, gs, {}, top) == 91);
+	}
+}
