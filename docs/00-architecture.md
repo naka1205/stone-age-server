@@ -3994,6 +3994,35 @@ A 移动后,扫 A **旧**位置与**新**位置周围 529 格的 olink,diff 两�
 
 ---
 
+### 9.0.43 ★ 推送窗口执行记录 —— shared-v0.16.0(2026-09-09)
+
+W.1 移动系统(§9.0.42)的推送窗口,与本地已 ahead 的 §9.0.41 执行记录 commit(`27da376`)一起上
+(用户两段批准:先定「先推 `shared-v0.16.0`」,本地准备全绿后再确认外发)。
+
+**执行**(§9.0.34 顺序:打本地 tag → 客户端换 pin 联调态验全绿 → 才外发):
+- server:`git push origin master`(`004bbe0..82c9922`,双 push URL gitee+github,含 `27da376` docs + `82c9922` W.1)
+  + tag `shared-v0.16.0`(指向 `82c9922`,★ **显式推单个 tag**,不用 `--follow-tags` 免顺带别的 —— §9.0.34 那条坑)
+- client:pin `v0.15.0` → `v0.16.0`(`6a3d364`),双远端推送
+
+**核实**(不凭绿灯,取实据 —— §9.0.10 纪律):
+- 两仓 × 两远端 master SHA **三处一致**(server `82c9922` · client `6a3d364`);★ **tag 集合差为空**
+  (本地 `git tag -l` vs gitee/github `ls-remote`,§9.0.34 纪律:核的是「还顺带上去了什么」—— 只推了 v0.16.0,无顺带无遗漏)
+- client 换 pin 后**删 `build/ci` 重跑** `ci_verify`(⚠️ `SA_SHARED_GIT_TAG` 是 CACHE 变量,陈旧目录会把它钉在旧值上,
+  「锁定 ref 与源码一致」守卫会红)⇒ 联调态 **8 项全过**:锁定 ref = v0.16.0 与源码一致、`SA_CLIENT_WERROR` **0 告警**、
+  **76 用例 / 2415 断言**(与 v0.15.0 同 —— W.1 未改 `shared/rules`,黄金用例集不变)
+- **server CI(`82c9922`)三平台 jobs 逐个 success**:Windows·MSVC / macOS·Apple clang / Linux·GCC ⇒
+  ★ **W.1 的 GCC/MSVC 首验通过**(§9.0.42 ⑦ 记「只在 Apple clang 21 跑过」)
+- **client CI(`6a3d364`)success**:发布态 `fetch` 锁定 ref = v0.16.0
+- ⚠️★ **一处窄边界要说清**:W.1 的两个新文件 `shared/model/Player.h`(位置字段)与
+  `idl/generated/cpp/domain/world_map.sa.h` 的**跨平台编译由 server CI 三平台覆盖**(server 的 `world/`·`net/` 代码 include 它们);
+  ⇒ **client 侧无任何 TU include 它们**(客户端地图表现层未做)⇒ **client CI 的绿灯读不出「这两文件在客户端工具链下编得过」**
+  —— §1.1 那条「D2 覆盖面是按文件而非按目录」窄边界的又一例,**非 W.1 遗留风险**(它俩已由 server 三平台验过)。
+- ⇒ **§9.0.42 ⑦ 的「锁定 ref 前推 `shared-v0.16.0`」待办兑现闭合**。
+
+⚠️ 本记录 commit 本地 ahead 1,留下批一起推(同 §9.0.38 / §9.0.41 模式:推送执行记录总在推送**之后**才写)。
+
+---
+
 ### 10.1 R-b:无解的结构性事实
 
 每条标【单源未交叉】/【8.5 源码推定】的规则,实现时**只能靠人工复核**,没有任何自动化验证手段。
@@ -4100,3 +4129,4 @@ A 移动后,扫 A **旧**位置与**新**位置周围 529 格的 olink,diff 两�
 | 2026-09-09 | ★★ **批次 M.7 —— 遇敌:编组 → 敌人列表**(新增 **§9.0.39**;`11` 新增 **DR-DT14** + §2.16,主表 125 → **126** 行)。遇敌链(`ENEMY_getEnemy` 四段)收尾:移植第三、四段(`:1356-1466`)—— 收候选 + `entrymax=RAND(1,min(enemymaxnum,ΣCREATEMAXNUM))` + 逐只抽 + 同族上限门 + 大怪布阵。交付 `EnemyTemplate` 加 `temp_no`/`size` · `EnemyEncounter` 加 `create_max_num`(c8,兑现 M.5 文末 ① 预告)· `findEnemyEncounter`/`findEnemyTemplate`/`rollEnemyList` 三个自由函数;`world_tick` 66 → **74 例 / 1033 断言**。★ **四条裁定**(DR-DT14):外键运行时线性扫(原版载入期缓存,我们无载入期 ⇒ 找不到 → -1 等价)· 大怪布阵完整实现 · `ENEMY_RandomEnemyArray` 不移植(M.5 登记)· 产出紧凑 `vector` 替代定长数组。⚠️★★★ **本批最该被读的一段(§9.0.39 ③):反向验证注入「删 `bigcnt>=5` 门」0 条转红** —— 第 6 只大怪走 `i>4` 换位、而此时前 5 位必全大怪(无 NORMAL 可换)⇒ `continue`,out **同样 5 只** ⇒ 门与「i>4 换位失败」在 out 层面**等效**,唯一独立可观察后果是 **rng 取数次数**(门 `entrymax--` 让循环 9 次结束,删掉空转到 101 次)⇒ 补 `calls()` 断言后转红;★★ 同 §9.0.36 ⑥,形态新:两个看似独立的条件在数据结构约束下退化等效。★★ **大怪布阵是真实主路径**:实测 `enemybase1.txt` **BIG 占 533/1053 = 50.6%**,与 M.6 `zorder`(全不触发)相反 ⇒ 逐分支覆盖。★ 实测边界:`CREATEMAXNUM` **min=1/max=63 无 0 无负** ⇒ `entrymax` 不触发退化区间;随机区间 `[945,956]∪[964,969]` 被 group1.txt 引用 **18 槽/6 行(0.49%)**。⚠️★ **反向验证过程踩到 make 秒级 mtime 坑**:连续「sed→build→跑」落同一秒 ⇒ make 复用陈旧 `.o` ⇒ 跑上一个注入的二进制(注入 5 假报转红);同族「陈旧构建目录钉 CACHE」,处置每次注入 `touch` 源 + 确认编译日志出现 `World.cpp.o`。**复验**:`ctest` 15/15 · `ci_verify` 六项全过(全新目录 build/m7 · SA_WERROR=ON 0 告警)· `code_format` 过 · `dr_table` **126 行** · ★ **反向验证六处**(四处真判据精确转红 · 两处等价/冗余 0 转红,与 DR-DT13 ④ 同)。★ 本批全在 `src/world/` ⇒ watched 路径零改动 ⇒ 锁定 ref 不前推。 |
 | 2026-09-09 | ★★ **批次 战果结算 —— EXP + 战斗结束经验分配 + BattleResult 下发**(新增 **§9.0.40**;`11` 新增 **DR-DT15** + §2.17,主表 126 → **127** 行;`01` §13 欠债表补残留)。遇敌链收尾后第一条「打赢有回报」的闭环。**敌人 EXP/DUELPOINT 判定树**(`enemy.c:1101-1107`,落 `spawnEnemy`;⚠️★ 哨兵是 -1 ⇒ `EnemyEncounter::exp` 默认取 -1 而非 0)· **`enemyExp` + `enemybaseexptbl` 全放 world**(用户裁定 —— 客户端不算经验、服务端权威;★ 74 级递减异常 959→956 照抄不修)· **玩家实拿走等级差衰减**(`BATTLE_AddExp` `EXPGET_MAXLEVEL=5`/`DIV=15`,累加 `Player.exp`,**战斗结束统一结算** ⇒ 总量与逐死亡等价、时机在回合末)· 下发独立顶层消息 **`BattleResult`**(`0x0206`,不进 `BattleEvent` union,避 8KB 红线)。⚠️★ **`enemyExp` 是 world 首个本地浮点公式**(`x*y+z`,GCC/clang 会 FMA 合并、MSVC 不)⇒ 给 `sa_world` 补 `-ffp-contract=off`(照 `sa_shared`,让三平台 CI 逐位一致从运气变纪律)。★★ **战果链耦合三类不可移植项,边界据证据划(非偷懒)**:升级(走 `exp.txt`、D 线未导入 + 成长域,**不撞** `fmdplevelexp` —— 那是家族声望)· 金钱(经济域 `GoldLedger`)· 掉落(道具域)· 决斗点分配(PvP/saac 域,只建初值 + `dpbattle` 判定)· 自由服魔改(VIP/`getBattleexp`/`Free*`/`EXPUP`,非 8.0 净核 ⇒ 恒等)—— 全部划出登记。⚠️★ `dpbattle` 门在「决斗点怪 exp=0」下无独立可观察后果(同 DR-DT13④/DR-DT14③ 等效族),保留因是源码语义。**复验**:`ctest` **15/15** · `ci_verify` 六项全过(SA_WERROR 清洁构建 0 告警,GCC `-Wshadow` 一处 `br` 改名)· `code_format` 过 · `dr_table` **127 行** · ★ **反向验证三处逐条精确转红**(异常值 956→985 · 衰减 `<=5`→`<=99` · 判定树 `<=0`→`<0`,恢复后绿、源码逐字节一致;⚠️ 恢复又踩 make 秒级 mtime 坑 ⇒ `sleep` 隔秒重编才采信)+ idl smoke 加 `BattleResult` 往返/截断。★★ **`shared/model`(Enemy/Player 加字段)+ `idl/generated`(BattleResult)有改动 ⇒ watched 路径变动 ⇒ 锁定 ref 必须前推 `shared-v0.15.0`**(推送窗口待办)。 |
 | 2026-09-09 | ★★ **批次 W.1 —— 移动系统:玩家移动 + 529 格视野广播**(新增 **§9.0.42**;`11` 新增 **DR-DT16** + §2.18,主表 127 → **128** 行;`01` §13 欠债 20② 推进 + 新增登记残缺)。tick 的 `kCharLoop`(第 5 步)+ `kOutboundFlush`(第 7 步)从占位变实装;用户裁定验证边界含视野 ⇒ 一批做两个里程碑。① **玩家移动**:`Player` 加位置 · `world/Map`(fixture + `mapWalkable` 移植 `MAP_walkAbleFromPoint`)· `WalkRequest`(0x0301)+ `onWalk`(移植 `lssproto_W_recv` 净核:防瞬移 + 碰撞预检 + 排走路串)· `kCharLoop` 玩家段按 `walkinterval=2500×100us=250ms` 逐字符消费(`CHAR_walk_check`/`walkcall`;`ctodirmode` 小写移动 / 大写转身,`CHAR_dxdy[8]` 八方向)。② **529 格视野**:`olink` 格子索引 + `CharAppear/Move/Disappear`(0x0302-04)+ 扫格 diff 双向广播(视野对称)。用例 `world_map` **10 例 / 63 断言**(含 `VisMirror`)。★ **视野常量取 23 是裁定**(§5.1/§10.2):展开视图 `CHAR_DEFAULTSEESIZ=20`(8.5 血统,unifdef 不改 #define),8.0 血统取 23、无二进制证据。⚠️★ **两处守卫抓到**:`module_boundaries` 抓 `Map.h` 违反「只暴露 Api.h」⇒ Map 并入 Api.h + 视野 helper 做成 `Impl` 成员;`next_walk_at_ms` 修 ManualClock t=0 时序 bug(写用例时发现)。**复验**:`ctest` **16/16** · `ci_verify` 六项 · `SA_WERROR` 0 告警 · ★ **反向验证 4 处**(方向反向 · 间隔门 · 不发 Move · 不发 Disappear)逐条精确转红后回绿(踩 make 秒级 mtime 坑,`sleep` 隔秒)。⚠️ **未做**:AI 摊还(W.3,依赖 `kNpcSpawn` + `EnemyMoveNum` 8.0=10)· 遇敌触发(W.4 ⇒ 闭环)· 客户端表现层 · 真实地图(D 线)· ★★ **`shared/model` + `idl/generated` 改 ⇒ 前推 `shared-v0.16.0`**(推送窗口待办)· GCC/MSVC 交 CI。 |
+| 2026-09-09 | ★ **推送窗口执行记录 —— `shared-v0.16.0`**(新增 **§9.0.43**)。W.1 移动系统(§9.0.42)的推送窗口,与本地 ahead 的 §9.0.41 记录 commit(`27da376`)一起上(用户两段批准:先定「先推」再确认外发)。server master `004bbe0..82c9922` + tag `shared-v0.16.0`(★ 显式推单 tag,不用 `--follow-tags`)· client pin v0.15→v0.16(`6a3d364`),双远端(gitee+github)`ls-remote` master 三处一致、**tag 集合差空**;client 换 pin **删 `build/ci` 重跑** `ci_verify` 联调态 **8 项全过**(76 例/2415 断言、`SA_CLIENT_WERROR` 0 告警)。**server CI 三平台 jobs 逐个 success**(Windows·MSVC / macOS·clang / Linux·GCC ⇒ ★ **W.1 的 GCC/MSVC 首验**)、**client CI 发布态 fetch v0.16.0 success**。⚠️★ W.1 两新文件(`Player.h`/`world_map.sa.h`)跨平台由 **server CI 三平台覆盖**(server 代码 include),client 无 TU include ⇒ client CI 读不出(§1.1「按文件覆盖」窄边界,非风险)。⇒ §9.0.42 ⑦ 前推待办闭合。本记录 commit 本地 ahead 1,留下批一起推。 |
