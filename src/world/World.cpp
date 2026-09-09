@@ -763,6 +763,43 @@ SA::Rules::BattleField makeDemoField()
 	return f;
 }
 
+// 遇敌骰子分母系数 —— 移植 `getEnemyAction`(`configfile.c:2669`):clamp 到 [1,100]。
+//   ★ 原版 `config.enemyact` 未配(`csa8.0/setup.cf` 无 `ENEMYACTION`)时为 0 ⇒ clamp 返回 1。
+int clampEnemyAction(std::uint32_t enemy_action)
+{
+	if (enemy_action > 100)
+		return 100;
+	if (enemy_action < 1)
+		return 1;
+	return static_cast<int>(enemy_action);
+}
+
+// 遇敌开战时玩家进场的 `Combatant`(批次 W.4,玩家侧 Side[0] 首位)。
+//
+// ⚠️★ 玩家四维 / 等级**无真实来源**:1.5 无选角(同 `onSessionReady` 名字留空、
+//    `makeDemoField` 手填)⇒ 用占位四维,**登记为无选角来源那族残缺**,阶段 2 接选角后由存档取代。
+// ★ 占位量级照 `makeDemoField` 的 me(力量为主):让占位玩家能打动遇敌链产出的真实弱怪,
+//   使「打赢拿经验」闭环有意义 —— 与欠债 25「真实模板 18 级弱 demo 约 16 倍」同一量级考量。
+SA::Rules::Combatant makePlayerCombatant()
+{
+	SA::Rules::Combatant c{};
+	c.occupied = true;
+	c.kind = SA::Rules::CombatantKind::kPlayer;
+	c.slot = 0;
+	c.level = 20;
+	c.mp = 100;
+	c.max_mp = 100;
+	c.luck = 10;
+	const SA::Rules::DerivedStats st =
+	    SA::Rules::deriveBaseStats(8000, 30000, 4000, 20000);
+	c.attack = st.attack;
+	c.defense = st.defense;
+	c.quick = st.quick;
+	c.max_hp = st.max_hp;
+	c.hp = c.max_hp;
+	return c;
+}
+
 } // namespace
 
 // ★★ config.cpp 把 demo_battle.slot 的上限写死成 9,因为 L0 够不着 L3
@@ -793,12 +830,20 @@ struct World::Impl
 		//   ⚠️ 用"下次可走"而非"上次走过"的时刻:ManualClock 从 0 起,后者无法区分
 		//      "尚未走过"与"在 t=0 走过"(同 BattleInstance::next_turn_at_ms 的取向)。
 		SA::Platform::Millis next_walk_at_ms = 0;
+
+		// ── 遇敌累积值(批次 W.4。原 `CONNECT_CEP`,char_walk.c:538/594/610)──────
+		//   走一格判遇敌:`temp = cep`(先夹在 `[prob_min, prob_max]`),骰子命中后 `cep = prob_min`。
+		//   ⚠️★ 原版 `cep++` 累积在**战斗态**分支(`char_walk.c:607`),而玩家在 kCharLoop
+		//     走路时恒**非战斗态**(战斗中 walk_seq 已被清、且不 tick 走路)⇒ 那条累积路径
+		//     在本实现走不到 ⇒ 照抄源码结构但不硬接一个到不了的分支(同 M.6/M.7 的等价/冗余处置)。
+		std::int32_t cep = 0;
 	};
 
 	Impl(const SA::Platform::ServerConfig &cfg, SA::Platform::Clock &clk,
 	     SA::Platform::Logger &log, SA::Platform::RandomSource &rnd,
 	     SA::Net::Transport &tp)
-	    : config(cfg), clock(clk), logger(log), random(rnd), transport(tp)
+	    : config(cfg), clock(clk), logger(log), random(rnd), transport(tp),
+	      world_rng(rnd.masterSeed() ^ 0x9E3779B97F4A7C15ull)
 	{
 		// olink 按 fixture 地图尺寸分配(map 已在成员初始化中建好,声明在 olink 之前)。
 		olink.assign(static_cast<std::size_t>(map.width) * static_cast<std::size_t>(map.height),
@@ -810,6 +855,12 @@ struct World::Impl
 	SA::Platform::Logger &logger;
 	SA::Platform::RandomSource &random;
 	SA::Net::Transport &transport;
+
+	// 世界级遇敌 rng(批次 W.4):遇敌骰子(randMod)+ 遇敌链选怪(pickEnemyGroup/rollEnemyList)用它。
+	// ⚠️★ 种子从 `masterSeed` **派生但不调 `nextSeed`** —— `nextSeed` 会消耗战斗种子序列、
+	//    使现有战斗的回放种子整体平移(现有用例的 `spawnEnemy` 结果会变)。异或一个盐使它与
+	//    任何战斗种子的序列都不同,同时随 `masterSeed` 确定 ⇒ 遇敌本身也可回放。
+	SA::Rules::SeededRandom world_rng;
 
 	std::map<SA::Net::ConnectionId, Conn> conns;
 	// 1.5 里 SessionId == ConnectionId(见上)。
@@ -849,6 +900,15 @@ struct World::Impl
 	//   ⚠️ 单张 fixture:1.4/demo 只有一个场景;多 floor 表留到内容导入(那时按 floor 索引)。
 	GridMap map = makeFixtureMap(64, 64);
 	TileAttrTable map_attr = makeFixtureAttr();
+
+	// ── 遇敌数据表(批次 W.4)────────────────────────────────────────────
+	//   ★ 默认空 ⇒ `findEncountArea` 恒返 -1 ⇒ 永不遇敌(现有走路用例不受影响)。
+	//     由 `loadEncounterTables` 注入(1.5 fixture / 阶段 2 D 线导入)。
+	//   坐标 ─encount_areas→ 区域 ─enemy_groups→ 编组 ─encounters→ 敌人行 ─enemy_templates→ 模板。
+	std::vector<EncountArea> encount_areas{};
+	std::vector<EnemyGroup> enemy_groups{};
+	std::vector<EnemyEncounter> encounters{};
+	std::vector<EnemyTemplate> enemy_templates{};
 
 	// ── 视野的运行时对象索引(里程碑②。原版 Map::olink,10 §3.1)──────────────
 	//   每格挂着**当前在该格的玩家会话**;视野广播扫 529 格遍历它(§5.2)。
@@ -1368,6 +1428,45 @@ void World::tick()
 			}
 			s.olink[s.map.index(p->x, p->y)].push_back(kv.first);
 			s.broadcastMove(kv.first, ox, oy, *p);
+
+			// ── 遇敌判定(批次 W.4。原 char_walk.c:585,展开视图基准)────────────
+			//   ★ 只在真移动(moved)后判:转身 / 撞墙不触发(原版遇敌在 walk_move 成功后)。
+			//   ⚠️ 数据表空(未 loadEncounterTables)⇒ findEncountArea 恒 -1 ⇒ 不遇敌
+			//      (现有走路用例不注入即不受影响)。
+			const std::int32_t arow =
+			    findEncountArea(s.encount_areas, p->floor, p->x, p->y);
+			if (arow >= 0)
+			{
+				const EncountArea &area =
+				    s.encount_areas[static_cast<std::size_t>(arow)];
+				// cep 夹在 [prob_min, prob_max](char_walk.c:553-554),temp = cep
+				//   (无技能 ⇒ p_cep=0 ⇒ temp=cep)。min/max 写反自动纠正(encount.c:245-253,
+				//   与敌人表 lv_min/max 同族)——载入期做,这里防御性纠一次不改行为。
+				std::int32_t lo = area.prob_min;
+				std::int32_t hi = area.prob_max;
+				if (lo > hi)
+				{
+					const std::int32_t t = lo;
+					lo = hi;
+					hi = t;
+				}
+				if (c.cep < lo)
+					c.cep = lo;
+				if (c.cep > hi)
+					c.cep = hi;
+				// 遇敌骰子 rand()%(120*getEnemyAction()) < temp(char_walk.c:585)。
+				//   ★ 用**世界 rng**(遇敌是世界事件,不是战斗内可回放序列)。
+				const int denom = 120 * clampEnemyAction(s.config.enemy_action);
+				if (s.world_rng.randMod(denom) < c.cep)
+				{
+					// 命中 ⇒ 清走路串(EN_recv:WALKARRAY="")+ cep 重置 prob_min(:594)+ 开战。
+					//   ⚠️ 清串后本 conn 剩余方向作废(原版遇敌即中断走路);triggerEncounter
+					//      只动 s.battles / 池,不增删 s.conns ⇒ 本遍历的引用 c 仍有效。
+					c.walk_seq.clear();
+					c.cep = lo;
+					(void)triggerEncounter(kv.first, arow);
+				}
+			}
 		}
 	}
 
@@ -1605,6 +1704,101 @@ bool World::spawnEnemyToField(BattleId battle, std::uint8_t slot,
 	              {"enemy_id", static_cast<std::uint64_t>(enc.enemy_id)},
 	              {"kind", std::string_view("enemy")}});
 	return true;
+}
+
+void World::loadEncounterTables(std::vector<EncountArea> areas,
+                                std::vector<EnemyGroup> groups,
+                                std::vector<EnemyEncounter> encounters,
+                                std::vector<EnemyTemplate> templates)
+{
+	Impl &s = *_impl;
+	s.encount_areas = std::move(areas);
+	s.enemy_groups = std::move(groups);
+	s.encounters = std::move(encounters);
+	s.enemy_templates = std::move(templates);
+}
+
+std::size_t World::battleCount() const noexcept { return _impl->battles.size(); }
+
+// 遇敌命中后的开战组装(批次 W.4)——移植 `EN_recv`(`callfromcli.c:1249`)清走路串 +
+//   `BATTLE_CreateVsEnemy(charaindex,0,-1)` 净核(`battle.c:2528`):
+//   遇敌链(`pickEnemyGroup`→`rollEnemyList`)→ 建场 → 玩家入场 → 逐只敌人入场。
+// ⚠️★ 遇敌链的 rng 用**世界 rng**(`s.random`)——原版 `ENEMY_getEnemy` 在建 battle **之前**、
+//    用全局 `rand()`,不是战斗 rng(战斗此刻还没建;敌人四维生成才用战斗 rng,见 spawnEnemyToField)。
+bool World::triggerEncounter(SA::Net::SessionId session, std::int32_t area_row)
+{
+	Impl &s = *_impl;
+	if (area_row < 0 ||
+	    static_cast<std::size_t>(area_row) >= s.encount_areas.size())
+		return false;
+	const EncountArea &area = s.encount_areas[static_cast<std::size_t>(area_row)];
+
+	// ── 选编组(区域 → 编组行下标)──────────────────────────────────────
+	//   ⚠️ 道具门用**空背包**快照(道具系统未移植,见 `EnemyGroup::appear_by_item_id`:
+	//      对空背包玩家与原版 100% 一致)。-1 ⇒ 无可用编组 ⇒ 本次不遇敌(原版等价)。
+	const std::vector<std::int32_t> empty_bag{};
+	const std::int32_t grow =
+	    pickEnemyGroup(area, s.enemy_groups, empty_bag, s.world_rng);
+	if (grow < 0)
+		return false;
+
+	// ── 选敌人列表(编组 → 敌人表行下标序列,含大怪布阵顺序)────────────────
+	const std::vector<std::int32_t> rows =
+	    rollEnemyList(s.enemy_groups[static_cast<std::size_t>(grow)], s.encounters,
+	                  s.enemy_templates, area.enemy_max_num, s.world_rng);
+	if (rows.empty())
+		return false; // 无候选 ⇒ 本次不遇敌
+
+	// ── 建场 + 玩家入场(Side[0] 首位)─────────────────────────────────
+	SA::Rules::BattleField field{};
+	field.at(0) = makePlayerCombatant();
+	const BattleId battle = startBattle(field);
+	if (!joinBattle(battle, session, 0))
+	{
+		// ⚠️ 进不去 ⇒ 刚建的 battle 成孤儿(同 onSessionReady demo 分支):报出来。
+		s.logger.log(SA::Platform::LogLevel::kError,
+		             SA::Platform::LogEvent::kBattleJoinFailed,
+		             {{"battle_id", battle},
+		              {"session_id", session},
+		              {"reason", std::string_view("encounter_join_failed")}});
+		return false;
+	}
+
+	// ── 逐只敌人入场(Side[1] 起,baselevel=-1 野外摇号)──────────────────
+	//   ★ `rollEnemyList` 已含大怪布阵顺序 ⇒ 第 i 只落敌方槽 `kSideOffset + i`。
+	//   ⚠️ 战场每侧的实体位是 `kBattlePlayerMax`(=5,宠位在其后)⇒ 取前 5 只
+	//     (`rollEnemyList` 上界是区域 `enemy_max_num ∈ [1,10]`,可能多于战场敌方位)。
+	int placed = 0;
+	for (std::size_t i = 0;
+	     i < rows.size() && placed < SA::Rules::kBattlePlayerMax; ++i)
+	{
+		const std::int32_t erow = rows[i];
+		if (erow < 0 || static_cast<std::size_t>(erow) >= s.encounters.size())
+			continue;
+		const EnemyEncounter &enc = s.encounters[static_cast<std::size_t>(erow)];
+		const std::int32_t trow = findEnemyTemplate(s.enemy_templates, enc.temp_no);
+		if (trow < 0)
+			continue; // 模板查不到 ⇒ 整只不放(同 rollEnemyList 内大怪布阵的处置)
+		const EnemyTemplate &tmpl = s.enemy_templates[static_cast<std::size_t>(trow)];
+		const std::uint8_t slot =
+		    static_cast<std::uint8_t>(SA::Rules::kSideOffset + placed);
+		if (spawnEnemyToField(battle, slot, tmpl, enc, /*baselevel=*/-1))
+			++placed;
+	}
+
+	if (placed == 0)
+	{
+		// ⚠️ 选出了怪却一只都没落地(全被模板/槽门挡)⇒ 空战斗;tick 会判空侧结束,
+		//    但这是异常路径,先记一笔(同 §10.4 那族"看起来做了、其实没写")。
+		s.logger.log(SA::Platform::LogLevel::kWarn,
+		             SA::Platform::LogEvent::kBattleJoinFailed,
+		             {{"battle_id", battle},
+		              {"session_id", session},
+		              {"reason", std::string_view("encounter_no_enemy_placed")}});
+	}
+	// ★ 成功路径不额外 log:startBattle(kBattleStarted+kBattleSeed)/joinBattle/
+	//   spawnEnemyToField 已各自记账,遇敌只是它们的调用者。
+	return placed > 0;
 }
 
 // ══ TransportEvents ═════════════════════════════════════════════

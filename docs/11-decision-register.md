@@ -265,6 +265,7 @@ P5 文件名 PascalCase + guard `__SA_<File>_H__` · P6 clang-format 引擎款�
 | **DR-DT10** | ★★ **成长率打包的跨字段借位**:原版 `ALLOCPOINT = (vital<<24)+(str<<16)+(tgh<<8)+dex` 用 `+` 而非 `|` ⇒ 基数为负时低位向高位**借位污染相邻字段**。照抄还是修正? | ✅ **修正 —— 各字段独立截断**(2026-09-08 用户拍板)。判据同 **DR-DT7**(「它没有任何玩法语义,是纯内存 bug ⇒ 修正」):跨字段借位是 `+` 写成 `|` 的纯算术 bug,没有任何设计意图会让一块矿石的 vital 成长率是 255。⚠️ **字段内回绕保留**(基数 300 ⇒ 44 · −2 ⇒ 254,与原版逐位一致)—— 修的只有跨字段那一半 | 见 §2.10;⇒ `Model::Pet` 的 `growth_*` 保持 `std::uint8_t` 不动(它已裁定「0..255 由类型本身兑现」) |
 | **DR-DT15** | ★★ **战果结算(EXP + 战斗结束经验分配)**:敌人身上经验 / 决斗点的判定树 · 经验公式放哪 · 玩家实拿经验怎么算 · 哪些环节撞永久不可判定必须划出批次 | ✅ **① 敌人 EXP/DUELPOINT 判定树照抄**(`enemy.c:1101-1107`:`duelpoint` 无条件写 · `duelpoint≤0` 才给 `exp` · `exp==-1` 哨兵走 `enemyExp`)· **② `enemyExp` 全放 `world`**(用户裁定;客户端不算经验、服务端权威,同 M.5-M.7 的遇敌逻辑)· **③ 玩家实拿走等级差衰减**(`BATTLE_AddExp` 的 `EXPGET_MAXLEVEL=5` / `DIV=15`,累加 `Player.exp`;战斗结束**统一结算**而非逐死亡,总量等价)· **④ 划出批次(有据非偷懒)**:升级(走 `exp.txt`、D 线未导入 + 成长域,★ **不撞** `fmdplevelexp` —— 那是家族声望)· 金钱(经济域 `GoldLedger`,阶段 2.2)· 掉落(道具域)· 决斗点分配(PvP / saac 域,只建初值 + `dpbattle` 判定)· 自由服魔改(VIP / `getBattleexp` / `Free*` / `EXPUP`,非 8.0 净核 ⇒ 按恒等)。范围 = 宽(含 IDL `BattleResult` 下发)。批次 战果结算 | 见 §2.17;★★ 附 `enemybaseexptbl` 的 **74 级递减异常**(959→956)照抄不修 · `dpbattle` 门在「决斗点怪 exp=0」下无独立可观察后果(同族等效) |
 | **DR-DT16** | ★★ **移动系统 W.1(玩家移动 + 529 格视野)**:地图数据放哪 · 视野常量取值 · 视野广播用扫格还是订阅 · 走路串机制 · `CharAppear` 带哪些字段 | ✅ **① 地图放 `world/` + fixture**(内容数据形状、服务端权威碰撞,同 `EnemyEncounter`;真实 LS2MAP 走 D 线入库,碰撞两查表接口不变)· **② 视野常量 23**(§5.1 / 10 §9 决策1;⚠️ 展开视图 `CHAR_DEFAULTSEESIZ=20` 是 8.5 血统,8.0 取 23、**无二进制证据**,`00` §10.2 不可判定之一 ⇒ 裁定非观测)· **③ 扫格 + 聚合不订阅**(10 §5.3 决策5)· **④ 走路串两步照抄**(`onWalk` 排串 → `kCharLoop` 玩家段按 `walkinterval=250ms` 逐字符消费 `ctodirmode`)· **⑤ `CharAppear` 只带位置**(Player 无选角 ⇒ 无图号/名字,客户端画占位,登记残缺)。范围 = 宽(含 IDL `world_map` 上下行)。批次 W.1 | 见 §2.18;★ 视野对称 ⇒ CA/CD 双向;`module_boundaries` 抓 `Map.h` 暴露面 ⇒ Map 并入 Api.h |
+| **DR-DT17** | ★★ **遇敌触发闭环 W.4(走动 → 遇敌 → 战斗 → 拿经验)**:遇敌骰子放哪 · 遇敌 rng 用哪个 · 遇敌数据怎么进 world · 玩家进场四维哪来 | ✅ **① 遇敌判定在 `kCharLoop` 玩家段**(走一格后,移植 `char_walk.c:585` 骰子 `randMod(120*getEnemyAction()) < cep`;命中 → `EN_recv` 净核清走路串 + `BATTLE_CreateVsEnemy(_,0,-1)` 组装:`pickEnemyGroup`→`rollEnemyList`→`startBattle`→`joinBattle`→ 逐只 `spawnEnemyToField`)· **② 遇敌用世界 rng `world_rng`**(原版 `ENEMY_getEnemy` 在建 battle 前用全局 rand;种子从 `masterSeed` 派生**不调 `nextSeed`** ⇒ 不动战斗种子序列,敌人四维仍用战斗 rng)· **③ 遇敌四表经 `loadEncounterTables` 注入**(默认空 ⇒ 不遇敌;真数据 D 线导入,同 `EnemyEncounter` 判据)· **④ 玩家进场四维占位**(`makePlayerCombatant`;1.5 无选角来源 ⇒ 登记残缺,同 §9.0.42 名字留空)· **⑤ 划出**:传送点抑制 / 明雷退回(依赖 `kNpcSpawn`/W.3)· 自由服魔改(`getEqNoenemy` 等)· 组队 / 技能固定遇敌率(系统未移植)· `cep++` 战斗态分支(走路走不到,照抄不硬接)。范围 = 中(全在 `src/world/`,watched 零改动)。批次 W.4 | 见 §2.19;★ 绝大部分复用遇敌链 M.5-M.7 + 战斗生命周期;`enemyCount` 区分力由握手 bug 真实兑现 |
 
 ---
 
@@ -926,6 +927,35 @@ D 线入库时导入器**不得**顺手纠正它。用例钉住其**可观察后
 
 **⑤ `CharAppear` 只带位置**:1.5 的 Player 无选角 ⇒ 无图号、名字恒空(同 `BattleSelfInfo.menu_flags`
 恒 0 那族登记残缺)⇒ 客户端画占位角色。有选角(阶段 2)后再扩字段,**不建恒空字段**。
+
+### 2.19 DR-DT17 —— 遇敌触发闭环 W.4:遇敌率骰子 / rng 分工 / 数据注入 / 玩家占位(批次 W.4)
+
+★ W.4 把移动(W.1)、遇敌链(M.5-M.7)、战斗(1.4)、战果结算串成「走动 → 遇敌 → 战斗 → 拿经验」闭环。
+详见 `00` §9.0.44。五条裁定:
+
+**① 遇敌判定落 `kCharLoop` 玩家段**(走完一格 `moved` 后)。骰子 `world_rng.randMod(120*getEnemyAction()) < cep`
+(1:1 移植 `char_walk.c:585`)。`cep` 夹在区域 `[prob_min, prob_max]`,命中后 `cep=prob_min`(`:594`)。命中动作
+移植 `EN_recv`(`callfromcli.c:1249`)净核:清走路串 + `BATTLE_CreateVsEnemy(_,0,-1)`(`battle.c:2528`,内部
+`ENEMY_getEnemy` 选怪 + 逐只 `ENEMY_createEnemy` ⇒ 对应 server 的 `pickEnemyGroup`/`rollEnemyList` +
+`spawnEnemyToField`)。
+
+**② 遇敌用世界级 rng**(`world_rng`,非战斗 rng):原版 `ENEMY_getEnemy` 在建 battle **之前**用全局
+`rand()`。种子从 `masterSeed` **派生但不调 `nextSeed`** ⇒ 不消耗战斗种子序列(否则现有战斗回放整体平移)。
+敌人四维仍用战斗 rng(`spawnEnemy`,M.4b)⇒ 两序列分离、各自可回放。
+
+**③ 遇敌四表经 `loadEncounterTables` 注入**,World 默认持空表 ⇒ `findEncountArea` 恒 -1 ⇒ 永不遇敌
+(现有走路用例不受影响)。真数据由 D 线内容导入入库后灌入(阶段 2),同 `EnemyEncounter` / 地图 fixture 的判据。
+
+**④ 玩家进场四维用占位**(`makePlayerCombatant`):1.5 的 `Player` 无四维、无 level(无选角来源),同 §9.0.42
+名字留空、`makeDemoField` 手填那族登记残缺。阶段 2 接选角后由存档取代。占位量级让它打得动遇敌链产出的真实弱怪。
+
+**⑤ 划出批次**:传送点抑制(`entflag`)/ 明雷退回 —— 依赖 `kNpcSpawn` 敌人实体(W.3);自由服魔改
+(`getEqNoenemy` / `getEqRandenemy` / Ra's amulet / `getStayEncount`)—— 非 8.0 净核;`CHAR_ENCOUNT_FIX`
+(技能固定遇敌率)/ 组队遇敌(`BATTLE_PartyNewEntry`)—— 技能 / 组队系统未移植;`cep++` 累积在战斗态分支
+(玩家走路恒非战斗态 ⇒ 走不到)—— 照抄源码结构但不硬接。
+
+⚠️★ 本批**全在 `src/world/`**(遇敌逻辑 + Conn 私有 `cep` + config),复用现有战斗下行消息 ⇒ watched 路径
+零改动 ⇒ 锁定 ref 不前推。
 
 ### 3.1 逐条裁定理由
 

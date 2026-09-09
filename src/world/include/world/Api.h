@@ -597,6 +597,18 @@ class World final : public SA::Net::TransportEvents,
 	                       const EnemyTemplate &tmpl, const EnemyEncounter &enc,
 	                       std::int32_t baselevel);
 
+	// 注入遇敌数据表(批次 W.4)—— 坐标→区域→编组→敌人行的四张内容表。
+	//
+	// ★★ 这是遇敌触发链的**数据源**:`kCharLoop` 玩家段走一格后据它判「要不要遇敌 /
+	//    遇到什么」(`findEncountArea` → `pickEnemyGroup` → `rollEnemyList` → 逐行 `spawnEnemyToField`)。
+	// ⚠️★ **默认空 ⇒ 永不遇敌** —— 现有走路用例(W.1)不注入即不受影响;遇敌用例显式注入 fixture。
+	//    ★ 这不是脚手架:真玩法里这四张表由 **D 线内容导入入库**后加载(阶段 2),本接口就是
+	//      那时的灌入点 —— 同 `spawnEnemyToField` 卷首「行以内是本批,数据源在导入期」。
+	void loadEncounterTables(std::vector<EncountArea> areas,
+	                         std::vector<EnemyGroup> groups,
+	                         std::vector<EnemyEncounter> encounters,
+	                         std::vector<EnemyTemplate> templates);
+
 	// ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
 	void requestShutdown() noexcept;
 	bool stopped() const noexcept;
@@ -636,6 +648,11 @@ class World final : public SA::Net::TransportEvents,
 	// ⚠️ 它同时是**泄漏的探针**:M.1 的教训是"主人走了宠物没释放,池只增不减,
 	//    跑够久才表现为捕获突然失败"。敌人池同族 ⇒ 用例断言"战斗结束后回落到 0"。
 	std::size_t enemyCount() const noexcept;
+
+	// 当前活跃战斗数(批次 W.4 遇敌触发的探针)。
+	// ★ 遇敌用例断言「走动后从 0 变 1」—— 没有它,「遇敌真的开了一场战」无从断言
+	//   (同 `enemyCount` 的理由:不接的静默只有观察面能戳破)。
+	std::size_t battleCount() const noexcept;
 
 	// 某场战斗某个槽背后的 L2 `Enemy` 实体(只读)。不存在 / 无实体返回 nullptr。
 	//
@@ -694,6 +711,14 @@ class World final : public SA::Net::TransportEvents,
 	const SA::Rules::BattleField *battleField(BattleId id) const;
 
   private:
+	// 遇敌命中后的开战组装(批次 W.4,内部)——移植 `EN_recv`(`callfromcli.c:1249`)+
+	//   `BATTLE_CreateVsEnemy(charaindex,0,-1)` 净核(`battle.c:2528`):遇敌链选怪
+	//   (`pickEnemyGroup` → `rollEnemyList`)→ 建场 → 玩家入场(Side[0])→ 逐只敌人入场
+	//   (Side[1],`baselevel=-1` 野外摇号)→ 战斗自动进 tick。
+	// ⚠️ `area_row` 是 `findEncountArea` 已命中的区域下标(kCharLoop 里算好);返回是否真开了战
+	//   (无可用编组 / 空敌人列表 ⇒ false,与原版「本次不遇敌」等价)。
+	bool triggerEncounter(SA::Net::SessionId session, std::int32_t area_row);
+
 	struct Impl;
 	std::unique_ptr<Impl> _impl;
 };

@@ -340,3 +340,191 @@ TEST_CASE("视野:视野外的移动不广播给对方")
 	mb.feed(f.transport.sent(b));
 	CHECK(countId(mb.moves, a) == moves_before);
 }
+
+// ══ 里程碑③:遇敌触发(批次 W.4。走一格 → 骰子 → 遇敌链 → 开战 → 战果)═══════════
+//
+// 遇敌骰子 rand()%(120*getEnemyAction()) < temp(char_walk.c:585)。getEnemyAction 默认 1
+//   ⇒ 分母 120。★ 用例用 prob 边界控制遇敌与否,**不依赖 world_rng 的具体值**:
+//     prob=120 ⇒ randMod(120)∈[0,119] 恒 < 120 ⇒ **必遇敌**;prob=0 ⇒ 恒不遇敌。
+//   单区域单编组单怪 ⇒ 遇敌必选那只乌力,链路不依赖 rng 序列。
+
+namespace
+{
+
+// 握手 + 建 Player。★ 遇敌开战要 joinBattle,而它要求会话**已握手**(防未握手连接拿事件流)
+//   ⇒ 不能用 MoveFixture::spawn 那条跳过握手的捷径(W.1 走路用例不 joinBattle 故没暴露)。
+//   handshakeBytes 与 WorldTickTest 同源(两文件是独立编译单元,各自持一份)。
+std::vector<std::uint8_t> handshakeBytes(std::uint32_t version)
+{
+	SA::Transport::HandshakeRequest req{};
+	req.protocol_version = version;
+	req.client_build.assign("test");
+	std::vector<std::uint8_t> out;
+	REQUIRE(SA::Net::encodeFramed(1, req, out));
+	return out;
+}
+
+SA::Net::ConnectionId spawnHandshaked(MoveFixture &f)
+{
+	const auto id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick(); // 网络入站处理握手 → onSessionReady 建 Player(walk_seq 空 ⇒ 本 tick 不遇敌)
+	return id;
+}
+
+// 注入一条最小遇敌链:floor 0 全图 → 编组 1 → 一只 1 级乌力(temp_no=1)。
+//   ⚠️ 模板 temp_no 必须 == enc.temp_no —— triggerEncounter 靠 findEnemyTemplate 配对。
+void loadEncounterFixture(World &world, std::int32_t prob)
+{
+	EncountArea area{};
+	area.index = 1;
+	area.floor = 0;
+	area.x = 0;
+	area.y = 0;
+	area.width = 63; // 64×64 fixture 地图,PointInRect 闭区间覆盖 0..63
+	area.height = 63;
+	area.prob_min = prob;
+	area.prob_max = prob;
+	area.enemy_max_num = 2;
+	area.zorder = 1; // > 0 ⇒ 启用(zorder 兼任开关)
+	area.group_id.fill(-1);
+	area.group_prob.fill(-1);
+	area.group_id[0] = 1;
+	area.group_prob[0] = 1;
+
+	EnemyGroup group{};
+	group.group_id = 1;
+	group.enemy_id.fill(-1);
+	group.create_prob.fill(-1);
+	group.enemy_id[0] = 9; // 乌力(enemy1.txt 第 5 行)
+	group.create_prob[0] = 1;
+
+	EnemyEncounter enc{};
+	enc.enemy_id = 9;
+	enc.temp_no = 1;
+	enc.lv_min = 1;
+	enc.lv_max = 1;
+	enc.capturable = true;
+	enc.create_max_num = 1;
+
+	EnemyTemplate tmpl{};
+	tmpl.temp_no = 1;
+	tmpl.stats = SA::Rules::SpawnTemplate{4.50, 10, 20, 12, 15, 25};
+	tmpl.mod_ai = 150;
+	tmpl.capture_difficulty = 11;
+	tmpl.earth = 80;
+	tmpl.water = 20;
+	tmpl.image = 100250;
+	REQUIRE(tmpl.name.assign("乌力"));
+
+	world.loadEncounterTables({area}, {group}, {enc}, {tmpl});
+}
+
+} // namespace
+
+TEST_CASE("W.4:遇敌触发 —— prob=120 走一格必遇敌,开一场战斗且敌人入场")
+{
+	MoveFixture f;
+	loadEncounterFixture(f.world, 120); // 必遇敌
+	const auto id = spawnHandshaked(f);
+	REQUIRE(f.world.battleCount() == 0);
+	REQUIRE(f.world.enemyCount() == 0);
+
+	f.sendWalk(id, "c"); // 走一步东
+	f.world.tick();
+
+	CHECK(f.world.battleCount() == 1); // 开了一场
+	CHECK(f.world.enemyCount() >= 1);  // 敌人入了 L2 池
+	// 首场 battleId == 1(next_battle_id 从 1)。玩家在 Side[0] slot 0,敌人在 Side[1]。
+	const SA::Rules::BattleField *fld = f.world.battleField(1);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->at(0).occupied);
+	CHECK(fld->at(0).kind == SA::Rules::CombatantKind::kPlayer);
+	CHECK(fld->at(SA::Rules::kSideOffset).occupied); // 敌方首槽有怪
+	CHECK(f.world.battleEnemyAt(1, SA::Rules::kSideOffset) != nullptr);
+}
+
+TEST_CASE("W.4:prob=0 恒不遇敌 —— 走多步 battleCount 保持 0")
+{
+	MoveFixture f;
+	loadEncounterFixture(f.world, 0);
+	const auto id = spawnHandshaked(f);
+	f.sendWalk(id, "cccc");
+	for (int i = 0; i < 6; ++i)
+	{
+		f.clock.advance(250);
+		f.world.tick();
+	}
+	CHECK(f.world.battleCount() == 0);
+}
+
+TEST_CASE("W.4:未注入遇敌表 ⇒ 走路不遇敌(现有走路用例不受影响)")
+{
+	MoveFixture f;
+	// ★ 不调 loadEncounterFixture ⇒ 四表空 ⇒ findEncountArea 恒 -1。
+	const auto id = spawnHandshaked(f);
+	const auto p0 = f.world.playerPos(id);
+	f.sendWalk(id, "cccc");
+	for (int i = 0; i < 6; ++i)
+	{
+		f.clock.advance(250);
+		f.world.tick();
+	}
+	CHECK(f.world.battleCount() == 0);
+	CHECK(f.world.playerPos(id).x == p0.x + 4); // 四步全走(没被遇敌打断)
+}
+
+TEST_CASE("W.4:遇敌命中 ⇒ 清走路串,剩余方向作废(EN_recv WALKARRAY 清空)")
+{
+	MoveFixture f;
+	loadEncounterFixture(f.world, 120); // 必遇敌
+	const auto id = spawnHandshaked(f);
+	const auto p0 = f.world.playerPos(id);
+	f.sendWalk(id, "cccc"); // 4 步
+	f.world.tick();         // 首步走 → 遇敌 → 清串
+	CHECK(f.world.playerPos(id).x == p0.x + 1);
+	for (int i = 0; i < 6; ++i)
+	{
+		f.clock.advance(250);
+		f.world.tick();
+	}
+	CHECK(f.world.playerPos(id).x == p0.x + 1); // 剩余 3 步作废
+	CHECK(f.world.battleCount() == 1);
+}
+
+TEST_CASE("W.4★★:端到端 —— 走动 → 遇敌 → 战斗 → 打赢拿经验")
+{
+	MoveFixture f;
+	loadEncounterFixture(f.world, 120);
+	const auto id = spawnHandshaked(f);
+	REQUIRE(f.world.playerExp(id) == 0);
+
+	f.sendWalk(id, "c");
+	f.world.tick(); // 走一步 → 遇敌 → 开战(玩家占位强场 vs 1 级乌力)
+	REQUIRE(f.world.battleCount() == 1);
+	const BattleId battle = 1; // 首场
+
+	// 玩家出招打敌方首槽,推进到打完(玩家 attack≈322 碾压 1 级乌力)。
+	//   ⚠️ 玩家侧须出招:L3「无指令 ⇒ 不行动」写死,fillEnemyCommands 只填敌方。
+	for (int i = 0; i < 30; ++i)
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		if (fld == nullptr)
+			break;
+		const BattleStats *st = f.world.stats(battle);
+		if (st != nullptr && st->finished)
+			break;
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = fld->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd.command.attack.target = static_cast<std::uint32_t>(SA::Rules::kSideOffset);
+		f.world.onBattleCommand(id, cmd);
+		f.clock.advance(1000); // battle_turn_interval_ms(makeMoveConfig = 1000)
+		f.world.tick();
+	}
+	REQUIRE(f.world.stats(battle) != nullptr);
+	CHECK(f.world.stats(battle)->finished);
+	CHECK(f.world.playerExp(id) > 0); // ★★ 打赢涨经验 —— 闭环兑现
+}

@@ -277,6 +277,11 @@ struct ServerConfig
 	// ★ 单一整数,不做「主版本兼容、次版本忽略」的分支。不等即拒(02 §2.1)。
 	std::uint32_t protocol_version = 1;
 	std::uint32_t heartbeat_interval_ms = 30000;
+	// 遇敌骰子分母系数(原版 `config.enemyact`,`getEnemyAction` clamp 到 [1,100];
+	//   遇敌骰子分母 = 120 * 该值,值越大越难遇敌,见 `char_walk.c:585`)。
+	//   ★ 默认 1 = 原版未配 `ENEMYACTION` 时 `getEnemyAction` 的返回(clamp 下界)。
+	//   ⚠️ 它是运营旋钮(10 §4.3 那族),`csa8.0/setup.cf` 未配 ⇒ 由 config 显式给,不入默认表。
+	std::uint32_t enemy_action = 1;
 	// 0 = 由启动时刻派生并**打进日志**;非 0 = 固定种子,用于回放。
 	std::uint64_t rng_seed = 0;
 	LogLevel log_level = LogLevel::kInfo;

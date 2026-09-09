@@ -4023,6 +4023,64 @@ W.1 移动系统(§9.0.42)的推送窗口,与本地已 ahead 的 §9.0.41 执行
 
 ---
 
+### 9.0.44 ★★ 批次 W.4 —— 遇敌触发闭环:走动 → 遇敌 → 战斗 → 拿经验(DR-DT17,2026-09-09)
+
+> 移动系统(W.1)之后,把已造齐的零件串成阶段 2 的关键闭环:玩家走一格 → 遇敌骰子 →
+> 遇敌链选怪 → 开战 → 战果。★ 取证确认这在原版是 `char_walk.c:585` 骰子 → `EN_recv`
+> → `BATTLE_CreateVsEnemy`,而后者内部**恰好是 server 现有函数的组合** ⇒ 本批以「复用 + 接线」为主。
+
+交付面(全在 `src/world/`):
+- **遇敌骰子**(`kCharLoop` 玩家段,走完一格 `moved` 后):`findEncountArea` 命中 ⇒ `cep` 夹在
+  `[prob_min, prob_max]` ⇒ 骰子 `world_rng.randMod(120*getEnemyAction()) < cep`(移植 `char_walk.c:585`;
+  `temp=cep`,无技能 `p_cep=0`)。命中 ⇒ 清走路串(`EN_recv` 的 `WALKARRAY=""`)+ `cep=prob_min`。
+- **开战组装** `World::triggerEncounter`(移植 `EN_recv`(`callfromcli.c:1249`)+ `BATTLE_CreateVsEnemy(_,0,-1)`
+  净核(`battle.c:2528`)):`pickEnemyGroup` → `rollEnemyList` 选怪 → `startBattle`(玩家占位入 Side[0]) →
+  `joinBattle` → 逐只 `spawnEnemyToField`(Side[1],`baselevel=-1` 野外摇号) → 战斗自动进 tick。
+- **遇敌数据源** `World::loadEncounterTables`(注入四表 `EncountArea`/`EnemyGroup`/`EnemyEncounter`/
+  `EnemyTemplate`)。★ 默认空 ⇒ 永不遇敌 ⇒ 现有走路用例不受影响;真玩法由 D 线导入灌入(阶段 2)。
+- **世界级遇敌 rng** `world_rng`:种子从 `masterSeed` **派生但不调 `nextSeed`** ⇒ 不消耗战斗种子序列
+  (否则现有战斗回放整体平移)。· **配置** `enemy_action`(`getEnemyAction` clamp[1,100];原版未配 ⇒ 1)·
+  观察面 `battleCount`。
+
+#### ① 玩家进场四维是占位(无选角来源,登记残缺)
+
+`makePlayerCombatant` 用占位四维(同 `makeDemoField` 的 me)—— 1.5 的 `Player` **无四维、无 level**
+(`Player.h` 只有位置 + `exp` + 宠物槽),同 §9.0.42 名字留空那族。⇒ 闭环能跑但玩家数值是占位,
+阶段 2 接选角后由存档取代。★ 占位量级(attack≈322)让它打得动遇敌链产出的真实弱怪(欠债 25 的 16 倍差),
+使「打赢拿经验」有意义。
+
+#### ② rng 分工:遇敌用世界 rng,敌人四维用战斗 rng
+
+原版 `ENEMY_getEnemy` 在建 battle **之前**用全局 `rand()`(战斗还没建)⇒ 遇敌骰子 + 选怪用
+`world_rng`;而 `spawnEnemyToField` 内的 `spawnEnemy`(生成四维)用 `b.rng`(战斗种子,可回放,M.4b)
+⇒ 两条序列分离,各自可回放。
+
+#### ③ 复验
+
+`ctest` **16/16**(`world_map` 10 → **15 例**,+5:必遇敌 / 不遇敌 / 未注入 / 清串 / 端到端)· `code_format` ·
+全套无破坏(现有 `world_tick` / 走路 / 视野全绿)。★ **反向验证:骰子符号 `<`→`>=`** ⇒ 用例 1/2/5/6
+精确转红(必遇敌变不遇敌、不遇敌变遇敌、清串失败、端到端无战斗),而用例 3(未注入)保持绿 ⇒ 断言有区分力。
+⚠️★★ **`enemyCount` 断言的区分力由一个真实 bug 兑现,比构造反验更强**:初版 `MoveFixture::spawn`
+跳过握手 ⇒ `joinBattle` 握手门拒绝 ⇒ `battleCount==1`(开了战)**而 `enemyCount==0`(敌人没入场)**
+⇒ 用例 1 当场把这两个断言分开抓到 —— 正是「开战」与「敌人入场」两件事各需一个探针(同欠债 20/25 那族)。
+⇒ 修法:遇敌用例改用握手 spawn(遇敌虽是服务端触发,但玩家仍须是握手过的会话)。
+
+#### ④ ⚠️ 未做 / 登记残缺
+
+| 项 | 归属 |
+|---|---|
+| 传送点抑制(`entflag`,`char_walk.c:578`)· 明雷敌人退回(`:566`)| **依赖未就绪**:1.5 地图无 WARP 对象、无 NPC 敌人实体(属 `kNpcSpawn`/W.3)⇒ 登记非留空(同 M.6 空背包)|
+| 自由服魔改:`getEqNoenemy` / `getEqRandenemy` / Ra's amulet(`eqen`)· `getStayEncount` | 非 8.0 净核 ⇒ 恒等划外 |
+| `cep` 累积 `cep++`(`char_walk.c:607`)| 在**战斗态**分支,玩家走路恒非战斗态 ⇒ 走不到,照抄源码结构但不硬接(同 M.6/M.7 等价 / 冗余族)|
+| `CHAR_ENCOUNT_FIX`(技能固定遇敌率 `p_cep`)· 组队遇敌(`BATTLE_PartyNewEntry`)| 技能 / 组队系统未移植 |
+| 玩家进场四维占位 | 无选角来源(见 ①),阶段 2 接选角 |
+| 遇敌数据 fixture / 真实导入 | 用例注入 fixture;真数据 D 线入库(同 M.5 的 `enemy1.txt`)|
+
+★ 本批**全在 `src/world/`**(Conn 私有 + world 逻辑 + config),复用现有战斗下行消息(`BattleSelfInfo`/
+`BattleTurnBegin`/`BattleResult`)⇒ **watched 路径零改动 ⇒ 锁定 ref 不前推**。只在 Apple clang 21 跑过,GCC/MSVC 交 CI。
+
+---
+
 ### 10.1 R-b:无解的结构性事实
 
 每条标【单源未交叉】/【8.5 源码推定】的规则,实现时**只能靠人工复核**,没有任何自动化验证手段。
@@ -4130,3 +4188,4 @@ W.1 移动系统(§9.0.42)的推送窗口,与本地已 ahead 的 §9.0.41 执行
 | 2026-09-09 | ★★ **批次 战果结算 —— EXP + 战斗结束经验分配 + BattleResult 下发**(新增 **§9.0.40**;`11` 新增 **DR-DT15** + §2.17,主表 126 → **127** 行;`01` §13 欠债表补残留)。遇敌链收尾后第一条「打赢有回报」的闭环。**敌人 EXP/DUELPOINT 判定树**(`enemy.c:1101-1107`,落 `spawnEnemy`;⚠️★ 哨兵是 -1 ⇒ `EnemyEncounter::exp` 默认取 -1 而非 0)· **`enemyExp` + `enemybaseexptbl` 全放 world**(用户裁定 —— 客户端不算经验、服务端权威;★ 74 级递减异常 959→956 照抄不修)· **玩家实拿走等级差衰减**(`BATTLE_AddExp` `EXPGET_MAXLEVEL=5`/`DIV=15`,累加 `Player.exp`,**战斗结束统一结算** ⇒ 总量与逐死亡等价、时机在回合末)· 下发独立顶层消息 **`BattleResult`**(`0x0206`,不进 `BattleEvent` union,避 8KB 红线)。⚠️★ **`enemyExp` 是 world 首个本地浮点公式**(`x*y+z`,GCC/clang 会 FMA 合并、MSVC 不)⇒ 给 `sa_world` 补 `-ffp-contract=off`(照 `sa_shared`,让三平台 CI 逐位一致从运气变纪律)。★★ **战果链耦合三类不可移植项,边界据证据划(非偷懒)**:升级(走 `exp.txt`、D 线未导入 + 成长域,**不撞** `fmdplevelexp` —— 那是家族声望)· 金钱(经济域 `GoldLedger`)· 掉落(道具域)· 决斗点分配(PvP/saac 域,只建初值 + `dpbattle` 判定)· 自由服魔改(VIP/`getBattleexp`/`Free*`/`EXPUP`,非 8.0 净核 ⇒ 恒等)—— 全部划出登记。⚠️★ `dpbattle` 门在「决斗点怪 exp=0」下无独立可观察后果(同 DR-DT13④/DR-DT14③ 等效族),保留因是源码语义。**复验**:`ctest` **15/15** · `ci_verify` 六项全过(SA_WERROR 清洁构建 0 告警,GCC `-Wshadow` 一处 `br` 改名)· `code_format` 过 · `dr_table` **127 行** · ★ **反向验证三处逐条精确转红**(异常值 956→985 · 衰减 `<=5`→`<=99` · 判定树 `<=0`→`<0`,恢复后绿、源码逐字节一致;⚠️ 恢复又踩 make 秒级 mtime 坑 ⇒ `sleep` 隔秒重编才采信)+ idl smoke 加 `BattleResult` 往返/截断。★★ **`shared/model`(Enemy/Player 加字段)+ `idl/generated`(BattleResult)有改动 ⇒ watched 路径变动 ⇒ 锁定 ref 必须前推 `shared-v0.15.0`**(推送窗口待办)。 |
 | 2026-09-09 | ★★ **批次 W.1 —— 移动系统:玩家移动 + 529 格视野广播**(新增 **§9.0.42**;`11` 新增 **DR-DT16** + §2.18,主表 127 → **128** 行;`01` §13 欠债 20② 推进 + 新增登记残缺)。tick 的 `kCharLoop`(第 5 步)+ `kOutboundFlush`(第 7 步)从占位变实装;用户裁定验证边界含视野 ⇒ 一批做两个里程碑。① **玩家移动**:`Player` 加位置 · `world/Map`(fixture + `mapWalkable` 移植 `MAP_walkAbleFromPoint`)· `WalkRequest`(0x0301)+ `onWalk`(移植 `lssproto_W_recv` 净核:防瞬移 + 碰撞预检 + 排走路串)· `kCharLoop` 玩家段按 `walkinterval=2500×100us=250ms` 逐字符消费(`CHAR_walk_check`/`walkcall`;`ctodirmode` 小写移动 / 大写转身,`CHAR_dxdy[8]` 八方向)。② **529 格视野**:`olink` 格子索引 + `CharAppear/Move/Disappear`(0x0302-04)+ 扫格 diff 双向广播(视野对称)。用例 `world_map` **10 例 / 63 断言**(含 `VisMirror`)。★ **视野常量取 23 是裁定**(§5.1/§10.2):展开视图 `CHAR_DEFAULTSEESIZ=20`(8.5 血统,unifdef 不改 #define),8.0 血统取 23、无二进制证据。⚠️★ **两处守卫抓到**:`module_boundaries` 抓 `Map.h` 违反「只暴露 Api.h」⇒ Map 并入 Api.h + 视野 helper 做成 `Impl` 成员;`next_walk_at_ms` 修 ManualClock t=0 时序 bug(写用例时发现)。**复验**:`ctest` **16/16** · `ci_verify` 六项 · `SA_WERROR` 0 告警 · ★ **反向验证 4 处**(方向反向 · 间隔门 · 不发 Move · 不发 Disappear)逐条精确转红后回绿(踩 make 秒级 mtime 坑,`sleep` 隔秒)。⚠️ **未做**:AI 摊还(W.3,依赖 `kNpcSpawn` + `EnemyMoveNum` 8.0=10)· 遇敌触发(W.4 ⇒ 闭环)· 客户端表现层 · 真实地图(D 线)· ★★ **`shared/model` + `idl/generated` 改 ⇒ 前推 `shared-v0.16.0`**(推送窗口待办)· GCC/MSVC 交 CI。 |
 | 2026-09-09 | ★ **推送窗口执行记录 —— `shared-v0.16.0`**(新增 **§9.0.43**)。W.1 移动系统(§9.0.42)的推送窗口,与本地 ahead 的 §9.0.41 记录 commit(`27da376`)一起上(用户两段批准:先定「先推」再确认外发)。server master `004bbe0..82c9922` + tag `shared-v0.16.0`(★ 显式推单 tag,不用 `--follow-tags`)· client pin v0.15→v0.16(`6a3d364`),双远端(gitee+github)`ls-remote` master 三处一致、**tag 集合差空**;client 换 pin **删 `build/ci` 重跑** `ci_verify` 联调态 **8 项全过**(76 例/2415 断言、`SA_CLIENT_WERROR` 0 告警)。**server CI 三平台 jobs 逐个 success**(Windows·MSVC / macOS·clang / Linux·GCC ⇒ ★ **W.1 的 GCC/MSVC 首验**)、**client CI 发布态 fetch v0.16.0 success**。⚠️★ W.1 两新文件(`Player.h`/`world_map.sa.h`)跨平台由 **server CI 三平台覆盖**(server 代码 include),client 无 TU include ⇒ client CI 读不出(§1.1「按文件覆盖」窄边界,非风险)。⇒ §9.0.42 ⑦ 前推待办闭合。本记录 commit 本地 ahead 1,留下批一起推。 |
+| 2026-09-09 | ★★ **批次 W.4 —— 遇敌触发闭环:走动 → 遇敌 → 战斗 → 拿经验**(新增 **§9.0.44**;`11` 新增 **DR-DT17** + §2.19,主表 128 → **129** 行)。把已造齐的零件串成阶段 2 关键闭环:`kCharLoop` 玩家段走一格 → 遇敌骰子 `world_rng.randMod(120*getEnemyAction()) < cep`(移植 `char_walk.c:585`,`cep` 夹 `[prob_min,prob_max]`)→ 命中清走路串 + `World::triggerEncounter`(移植 `EN_recv` + `BATTLE_CreateVsEnemy(_,0,-1)` 净核:`pickEnemyGroup`→`rollEnemyList` 选怪 → `startBattle`→`joinBattle`→ 逐只 `spawnEnemyToField` baselevel=-1)→ 战斗自动进 tick → 战果。★ 新增 `World::loadEncounterTables`(注入四表,**默认空 ⇒ 不遇敌** ⇒ 现有走路用例不受影响;真数据 D 线导入)· `world_rng`(遇敌世界 rng,种子从 `masterSeed` 派生**不调 `nextSeed`** ⇒ 不动战斗种子序列)· `config.enemy_action`(clamp[1,100])· 观察面 `battleCount`。★★ **绝大部分是复用**(遇敌链 M.5-M.7 + `startBattle`/`joinBattle`/`spawnEnemyToField` + tick 自动推进),新增只在遇敌骰子 + 组装 + 数据注入。⚠️★ **玩家进场四维是占位**(`makePlayerCombatant`;1.5 `Player` 无四维/level,同 §9.0.42 名字留空 ⇒ 登记残缺,阶段 2 接选角)。**复验**:`ctest` **16/16**(`world_map` 10 → **15 例**,+5)· `code_format` · 全套无破坏 · ★ **反向验证骰子符号 `<`→`>=`**:用例 1/2/5/6 精确转红、用例 3(未注入)绿。⚠️★★ **`enemyCount` 断言区分力由真实 bug 兑现**:初版 `spawn` 跳过握手 ⇒ `joinBattle` 拒 ⇒ `battleCount==1` 而 `enemyCount==0` ⇒ 用例当场分开抓到「开战」与「敌人入场」。⚠️ **未做**:传送点抑制 / 明雷退回(依赖 `kNpcSpawn`/W.3)· 自由服魔改(`getEqNoenemy` 等,非净核)· `cep++` 战斗态分支(走路走不到,照抄不硬接)。★ 本批**全在 `src/world/`** ⇒ watched 路径零改动 ⇒ **锁定 ref 不前推**;只 Apple clang 21 跑过,GCC/MSVC 交 CI。 |
