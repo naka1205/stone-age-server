@@ -1656,8 +1656,12 @@ std::int32_t rollEncounterLevel(const EnemyEncounter &enc, SA::Rules::Random &rn
 
 	// ── 归一 ②(源码 :484-485):写反了自动纠正 ──────────────────────────
 	//
-	// ⚠️ 这一步是 `Rules::Random::rand` 的 `lo <= hi` 前提的**唯一**保证者
-	//    (那个契约明写"调用方须自行保证")⇒ 删掉它就是把实现定义行为放进运行期。
+	// ⚠️★ **这一步的理由在 2026-09-09 换过一次(DR-BT23)**:原先写的是
+	//    「它是 `Rules::Random::rand` 的 `lo <= hi` 前提的唯一保证者」——
+	//    而退化区间现在**有定义**(返回 `lo` 且照常消耗一次)⇒ 那个理由失效。
+	// ✅ 现判据:**原版在载入期就做了这两条归一**(`enemy.c:479-486`)
+	//    ⇒ 删掉它就不是"引入 UB",而是**与原版行为不等价** —— 后者一样不可接受,
+	//      且它是源码事实,不会再随接口口径变化(`00` §9.0.36 ④)。
 	const std::int32_t lv_min = lo < hi_raw ? lo : hi_raw;
 	const std::int32_t lv_max = lo < hi_raw ? hi_raw : lo;
 

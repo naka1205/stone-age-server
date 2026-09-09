@@ -14,56 +14,13 @@
 #include <vector>
 
 #include "rules/Progression.h"
+#include "support/ScriptedRandom.h"
 
 using namespace SA::Rules;
 
-// ── 用例集专用 rng 存根 ───────────────────────────────────────────────
-//
-// ★ 与 RulesBattleTest.cpp 同一取向:**不用 SeededRandom 撞运气**。
-//   本文件要钉的是「第 ② 步在第 ③ 步之前」这种**顺序**,以及浮点/截断的分档 ——
-//   都必须逐个取值验,分布用例挡不住"两步对调"这类移植错误。
-class ScriptedRandom final : public Random
-{
-  public:
-	explicit ScriptedRandom(std::vector<int> script) : _script(std::move(script)) {}
-
-	int rand(int lo, int hi) override
-	{
-		++_calls;
-		const int v = next();
-		if (v < lo)
-			return lo;
-		if (v > hi)
-			return hi;
-		return v;
-	}
-	int randMod(int n) override
-	{
-		++_calls;
-		if (n <= 0)
-			return 0;
-		return next() % n;
-	}
-
-	// ★ 消费次数是**可回放性的一部分**,不只是调试信息:多摇或少摇一次,
-	//   同种子下后续所有取值全错位,而没有任何一处报错。
-	int calls() const { return _calls; }
-
-  private:
-	int next()
-	{
-		if (_script.empty())
-			return 0;
-		// 用尽后重复最后一个值,不回卷(同 RulesBattleTest 的理由:回卷会让
-		// "多消费一次"的偏差在长序列里自愈,从而掩盖 rng 消费序列的变化)。
-		if (_cursor >= _script.size())
-			return _script.back();
-		return _script[_cursor++];
-	}
-	std::vector<int> _script;
-	std::size_t _cursor = 0;
-	int _calls = 0;
-};
+// 用例集专用 rng 存根 ⇒ `tests/support/ScriptedRandom.h`(**唯一一份**)。
+// ★★ 此前三个用例集各带一份拷贝,而实测三份已经漂了(`randMod` 的退化分支自相矛盾、
+//    `calls()` 只有两份有)⇒ 见该头文件卷首与 DR-BT23。
 
 // `enemybase1.txt` 的两行**真实模板**(csa8.0 数据包,2026-09-08 实测按 E_T_* 枚举解出)。
 //

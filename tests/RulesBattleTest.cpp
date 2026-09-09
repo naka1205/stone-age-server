@@ -27,6 +27,7 @@
 #include <doctest/doctest.h>
 
 #include "rules/Battle.h"
+#include "support/ScriptedRandom.h"
 
 #include <cmath>
 #include <cstring>
@@ -636,47 +637,9 @@ TEST_CASE("回避:硬上限 75%,极端 dex 差也不会必闪")
 namespace
 {
 
-// 可编排的随机源 —— 用来把"抽到第几档"从概率变成断言。
-//
-// ★ 为什么不用 SeededRandom 撞运气:分档边界(§3.5 的 25/50/70/85/95/100、
-//   §3.9 的 10/30/70)必须**逐个边界值**验,而不是"跑一万次看分布像不像"。
-//   分布用例挡不住"档位表抄错一格"这种最常见的移植错误。
-class ScriptedRandom final : public Random
-{
-  public:
-	explicit ScriptedRandom(std::vector<int> script) : _script(std::move(script)) {}
-
-	int rand(int lo, int hi) override
-	{
-		const int v = next();
-		if (v < lo)
-			return lo;
-		if (v > hi)
-			return hi;
-		return v;
-	}
-	int randMod(int n) override
-	{
-		if (n <= 0)
-			return 0;
-		const int v = next();
-		return v % n;
-	}
-
-  private:
-	int next()
-	{
-		if (_script.empty())
-			return 0;
-		// ★ 用尽后**重复最后一个值**,不回卷:回卷会让"多消费了一次随机数"这种
-		//   偏差在长序列里自愈,从而掩盖 rng 消费序列的变化。
-		if (_cursor >= _script.size())
-			return _script.back();
-		return _script[_cursor++];
-	}
-	std::vector<int> _script;
-	std::size_t _cursor = 0;
-};
+// 用例集专用 rng 存根 ⇒ `tests/support/ScriptedRandom.h`(**唯一一份**)。
+// ★★ 此前三个用例集各带一份拷贝,而实测三份已经漂了(`randMod` 的退化分支自相矛盾、
+//    `calls()` 只有两份有)⇒ 见该头文件卷首与 DR-BT23。
 
 // 恒取上界的随机源。★ 回避判定是 `RAND(1,10000) <= per` 而 per 硬上限 7500
 //   ⇒ 取 10000 时**必不闪避**,把回避这个自由度从调度用例里摘出去。
@@ -1987,4 +1950,79 @@ TEST_CASE("ResolveTurn:不打穿(有剩血)⇒ 累加器不变,不产 KnockbackS
 	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
 	CHECK(countKind(ev, SA::Domain::BattleEvent::BodyKind::KNOCKBACK_STATE) == 0u);
+}
+
+// ── ★★ DR-BT23:随机源在退化区间上的消耗语义 ────────────────────────────
+//
+// ★★ **立案背景比结论重要**(2026-09-09):`SeededRandom::rand` 原写作
+//    `if (hi <= lo) return lo;` —— 返回值与原版 `RAND(x,x)` 一致,但**少消耗一次**
+//    ⇒ rng 序列自此整体平移。
+//
+// ⚠️★★ 把它改对之后,**既有 3,300+ 条断言一条都没红**,而原因不是"断言不敏感":
+//    全部用例走 `ScriptedRandom`(它从第一天起就无条件取数),
+//    **生产实现 `SeededRandom` 的这一支从未被任何用例触及**
+//    ⇒ 同一个接口的两个实现语义分叉,跨了三个批次没有任何东西发现。
+//    ★ 而 `RulesProgressionTest` 当时就写下了「消费次数是可回放性的一部分」——
+//      认识早就有了,缺的是**把它作用到生产实现上的那条断言**。
+//
+// ⇒ 本组守的正是那个缺口。★ 判据分两层:① 退化区间照常消耗;
+//    ② **两个实现在这一点上必须一致** —— 只验其中一个,分叉会再次静默发生。
+TEST_CASE("DR-BT23★★:退化区间照常消耗一次 —— 返回值相同而序列平移")
+{
+	SUBCASE("hi == lo 也消耗(本条是 DR-BT23 的关闭判据)")
+	{
+		SeededRandom r{42};
+		const auto before = r.state();
+		CHECK(r.rand(5, 5) == 5);   // 原版 `RAND(5,5)`:系数 1 ⇒ 取整 0 ⇒ 恒为 5
+		CHECK(r.state() != before); // ★ 状态必须变 —— 旧实现在此不动
+	}
+
+	SUBCASE("hi < lo:返回 lo 且照常消耗")
+	{
+		// ★ 原版 `RAND(0,-1)`:`y-(x-1)` = `-1-(-1)` = **0** ⇒ 系数 0 ⇒ 取整 0 ⇒ 返回 0。
+		// ⚠️ 而 `rand()` 是那个乘法的操作数 ⇒ **系数为 0 也要求值** ⇒ 照样消耗。
+		//    ⇒ 这一支在真实数据上会发生:`group1.txt` 有 4 行编组权重和为 0
+		//      ⇒ `r_max = Σ − 1 = −1`,其中 3 行被 `encount.txt` 引用(**可达**)。
+		SeededRandom r{555};
+		const auto before = r.state();
+		CHECK(r.rand(0, -1) == 0);
+		CHECK(r.state() != before);
+	}
+
+	SUBCASE("randMod(n <= 0) 也消耗 —— 原版取模前 rand() 已求值")
+	{
+		SeededRandom r{1234};
+		const auto before = r.state();
+		CHECK(r.randMod(0) == 0);
+		CHECK(r.state() != before);
+	}
+
+	SUBCASE("★ 退化调用恰好占掉序列里的一位(旧实现在此必红)")
+	{
+		// ★★ 这条比"状态变了没"更硬:它断言**平移量正好是一位**,
+		//    而不只是"有变化"。⇒ 若将来有人把退化支改成消耗两次,只有这条会红。
+		SeededRandom a{7}, b{7};
+		a.rand(3, 3);   // 退化调用:占掉第 1 位
+		b.rand(0, 999); // 普通调用:占掉同一位
+		CHECK(a.rand(0, 999) == b.rand(0, 999));
+	}
+
+	SUBCASE("★★ 两个实现的退化语义一致 —— 防的是「只改了生产、忘了脚本源」")
+	{
+		SeededRandom s{99};
+		ScriptedRandom c({111, 222});
+		const auto s0 = s.state();
+
+		CHECK(s.rand(4, 4) == 4);
+		CHECK(c.rand(4, 4) == 4); // 脚本值 111 被钳到 [4,4]
+
+		CHECK(s.state() != s0);
+		CHECK(c.calls() == 1);
+		// ★★ 判据必须落在"下一发"上 —— 这一条是**反向验证逼出来的**:
+		//    把 `ScriptedRandom` 也改成早退时,`c.calls() == 1` **照样绿**
+		//    (计数器在早退之前就 ++ 了)⇒ ★ `calls()` 数的是**调用次数**,
+		//    不是**取数次数**,而分叉恰恰发生在后者。
+		//    ⇒ 只有这一条会红:若脚本源没消耗,这里拿到的是 111 而不是 222。
+		CHECK(c.rand(0, 1000) == 222);
+	}
 }

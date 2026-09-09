@@ -14,6 +14,7 @@
 
 #include "model/Player.h"
 #include "rules/Progression.h"
+#include "support/ScriptedRandom.h"
 
 #include <cstdint>
 #include <map>
@@ -1289,38 +1290,9 @@ TEST_CASE("DR-BT21:joinBattle 自动带出出战宠(default_pet 跨战斗)")
 namespace
 {
 
-// 用例集专用 rng 存根 —— 与 RulesProgressionTest 同一取向:
-// ★ 生成路径要断言**逐值**,而 SeededRandom 的取值不可手算 ⇒ 喂脚本。
-class ScriptedRandom final : public SA::Rules::Random
-{
-  public:
-	explicit ScriptedRandom(std::vector<int> script) : _script(std::move(script)) {}
-	int rand(int lo, int hi) override
-	{
-		++_calls;
-		const int v = next();
-		return v < lo ? lo : (v > hi ? hi : v);
-	}
-	int randMod(int n) override
-	{
-		++_calls;
-		return n <= 0 ? 0 : next() % n;
-	}
-	int calls() const { return _calls; }
-
-  private:
-	int next()
-	{
-		if (_script.empty())
-			return 0;
-		if (_cursor >= _script.size())
-			return _script.back();
-		return _script[_cursor++];
-	}
-	std::vector<int> _script;
-	std::size_t _cursor = 0;
-	int _calls = 0;
-};
+// 用例集专用 rng 存根 ⇒ `tests/support/ScriptedRandom.h`(**唯一一份**)。
+// ★★ 此前三个用例集各带一份拷贝,而实测三份已经漂了(`randMod` 的退化分支自相矛盾、
+//    `calls()` 只有两份有)⇒ 见该头文件卷首与 DR-BT23。
 
 // 「乌力」= `enemybase1.txt` **第 1 行的全部实测列**(2026-09-08 核,名字列按 GBK 解)。
 //
