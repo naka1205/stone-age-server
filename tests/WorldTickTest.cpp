@@ -2547,3 +2547,127 @@ TEST_CASE("M.7:敌人行的模板查不到 ⇒ 整只不放(i 不推进,靠 loop
 	const auto out = SA::World::rollEnemyList(g, encs, tmpls, 10, rng);
 	CHECK(out.empty()); // ★ 候选有效(收进了)但模板缺失 ⇒ 一只都放不出
 }
+
+// ══ 战果结算(EXP / DUELPOINT + 战斗结束经验分配)══════════════════════════
+//
+// ★ 敌人身上的 exp / duelpoint 走 spawnEnemy 的判定树(直接可算,不依赖战斗);
+//   玩家实拿的经验走 finished 段的等级差衰减(端到端,靠 playerExp 观察面)。
+// ⚠️ 乌力模板(makeWuliTemplate):四维基数和 20+12+15+25 = 72 < 80 ⇒ rank 5(bonus 0.0);
+//    capture_difficulty = 11 是 alpha 里的 E_T_GET 项 ⇒ alpha = 11/100.0 = 0.11;
+//    其余抗性列 / rare 均 0。⇒ enemyExp = base[level−1] + (0.0 + 0.11) * level,截断。
+
+TEST_CASE("战果:敌人 EXP/DUELPOINT 判定树三分支(enemy.c:1101-1107)")
+{
+	const std::vector<int> script{2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+	const SA::Rules::RulesConfig cfg{};
+
+	SUBCASE("duelpoint <= 0 且 exp == -1(哨兵)⇒ 走 enemyExp 公式")
+	{
+		ScriptedRandom rng(script);
+		// fixedLv1 默认 exp = -1 / duelpoint = 0;传 baselevel = 10 固定等级。
+		const SA::Model::Enemy e =
+		    spawnEnemy(makeWuliTemplate(), makeWuliEncounterFixedLv1(), 10, rng, cfg);
+		// base[9] = 18 ⇒ raw = 18 + (0.0 + 0.11) * 10 = 19.1 ⇒ 19。
+		CHECK(e.exp == 19);
+		CHECK(e.duelpoint == 0);
+	}
+
+	SUBCASE("duelpoint <= 0 且 exp != -1 ⇒ 用敌人表值,不走公式")
+	{
+		ScriptedRandom rng(script);
+		EnemyEncounter enc = makeWuliEncounterFixedLv1();
+		enc.exp = 500;
+		const SA::Model::Enemy e = spawnEnemy(makeWuliTemplate(), enc, 10, rng, cfg);
+		CHECK(e.exp == 500); // ★ 表值直接用 —— 不是公式算出的 19
+		CHECK(e.duelpoint == 0);
+	}
+
+	SUBCASE("duelpoint > 0 ⇒ 决斗点怪,exp 保持 0(即使敌人表配了 exp 也不给)")
+	{
+		ScriptedRandom rng(script);
+		EnemyEncounter enc = makeWuliEncounterFixedLv1();
+		enc.duelpoint = 100;
+		enc.exp = 500; // ★ 配了也不进 exp 分支(duelpoint > 0 短路)
+		const SA::Model::Enemy e = spawnEnemy(makeWuliTemplate(), enc, 10, rng, cfg);
+		CHECK(e.exp == 0); // ★ 决斗点怪不给经验(判定树 if(duelpoint<=0) 不成立)
+		CHECK(e.duelpoint == 100);
+	}
+}
+
+TEST_CASE("战果:enemyExp 逐值 + enemybaseexptbl 的 74 级递减异常照抄")
+{
+	const std::vector<int> script{2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+	const SA::Rules::RulesConfig cfg{};
+	const EnemyEncounter enc = makeWuliEncounterFixedLv1(); // exp = -1 ⇒ 走公式
+
+	auto expAt = [&](std::int32_t level)
+	{
+		ScriptedRandom rng(script);
+		return spawnEnemy(makeWuliTemplate(), enc, level, rng, cfg).exp;
+	};
+
+	// ★ 逐值(避量级断言无区分力,§9.0.35 ⑤):
+	CHECK(expAt(1) == 1);   // base[0]=1 ⇒ 1 + 0.11*1 = 1.11 ⇒ 1
+	CHECK(expAt(10) == 19); // base[9]=18 ⇒ 18 + 0.11*10 = 19.1 ⇒ 19
+
+	// ★★ 74 级递减异常:base[72]=959(lv73)· base[73]=956(lv74,比前一个小)。
+	//   照抄原版数据毛刺的**可观察后果** = 74 级经验反而比 73 级少(单调递增序列里唯一
+	//   的下坠)。⇒ 若哪天有人"顺手把 956 改成 985 插值",这条会转红。
+	const std::int32_t e73 = expAt(73); // 959 + 0.11*73 = 967.03 ⇒ 967
+	const std::int32_t e74 = expAt(74); // 956 + 0.11*74 = 964.14 ⇒ 964
+	CHECK(e73 == 967);
+	CHECK(e74 == 964);
+	CHECK(e74 < e73); // ★ 异常值没被"修正"的钉子
+}
+
+TEST_CASE("战果:端到端 —— 打赢野怪,玩家按等级差衰减涨经验(playerExp)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick(); // onSessionReady ⇒ 建 Player 实体
+	REQUIRE(f.world.playerCount() == 1);
+	REQUIRE(f.world.playerExp(id) == 0); // 入场时 0
+
+	// ★ 玩家强场(秒杀 + 高血不死),敌方槽空 —— 由 spawnEnemyToField 填真敌人。
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20; // ★ 玩家 20 级
+	me.hp = 100000;
+	me.max_hp = 100000;
+	me.attack = 100000; // 秒杀敌人
+	me.defense = 10000;
+	me.quick = 500; // 先手
+	me.luck = 10;
+	const BattleId battle = f.world.startBattle(pf);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+
+	// 刷一只 10 级乌力(exp = -1 ⇒ 公式 ⇒ 19)。
+	REQUIRE(f.world.spawnEnemyToField(battle, SA::Rules::kSideOffset,
+	                                  makeWuliTemplate(), makeWuliEncounterFixedLv1(),
+	                                  /*baselevel=*/10));
+
+	// 推进:每回合玩家出招打敌人 slot 10,直到打完(finished 后 tick 会跳过)。
+	for (int i = 0; i < 30; ++i)
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		if (fld == nullptr)
+			break;
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = fld->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd.command.attack.target = static_cast<std::uint32_t>(SA::Rules::kSideOffset);
+		f.world.onBattleCommand(id, cmd);
+		f.clock.advance(2000);
+		f.world.tick();
+	}
+
+	// ★★ 玩家 20 级打 10 级敌人:b_level = 20 − 10 = 10 > 5 ⇒ 衰减
+	//    b_level = 5 + 15 − 10 = 10;nowexp = 19 * 10 / 15 = 12(整除)。
+	CHECK(f.world.playerExp(id) == 12);
+}

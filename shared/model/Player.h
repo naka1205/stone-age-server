@@ -60,6 +60,16 @@ struct Player
 	// 累计捕获数(原 `CHAR_GETPETCOUNT`,源码 `battle_event.c:3543`)。
 	std::int32_t capture_count = 0;
 
+	// 累计经验值(原 `CHAR_EXP`,战果结算批次)。
+	//
+	// ★ 战斗胜利时按等级差衰减把死亡敌人的经验累加进来(`World.cpp` finished 段,
+	//   源码 `BATTLE_AddExp` 的 `EXPGET_MAXLEVEL=5` / `DIV=15` 段)。
+	// ⚠️ 本批**只累积、不触发升级** —— 升级要读 `exp.txt`(下一级所需经验,D 线数据
+	//   未导入)+ 属成长域,且与 `fmdplevelexp`(那是家族声望,`00` §10.2)无关。
+	//   ⇒ 玩家等级不因经验变化;不在此建 `level`(等级差衰减读**战场 Combatant** 的等级,
+	//   见 `World.cpp` finished 段;M.1 起「不建没人用的字段」,真做升级那批再建)。
+	std::int32_t exp = 0;
+
 	// ── 宠物槽操作 ────────────────────────────────────────────────
 
 	// 找一个空宠物槽,满则返回 −1。

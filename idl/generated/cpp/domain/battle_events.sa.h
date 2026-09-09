@@ -906,6 +906,44 @@ inline void decode(SA::IDL::Reader& r, BattleEvents& m) {
       [](SA::IDL::Reader& re, SA::Domain::BattleEvent& e) { decode(re, e); });
 }
 
+struct ExpGain {
+  std::uint32_t slot;
+  std::int32_t exp_gained;
+  std::int32_t exp_total;
+};
+
+inline void encode(SA::IDL::Writer& w, const ExpGain& m) {
+  w.u32(m.slot);
+  w.i32(m.exp_gained);
+  w.i32(m.exp_total);
+}
+
+inline void decode(SA::IDL::Reader& r, ExpGain& m) {
+  m.slot = r.u32();
+  m.exp_gained = r.i32();
+  m.exp_total = r.i32();
+}
+
+struct BattleResult {
+  std::uint64_t battle_id;
+  bool player_won;
+  SA::IDL::FixedVec<SA::Domain::ExpGain, 10> exp_gains;
+};
+
+inline void encode(SA::IDL::Writer& w, const BattleResult& m) {
+  w.u64(m.battle_id);
+  w.b(m.player_won);
+  SA::IDL::write_vec(w, m.exp_gains,
+      [](SA::IDL::Writer& we, const SA::Domain::ExpGain& e) { encode(we, e); });
+}
+
+inline void decode(SA::IDL::Reader& r, BattleResult& m) {
+  m.battle_id = r.u64();
+  m.player_won = r.b();
+  SA::IDL::read_vec(r, m.exp_gains,
+      [](SA::IDL::Reader& re, SA::Domain::ExpGain& e) { decode(re, e); });
+}
+
 struct Attack {
   std::uint32_t target;
 };

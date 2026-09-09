@@ -135,7 +135,26 @@ struct EnemyTemplate
 
 	// 捕获难度(`E_T_GET` → `CHAR_WORKMODCAPTUREDEFAULT`,源码 :1166)。
 	// ⚠️ 载入器对空列保持 `-1`(`06` §3.5)⇒ 这里可以是 −1,照传不兜底。
+	// ★★ 战果结算批次:它同时是 `enemyExp()` 的 alpha 里的 `E_T_GET` 项(源码 :789)——
+	//    **一列两用**,不重建。
 	std::int32_t capture_difficulty = 0;
+
+	// ── 经验公式 `enemyExp()` 的 alpha 项(源码 `ENEMY_getExp:789-793`,战果结算批次)──
+	//
+	// ★ `alpha = (critical + counter + [E_T_GET=capture_difficulty] + poison + paralysis
+	//   + sleep + stone + drunk + confusion) / 100.0 + rare` ⇒ 敌人越难缠 / 越稀有,
+	//   给的经验越多。列名照 `include/enemy.h` 的 `E_T_*`。
+	// ⚠️ 只为经验公式建 —— 状态抗性本身(战斗里的免疫)属 L4 状态系统,那时另建;
+	//   这里是同一批模板数据的**经验用途**,不是把 L4 提前做了。
+	std::int32_t critical = 0;  // E_T_CRITICAL
+	std::int32_t counter = 0;   // E_T_COUNTER
+	std::int32_t poison = 0;    // E_T_POISON
+	std::int32_t paralysis = 0; // E_T_PARALYSIS
+	std::int32_t sleep = 0;     // E_T_SLEEP
+	std::int32_t stone = 0;     // E_T_STONE
+	std::int32_t drunk = 0;     // E_T_DRUNK
+	std::int32_t confusion = 0; // E_T_CONFUSION
+	std::int32_t rare = 0;      // E_T_RARE
 
 	// 名字(`E_T_NAME`,源码 :1108-1110)。★ 模板表里唯一的非 ASCII 列(`04` §7.2)。
 	//
@@ -239,6 +258,18 @@ struct EnemyEncounter
 	// ★ 实测分布:**1277/2154 行可捕(59%)**,877 行不可捕 ⇒ `Combatant.h` 那句
 	//   「并非所有敌人都可捕(BOSS / 事件怪不带此标记)」第一次有了量。
 	bool capturable = false;
+
+	// ── 战果:经验值与决斗点(`ENEMY_EXP` c11 / `ENEMY_DUELPOINT` c12,战果结算批次)──
+	//
+	// ★★ 判定树(源码 `char/enemy.c:1101-1107`,落地在 `spawnEnemy`):
+	//      `Enemy.duelpoint = enc.duelpoint`(无条件);
+	//      仅当 `enc.duelpoint <= 0` 才给 exp;`enc.exp == -1` 是哨兵 ⇒ 走 `enemyExp()`。
+	// ⚠️★★ **哨兵是 -1,所以 `exp` 默认值取 -1 而非 0** —— 0 会被判定树读成
+	//    「配表写了 0 经验」(用表值)而不是「没配 ⇒ 走公式」,是 M.5「默认值即语义」
+	//    那族坑(同 `create_max_num` 默认 1 的取向)。`duelpoint` 默认 0 = 经验怪。
+	// ⚠️ `enemyExp()` 只读**模板**列 + level + rank,不读本表(校正见 `Enemy.h` 文末 ⑥)。
+	std::int32_t exp = -1;
+	std::int32_t duelpoint = 0;
 };
 
 // ── 敌人表里源码写了、本批**有意不建**的列(逐条记明,均非遗漏)───────────────
@@ -258,11 +289,10 @@ struct EnemyEncounter
 //    (单一值)⇒ 战术**号**无变化,有变化的是 `TACTICSOPTION` 那个字符串
 //    (`at:10;1;1|gu:1|es:1|wa:0;...`)⇒ 将来接 AI 时要解析的是它,不是那个号。
 //
-// ④ `ENEMY_EXP`(c11)· `ENEMY_DUELPOINT`(c12)⇒ **战果结算**。
-//    ⚠️★ 两者有**依赖顺序**,别分开移植:源码 :1101-1107 是
-//    `DUELPOINT` 先无条件写,然后**只有 `DUELPOINT <= 0` 时才给 EXP**,
-//    且 `EXP == -1` 是"不覆盖"哨兵 ⇒ 走 `ENEMY_getExp(array, tarray, level, rank)`。
-//    ⇒ 三个值构成一棵判定树,拆开移植会得到一个"看起来对"的错经验值。
+// ④ ✅ `ENEMY_EXP`(c11)· `ENEMY_DUELPOINT`(c12)⇒ **战果结算批次已建**为上方
+//    `exp` / `duelpoint`(判定树见那里)。★ 三值一棵树的裁定兑现在 `spawnEnemy`、没拆开:
+//    `DUELPOINT` 无条件写 → `DUELPOINT <= 0` 才给 EXP → `EXP == -1` 哨兵走 `enemyExp()`。
+//    ⚠️ `enemyExp()` 只读模板 + level / rank(不读本表行 `p`,校正见 `Enemy.h` 文末 ⑥)。
 //
 // ⑤ `ENEMY_STYLE`(c13)⇒ 敌人武器(源码 :1132-1150 的 switch → `ITEM_makeItemAndRegist`)。
 //    ⚠️★★ **实测把 M.4b 登记的那条偏差缩小了一个数量级,值得改口径**:
@@ -569,6 +599,13 @@ class World final : public SA::Net::TransportEvents,
 	// 当前出战宠在 `pets[]` 的槽号(原 `CHAR_DEFAULTPET`)。-1 = 无实体 / 无出战宠。
 	// ★ DR-BT21 的测试观察面:换宠(PET_OUT/PET_IN)是否写对 `default_pet`。
 	int playerDefaultPet(SA::Net::SessionId session) const;
+
+	// 某会话背后 Player 的累计经验值(原 `CHAR_EXP`,战果结算批次)。
+	// -1 = 会话无 L2 实体(与真 0 区分,同 `playerCaptureCount`;exp 非负 ⇒ -1 无歧义)。
+	//
+	// ★ 关闭判据 = 可断言:战斗胜利后玩家经验涨没涨、涨多少,靠它对着 `enemyExp()`
+	//   × 等级差衰减比 —— 没有它,「打赢涨经验」这条闭环无从证明(同欠债 20 / 25 那族)。
+	int playerExp(SA::Net::SessionId session) const;
 
 	// 某场战斗的战场快照(只读)。不存在返回 nullptr。
 	//

@@ -232,6 +232,7 @@
     "sa.domain.BattleCommand": 528,
     "sa.domain.BattleEvents": 517,
     "sa.domain.BattleLeave": 516,
+    "sa.domain.BattleResult": 518,
     "sa.domain.BattleSelfInfo": 515,
     "sa.domain.BattleSnapshot": 513,
     "sa.domain.BattleTurnBegin": 514,

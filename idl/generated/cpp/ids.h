@@ -22,6 +22,7 @@ enum class MsgId : std::uint32_t {
   BattleSelfInfo = 0x0203,
   BattleLeave = 0x0204,
   BattleEvents = 0x0205,
+  BattleResult = 0x0206,
   BattleCommand = 0x0210,
   WindowOpen = 0x0601,
   WindowReply = 0x0602,
@@ -104,6 +105,12 @@ template <>
 struct MsgTraits<SA::Domain::BattleEvents> {
   static constexpr MsgId kId = MsgId::BattleEvents;
   static constexpr const char* kName = "sa.domain.BattleEvents";
+};
+
+template <>
+struct MsgTraits<SA::Domain::BattleResult> {
+  static constexpr MsgId kId = MsgId::BattleResult;
+  static constexpr const char* kName = "sa.domain.BattleResult";
 };
 
 template <>

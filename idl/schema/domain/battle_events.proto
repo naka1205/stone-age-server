@@ -425,6 +425,33 @@ message BattleEvents {
   repeated BattleEvent events = 3 [(sa.max_count) = 256];
 }
 
+// ── 战斗结算(原版战斗结束后的战果下发)战果结算批次 ──────────────────────────
+//
+// ★ **独立顶层消息,不进 BattleEvent 的 oneof**:原版战果本就单独下发(经验走
+//   CHAR_send_P_StatusString、决斗点走 lssproto_RD_send,都不进回合串缓冲),且塞进
+//   union 会按最大变体给**每个** BattleEvent 买单 ⇒ 撑破 smoke.cpp 的 8KB 零分配红线
+//   (同 KnockbackState 单开、TextBox 参数 ID 化的理由)。
+// ⚠️ 本批只带**经验**:升级(exp.txt 未导入)/ 金钱(经济域 GoldLedger)/ 决斗点(PvP·saac 域)/
+//   掉落(道具域)都划在批次外(依据见 World.cpp finished 段与 01 §13),客户端此刻收不到它们。
+// ⚠️ 客户端消费本批**不做**(服务端为主,同 1.4 节奏):消息在 schema 里存在 ⇒ 两端都会
+//   生成处理分支(02 §6.2 单一真源),但客户端 BattleScene 是否据它演出留客户端批次。
+
+// 单个玩家的经验战果。
+message ExpGain {
+  uint32 slot       = 1;   // 获经验玩家的战场槽(0..9 己方)
+  int32  exp_gained = 2;   // 本场获得(等级差衰减后;源码 EXPGET_MAXLEVEL=5/DIV=15)
+  int32  exp_total  = 3;   // 累加后的玩家总经验(客户端显示 / 观察用;= Player.exp)
+}
+
+message BattleResult {
+  option (sa.msg_id) = 0x0206;
+
+  uint64 battle_id  = 1;
+  bool   player_won = 2;   // 玩家方是否胜利(输了不给经验,exp_gains 为空)
+  // 每个获经验的玩家一条。★ 己方最多 10 槽(0..9),取 10;实际获经验的是玩家单位(0..4)。
+  repeated ExpGain exp_gains = 3 [(sa.max_count) = 10];
+}
+
 // ── 上行指令 ──────────────────────────────────────────────────────
 //
 // 07 §5.2 实测:客户端上行只有 **12 个字母**,却要驱动 **148 个内部指令码** ——

@@ -960,6 +960,120 @@ void World::tick()
 			if (it == s.battles.end())
 				continue;
 
+			BattleInstance &b = it->second;
+
+			// ── ★★ 战果结算:经验分配(战果结算批次)──────────────────────────
+			//
+			// 源码 `BATTLE_AddExp`(`battle.c:5500-5545`)的等级差衰减段。⚠️★ **时机差异
+			//   登记**:原版每死一个敌人即结算一次(`AddProfit` 在死亡处理里调),我们在
+			//   **战斗结束统一**遍历 `enemy_of_slot` 剩下的敌人 —— 被捕的那只已在
+			//   `applyEvents` 释放并清了句柄,所以这里剩的**就是被打死的**。最终 Player.exp
+			//   总量与逐死亡结算等价,差别只在结算落在回合末(可接受,登记)。
+			// ⚠️ **只结算玩家方胜利**:玩家方全灭(打输)不给经验(源码 proflg 判胜方)。
+			// ⚠️ 骑宠经验(源码 `×0.6`)本批不做 —— `Model::Pet` 无 `exp` 字段,且宠物
+			//    经验 / 升级属宠物成长域(登记残缺)。
+			{
+				// 玩家方赢 = 敌方全灭且玩家方未全灭(finished 触发时至少一方全灭)。
+				const bool player_won = sideWipedOut(b.field, /*enemy_side=*/true) && !sideWipedOut(b.field, /*enemy_side=*/false);
+
+				// dpbattle(源码 :2267):本场任一敌人 `duelpoint > 0` ⇒ 决斗点怪 ⇒ 走
+				// 决斗点、不走经验。★ 决斗点分配本批未做(PvP / saac 域)⇒ 这场谁也不拿战果。
+				bool dp_battle = false;
+				for (const SA::Model::EntityHandle &eh : b.enemy_of_slot)
+				{
+					const SA::Model::Enemy *e = s.enemies.resolve(eh);
+					if (e != nullptr && e->duelpoint > 0)
+					{
+						dp_battle = true;
+						break;
+					}
+				}
+
+				// 本场每个玩家槽获得的经验 —— 既累加进 Player.exp,又用于下发 BattleResult。
+				std::array<std::int32_t, SA::Rules::kSideOffset> gained{};
+
+				if (player_won && !dp_battle)
+				{
+					// 外层:每个还挂在 `enemy_of_slot` 的敌人 = 被打死的(被捕的已清句柄)。
+					for (int es = SA::Rules::kSideOffset; es < SA::Rules::kSlotCount; ++es)
+					{
+						const SA::Model::Enemy *e = s.enemies.resolve(
+						    b.enemy_of_slot[static_cast<std::size_t>(es)]);
+						if (e == nullptr)
+							continue;
+						const std::int32_t enemy_exp = e->exp;
+						const std::int32_t enemy_level = e->level;
+
+						// 内层:每个在场的玩家实体(源码逐个 `charaindex[k]`)。
+						for (int ps = 0; ps < SA::Rules::kSideOffset; ++ps)
+						{
+							SA::Model::Player *p = s.players.resolve(
+							    b.player_of_slot[static_cast<std::size_t>(ps)]);
+							if (p == nullptr)
+								continue;
+
+							// 等级差衰减(源码 `EXPGET_MAXLEVEL=5` / `EXPGET_DIV=15`):
+							//   玩家不比怪高 5 级 ⇒ 全额;高 5 级以上 ⇒ 线性衰减、保底 1。
+							// ★ 整数运算(源码 `exp * b_level / 15`);玩家等级取**战场
+							//   Combatant**(Player 实体不建 level,见 Player.h)。
+							const std::int32_t player_level = b.field.at(ps).level;
+							std::int32_t b_level = player_level - enemy_level;
+							std::int32_t nowexp;
+							if (b_level <= 5)
+							{
+								nowexp = enemy_exp;
+							}
+							else
+							{
+								b_level = 5 + 15 - b_level;
+								if (b_level > 15)
+									b_level = 15;
+								if (b_level <= 0)
+									nowexp = 1;
+								else
+									nowexp = enemy_exp * b_level / 15;
+								if (nowexp < 1)
+									nowexp = 1;
+							}
+							p->exp += nowexp;
+							gained[static_cast<std::size_t>(ps)] += nowexp;
+						}
+					}
+				}
+
+				// ── 下发 BattleResult(战斗结束都发,告知胜负 + 经验)战果结算批次 ──────
+				//
+				// ★ 每个**在场玩家实体**一条 ExpGain(本场 gained + 累计 exp_total),
+				//   即使 gained == 0(打输 / 决斗点怪 / demo 无 L2 敌人)也发 —— 客户端要能
+				//   显示"本场结果"。⚠️ 独立顶层消息,不进事件流(理由见 battle_events.proto)。
+				SA::Domain::BattleResult result{};
+				result.battle_id = b.id;
+				result.player_won = player_won;
+				for (int ps = 0; ps < SA::Rules::kSideOffset; ++ps)
+				{
+					const SA::Model::Player *p = s.players.resolve(
+					    b.player_of_slot[static_cast<std::size_t>(ps)]);
+					if (p == nullptr)
+						continue;
+					SA::Domain::ExpGain g{};
+					g.slot = static_cast<std::uint32_t>(ps);
+					g.exp_gained = gained[static_cast<std::size_t>(ps)];
+					g.exp_total = p->exp;
+					(void)result.exp_gains.push_back(g);
+				}
+
+				for (const SA::Net::SessionId sid : b.members)
+				{
+					const auto cit = s.conns.find(sid);
+					if (cit == s.conns.end())
+						continue;
+					Impl::Conn &c = cit->second;
+					if (c.session == nullptr)
+						continue;
+					(void)c.session->push(result, c.outbound);
+				}
+			}
+
 			// ★★ **战斗结束 ⇒ 该场剩下的敌人 L2 实体全部回池(批次 M.4b)**。
 			//
 			// ⚠️★ 这一步不是"顺手清理",它有源码依据也有前车之鉴:
@@ -1531,6 +1645,13 @@ int World::playerDefaultPet(SA::Net::SessionId session) const
 	return p == nullptr ? -1 : p->default_pet;
 }
 
+int World::playerExp(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : static_cast<int>(p->exp);
+}
+
 int World::playerPetSlotsUsed(SA::Net::SessionId session) const
 {
 	const SA::Model::Player *p =
@@ -1963,6 +2084,254 @@ std::int32_t rollEncounterLevel(const EnemyEncounter &enc, SA::Rules::Random &rn
 	return rng.rand(lv_min, lv_max);
 }
 
+// ── 敌人基础经验表(源码 `include/enemyexptbl.h` 的 `enemybaseexptbl[]`)──────────
+//
+// ★ 200 个硬编码值,下标 = level − 1(`kEnemyBaseExpTbl[0]` = 1 级基础经验)。
+//   `enemyExp()` 里 `level--` 后取它,level < 1 或 > 200 越界 ⇒ 返 0(源码 :780)。
+// ⚠️★★ **74 级是一处递减异常**:73 级 959 → 74 级 **956**(比前一个小),75 级又跳到 1012。
+//    这是**原版数据的毛刺**(否则整表单调递增),照抄不修 —— 改成插值(如 985)是把猜测
+//    固化,同「实测异常照抄」纪律。将来这表若走 D 线入库,导入器**不得**顺手纠正它。
+constexpr std::array<std::int32_t, 200> kEnemyBaseExpTbl = {
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    9,
+    12,
+    15,
+    18, // level   1-10
+    22,
+    26,
+    30,
+    35,
+    40,
+    46,
+    52,
+    58,
+    65,
+    72, //        11-20
+    79,
+    87,
+    95,
+    104,
+    113,
+    122,
+    131,
+    141,
+    151,
+    162, //        21-30
+    173,
+    184,
+    196,
+    208,
+    220,
+    233,
+    246,
+    260,
+    274,
+    288, //        31-40
+    303,
+    318,
+    333,
+    348,
+    365,
+    381,
+    398,
+    415,
+    432,
+    450, //        41-50
+    468,
+    486,
+    506,
+    525,
+    545,
+    564,
+    585,
+    606,
+    627,
+    648, //        51-60
+    670,
+    692,
+    714,
+    737,
+    760,
+    784,
+    808,
+    832,
+    857,
+    882, //        61-70
+    907,
+    933,
+    959,
+    956, // ★★ 74 级递减异常:比上一个(73 级 959)小 —— 原版数据毛刺,照抄不修
+    1012,
+    1040,
+    1067,
+    1095,
+    1123,
+    1152, //        71-80
+    1181,
+    1210,
+    1240,
+    1270,
+    1300,
+    1331,
+    1362,
+    1394,
+    1426,
+    1458, //        81-90
+    1490,
+    1524,
+    1557,
+    1590,
+    1625,
+    1659,
+    1694,
+    1729,
+    1764,
+    1800, //       91-100
+    1836,
+    1872,
+    1909,
+    1946,
+    1983,
+    2021,
+    2059,
+    2097,
+    2136,
+    2175, //      101-110
+    2214,
+    2254,
+    2294,
+    2334,
+    2374,
+    2414,
+    2455,
+    2496,
+    2537,
+    2578, //      111-120
+    2619,
+    2661,
+    2703,
+    2745,
+    2787,
+    2829,
+    2872,
+    2915,
+    2958,
+    3000, //      121-130
+    3043,
+    3088,
+    3132,
+    3176,
+    3220,
+    3264,
+    3309,
+    3354,
+    3399,
+    3444, //      131-140
+    3489,
+    3535,
+    3581,
+    3627,
+    3673,
+    3719,
+    3765,
+    3812,
+    3859,
+    3906, //      141-150
+    3953,
+    4000,
+    4047,
+    4095,
+    4143,
+    4191,
+    4239,
+    4287,
+    4335,
+    4384, //      151-160
+    4433,
+    4482,
+    4531,
+    4580,
+    4629,
+    4679,
+    4729,
+    4779,
+    4829,
+    4879, //      161-170
+    4929,
+    4980,
+    5031,
+    5082,
+    5133,
+    5184,
+    5235,
+    5287,
+    5339,
+    5391, //      171-180
+    5443,
+    5495,
+    5547,
+    5599,
+    5652,
+    5705,
+    5758,
+    5811,
+    5864,
+    5917, //      181-190
+    5970,
+    6024,
+    6078,
+    6132,
+    6186,
+    6240,
+    6295,
+    6350,
+    6405,
+    6460, //      191-200
+};
+
+// 敌人身上的经验值 —— 1:1 移植 `ENEMY_getExp`(展开视图 `char/enemy.c:761-799`)。
+//
+// ★★ **签名不收 `EnemyEncounter`**:生效行(:796)只读模板 `tp` + 入参 level / rank,
+//    敌人表行 `p` 只出现在 :795 那条被注释掉的旧式里(校正见 `Enemy.h` 文末 ⑥)。
+// 公式(源码逐行):
+//   :779  level--;                              ← 下标是「等级 − 1」
+//   :780  越界(含 level<=0)返 0;
+//   :786  rank<0||rank>5 ⇒ 归 0 档;
+//   :787  rankBonus = ranktbl[rank].rank;        ← {2.5,2.0,1.5,1.0,0.5,0.0}(num 列不用,不建)
+//   :789  alpha = (critical+counter+GET+poison+paralysis+sleep+stone+drunk+confusion)
+//               / 100.0 + rare;                  ← ★ GET = capture_difficulty(一列两用)
+//   :796  ret  = base[level] + (rankBonus + alpha) * (level+1);  ← level 已--,+1 复原成原等级
+//   :797  return ret < 1 ? 1 : ret;              ← 保底 1
+// ⚠️ 浮点类型贴源码:`/100.0` 是 double 除;最终整段在 float 域求值后截断成 int。
+//    逐位一致依赖 sa_world 的 `-ffp-contract=off`(见 CMakeLists,与 sa_shared 同源)。
+std::int32_t enemyExp(const EnemyTemplate &tmpl, std::int32_t level, std::int32_t rank)
+{
+	level -= 1;
+	if (level < 0 || level >= static_cast<std::int32_t>(kEnemyBaseExpTbl.size()))
+		return 0;
+
+	static constexpr float kRankBonus[6] = {2.5f, 2.0f, 1.5f, 1.0f, 0.5f, 0.0f};
+	if (rank < 0 || rank > 5)
+		rank = 0;
+	const float rank_bonus = kRankBonus[static_cast<std::size_t>(rank)];
+
+	// ★ E_T_GET 项就是 `capture_difficulty`(Api.h 的 EnemyTemplate 已一列两用)。
+	const std::int32_t resist_sum =
+	    tmpl.critical + tmpl.counter + tmpl.capture_difficulty + tmpl.poison + tmpl.paralysis + tmpl.sleep + tmpl.stone + tmpl.drunk + tmpl.confusion;
+	const float alpha =
+	    static_cast<float>(static_cast<double>(resist_sum) / 100.0 + tmpl.rare);
+
+	const float raw =
+	    static_cast<float>(kEnemyBaseExpTbl[static_cast<std::size_t>(level)]) + (rank_bonus + alpha) * static_cast<float>(level + 1);
+	const std::int32_t ret = static_cast<std::int32_t>(raw);
+	return ret < 1 ? 1 : ret;
+}
+
 SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, const EnemyEncounter &enc,
                             std::int32_t baselevel, SA::Rules::Random &rng,
                             const SA::Rules::RulesConfig &cfg)
@@ -2047,6 +2416,20 @@ SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, const EnemyEncounter &enc
 	out.hp = SA::Rules::deriveBaseStats(out.vital, out.str, out.tough, out.dex).max_hp;
 
 	// ⚠️ `mp` / `max_mp` 留 0 —— 源码从不写它们,默认模板里也是 0(见 `Enemy.h`)。
+
+	// ── 战果:经验值 / 决斗点判定树(源码 :1028 + :1101-1107)★ 三值一棵树,不拆开 ────
+	//
+	// `duelpoint` 无条件写(源码 :1101);仅当 `duelpoint <= 0` 才给 `exp`(源码 :1102):
+	//   `enc.exp != -1` 用敌人表值 · `enc.exp == -1` 哨兵 ⇒ 走 `enemyExp()`(源码 :1103-1107)。
+	// ⚠️★ `duelpoint > 0` 的「决斗点怪」`exp` 保持默认 0 —— 那场结算走决斗点、不走经验
+	//    (`battle.c:2267` 的 `dpbattle`),而决斗点分配本批未做(登记残缺,见 `Enemy.h`)。
+	// ★ `enemyExp` 的 rank 传刚算好的 `out.pet_rank`(与源码 :1106 传 `enemyrank` 同一个值)。
+	out.duelpoint = enc.duelpoint;
+	if (enc.duelpoint <= 0)
+	{
+		out.exp = enc.exp != -1 ? enc.exp : enemyExp(tmpl, out.level, out.pet_rank);
+	}
+
 	return out;
 }
 

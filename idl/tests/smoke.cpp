@@ -230,6 +230,40 @@ int main()
 	assert(win2.body.select.choices[1].choice_id == 200);
 	assert(std::strcmp(win2.body.select.choices[0].text.c_str(), "买东西") == 0);
 
+	// ── 往返 6:★ 战斗结算(顶层消息 + repeated ExpGain)战果结算批次 ──
+	Domain::BattleResult res{};
+	res.battle_id = 0x1234'5678ull;
+	res.player_won = true;
+	{
+		Domain::ExpGain g0{};
+		g0.slot = 0;
+		g0.exp_gained = 12;
+		g0.exp_total = 12;
+		res.exp_gains.push_back(g0);
+
+		Domain::ExpGain g1{};
+		g1.slot = 1;
+		g1.exp_gained = 0; // ★ 本场没得(高等级玩家),但仍下发 total
+		g1.exp_total = 999;
+		res.exp_gains.push_back(g1);
+	}
+
+	IDL::Writer w6(buf, sizeof(buf));
+	encode(w6, res);
+	assert(w6.ok());
+
+	Domain::BattleResult res2{};
+	IDL::Reader r6(buf, w6.size());
+	decode(r6, res2);
+	assert(r6.ok());
+	assert(res2.battle_id == 0x1234'5678ull);
+	assert(res2.player_won == true);
+	assert(res2.exp_gains.size() == 2);
+	assert(res2.exp_gains[0].slot == 0);
+	assert(res2.exp_gains[0].exp_gained == 12);
+	assert(res2.exp_gains[1].exp_gained == 0);
+	assert(res2.exp_gains[1].exp_total == 999);
+
 	// ── 边界:截断输入必须被挡住,不得越界读 ─────────────────────
 	{
 		IDL::Reader rt(buf, 1);
@@ -323,6 +357,26 @@ int main()
 		decode(rt, e);
 		assert(!rt.ok()); // 未知 tag 不静默跳过(DR-CP4)
 		assert(e.body_kind == Domain::BattleEvent::BodyKind::NONE);
+	}
+	{
+		// ⑤ ★ BattleResult(顶层消息 + repeated ExpGain)战果结算批次 —— 同 ③ 的形状、
+		//   针对本批新消息:先填非零,半包截断,断言作废 + 标量归零 + FixedVec count 归零。
+		Domain::BattleResult br{};
+		br.battle_id = 0x9999'8888'7777'6666ull;
+		br.player_won = true;
+		Domain::ExpGain g{};
+		g.slot = 3;
+		g.exp_gained = 42;
+		g.exp_total = 42;
+		assert(br.exp_gains.push_back(g));
+		assert(br.exp_gains.size() == 1);
+
+		IDL::Reader rt(buf, 4); // battle_id 是 u64,读不满
+		decode(rt, br);
+		assert(!rt.ok());
+		assert(br.battle_id == 0);
+		assert(!br.player_won);       // 标量归零
+		assert(br.exp_gains.empty()); // ★ count 归零 —— 否则 range-for 越界(同 ③)
 	}
 
 	// ── 边界:写缓冲不足必须被挡住 ──────────────────────────────
