@@ -910,6 +910,27 @@ struct World::Impl
 	std::vector<EnemyEncounter> encounters{};
 	std::vector<EnemyTemplate> enemy_templates{};
 
+	// ── 世界刷怪点与世界态敌人(批次 W.2 / W.3)──────────────────────────────
+	//   spawn_points:注入的刷怪点(loadSpawnPoints,默认空 ⇒ 世界无常驻怪);
+	//   world_enemies:当前在地图上的敌人。★ 与战斗态敌人**共用 `enemies` 池但分开跟踪** ——
+	//     战斗态在 `b.enemy_of_slot`,世界态在这里 ⇒ `enemyCount()` 数全池、`worldEnemyCount()`
+	//     只数这里(两条静默各有探针,同欠债 25 的观察面纪律)。
+	std::vector<SpawnPoint> spawn_points{};
+	struct WorldEnemy
+	{
+		SA::Model::EntityHandle handle;
+		std::size_t spawn_point; // 来自 spawn_points 的哪个点(取游荡中心 / 半径 / 间隔)
+	};
+	std::vector<WorldEnemy> world_enemies{};
+
+	// kCharLoop 非玩家段的**条数制**摊还游标(批次 W.3。原 CHAR_Loop 的 static charcnt)。
+	//   ★ 每 tick 处理够 `tempo.enemy_move_num` 只即停、记位下 tick 续、遍历完绕回 0。
+	//   ⚠️★★ **条数制不是时间预算制** —— 8.0 的 `_CHAR_LOOP_TIME` 三证实测**关**(15 §5.2 C18),
+	//      unifdef_80 展开视图把它误当时间预算是选错分支(见 §9.0.45)。
+	//   ⚠️ 原版游标绕回 `playernum` 跳过玩家段;我们分池 ⇒ 游标只在 world_enemies 上绕,
+	//      天然不含玩家(玩家段每 tick 全扫)⇒ 语义等价、更简单。
+	std::size_t charloop_cursor = 0;
+
 	// ── 视野的运行时对象索引(里程碑②。原版 Map::olink,10 §3.1)──────────────
 	//   每格挂着**当前在该格的玩家会话**;视野广播扫 529 格遍历它(§5.2)。
 	//   ⚠️ size == map.width*height,构造时按 fixture 尺寸分配(见构造函数体)。
@@ -929,6 +950,26 @@ struct World::Impl
 	                   const SA::Model::Player &p);
 	void broadcastSpawn(SA::Net::ConnectionId who, const SA::Model::Player &p);
 	void broadcastDespawn(SA::Net::ConnectionId who, std::int32_t x, std::int32_t y);
+
+	// ── 世界敌人:生成 / 游荡 / 视野(批次 W.2 / W.3)──────────────────────────
+	//   ★ 都是 Impl 成员:要碰 enemies 池 / world_enemies / olink / 视野下行,自由函数装不下。
+	//
+	// kNpcSpawn:据 spawn_points 把世界态敌人补齐到各点的 count(不足则 spawnEnemy 生成 + 入池)。
+	void spawnWorldEnemies();
+	// kCharLoop 非玩家段:条数制摊还,本 tick 最多处理 max_this_tick 只(到期的游荡一步)。
+	void wanderWorldEnemies(std::size_t max_this_tick);
+	// 收视野内玩家会话(★ 不排除 self)—— 敌人广播用(敌人无会话,无 self 可排)。
+	std::vector<SA::Net::ConnectionId> collectVisiblePlayers(std::int32_t cx,
+	                                                         std::int32_t cy) const;
+	// 敌人视野广播(★ 单向:敌人无会话、不接收下行,只发给周围玩家;entity_type = ENTITY_ENEMY)。
+	void broadcastEnemySpawn(const SA::Model::Enemy &e, std::uint64_t eid);
+	void broadcastEnemyMove(const SA::Model::Enemy &e, std::uint64_t eid, std::int32_t ox,
+	                        std::int32_t oy);
+	void broadcastEnemyDespawn(std::int32_t x, std::int32_t y, std::uint64_t eid);
+	// 玩家移动 (ox,oy)→(p.x,p.y) 后,把视野**新进 / 离开**的世界敌人补 appear / disappear 给他。
+	//   ★ 这是"玩家看敌人"那一半(broadcastMove 只做了"玩家看玩家")。
+	void refreshEnemyView(SA::Net::ConnectionId viewer, const SA::Model::Player &p,
+	                      std::int32_t ox, std::int32_t oy);
 };
 
 World::World(const SA::Platform::ServerConfig &config,
@@ -1027,6 +1068,13 @@ bool visContains(const std::vector<SA::Net::ConnectionId> &v, SA::Net::Connectio
 	return std::find(v.begin(), v.end(), c) != v.end();
 }
 
+// (tx,ty) 是否落在以 (cx,cy) 为心的 529 格视野框内(与 collectVisible 的方框一致)。批次 W.3。
+bool inSee(std::int32_t cx, std::int32_t cy, std::int32_t tx, std::int32_t ty) noexcept
+{
+	return tx >= cx - kSeeRadius && tx <= cx + kSeeRadius && ty >= cy - kSeeRadius &&
+	       ty <= cy + kSeeRadius;
+}
+
 SA::Domain::CharAppear makeAppear(SA::Net::ConnectionId who, const SA::Model::Player &p)
 {
 	SA::Domain::CharAppear a{};
@@ -1035,6 +1083,29 @@ SA::Domain::CharAppear makeAppear(SA::Net::ConnectionId who, const SA::Model::Pl
 	a.x = p.x;
 	a.y = p.y;
 	a.dir = static_cast<std::uint32_t>(p.dir);
+	return a;
+}
+
+// 敌人 EntityHandle → uint64(视野 entity_id / 观察面)。★ (index<<32)|generation:
+//   与玩家的 ConnectionId 是**两个独立 id 空间**,数值会撞 ⇒ 靠 CharAppear.entity_type 区分
+//   (world_map.proto:客户端按 (entity_type, entity_id) 二元组跟踪对象)。
+constexpr std::uint64_t encodeHandle(SA::Model::EntityHandle h) noexcept
+{
+	return (static_cast<std::uint64_t>(h.index) << 32) |
+	       static_cast<std::uint64_t>(h.generation);
+}
+
+// 从世界态敌人造 CharAppear(entity_type = ENTITY_ENEMY,带真图号 base_image;玩家版 image 恒 0)。
+SA::Domain::CharAppear makeEnemyAppear(std::uint64_t eid, const SA::Model::Enemy &e)
+{
+	SA::Domain::CharAppear a{};
+	a.entity_id = eid;
+	a.floor = e.floor;
+	a.x = e.x;
+	a.y = e.y;
+	a.dir = static_cast<std::uint32_t>(e.dir);
+	a.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY);
+	a.image = e.base_image;
 	return a;
 }
 
@@ -1131,6 +1202,220 @@ void World::Impl::broadcastDespawn(SA::Net::ConnectionId who, std::int32_t x, st
 		sendTo(b, dis);
 }
 
+// ══ 世界敌人:视野 / 生成 / 游荡(批次 W.2 / W.3)══════════════════════════════
+
+// 收视野内玩家会话(★ 不排除 self)。敌人无会话,没有"自己"要排 —— 与 collectVisible 的唯一区别。
+std::vector<SA::Net::ConnectionId> World::Impl::collectVisiblePlayers(std::int32_t cx,
+                                                                      std::int32_t cy) const
+{
+	std::vector<SA::Net::ConnectionId> out;
+	for (std::int32_t j = cy - kSeeRadius; j <= cy + kSeeRadius; ++j)
+		for (std::int32_t i = cx - kSeeRadius; i <= cx + kSeeRadius; ++i)
+		{
+			if (!map.inBounds(i, j))
+				continue;
+			for (const SA::Net::ConnectionId c : olink[map.index(i, j)])
+				out.push_back(c);
+		}
+	return out;
+}
+
+// 敌人进入世界 ⇒ 给视野内每个玩家发 CharAppear(★ 单向)。
+void World::Impl::broadcastEnemySpawn(const SA::Model::Enemy &e, std::uint64_t eid)
+{
+	const SA::Domain::CharAppear a = makeEnemyAppear(eid, e);
+	for (const SA::Net::ConnectionId b : collectVisiblePlayers(e.x, e.y))
+		sendTo(b, a);
+}
+
+// 敌人移动一步 ⇒ 扫格 diff(同 broadcastMove 但单向:一直可见→CharMove / 新进→CharAppear / 离开→CharDisappear)。
+void World::Impl::broadcastEnemyMove(const SA::Model::Enemy &e, std::uint64_t eid,
+                                     std::int32_t ox, std::int32_t oy)
+{
+	const auto old_vis = collectVisiblePlayers(ox, oy);
+	const auto new_vis = collectVisiblePlayers(e.x, e.y);
+
+	SA::Domain::CharMove mv{};
+	mv.entity_id = eid;
+	mv.x = e.x;
+	mv.y = e.y;
+	mv.dir = static_cast<std::uint32_t>(e.dir);
+	mv.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY);
+	const SA::Domain::CharAppear ap = makeEnemyAppear(eid, e);
+
+	for (const SA::Net::ConnectionId b : new_vis)
+	{
+		if (visContains(old_vis, b))
+			sendTo(b, mv); // 一直可见 ⇒ 移动
+		else
+			sendTo(b, ap); // 新进入视野 ⇒ 出现
+	}
+	SA::Domain::CharDisappear dis{};
+	dis.entity_id = eid;
+	dis.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY);
+	for (const SA::Net::ConnectionId b : old_vis)
+		if (!visContains(new_vis, b))
+			sendTo(b, dis); // 离开视野 ⇒ 消失
+}
+
+// 敌人离开世界(被拉进战斗 / 死亡)⇒ 给视野内每个玩家发 CharDisappear。⚠️ 须在改位置**之前**调。
+void World::Impl::broadcastEnemyDespawn(std::int32_t x, std::int32_t y, std::uint64_t eid)
+{
+	SA::Domain::CharDisappear dis{};
+	dis.entity_id = eid;
+	dis.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY);
+	for (const SA::Net::ConnectionId b : collectVisiblePlayers(x, y))
+		sendTo(b, dis);
+}
+
+// 玩家从 (ox,oy) 走到 (p.x,p.y) 后,补发**世界敌人**的 appear / disappear(★ 玩家看敌人那一半)。
+//   对每只世界敌人:旧位置可见→新不可见 ⇒ CharDisappear;旧不可见→新可见 ⇒ CharAppear;
+//   两者都可见 ⇒ 不发(敌人自身移动由 broadcastEnemyMove 覆盖)。
+void World::Impl::refreshEnemyView(SA::Net::ConnectionId viewer, const SA::Model::Player &p,
+                                   std::int32_t ox, std::int32_t oy)
+{
+	for (const WorldEnemy &we : world_enemies)
+	{
+		const SA::Model::Enemy *e = enemies.resolve(we.handle);
+		if (e == nullptr || e->floor != p.floor)
+			continue;
+		const bool saw = inSee(ox, oy, e->x, e->y);
+		const bool sees = inSee(p.x, p.y, e->x, e->y);
+		if (sees == saw)
+			continue;
+		const std::uint64_t eid = encodeHandle(we.handle);
+		if (sees)
+			sendTo(viewer, makeEnemyAppear(eid, *e));
+		else
+		{
+			SA::Domain::CharDisappear dis{};
+			dis.entity_id = eid;
+			dis.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY);
+			sendTo(viewer, dis);
+		}
+	}
+}
+
+// kNpcSpawn:据刷怪点把世界态敌人补齐到各点 count。★ 不阻塞 D6 的注入式刷怪(见 Api.h SpawnPoint)。
+void World::Impl::spawnWorldEnemies()
+{
+	for (std::size_t pi = 0; pi < spawn_points.size(); ++pi)
+	{
+		const SpawnPoint &sp = spawn_points[pi];
+		const std::size_t target = sp.count < 0 ? 0 : static_cast<std::size_t>(sp.count);
+		std::size_t alive = 0;
+		for (const WorldEnemy &we : world_enemies)
+			if (we.spawn_point == pi)
+				++alive;
+		while (alive < target)
+		{
+			// 敌人来源:enemy_id → 敌人表行 → 模板行(单一真源,复用 M.7 find + M.4b spawnEnemy)。
+			const std::int32_t erow = findEnemyEncounter(encounters, sp.enemy_id);
+			if (erow < 0)
+			{
+				logger.log(SA::Platform::LogLevel::kWarn,
+				           SA::Platform::LogEvent::kWorldEnemySpawnFailed,
+				           {{"enemy_id", static_cast<std::uint64_t>(sp.enemy_id)},
+				            {"reason", std::string_view("no_encounter")}});
+				break; // 敌人表查不到(多半没 loadEncounterTables)⇒ 该点整个刷不出
+			}
+			const EnemyEncounter &enc = encounters[static_cast<std::size_t>(erow)];
+			const std::int32_t trow = findEnemyTemplate(enemy_templates, enc.temp_no);
+			if (trow < 0)
+			{
+				logger.log(SA::Platform::LogLevel::kWarn,
+				           SA::Platform::LogEvent::kWorldEnemySpawnFailed,
+				           {{"enemy_id", static_cast<std::uint64_t>(sp.enemy_id)},
+				            {"temp_no", static_cast<std::uint64_t>(enc.temp_no)},
+				            {"reason", std::string_view("no_template")}});
+				break;
+			}
+			const EnemyTemplate &tmpl = enemy_templates[static_cast<std::size_t>(trow)];
+			const SA::Model::EntityHandle eh = enemies.allocate();
+			if (!eh.valid())
+			{
+				logger.log(SA::Platform::LogLevel::kError,
+				           SA::Platform::LogEvent::kEntityPoolExhausted,
+				           {{"pool", std::string_view("enemy")},
+				            {"capacity", static_cast<std::uint64_t>(kMaxEnemies)}});
+				break;
+			}
+			SA::Model::Enemy *e = enemies.resolve(eh);
+			if (e == nullptr)
+			{
+				(void)enemies.release(eh);
+				break;
+			}
+			// ★ 生成用**世界 rng**(世界态敌人不在战斗内;同遇敌链)。⚠️ 消耗 world_rng ⇒
+			//   刷怪时机影响遇敌骰子 / 选怪序列(原版刷怪也在全局 rand;可回放前提是刷怪调用序重现)。
+			*e = spawnEnemy(tmpl, enc, sp.level, world_rng, rules_config);
+			e->floor = sp.floor;
+			e->x = sp.x;
+			e->y = sp.y;
+			e->dir = 0;
+			e->next_wander_at_ms = now_ms + sp.wander_interval_ms;
+			world_enemies.push_back({eh, pi});
+			broadcastEnemySpawn(*e, encodeHandle(eh));
+			logger.log(SA::Platform::LogLevel::kDebug,
+			           SA::Platform::LogEvent::kWorldEnemySpawned,
+			           {{"enemy_id", static_cast<std::uint64_t>(sp.enemy_id)},
+			            {"floor", static_cast<std::uint64_t>(sp.floor)},
+			            {"x", static_cast<std::uint64_t>(sp.x)},
+			            {"y", static_cast<std::uint64_t>(sp.y)}});
+			++alive;
+		}
+	}
+}
+
+// kCharLoop 非玩家段:**条数制**摊还(原 CHAR_Loop 的 #else 分支,`_CHAR_LOOP_TIME` 8.0 关)。
+//   从 charloop_cursor 起,本 tick 最多**游荡** max_this_tick 只(对应原版 movecnt >= EnemyMoveNum),
+//   最多**检查** world_enemies.size() 只(对应原版 for 的迭代上限,防没一个到期时空转),游标记位下 tick 续。
+void World::Impl::wanderWorldEnemies(std::size_t max_this_tick)
+{
+	const std::size_t n = world_enemies.size();
+	if (n == 0 || max_this_tick == 0)
+		return;
+	std::size_t moved = 0;   // 真跑了 AI 的只数(对应原版 movecnt:节拍到期即计,不论走没走成)
+	std::size_t scanned = 0; // 检查的只数(对应原版 for 迭代上限,防空转)
+	while (scanned < n && moved < max_this_tick)
+	{
+		if (charloop_cursor >= n)
+			charloop_cursor = 0; // 绕回(原版 charcnt >= charnum ⇒ playernum)
+		const WorldEnemy we = world_enemies[charloop_cursor];
+		++charloop_cursor;
+		++scanned;
+		SA::Model::Enemy *e = enemies.resolve(we.handle);
+		if (e == nullptr)
+			continue; // 悬空(世界态理论上不会;守零成本)
+		if (now_ms < e->next_wander_at_ms)
+			continue; // 未到游荡节拍(对应 CHAR_callLoop 返回 FALSE ⇒ movecnt 不增)
+		// 到期 ⇒ 游荡一步(随机方向 + 通行门 + 刷怪点半径门)。
+		const SpawnPoint &sp = spawn_points[we.spawn_point];
+		const std::uint8_t dir = static_cast<std::uint8_t>(world_rng.randMod(8));
+		const std::int32_t nx = e->x + kDirDelta[dir].dx;
+		const std::int32_t ny = e->y + kDirDelta[dir].dy;
+		e->dir = dir; // 面向选中方向(即使没走成 = 转身,同原版 ctodirmode 大写转身)
+		std::int32_t adx = nx - sp.x;
+		adx = adx < 0 ? -adx : adx;
+		std::int32_t ady = ny - sp.y;
+		ady = ady < 0 ? -ady : ady;
+		const bool blocked_or_far =
+		    !mapWalkable(map, map_attr, nx, ny) ||
+		    (sp.wander_radius >= 0 && (adx > sp.wander_radius || ady > sp.wander_radius));
+		if (!blocked_or_far)
+		{
+			const std::int32_t ox = e->x;
+			const std::int32_t oy = e->y;
+			e->x = nx;
+			e->y = ny;
+			broadcastEnemyMove(*e, encodeHandle(we.handle), ox, oy);
+		}
+		// ★ 无论走没走成,节拍到了就顺延(对应原版 loopfunc 执行后记 now)⇒ moved 计数(movecnt)。
+		e->next_wander_at_ms = now_ms + sp.wander_interval_ms;
+		++moved;
+	}
+}
+
 // ══ tick(01 §3.1)═══════════════════════════════════════════════
 void World::tick()
 {
@@ -1148,7 +1433,10 @@ void World::tick()
 	// 从传输层取已到达的字节,派发到会话。★ 不阻塞(01 §2)。
 	s.transport.poll();
 
-	// ── 3. NPC 生成 ──  ⬜ 阶段 2
+	// ── 3. NPC 生成(批次 W.2)──
+	//   据刷怪点把世界态敌人补齐到各点 count(默认无刷怪点 ⇒ 空操作,现有用例不受影响)。
+	//   ★ 最小切法(不阻塞 D6 脚本层);真玩法接脚本层后由脚本产出刷怪参数,见 Api.h SpawnPoint。
+	s.spawnWorldEnemies();
 
 	// ── 4. 战斗推进 ──  ★ 受节拍层控制,不等于 tick 频率(01 §3.2)
 	{
@@ -1389,8 +1677,9 @@ void World::tick()
 
 	// ── 5. 角色循环 —— 玩家段(批次 W.1。原 CHAR_Loop:4667 玩家 for + CHAR_walk_check:4583)──
 	//   ★ 全扫在线玩家:走路串非空 且距上次走够 walksendinterval ⇒ 走一步(CHAR_walkcall)。
-	//   ⚠️ 非玩家段(NPC/敌人 AI 摊还,CHAR_Loop:4712 游标 + EnemyMoveNum)留 W.3(依赖 kNpcSpawn);
-	//      视野广播 / 遇敌骰子 / 组队跟随各留其批。
+	//   ⚠️ 非玩家段(世界敌人 AI 摊还)见下方 5b —— **条数制**(EnemyMoveNum 上限 + 游标),
+	//      **不是** CHAR_Loop:4712 那个时间预算 while(那是 _CHAR_LOOP_TIME,8.0 三证关,见 §9.0.45);
+	//      组队跟随各留其批。
 	for (auto &kv : s.conns)
 	{
 		Impl::Conn &c = kv.second;
@@ -1428,6 +1717,8 @@ void World::tick()
 			}
 			s.olink[s.map.index(p->x, p->y)].push_back(kv.first);
 			s.broadcastMove(kv.first, ox, oy, *p);
+			// W.3:玩家移动后补发视野内**世界敌人**的 appear / disappear(玩家看敌人那一半)。
+			s.refreshEnemyView(kv.first, *p, ox, oy);
 
 			// ── 遇敌判定(批次 W.4。原 char_walk.c:585,展开视图基准)────────────
 			//   ★ 只在真移动(moved)后判:转身 / 撞墙不触发(原版遇敌在 walk_move 成功后)。
@@ -1469,6 +1760,11 @@ void World::tick()
 			}
 		}
 	}
+
+	// ── 5b. 角色循环 —— 非玩家段:世界敌人 AI(批次 W.3)──────────────────────
+	//   ★ 条数制摊还:每 tick 最多游荡 tempo.enemy_move_num 只世界敌人,游标续跑(wanderWorldEnemies)。
+	//   ⚠️★ **不是时间预算制** —— 8.0 的 _CHAR_LOOP_TIME 三证实测关(15 §5.2 C18),走 #else 条数制。
+	s.wanderWorldEnemies(s.config.tempo.enemy_move_num);
 
 	// ── 6. 定时业务 ──   ⬜ 阶段 2
 	// ── 7. 出站聚合 ──   ⬜ 阶段 2(CA/CD 视野聚合;1.5 无视野)
@@ -1718,7 +2014,36 @@ void World::loadEncounterTables(std::vector<EncountArea> areas,
 	s.enemy_templates = std::move(templates);
 }
 
+void World::loadSpawnPoints(std::vector<SpawnPoint> points)
+{
+	_impl->spawn_points = std::move(points);
+}
+
 std::size_t World::battleCount() const noexcept { return _impl->battles.size(); }
+
+std::size_t World::worldEnemyCount() const noexcept { return _impl->world_enemies.size(); }
+
+std::vector<WorldEnemyPos> World::worldEnemies() const
+{
+	Impl &s = *_impl;
+	std::vector<WorldEnemyPos> out;
+	out.reserve(s.world_enemies.size());
+	for (const auto &we : s.world_enemies)
+	{
+		const SA::Model::Enemy *e = s.enemies.resolve(we.handle);
+		if (e == nullptr)
+			continue; // 悬空(世界态理论上不会;守零成本)
+		WorldEnemyPos p{};
+		p.entity_id = encodeHandle(we.handle);
+		p.floor = e->floor;
+		p.x = e->x;
+		p.y = e->y;
+		p.dir = e->dir;
+		p.image = e->base_image;
+		out.push_back(p);
+	}
+	return out;
+}
 
 // 遇敌命中后的开战组装(批次 W.4)——移植 `EN_recv`(`callfromcli.c:1249`)清走路串 +
 //   `BATTLE_CreateVsEnemy(charaindex,0,-1)` 净核(`battle.c:2528`):

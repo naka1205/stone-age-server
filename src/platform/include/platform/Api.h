@@ -172,6 +172,12 @@ enum class LogEvent : std::uint16_t
 	//    (将来接 BattleSnapshot 后)可能演了换宠而服务端没真换。级别 error 同理由 ——
 	//    玩家侧「点了换宠却没换」是投诉级,不是可淹在 warn 里的东西。
 	kPetSwitchFailed = 210,
+	// ★ 世界态敌人刷出(2026-09-10,批次 W.2)。debug 级:哪个刷怪点、哪只 enemy_id、落在哪。
+	kWorldEnemySpawned = 211,
+	// ★ 世界刷怪失败(2026-09-10,批次 W.2)。warn 级,`reason` 区分:
+	//   `no_encounter`(enemy_id 在敌人表查不到 ⇒ 多半没 loadEncounterTables)·
+	//   `no_template`(敌人表行的 temp_no 在模板表查不到)。★ 池满另走 kEntityPoolExhausted。
+	kWorldEnemySpawnFailed = 212,
 };
 
 // 日志字段。定长语义、不做格式化字符串 —— printf 风格的日志无法被机器消费。
@@ -245,6 +251,14 @@ struct TempoConfig
 	std::uint32_t tick_hz = 60;
 	std::uint32_t battle_turn_interval_ms = 1200;
 	std::uint32_t char_loop_interval_ms = 1000;
+	// 每 tick 非玩家段处理的世界敌人上限(批次 W.3。原 `EnemyMoveNum`,char.c:4654 初值 20)。
+	//
+	// ⚠️★★ **这是条数制摊还,不是时间预算制** —— 8.0 的 `_CHAR_LOOP_TIME`(时间预算)三证
+	//    实测**关**(15 §5.2 C18:getter / 配置键不在 B80 + `csa8.0/setup.cf` 未赋值)⇒ `CHAR_Loop`
+	//    非玩家段走 `#else` 条数制:每 tick 处理够这么多只即停,游标记位下 tick 续。
+	//    ★ unifdef_80 展开视图把它误当时间预算(把编译期 `-D` 宏当"开")—— 别照那个做。
+	// ★ 做成配置(原版是 GM 命令可设的全局变量):值越大每 tick 走的敌人越多、CPU 峰值越高。
+	std::uint32_t enemy_move_num = 20;
 };
 
 // ★★ 1.4 demo 的入场装配(2026-09-06)——**脚手架,不是玩法**。

@@ -4081,6 +4081,75 @@ W.1 移动系统(§9.0.42)的推送窗口,与本地已 ahead 的 §9.0.41 执行
 
 ---
 
+### 9.0.45 ★★ 批次 W.2+W.3 —— 世界敌人:地图刷怪 + 条数制摊还游荡 + 视野扩到"玩家看敌人"(DR-DT18,2026-09-10)
+
+> 用户拍板**合一批做完**(如 W.1「移动 + 视野」):让敌人成为**地图上的常驻游荡怪**(明雷)——
+> spawn 到世界坐标、按节拍游荡、被周围玩家视野看到。区别于 W.4 的**遇敌即时 spawn 到战场**(暗雷)。
+
+交付面:
+- **W.2 刷怪**(`kNpcSpawn` tick 第 3 步实装):`loadSpawnPoints` 注入 `SpawnPoint`(floor/中心/enemy_id/count/
+  radius/interval/level,默认空)· `spawnWorldEnemies` 据点补齐到 count(`enemy_id → findEnemyEncounter →
+  findEnemyTemplate → spawnEnemy` 入 `EnemyPool` + 写世界位置)· 观察面 `worldEnemyCount` / `worldEnemies`。
+- **W.3 摊还 + 游荡**(`kCharLoop` 非玩家段 5b):`wanderWorldEnemies(tempo.enemy_move_num)` 条数制摊还
+  (`charloop_cursor` 游标续跑)· 游荡 AI(节拍 `Enemy.next_wander_at_ms` → `world_rng.randMod(8)` 方向 →
+  `mapWalkable` + 半径门 → 走一格)。
+- **视野扩展**:`world_map.proto` 的 `CharAppear/Move/Disappear` 加 `entity_type`、`CharAppear` 加 `image`;
+  敌人 spawn/move/despawn **单向**广播给周围玩家(`collectVisiblePlayers`),玩家移动后 `refreshEnemyView` 补发。
+- **`Enemy.h` 加世界态位置**(floor/x/y/dir + `next_wander_at_ms`)· `tempo.enemy_move_num`(默认 20,可配)。
+
+#### ① ⚠️★★ 一次二度反转:摊还是条数制不是时间预算制(本批最该被读的一节)
+
+`CHAR_Loop`(`char.c:4655`)非玩家段在原版是**三套宏互斥**:`_CHAR_LOOP_TIME`(时间预算 `while` + `getCharLoopTime()`
+微秒预算)/ `_FIX_CHAR_LOOP`(pet 段 `EnemyMoveNum` + other 段 50)/ 默认(`petnum/2` + `EnemyMoveNum`)。
+★★ **`_CHAR_LOOP_TIME` 在 8.0 三证实测关**(`15 §5.2 C18`:getter `getCharLoopTime` 不在 B80 符号 + 配置键
+`charlooptime` 不在 B80 配置表 + `csa8.0/setup.cf` 未赋值,三证一致;实现仓本文件 §9 的 `TempoConfig` 注释早已采信)
+⇒ 走 `#else` **条数制**:每 tick 处理够 `EnemyMoveNum` 只即停、`static charcnt` 游标记位下 tick 续。
+
+⚠️★★ **`unifdef_80` 展开视图 `char.c:4714` 把 `_CHAR_LOOP_TIME` 当"开"、展开成时间预算 `while`,是错的** ——
+根因是 `_CHAR_LOOP_TIME` 是**编译期 `-D` 宏**(stoneage85 全树无 `#define`),`macros_80.json` 把它列入 ⇒ unifdef 当定义。
+★ **动手时先照展开视图记成"时间预算制、EnemyMoveNum 死变量",直到撞见本文件 `TempoConfig` 注释与 `15 §5.2` 才二度反转**
+—— 这是取证纪律「展开视图会误导」的**最强样本:不是丢被宏关的分支,是把关的宏当开、选错分支**(记忆 evidence-workflow 已补)。
+⇒ 反转后实现**更简单**:条数制确定可测(去掉墙钟 / 预算的非确定性),`EnemyMoveNum` 移植为 `tempo.enemy_move_num`。
+⚠️ `_FIX_CHAR_LOOP` 开关未核(other 段 50 vs 默认 `EnemyMoveNum`),fixture 规模无可观察差异 ⇒ 登记。
+⚠️ 分池后游标只在 `world_enemies` 上绕(原版绕回 `playernum` 跳过玩家段;我们玩家在玩家段每 tick 全扫)⇒ 语义等价、更简单。
+
+#### ② 刷怪点是不阻塞 D6 的注入式替身,不是原版某表
+
+原版地图敌人由 **NPC/Lua 脚本**调 `ENEMY_createEnemy(enemy_id, level)` 刷(`mylua/npcbase.c:472`),`CHAR_callLoop:4598`
+的 AI 也靠角色身上的**函数指针 `CHAR_LOOPFUNC`** + `RunCharLoopEvent`(Lua)。而**脚本层 D6 未落地**、函数指针在 POD 架构不可照搬。
+⇒ `SpawnPoint` 是**不阻塞 D6 的最小切法**(同 W.4 `loadEncounterTables` 默认空的注入式取向):真玩法接 D6 后由脚本产出刷怪参数。
+★ 敌人来源仍走单一真源(`enemy_id` 查敌人表 → 模板表 → `spawnEnemy`,复用 M.4b/M.7);游荡 AI 改成数据驱动(随机游走)替代函数指针。
+
+#### ③ 视野从"玩家↔玩家"扩到"玩家看敌人"(两处 watched 变更)
+
+W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分玩家 id 空间与敌人 `EntityHandle` 空间(数值会撞,
+客户端按 `(type,id)` 二元组跟踪);`image` 带敌人真图号(玩家 0,残缺同 §9.0.42/DR-DT16 ⑤)。⇒ **单向**:敌人不接收下行。
+⚠️ 改 `world_map.proto`(重跑 `saidl_gen.py`,`idl_verify` 一致)+ `Enemy.h` 加位置 ⇒ **两处 watched 变更,须前推 `shared`**
+(与 W.1「零改动不前推」相反)。
+
+#### ④ 复验
+
+`ctest` **16/16**(`world_map` 15 → **26 例 / 213 断言**,+11:刷怪补齐 / 落位带图号 / 幂等 / 查不到不刷 / 默认无刷 /
+游荡位置变 + 半径 / radius=0 不动 / 条数制上限 / 视野 appear(entity_type+image) / move / disappear)· `ci_verify` 六项全过
+(`SA_WERROR` 清洁构建 0 告警,新加 `LogEvent` 两条补 `Log.cpp` switch)· `code_format` · `idl_verify` · `shared_purity`
+(`Enemy` 加位置不违纯度)· `dr_table`(§2 加 DT18 + §2.20)。★ **反向验证三处逐条精确转红**:条数制上限(`moved<max`→不限
+⇒ 3 只全动 `3==1`)· 视野 `entity_type`(ENEMY→PLAYER ⇒ `0==1`)· 半径门(→`false` ⇒ radius=0 也走 `33==32`),恢复后全绿。
+
+#### ⑤ ⚠️ 未做 / 登记残缺
+
+| 项 | 归属 |
+|---|---|
+| **明雷触发战斗**(玩家撞上世界敌人开战,把世界敌人拉进战斗)| 解 W.4「明雷退回」的那一层,留下批;当前世界敌人可被看到、会游荡,但撞上不开战 |
+| `CHAR_LOOPFUNC` 完整 AI(追击 / 攻击玩家)· `RunCharLoopEvent`(Lua)| 依赖脚本层 D6 + 函数指针数据驱动化 |
+| 时间预算截断路径(`_CHAR_LOOP_TIME` 那支)| 8.0 关 ⇒ 不实现;墙钟不可确定性复现 ⇒ 结构留 `charloop_cursor` 但不做确定性用例 |
+| `_FIX_CHAR_LOOP` 的 other 段上限 50 | 未核(fixture 规模无差异);敌人规模大且需精确摊还时回 B80 核 |
+| 多 floor(fixture 单张)· 真实刷怪点 | D 线内容导入 / D6 脚本层 |
+| 世界态敌人四维观察面 | `worldEnemies` 只暴露位置 / 图号;四维已由 M.4b `spawnEnemy` 的用例覆盖 |
+
+★ 只在 Apple clang 21 跑过,GCC/MSVC 交 CI。
+
+---
+
 ### 10.1 R-b:无解的结构性事实
 
 每条标【单源未交叉】/【8.5 源码推定】的规则,实现时**只能靠人工复核**,没有任何自动化验证手段。
@@ -4189,3 +4258,4 @@ W.1 移动系统(§9.0.42)的推送窗口,与本地已 ahead 的 §9.0.41 执行
 | 2026-09-09 | ★★ **批次 W.1 —— 移动系统:玩家移动 + 529 格视野广播**(新增 **§9.0.42**;`11` 新增 **DR-DT16** + §2.18,主表 127 → **128** 行;`01` §13 欠债 20② 推进 + 新增登记残缺)。tick 的 `kCharLoop`(第 5 步)+ `kOutboundFlush`(第 7 步)从占位变实装;用户裁定验证边界含视野 ⇒ 一批做两个里程碑。① **玩家移动**:`Player` 加位置 · `world/Map`(fixture + `mapWalkable` 移植 `MAP_walkAbleFromPoint`)· `WalkRequest`(0x0301)+ `onWalk`(移植 `lssproto_W_recv` 净核:防瞬移 + 碰撞预检 + 排走路串)· `kCharLoop` 玩家段按 `walkinterval=2500×100us=250ms` 逐字符消费(`CHAR_walk_check`/`walkcall`;`ctodirmode` 小写移动 / 大写转身,`CHAR_dxdy[8]` 八方向)。② **529 格视野**:`olink` 格子索引 + `CharAppear/Move/Disappear`(0x0302-04)+ 扫格 diff 双向广播(视野对称)。用例 `world_map` **10 例 / 63 断言**(含 `VisMirror`)。★ **视野常量取 23 是裁定**(§5.1/§10.2):展开视图 `CHAR_DEFAULTSEESIZ=20`(8.5 血统,unifdef 不改 #define),8.0 血统取 23、无二进制证据。⚠️★ **两处守卫抓到**:`module_boundaries` 抓 `Map.h` 违反「只暴露 Api.h」⇒ Map 并入 Api.h + 视野 helper 做成 `Impl` 成员;`next_walk_at_ms` 修 ManualClock t=0 时序 bug(写用例时发现)。**复验**:`ctest` **16/16** · `ci_verify` 六项 · `SA_WERROR` 0 告警 · ★ **反向验证 4 处**(方向反向 · 间隔门 · 不发 Move · 不发 Disappear)逐条精确转红后回绿(踩 make 秒级 mtime 坑,`sleep` 隔秒)。⚠️ **未做**:AI 摊还(W.3,依赖 `kNpcSpawn` + `EnemyMoveNum` 8.0=10)· 遇敌触发(W.4 ⇒ 闭环)· 客户端表现层 · 真实地图(D 线)· ★★ **`shared/model` + `idl/generated` 改 ⇒ 前推 `shared-v0.16.0`**(推送窗口待办)· GCC/MSVC 交 CI。 |
 | 2026-09-09 | ★ **推送窗口执行记录 —— `shared-v0.16.0`**(新增 **§9.0.43**)。W.1 移动系统(§9.0.42)的推送窗口,与本地 ahead 的 §9.0.41 记录 commit(`27da376`)一起上(用户两段批准:先定「先推」再确认外发)。server master `004bbe0..82c9922` + tag `shared-v0.16.0`(★ 显式推单 tag,不用 `--follow-tags`)· client pin v0.15→v0.16(`6a3d364`),双远端(gitee+github)`ls-remote` master 三处一致、**tag 集合差空**;client 换 pin **删 `build/ci` 重跑** `ci_verify` 联调态 **8 项全过**(76 例/2415 断言、`SA_CLIENT_WERROR` 0 告警)。**server CI 三平台 jobs 逐个 success**(Windows·MSVC / macOS·clang / Linux·GCC ⇒ ★ **W.1 的 GCC/MSVC 首验**)、**client CI 发布态 fetch v0.16.0 success**。⚠️★ W.1 两新文件(`Player.h`/`world_map.sa.h`)跨平台由 **server CI 三平台覆盖**(server 代码 include),client 无 TU include ⇒ client CI 读不出(§1.1「按文件覆盖」窄边界,非风险)。⇒ §9.0.42 ⑦ 前推待办闭合。本记录 commit 本地 ahead 1,留下批一起推。 |
 | 2026-09-09 | ★★ **批次 W.4 —— 遇敌触发闭环:走动 → 遇敌 → 战斗 → 拿经验**(新增 **§9.0.44**;`11` 新增 **DR-DT17** + §2.19,主表 128 → **129** 行)。把已造齐的零件串成阶段 2 关键闭环:`kCharLoop` 玩家段走一格 → 遇敌骰子 `world_rng.randMod(120*getEnemyAction()) < cep`(移植 `char_walk.c:585`,`cep` 夹 `[prob_min,prob_max]`)→ 命中清走路串 + `World::triggerEncounter`(移植 `EN_recv` + `BATTLE_CreateVsEnemy(_,0,-1)` 净核:`pickEnemyGroup`→`rollEnemyList` 选怪 → `startBattle`→`joinBattle`→ 逐只 `spawnEnemyToField` baselevel=-1)→ 战斗自动进 tick → 战果。★ 新增 `World::loadEncounterTables`(注入四表,**默认空 ⇒ 不遇敌** ⇒ 现有走路用例不受影响;真数据 D 线导入)· `world_rng`(遇敌世界 rng,种子从 `masterSeed` 派生**不调 `nextSeed`** ⇒ 不动战斗种子序列)· `config.enemy_action`(clamp[1,100])· 观察面 `battleCount`。★★ **绝大部分是复用**(遇敌链 M.5-M.7 + `startBattle`/`joinBattle`/`spawnEnemyToField` + tick 自动推进),新增只在遇敌骰子 + 组装 + 数据注入。⚠️★ **玩家进场四维是占位**(`makePlayerCombatant`;1.5 `Player` 无四维/level,同 §9.0.42 名字留空 ⇒ 登记残缺,阶段 2 接选角)。**复验**:`ctest` **16/16**(`world_map` 10 → **15 例**,+5)· `code_format` · 全套无破坏 · ★ **反向验证骰子符号 `<`→`>=`**:用例 1/2/5/6 精确转红、用例 3(未注入)绿。⚠️★★ **`enemyCount` 断言区分力由真实 bug 兑现**:初版 `spawn` 跳过握手 ⇒ `joinBattle` 拒 ⇒ `battleCount==1` 而 `enemyCount==0` ⇒ 用例当场分开抓到「开战」与「敌人入场」。⚠️ **未做**:传送点抑制 / 明雷退回(依赖 `kNpcSpawn`/W.3)· 自由服魔改(`getEqNoenemy` 等,非净核)· `cep++` 战斗态分支(走路走不到,照抄不硬接)。★ 本批**全在 `src/world/`** ⇒ watched 路径零改动 ⇒ **锁定 ref 不前推**;只 Apple clang 21 跑过,GCC/MSVC 交 CI。 |
+| 2026-09-10 | ★★ **批次 W.2+W.3 —— 世界敌人:地图刷怪 + 条数制摊还游荡 + 视野扩到「玩家看敌人」**(新增 **§9.0.45**;`11` 新增 **DR-DT18** + §2.20,主表 124 → **125** 行;`01` §13 新增登记残缺)。用户 2026-09-10 拍板合一批(如 W.1 移动+视野)。`kNpcSpawn` 据 `SpawnPoint`(`loadSpawnPoints` 注入,默认空)补齐世界敌人(`enemy_id → spawnEnemy` 入 `EnemyPool` + 写位置)· `kCharLoop` 非玩家段 `wanderWorldEnemies` **条数制摊还**(`tempo.enemy_move_num` 默认 20 + `charloop_cursor` 游标)· 游荡 AI(节拍 → `world_rng` 随机方向 + `mapWalkable` + 半径门)· 视野 `CharAppear/Move/Disappear` 加 `entity_type`、`CharAppear` 加 `image`(敌人**单向**广播给周围玩家,玩家移动后 `refreshEnemyView` 补发)· `Enemy` 加世界态位置 + `next_wander_at_ms`。★★ **本批最该记的是一次二度反转**:先照 `unifdef_80` 展开视图 `char.c:4714` 记成**时间预算制**(`_CHAR_LOOP_TIME` while),由 `15 §5.2 C18` 三证(getter / 配置键不在 B80 + `setup.cf` 未赋值)纠正为 **8.0 关 ⇒ #else 条数制** —— 根因 `_CHAR_LOOP_TIME` 是编译期 `-D` 宏(stoneage85 无 `#define`)⇒ `macros_80.json` 误当"开"⇒ unifdef **选错分支**(不是丢分支)。★ 刷怪点 / 游荡 AI 是**不阻塞 D6 脚本层的注入式替身**(原版 NPC/Lua 刷 + 函数指针 AI 均未落地)。**复验**:`ctest` **16/16**(`world_map` 15 → **26 例 / 213 断言**)· `ci_verify` 六项全过(`SA_WERROR` 0 告警;新 `LogEvent` 补 `Log.cpp` switch)· 反向验证三处逐条精确转红(条数制上限 / 视野 `entity_type` / 半径门)。⚠️★★ **两处 watched 变更(`world_map.proto` 加 `entity_type`/`image` + `Enemy.h` 加位置)⇒ 锁定 ref 须前推 `shared`**(与 W.1「零改动不前推」相反,推送窗口待办);只 Apple clang 21 跑过,GCC/MSVC 交 CI。 |

@@ -289,7 +289,7 @@ ConfigResult parseConfig(std::string_view json_text)
 		{
 			rejectUnknownKeys(*tp, "tempo",
 			                  {"tick_hz", "battle_turn_interval_ms",
-			                   "char_loop_interval_ms"},
+			                   "char_loop_interval_ms", "enemy_move_num"},
 			                  r);
 
 			// tick_hz 上限 1000:再高单 tick 预算就不足 1 毫秒,
@@ -314,6 +314,14 @@ ConfigResult parseConfig(std::string_view json_text)
 			if (readUInt(*tp, "tempo", "char_loop_interval_ms", 100, 60000, cl, r))
 			{
 				cfg.tempo.char_loop_interval_ms = static_cast<std::uint32_t>(cl);
+			}
+
+			// 每 tick 非玩家段处理的世界敌人上限(批次 W.3。原 EnemyMoveNum,char.c:4654 = 20)。
+			//   上限 10000 = 敌人池容量(kMaxEnemies);下限 1(0 会让世界敌人永不游荡)。
+			std::uint64_t em = cfg.tempo.enemy_move_num;
+			if (readUInt(*tp, "tempo", "enemy_move_num", 1, 10000, em, r))
+			{
+				cfg.tempo.enemy_move_num = static_cast<std::uint32_t>(em);
 			}
 		}
 	}

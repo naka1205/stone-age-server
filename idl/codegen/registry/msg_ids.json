@@ -156,6 +156,10 @@
       "ENTITY_SOURCE_INVALID": 0,
       "ENTITY_SOURCE_SYSTEM": 1
     },
+    "sa.domain.EntityType": {
+      "ENTITY_ENEMY": 1,
+      "ENTITY_PLAYER": 0
+    },
     "sa.domain.MenuFlag": {
       "MENU_FLAG_BOOMERANG": 4,
       "MENU_FLAG_ENEMY_SURPRISAL": 16,

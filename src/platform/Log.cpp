@@ -95,6 +95,10 @@ const char *eventName(LogEvent e) noexcept
 		return "entity_pool_exhausted";
 	case LogEvent::kPetSwitchFailed:
 		return "pet_switch_failed";
+	case LogEvent::kWorldEnemySpawned:
+		return "world_enemy_spawned";
+	case LogEvent::kWorldEnemySpawnFailed:
+		return "world_enemy_spawn_failed";
 	}
 	return "unknown";
 }

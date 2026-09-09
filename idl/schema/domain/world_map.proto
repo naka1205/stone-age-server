@@ -30,34 +30,50 @@ message WalkRequest {
   string direction = 3 [(sa.max_len) = 32];
 }
 
-// ── 视野下行(里程碑②)。★ 对应原版扫 529 格逐格发的 C / ACTWALK / CD ──────────
-//   entity_id = 该角色的会话标识(客户端据此新建 / 更新 / 移除角色)。
-//   ⚠️ 视野对称(同视野常量 23):A 见 B ⟺ B 见 A(CHAR_sendCToArroundCharacter:4100)。
+// ── 视野下行(里程碑② / 批次 W.3)。★ 对应原版扫 529 格逐格发的 C / ACTWALK / CD ──────────
+//   entity_id   = 该角色的标识(客户端据此新建 / 更新 / 移除角色)。
+//   entity_type = 对象族(批次 W.3)。⚠️★ **必须带它** —— 原版 olink 挂的是统一的 Object,
+//                 一个对象只有一个身份;而我们分池(玩家会话 id / 敌人 EntityHandle)是**两个
+//                 独立的 uint64 空间,数值会撞** ⇒ 客户端收 `CharMove{entity_id=5}` 无法判断动的是
+//                 玩家-conn-5 还是敌人-handle-5。⇒ 客户端按 **(entity_type, entity_id)** 二元组跟踪。
+//   ⚠️ 视野**方向不再对称**(批次 W.3 起):玩家 ⟺ 玩家仍对称(CHAR_sendCToArroundCharacter:4100),
+//      但**敌人无会话**、不接收下行 ⇒ 敌人 appear/move/disappear 是**单向发给周围玩家**。
+
+// 对象族(批次 W.3)。★ 值与将来 kNpc / kPet 的扩展留出空间,现只用到前两个。
+enum EntityType {
+  ENTITY_PLAYER = 0; // 玩家(entity_id = 会话 ConnectionId)
+  ENTITY_ENEMY  = 1; // 世界态敌人(entity_id = 敌人 EntityHandle 编码)
+}
 
 // 角色进入视野(原版 lssproto_C_send,char_walk.c:1019 / char.c:4151)。
-//   ⚠️★ 只带位置:原版 C 串还含图号 / 名字 / 各种 effect,但 1.5 的 Player 无选角 ⇒
-//      无图号、名字恒空(同 BattleSelfInfo.menu_flags 恒 0 那族登记残缺)⇒ 客户端画占位角色。
-//      有选角(阶段 2)后再扩字段,不在此建恒空的名字 / 图号。
+//   ⚠️★ 玩家侧只带位置:1.5 的 Player 无选角 ⇒ 无图号、名字恒空(同 BattleSelfInfo.menu_flags 恒 0
+//      那族登记残缺)⇒ 客户端画占位角色。有选角(阶段 2)后再扩名字字段。
+//   ★ image(批次 W.3):**敌人有真图号**(EnemyTemplate.image,源码 :1023-1024),客户端据此画对怪;
+//      **玩家填 0**(无选角来源,登记残缺,同上)。⇒ 这是"敌人比玩家多一块可画信息"的落点。
 message CharAppear {
   option (sa.msg_id) = 0x0302;
-  uint64 entity_id = 1;
-  sint32 floor     = 2;
-  sint32 x         = 3;
-  sint32 y         = 4;
-  uint32 dir       = 5;
+  uint64 entity_id   = 1;
+  sint32 floor       = 2;
+  sint32 x           = 3;
+  sint32 y           = 4;
+  uint32 dir         = 5;
+  uint32 entity_type = 6; // EntityType(批次 W.3)
+  sint32 image       = 7; // 图号:敌人取 E_T_IMGNUMBER;玩家 0(残缺)
 }
 
 // 视野内角色移动一步(原版 CHAR_ACTWALK 广播,char_walk.c:469)。
 message CharMove {
   option (sa.msg_id) = 0x0303;
-  uint64 entity_id = 1;
-  sint32 x         = 2;
-  sint32 y         = 3;
-  uint32 dir       = 4;
+  uint64 entity_id   = 1;
+  sint32 x           = 2;
+  sint32 y           = 3;
+  uint32 dir         = 4;
+  uint32 entity_type = 5; // EntityType(批次 W.3)
 }
 
 // 角色离开视野(原版 CD,CHAR_sendCDArroundChar:4241)。
 message CharDisappear {
   option (sa.msg_id) = 0x0304;
-  uint64 entity_id = 1;
+  uint64 entity_id   = 1;
+  uint32 entity_type = 2; // EntityType(批次 W.3)
 }

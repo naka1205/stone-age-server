@@ -226,6 +226,10 @@ struct VisMirror
 	std::vector<std::uint64_t> appears;
 	std::vector<std::uint64_t> moves;
 	std::vector<std::uint64_t> disappears;
+	// 完整消息(批次 W.3:验 entity_type / image,现有 W.1 用例仍用上面的 id 列表)。
+	std::vector<SA::Domain::CharAppear> appear_msgs;
+	std::vector<SA::Domain::CharMove> move_msgs;
+	std::vector<SA::Domain::CharDisappear> disappear_msgs;
 
 	void feed(const std::vector<std::uint8_t> &sent)
 	{
@@ -251,6 +255,7 @@ struct VisMirror
 				SA::Domain::CharAppear m;
 				decode(rd, m);
 				appears.push_back(m.entity_id);
+				appear_msgs.push_back(m);
 				break;
 			}
 			case SA::IDL::MsgId::CharMove:
@@ -258,6 +263,7 @@ struct VisMirror
 				SA::Domain::CharMove m;
 				decode(rd, m);
 				moves.push_back(m.entity_id);
+				move_msgs.push_back(m);
 				break;
 			}
 			case SA::IDL::MsgId::CharDisappear:
@@ -265,6 +271,7 @@ struct VisMirror
 				SA::Domain::CharDisappear m;
 				decode(rd, m);
 				disappears.push_back(m.entity_id);
+				disappear_msgs.push_back(m);
 				break;
 			}
 			default:
@@ -527,4 +534,256 @@ TEST_CASE("W.4★★:端到端 —— 走动 → 遇敌 → 战斗 → 打赢拿
 	REQUIRE(f.world.stats(battle) != nullptr);
 	CHECK(f.world.stats(battle)->finished);
 	CHECK(f.world.playerExp(id) > 0); // ★★ 打赢涨经验 —— 闭环兑现
+}
+
+// ══ 里程碑④/⑤:世界敌人(批次 W.2 刷怪 + W.3 游荡 + 视野扩展)═══════════════════
+//
+// ★ 与 W.4 遇敌(暗雷,即时 spawn 到战场)不同:这是**地图上的常驻游荡怪**(明雷)——
+//   spawn 到世界坐标、按节拍游荡、被周围玩家视野看到。
+
+namespace
+{
+
+// 注入一个刷怪点(floor 0,中心 (cx,cy),维持 count 只乌力)+ 敌人表 / 模板表(供 enemy_id 查)。
+//   ⚠️ **不注入 EncountArea/Group** ⇒ 走路不遇敌(与 loadEncounterFixture 区分:那个会遇敌)。
+//   ⚠️ image=100250 ⇒ 视野用例断言 CharAppear.image 取到模板图号。
+void loadWorldEnemyFixture(World &world, std::int32_t count, std::int32_t radius,
+                           std::int64_t interval_ms, std::int32_t cx = 32,
+                           std::int32_t cy = 32)
+{
+	EnemyEncounter enc{};
+	enc.enemy_id = 9;
+	enc.temp_no = 1;
+	enc.lv_min = 1;
+	enc.lv_max = 1;
+	enc.capturable = true;
+	enc.create_max_num = 1;
+
+	EnemyTemplate tmpl{};
+	tmpl.temp_no = 1;
+	tmpl.stats = SA::Rules::SpawnTemplate{4.50, 10, 20, 12, 15, 25};
+	tmpl.image = 100250;
+	tmpl.earth = 80;
+	REQUIRE(tmpl.name.assign("乌力"));
+
+	world.loadEncounterTables({}, {}, {enc}, {tmpl}); // 无 area/group ⇒ 走路不遇敌
+
+	SpawnPoint sp{};
+	sp.floor = 0;
+	sp.x = cx;
+	sp.y = cy;
+	sp.enemy_id = 9;
+	sp.count = count;
+	sp.wander_radius = radius;
+	sp.wander_interval_ms = interval_ms;
+	sp.level = 1;
+	world.loadSpawnPoints({sp});
+}
+
+// 世界敌人里位置 != (x,y) 的只数(用于"谁动了")。
+int movedAwayCount(const std::vector<WorldEnemyPos> &es, std::int32_t x, std::int32_t y)
+{
+	int n = 0;
+	for (const auto &e : es)
+		if (e.x != x || e.y != y)
+			++n;
+	return n;
+}
+
+} // namespace
+
+TEST_CASE("W.2:kNpcSpawn 据刷怪点把敌人刷到世界(补齐到 count)")
+{
+	MoveFixture f;
+	loadWorldEnemyFixture(f.world, /*count=*/3, /*radius=*/10, /*interval=*/1000);
+	REQUIRE(f.world.worldEnemyCount() == 0);
+
+	f.world.tick(); // 第 3 步 kNpcSpawn ⇒ 刷 3 只
+
+	CHECK(f.world.worldEnemyCount() == 3);
+	CHECK(f.world.enemyCount() >= 3); // 世界态敌人也进 EnemyPool
+}
+
+TEST_CASE("W.2:刷怪点敌人落在中心,带模板图号")
+{
+	MoveFixture f;
+	loadWorldEnemyFixture(f.world, 1, 10, 1000, /*cx=*/32, /*cy=*/32);
+	f.world.tick();
+
+	const auto es = f.world.worldEnemies();
+	REQUIRE(es.size() == 1);
+	CHECK(es[0].floor == 0);
+	CHECK(es[0].x == 32);
+	CHECK(es[0].y == 32);
+	CHECK(es[0].image == 100250); // E_T_IMGNUMBER
+}
+
+TEST_CASE("W.2:补齐幂等 —— 已达 count 不再刷")
+{
+	MoveFixture f;
+	loadWorldEnemyFixture(f.world, 2, 10, 1000);
+	f.world.tick();
+	REQUIRE(f.world.worldEnemyCount() == 2);
+	for (int i = 0; i < 5; ++i)
+	{
+		f.clock.advance(1000);
+		f.world.tick();
+	}
+	CHECK(f.world.worldEnemyCount() == 2); // 不超刷
+}
+
+TEST_CASE("W.2:enemy_id 查不到(未 loadEncounterTables)⇒ 不刷")
+{
+	MoveFixture f;
+	SpawnPoint sp{};
+	sp.floor = 0;
+	sp.x = 32;
+	sp.y = 32;
+	sp.enemy_id = 9;
+	sp.count = 3;
+	f.world.loadSpawnPoints({sp}); // 只给刷怪点,不给敌人表 ⇒ findEnemyEncounter 返 -1
+	f.world.tick();
+	CHECK(f.world.worldEnemyCount() == 0);
+}
+
+TEST_CASE("W.2:默认无刷怪点 ⇒ 世界无敌人(现有 tick 不受影响)")
+{
+	MoveFixture f;
+	f.world.tick();
+	CHECK(f.world.worldEnemyCount() == 0);
+}
+
+TEST_CASE("W.3:敌人到游荡节拍走一步(位置变),不出半径")
+{
+	MoveFixture f;
+	loadWorldEnemyFixture(f.world, 1, /*radius=*/10, /*interval=*/1000);
+	f.world.tick(); // spawn:next_wander = 0 + 1000
+	const auto e0 = f.world.worldEnemies();
+	REQUIRE(e0.size() == 1);
+	CHECK(e0[0].x == 32); // 未到节拍,还在中心
+
+	f.clock.advance(1000);
+	f.world.tick(); // now=1000 >= next_wander ⇒ 游荡一步
+	const auto e1 = f.world.worldEnemies();
+	REQUIRE(e1.size() == 1);
+	// 全通行地图 + radius 10 ⇒ 必能走 ⇒ 位置变(方向由 world_rng 定,不断言具体坐标)。
+	CHECK((e1[0].x != 32 || e1[0].y != 32));
+
+	for (int i = 0; i < 20; ++i)
+	{
+		f.clock.advance(1000);
+		f.world.tick();
+	}
+	const auto e2 = f.world.worldEnemies();
+	const int dx = e2[0].x - 32;
+	const int dy = e2[0].y - 32;
+	CHECK(dx >= -10);
+	CHECK(dx <= 10);
+	CHECK(dy >= -10);
+	CHECK(dy <= 10);
+}
+
+TEST_CASE("W.3:radius=0 ⇒ 敌人原地不动(半径门)")
+{
+	MoveFixture f;
+	loadWorldEnemyFixture(f.world, 1, /*radius=*/0, /*interval=*/1000);
+	f.world.tick();
+	for (int i = 0; i < 10; ++i)
+	{
+		f.clock.advance(1000);
+		f.world.tick();
+	}
+	const auto es = f.world.worldEnemies();
+	REQUIRE(es.size() == 1);
+	CHECK(es[0].x == 32); // 任何方向都超半径 0 ⇒ 不走
+	CHECK(es[0].y == 32);
+}
+
+TEST_CASE("W.3:条数制摊还 —— enemy_move_num=1 每 tick 最多游荡 1 只")
+{
+	// ★ 直接构造 World(tempo.enemy_move_num=1),不走 MoveFixture 的默认 20。
+	SA::Platform::ServerConfig config = makeMoveConfig();
+	config.tempo.enemy_move_num = 1;
+	SA::Platform::ManualClock clock{0};
+	SA::Platform::Logger logger{SA::Platform::LogLevel::kError};
+	SA::Platform::RandomSource random{0xABCDEF};
+	SA::Net::LoopbackTransport transport{};
+	World world{config, clock, logger, random, transport};
+
+	loadWorldEnemyFixture(world, /*count=*/3, /*radius=*/20, /*interval=*/1000);
+	world.tick(); // spawn 3 只(都在 (32,32),next_wander=1000)
+	REQUIRE(world.worldEnemyCount() == 3);
+
+	clock.advance(1000);
+	world.tick(); // 3 只都到期,但 enemy_move_num=1 ⇒ 本 tick 只游荡 1 只
+	CHECK(movedAwayCount(world.worldEnemies(), 32, 32) == 1);
+}
+
+TEST_CASE("W.3视野:玩家看到世界敌人 CharAppear(entity_type=ENEMY + 图号)")
+{
+	MoveFixture f;
+	const auto viewer = f.spawn();                                       // 玩家在中心 (32,32)
+	loadWorldEnemyFixture(f.world, 1, 10, 100000, /*cx=*/33, /*cy=*/32); // 敌人邻格,视野内
+	f.world.tick();                                                      // spawn ⇒ broadcastEnemySpawn 给视野内玩家
+
+	const auto es = f.world.worldEnemies();
+	REQUIRE(es.size() == 1);
+	const std::uint64_t eid = es[0].entity_id;
+
+	VisMirror mv;
+	mv.feed(f.transport.sent(viewer));
+	bool found = false;
+	for (const auto &a : mv.appear_msgs)
+		if (a.entity_id == eid)
+		{
+			CHECK(a.entity_type ==
+			      static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY));
+			CHECK(a.image == 100250);
+			found = true;
+		}
+	CHECK(found);
+}
+
+TEST_CASE("W.3视野:敌人游荡 ⇒ 玩家收到 CharMove(ENEMY)")
+{
+	MoveFixture f;
+	const auto viewer = f.spawn();
+	loadWorldEnemyFixture(f.world, 1, 10, 1000, 33, 32);
+	f.world.tick(); // spawn + appear
+	const std::uint64_t eid = f.world.worldEnemies()[0].entity_id;
+
+	f.clock.advance(1000);
+	f.world.tick(); // 敌人游荡 ⇒ broadcastEnemyMove
+
+	VisMirror mv;
+	mv.feed(f.transport.sent(viewer));
+	bool found = false;
+	for (const auto &m : mv.move_msgs)
+		if (m.entity_id == eid)
+		{
+			CHECK(m.entity_type ==
+			      static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY));
+			found = true;
+		}
+	CHECK(found);
+}
+
+TEST_CASE("W.3视野:玩家走出敌人视野 ⇒ 收到敌人 CharDisappear")
+{
+	MoveFixture f;
+	const auto viewer = f.spawn();
+	loadWorldEnemyFixture(f.world, 1, 0, 100000, 32, 32); // radius 0 ⇒ 敌人不动,隔离变量
+	f.world.tick();
+	const std::uint64_t eid = f.world.worldEnemies()[0].entity_id;
+
+	// 玩家一路往东走出视野(半径 11)。
+	f.sendWalk(viewer, std::string(15, 'c').c_str());
+	for (int i = 0; i < 20; ++i)
+	{
+		f.world.tick();
+		f.clock.advance(250);
+	}
+	VisMirror mv;
+	mv.feed(f.transport.sent(viewer));
+	CHECK(countId(mv.disappears, eid) >= 1);
 }

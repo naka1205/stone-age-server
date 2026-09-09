@@ -176,6 +176,29 @@ struct Enemy
 	//    (`EXPGET_MAXLEVEL=5` / `DIV=15`,见 `World.cpp` finished 段)。
 	std::int32_t exp = 0;
 	std::int32_t duelpoint = 0;
+
+	// ── 世界态:位置与游荡节拍(批次 W.2 / W.3)──────────────────────────────
+	//
+	// ★ 原版敌人是 `Char` 结构,与玩家共用 `CHAR_FLOOR/X/Y/DIR`(在地图上游荡)。
+	//   M.4b 的 Enemy 只取了 `ENEMY_createEnemy` 的**战斗态**字段(四维 / 属性 / hp),
+	//   因为那时敌人只"遇敌即生成到战斗槽"(W.4)、不在地图上存在 ⇒ 无需位置。
+	//   ⇒ W.2 让敌人成为**世界地图上的常驻对象**,下面几个字段回答"它在哪 / 何时走"。
+	//
+	// ⚠️★ **与 `Player` 的位置处理有一处不同,值得记**:`Player` 把走路的**运行时态**
+	//    (方向串 + 上次走一步的时刻)排除在实体外、放 `World::Impl::Conn`(Player.h :76),
+	//    理由是玩家有存档而那些态不该存档。**敌人无存档**(见文末 ⑤)、且**无 Conn**
+	//    (不是会话)⇒ 整个 Enemy 实体本就是"运行时生成、随战斗 / 世界周期消亡"的对象
+	//    ⇒ 位置与游荡调度态一并放实体,既无落盘副作用,也省掉一套 handle→态 的平行映射。
+	std::int32_t floor = 0;
+	std::int32_t x = 0;
+	std::int32_t y = 0;
+	std::uint8_t dir = 0; // 0-7 八方向(同 Player.dir / CHAR_ctodirmode 值域)
+
+	// 下次可游荡的时刻(ms,单调时钟)。★ 游荡节拍对应原版 `CHAR_LOOPINTERVAL` 经
+	//   `CHAR_callLoop`(char.c:4598)的间隔门:到期才调 AI、走一步,随后顺延。
+	// ⚠️ 用 `std::int64_t` 而非 `Platform::Millis`:shared/ 不依赖 platform(卷首 :29)。
+	//   0 = 尚未安排(spawn 到世界时由 World 据当前时钟 + 间隔初始化)。
+	std::int64_t next_wander_at_ms = 0;
 };
 
 // ── 文末:源码写了、本批**有意不建**的字段(逐条记明,均非遗漏)─────────────

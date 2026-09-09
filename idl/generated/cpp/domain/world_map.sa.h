@@ -12,6 +12,11 @@
 namespace SA {
 namespace Domain {
 
+enum class EntityType : std::uint32_t {
+  ENTITY_PLAYER = 0,
+  ENTITY_ENEMY = 1,
+};
+
 struct WalkRequest {
   std::int32_t x;
   std::int32_t y;
@@ -36,6 +41,8 @@ struct CharAppear {
   std::int32_t x;
   std::int32_t y;
   std::uint32_t dir;
+  std::uint32_t entity_type;
+  std::int32_t image;
 };
 
 inline void encode(SA::IDL::Writer& w, const CharAppear& m) {
@@ -44,6 +51,8 @@ inline void encode(SA::IDL::Writer& w, const CharAppear& m) {
   w.i32(m.x);
   w.i32(m.y);
   w.u32(m.dir);
+  w.u32(m.entity_type);
+  w.i32(m.image);
 }
 
 inline void decode(SA::IDL::Reader& r, CharAppear& m) {
@@ -52,6 +61,8 @@ inline void decode(SA::IDL::Reader& r, CharAppear& m) {
   m.x = r.i32();
   m.y = r.i32();
   m.dir = r.u32();
+  m.entity_type = r.u32();
+  m.image = r.i32();
 }
 
 struct CharMove {
@@ -59,6 +70,7 @@ struct CharMove {
   std::int32_t x;
   std::int32_t y;
   std::uint32_t dir;
+  std::uint32_t entity_type;
 };
 
 inline void encode(SA::IDL::Writer& w, const CharMove& m) {
@@ -66,6 +78,7 @@ inline void encode(SA::IDL::Writer& w, const CharMove& m) {
   w.i32(m.x);
   w.i32(m.y);
   w.u32(m.dir);
+  w.u32(m.entity_type);
 }
 
 inline void decode(SA::IDL::Reader& r, CharMove& m) {
@@ -73,18 +86,22 @@ inline void decode(SA::IDL::Reader& r, CharMove& m) {
   m.x = r.i32();
   m.y = r.i32();
   m.dir = r.u32();
+  m.entity_type = r.u32();
 }
 
 struct CharDisappear {
   std::uint64_t entity_id;
+  std::uint32_t entity_type;
 };
 
 inline void encode(SA::IDL::Writer& w, const CharDisappear& m) {
   w.u64(m.entity_id);
+  w.u32(m.entity_type);
 }
 
 inline void decode(SA::IDL::Reader& r, CharDisappear& m) {
   m.entity_id = r.u64();
+  m.entity_type = r.u32();
 }
 
 }  // namespace Domain

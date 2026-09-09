@@ -537,7 +537,51 @@ struct EnemyGroup
 	//    ★ 生成路径一次都不读它,建了就会有人拿它当显示名。
 };
 
+// ── 世界刷怪点(批次 W.2)──────────────────────────────────────────────────
+//
+// ★ 让敌人成为**地图上的常驻游荡怪**(明雷),区别于 W.4 的**遇敌即时生成到战场**(暗雷):
+//   前者在世界地图上存在、会游荡、被玩家视野看到,撞上才开战;后者走路骰子命中即建战斗。
+//
+// ⚠️★★ **这不是原版某张表的 1:1 移植** —— 原版地图上的敌人 / NPC 由 **NPC 脚本 / Lua**
+//    调 `ENEMY_createEnemy(enemy_id, level)` 逐个刷(`mylua/npcbase.c:472` / `npc_lua`),
+//    而**脚本层(D6)尚未落地** ⇒ 照搬要先做脚本层(依赖未就绪,同 W.4 的传送点抑制)。
+//    ⇒ 本结构是**不阻塞 D6 的最小切法**:把"在哪刷 / 刷哪只 / 刷几只 / 多久走一步"做成
+//    注入式配置(同 `loadEncounterTables` 默认空的取向)。真玩法接脚本层后,由脚本产出
+//    这些参数,本接口就是那时的灌入点。⇒ 登记为**依赖未就绪的替身**,不是留空。
+//
+// ★ 敌人来源仍走单一真源:`enemy_id`(敌人表主键)→ `findEnemyEncounter` 得 `EnemyEncounter`
+//   → `findEnemyTemplate(enc.temp_no)` 得 `EnemyTemplate` → `spawnEnemy` 生成
+//   (复用 M.4b / M.7,不另造敌人构造路径)⇒ 刷怪点表与遇敌四表都经注入,同属内容数据。
+struct SpawnPoint
+{
+	std::int32_t floor = 0;
+	std::int32_t x = 0; // 刷怪中心
+	std::int32_t y = 0;
+	std::int32_t enemy_id = 0;              // 敌人表 ENEMY_ID(查 encounters/templates 生成)
+	std::int32_t count = 1;                 // 本点维持的活敌人只数(kNpcSpawn 补齐到它)
+	std::int32_t wander_radius = 4;         // 游荡半径:走一步不超过离中心这么远(0 = 原地不动)
+	std::int64_t wander_interval_ms = 1000; // 游荡节拍(ms):每这么久走一步(原 CHAR_LOOPINTERVAL)
+	std::int32_t level = -1;                // 等级;<=0 走敌人表 LV_MIN/MAX 摇号(同 spawnEnemy)
+};
+
+// 世界态敌人的位置快照(批次 W.2 / W.3 的观察面)。
+//
+// ★ 加它的理由同 `PlayerPos` / `enemyCount`:欠债 20 那族「地基绿而运行时不接,ctest 一样全过」——
+//   没有观察面,「敌人真的 spawn 到地图了 / 游荡后位置真的变了」无从断言。
+//   ⚠️ `entity_id` = 敌人 `EntityHandle` 的编码,**与 `CharAppear.entity_id` 同一口径**
+//     ⇒ 用例既能追踪同一只敌人跨 tick 的位移,又能对着视野下行消息核 id 是否一致。
+struct WorldEnemyPos
+{
+	std::uint64_t entity_id = 0;
+	std::int32_t floor = 0;
+	std::int32_t x = 0;
+	std::int32_t y = 0;
+	std::uint8_t dir = 0;
+	std::int32_t image = 0; // E_T_IMGNUMBER(CharAppear.image 的源)
+};
+
 class World final : public SA::Net::TransportEvents,
+
                     public SA::Net::SessionHost
 {
   public:
@@ -609,6 +653,13 @@ class World final : public SA::Net::TransportEvents,
 	                         std::vector<EnemyEncounter> encounters,
 	                         std::vector<EnemyTemplate> templates);
 
+	// 注入世界刷怪点(批次 W.2)—— 让 `kNpcSpawn` 据它把敌人刷到地图上。
+	//
+	// ⚠️★ **默认空 ⇒ 世界里没有常驻怪** —— 现有走路 / 遇敌用例不注入即不受影响(同
+	//    `loadEncounterTables`)。⇒ 刷怪点用 `enemy_id` 查的是 `loadEncounterTables` 注入的
+	//    那份敌人表 / 模板表 ⇒ **两个 load 都要调**,否则查不到即该点刷不出(落 warn、不崩)。
+	void loadSpawnPoints(std::vector<SpawnPoint> points);
+
 	// ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
 	void requestShutdown() noexcept;
 	bool stopped() const noexcept;
@@ -653,6 +704,14 @@ class World final : public SA::Net::TransportEvents,
 	// ★ 遇敌用例断言「走动后从 0 变 1」—— 没有它,「遇敌真的开了一场战」无从断言
 	//   (同 `enemyCount` 的理由:不接的静默只有观察面能戳破)。
 	std::size_t battleCount() const noexcept;
+
+	// 世界态活跃敌人数 / 全部位置快照(批次 W.2 / W.3 的观察面)。
+	//
+	// ★ 与战斗态敌人分开:`enemyCount()` 数的是 **EnemyPool 里的全部实体**(含战斗态 +
+	//   世界态);本组只数 / 只列**世界态**那部分(在地图上、会游荡、被视野广播的那些)。
+	//   ⇒ 用例能分别断言「刷了几只到世界」与「战斗里生成了几只」,两条静默各有探针。
+	std::size_t worldEnemyCount() const noexcept;
+	std::vector<WorldEnemyPos> worldEnemies() const;
 
 	// 某场战斗某个槽背后的 L2 `Enemy` 实体(只读)。不存在 / 无实体返回 nullptr。
 	//
