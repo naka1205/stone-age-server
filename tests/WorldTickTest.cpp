@@ -13,6 +13,7 @@
 #include "world/Api.h"
 
 #include "model/Player.h"
+#include "rules/CaptureItem.h"
 #include "rules/Progression.h"
 #include "support/ScriptedRandom.h"
 
@@ -1496,8 +1497,25 @@ TEST_CASE("M.4b:spawnEnemy 逐值 —— 四维 / 满血 / 评级 / 两张表的
 	//    把这个 0 拷进宠物。★ Enemy **没有** luck 字段,理由见 Enemy.h 卷首。
 	CHECK(e.variable_ai == 0);
 
+	// ★ pet_id = 模板号(源码 :1200 `CHAR_PETID = *(tp + E_T_TEMPNO)`,捕获扣道具批次)。
+	//   makeWuliTemplate 未设 temp_no ⇒ 默认 0 ⇒ pet_id 0(不在 NeedEnemy 表内)。
+	CHECK(e.pet_id == 0);
+
 	// ★ rng 消耗恰好 14 次 —— `spawnEnemy` 自己不摇任何数(见 Api.h 声明处)。
 	CHECK(rng.calls() == 14);
+}
+
+TEST_CASE("捕获扣道具:spawnEnemy 把模板号落进 pet_id(源码 enemy.c:1200)")
+{
+	// ★ 匹配键 = CHAR_PETID = E_T_TEMPNO。把模板号设成 NeedEnemy 表里有的 524,
+	//   断言它原样落进 Enemy.pet_id ⇒ 捕获扣道具据它查表(见 CaptureItem.h)。
+	EnemyTemplate t = makeWuliTemplate();
+	t.temp_no = 524; // NeedEnemy 表:524 → {2456}
+	ScriptedRandom rng({2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	const SA::Model::Enemy e =
+	    spawnEnemy(t, makeWuliEncounterFixedLv1(), 18, rng, SA::Rules::RulesConfig{});
+	CHECK(e.pet_id == 524);
+	CHECK(SA::Rules::isNeedCaptureItem(e.pet_id) == 0); // 表第 0 行
 }
 
 TEST_CASE("M.4b:等级是入参 —— 同模板不同等级 ⇒ 四维按 coef 成比例(enemy.c:1040)")
@@ -2692,4 +2710,193 @@ TEST_CASE("战果:端到端 —— 打赢野怪,玩家按等级差衰减涨经�
 	// ★★ 玩家 20 级打 10 级敌人:b_level = 20 − 10 = 10 > 5 ⇒ 衰减
 	//    b_level = 5 + 15 − 10 = 10;nowexp = 19 * 10 / 15 = 12(整除)。
 	CHECK(f.world.playerExp(id) == 12);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  捕获扣道具(道具域第二批,DR-BT10「全删」+ 前置门 CaptureItemCheck)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ★ 端到端:玩家背包有条件道具 → 抓表内怪 → 道具被全删;背包缺条件道具 → 门 ④ 拦、抓不到。
+//   ⚠️ 用**真的 L2 敌人**(spawnEnemyToField),因为匹配键 pet_id 来自敌人实体。
+
+namespace
+{
+// 造一只可捕、低级、模板号 = 指定值的 L2 敌人模板(其余同乌力)。
+EnemyTemplate makeNeedItemTemplate(std::int32_t temp_no)
+{
+	EnemyTemplate t = makeWuliTemplate();
+	t.temp_no = temp_no; // 落进 Enemy.pet_id ⇒ NeedEnemy 表匹配键
+	return t;
+}
+
+// 握手 + 入场(强场,charm 200 ⇒ 捕获必过概率门)+ 刷一只模板号 = temp_no 的可捕敌人。
+BattleId joinWithNeedItemEnemy(Fixture &f, SA::Net::ConnectionId id,
+                               std::int32_t temp_no)
+{
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	const BattleId battle = f.world.startBattle(makePlayerOnlyField());
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	REQUIRE(f.world.spawnEnemyToField(battle, SA::Rules::kSideOffset,
+	                                  makeNeedItemTemplate(temp_no),
+	                                  makeWuliEncounterFixedLv1(), /*baselevel=*/1));
+	return battle;
+}
+
+// 造一个指定 id 的道具(其余字段留默认,本批只按 item_id 匹配)。
+SA::Model::Item makeItem(std::int32_t item_id)
+{
+	SA::Model::Item it{};
+	it.item_id = item_id;
+	return it;
+}
+} // namespace
+
+TEST_CASE("捕获扣道具:抓表内怪 ⇒ 条件道具被全删,非条件道具留下(DR-BT10)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	// 524 → 需要道具 2456(NeedEnemy 表第 0 行)。
+	const BattleId battle = joinWithNeedItemEnemy(f, id, 524);
+
+	// 背包:1 个条件道具 2456 + 1 个无关道具 9999。
+	const int slot_need = f.world.giveItemToPlayer(id, makeItem(2456));
+	const int slot_decoy = f.world.giveItemToPlayer(id, makeItem(9999));
+	REQUIRE(slot_need >= 0);
+	REQUIRE(slot_decoy >= 0);
+	REQUIRE(f.world.itemCount() == 2);
+	REQUIRE(f.world.playerItemSlotsUsed(id) == 2);
+
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+
+	// ★★ 抓到了(门 ④ 满足:背包有 2456)⇒ 宠物入槽。
+	CHECK(f.world.petCount() == 1);
+	CHECK(f.world.playerCaptureCount(id) == 1);
+
+	// ★★ 条件道具 2456 被删,无关道具 9999 留下(全删只删表里列的)。
+	CHECK(f.world.itemCount() == 1);                       // 池里只剩 1 个(2456 已 release)
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);           // 背包只剩 1 槽
+	CHECK(f.world.playerItemAt(id, slot_need) == nullptr); // ★ 条件道具槽已空
+	const SA::Model::Item *decoy = f.world.playerItemAt(id, slot_decoy);
+	REQUIRE(decoy != nullptr);
+	CHECK(decoy->item_id == 9999); // ★ 无关道具原样还在
+}
+
+TEST_CASE("捕获扣道具★★:背包缺条件道具 ⇒ 门 ④ 拦,抓不到(不是白给)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinWithNeedItemEnemy(f, id, 524); // 需要 2456
+
+	// ★ 只给无关道具,**不给** 2456 ⇒ CaptureItemCheck 门 ④ 不过。
+	REQUIRE(f.world.giveItemToPlayer(id, makeItem(9999)) >= 0);
+	REQUIRE(f.world.itemCount() == 1);
+
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+
+	// ★★ 抓不到:门 ④ 在 rollCapture 之前拦下 ⇒ flags=0 ⇒ 无宠物、无计数、目标留场。
+	CHECK(f.world.petCount() == 0);
+	CHECK(f.world.playerCaptureCount(id) == 0);
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->at(SA::Rules::kSideOffset).occupied); // 目标还在场
+	// ★ 无关道具没被碰(抓失败不删任何东西)。
+	CHECK(f.world.itemCount() == 1);
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+}
+
+TEST_CASE("捕获扣道具:抓不在表内的怪 ⇒ 背包一个道具都不动")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	// temp_no=1 不在 NeedEnemy 表 ⇒ isNeedCaptureItem 返 -1 ⇒ 门自动满足、无删除。
+	const BattleId battle = joinWithNeedItemEnemy(f, id, 1);
+
+	REQUIRE(f.world.giveItemToPlayer(id, makeItem(2456)) >= 0); // 就算带着 2456
+	REQUIRE(f.world.itemCount() == 1);
+
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+
+	CHECK(f.world.petCount() == 1);  // 照常抓到(无条件道具要求)
+	CHECK(f.world.itemCount() == 1); // ★ 道具没被删(这只怪不吃道具)
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+}
+
+TEST_CASE("捕获扣道具★★:全删 —— 同一条件 id 的多个道具一次全删(源码 :4074 不 break)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const BattleId battle = joinWithNeedItemEnemy(f, id, 524); // 需要 2456
+
+	// ★ 背包放**两个** 2456(源码那句被注释掉的 break ⇒ 全删,不是只删一个)。
+	REQUIRE(f.world.giveItemToPlayer(id, makeItem(2456)) >= 0);
+	REQUIRE(f.world.giveItemToPlayer(id, makeItem(2456)) >= 0);
+	REQUIRE(f.world.itemCount() == 2);
+
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+
+	CHECK(f.world.petCount() == 1);
+	// ★★ 两个都删掉,不是剩一个 —— 这条钉住"全删"语义。
+	CHECK(f.world.itemCount() == 0);
+	CHECK(f.world.playerItemSlotsUsed(id) == 0);
+}
+
+TEST_CASE("捕获扣道具:多条件道具怪(1105→3 种)—— 缺一即拦、齐备才抓并全删")
+{
+	// NeedEnemy 表:1105 → {1690, 1691, 1692}(源码 :3901,唯一的多道具行)。
+	SUBCASE("只带 2 种(缺 1692)⇒ 门 ④ 拦,抓不到")
+	{
+		Fixture f;
+		const SA::Net::ConnectionId id = f.transport.connect();
+		const BattleId battle = joinWithNeedItemEnemy(f, id, 1105);
+		REQUIRE(f.world.giveItemToPlayer(id, makeItem(1690)) >= 0);
+		REQUIRE(f.world.giveItemToPlayer(id, makeItem(1691)) >= 0);
+
+		captureTurn(f, id, battle, SA::Rules::kSideOffset);
+
+		CHECK(f.world.petCount() == 0);  // 缺一种 ⇒ 抓不到
+		CHECK(f.world.itemCount() == 2); // 没删(抓失败)
+	}
+
+	SUBCASE("三种齐备 ⇒ 抓到并三种全删")
+	{
+		Fixture f;
+		const SA::Net::ConnectionId id = f.transport.connect();
+		const BattleId battle = joinWithNeedItemEnemy(f, id, 1105);
+		REQUIRE(f.world.giveItemToPlayer(id, makeItem(1690)) >= 0);
+		REQUIRE(f.world.giveItemToPlayer(id, makeItem(1691)) >= 0);
+		REQUIRE(f.world.giveItemToPlayer(id, makeItem(1692)) >= 0);
+		REQUIRE(f.world.giveItemToPlayer(id, makeItem(9999)) >= 0); // 无关道具
+		REQUIRE(f.world.itemCount() == 4);
+
+		captureTurn(f, id, battle, SA::Rules::kSideOffset);
+
+		CHECK(f.world.petCount() == 1);
+		CHECK(f.world.itemCount() == 1); // 三种条件道具删光,只剩无关的 9999
+		CHECK(f.world.playerItemSlotsUsed(id) == 1);
+	}
+}
+
+TEST_CASE("捕获扣道具:giveItemToPlayer 注入 seam —— 三门与背包段边界")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+
+	// 门 ①:无 L2 玩家实体(还没握手)⇒ -1,世界不动。
+	CHECK(f.world.giveItemToPlayer(id, makeItem(1)) == -1);
+	CHECK(f.world.itemCount() == 0);
+
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	// 放入 ⇒ 落在背包段(下标 >= kStartItemArray)。
+	const int slot = f.world.giveItemToPlayer(id, makeItem(42));
+	REQUIRE(slot >= static_cast<int>(SA::Model::kStartItemArray));
+	CHECK(f.world.itemCount() == 1);
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+	const SA::Model::Item *it = f.world.playerItemAt(id, slot);
+	REQUIRE(it != nullptr);
+	CHECK(it->item_id == 42);
 }

@@ -19,6 +19,7 @@
 #include "model/EntityIndex.h"
 #include "model/EntityPool.h"
 #include "model/Player.h"
+#include "rules/CaptureItem.h"
 #include "rules/Progression.h"
 
 namespace SA::World
@@ -98,6 +99,13 @@ struct WorldWriteContext
 	//    敌人离场即 `CHAR_endCharOneArray`)⇒ 池要可写,映射也要可清。
 	EnemyPool *enemies = nullptr;
 	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> *enemy_of_slot = nullptr;
+
+	// ── 道具侧的落脚点(批次「捕获扣道具」)────────────────────────
+	//
+	// ★ 捕获成功后按 `NeedEnemy[]` 表**全删**攻方背包里的所需道具(DR-BT10,
+	//   源码 `BATTLE_CaptureItemDelAll` `battle_event.c:4028`)⇒ 要读写玩家背包槽 +
+	//   释放 Item 实体。⚠️ 非 const:删道具要 `items->release` + `Player::clearItemSlot`。
+	ItemPool *items = nullptr;
 	SA::Platform::Logger *logger = nullptr;
 };
 
@@ -357,6 +365,137 @@ bool createPetFromCapture(const SA::Rules::Combatant &tgt,
 	return true;
 }
 
+// 捕获成功后按 `NeedEnemy[]` 表**全删**攻方背包里的所需道具(批次「捕获扣道具」)。
+//
+// ★★ 1:1 移植 `BATTLE_CaptureItemDelAll`(展开视图 `battle_event.c:4028-4079`,
+//    `_CAPTURE_FREES` 分支):`ti = IsNeedCaptureItem(pet_id)` → 对该行每个非 -1 的
+//    item_id,遍历攻方背包命中即删 —— **不 break,同 id 多个都删**(源码 :4074 那句被
+//    注释掉的 break 就是这个意思:"抓一只只删一个道具(会员还是决定全删)")。
+//   ⚠️ `_NEED_ITEM_ENEMY` 关 ⇒ 8.0 **无条件删**,不看 `getDelNeedItem()` 配置门(那门属
+//     `_NEED_ITEM_ENEMY` 段)。⇒ 命中即删,不加开关。
+//   ⚠️ **不复刻** `ITEM_DETACHFUNC` 函数指针 + `RunItemDetachEvent` Lua 回调(:4060-4070)
+//     —— 8.0 无 Lua(Item.h 文末 ⑤ / 04 §3.3.3 同结论)。
+//   ⬜ `CHAR_complianceParameter`(源码 :4073,删道具后重算属性)⇒ 装备加成未移植
+//     ⇒ 本批**无可观察后果**,不调(同"永假判断不伪造"取向);属装备域,接装备时一并落。
+//
+// 前提:`pet_id` 取自被捕目标的 L2 `Enemy` 实体(= 模板号,见 Enemy.h::pet_id)。
+//   `src_enemy == nullptr`(demo foe / PvP)⇒ 无 pet_id ⇒ 由调用方跳过本函数。
+void captureItemDelAll(SA::Model::Player &owner, std::int32_t pet_id, ItemPool &items)
+{
+	const int ti = SA::Rules::isNeedCaptureItem(pet_id);
+	if (ti < 0)
+		return; // 这只怪不需要条件道具,无删除
+
+	const SA::Rules::CaptureNeedItem &row =
+	    SA::Rules::kNeedItemEnemy[static_cast<std::size_t>(ti)];
+	for (std::size_t k = 0; k < SA::Rules::kMaxCaptureFreeItems; ++k)
+	{
+		const std::int32_t need_id = row.item_ids[k];
+		if (need_id == -1)
+			break; // -1 = 该行道具列表结束(源码 :4037)
+
+		// ★ 只扫背包段 `[kStartItemArray, kMaxItemHave)` —— 源码循环从
+		//   `CHAR_STARTITEMARRAY` 起(:4038 的 `CheckCharMaxItem` 上界、下界那条链)。
+		//   装备位段不是"持有的可扣道具",与 findFreeItemSlot 同一边界。
+		for (std::size_t j = SA::Model::kStartItemArray; j < SA::Model::kMaxItemHave; ++j)
+		{
+			const SA::Model::ItemHandle h = owner.items[j];
+			SA::Model::Item *it = items.resolve(h);
+			if (it == nullptr)
+				continue; // 空槽 / 悬空句柄(源码 `ITEM_CHECKINDEX == FALSE` 跳过,:4040)
+			if (it->item_id != need_id)
+				continue;
+
+			// 命中 ⇒ 删:清槽 + 释放实体**成对**(M.1 那条纪律的第四处兑现:
+			//   漏一半会让池只增不减或槽永久占用,而没有一处报错)。
+			owner.clearItemSlot(static_cast<int>(j));
+			(void)items.release(h);
+			// ⚠️ **不 break**:同一 need_id 的多个道具全删(源码 :4074)。
+		}
+	}
+}
+
+// 攻方背包里是否**齐备**捕获这只怪所需的全部条件道具(捕获前置门 ④)。
+//
+// ★★ 1:1 移植 `BATTLE_CaptureItemCheck`(展开视图 `battle_event.c:3986-4013`,
+//    `_CAPTURE_FREES` 分支):对 `NeedEnemy[ti]` 行的每个非 -1 道具,背包里都得找到
+//    至少一个 ⇒ 任一缺失即返回 false(源码 :4011 `if(j >= max) return FALSE`)。
+//   ⚠️ 与删除同用一张表、同一背包扫描边界;这里只**读不写**(判定,纯查询)。
+//   ⚠️ 不需要 = 该怪不在表内(`ti < 0`)⇒ 返回 true(源码 :3994 `if(ti<0) return TRUE`)。
+bool hasCaptureItems(const SA::Model::Player &owner, std::int32_t pet_id,
+                     const ItemPool &items)
+{
+	const int ti = SA::Rules::isNeedCaptureItem(pet_id);
+	if (ti < 0)
+		return true; // 无需求怪 ⇒ 门自动满足
+
+	const SA::Rules::CaptureNeedItem &row =
+	    SA::Rules::kNeedItemEnemy[static_cast<std::size_t>(ti)];
+	for (std::size_t k = 0; k < SA::Rules::kMaxCaptureFreeItems; ++k)
+	{
+		const std::int32_t need_id = row.item_ids[k];
+		if (need_id == -1)
+			break; // 该行道具列表结束(源码 :3998)
+
+		bool found = false;
+		for (std::size_t j = SA::Model::kStartItemArray;
+		     j < SA::Model::kMaxItemHave; ++j)
+		{
+			const SA::Model::Item *it = items.resolve(owner.items[j]);
+			if (it != nullptr && it->item_id == need_id)
+			{
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			return false; // 缺任一所需道具 ⇒ 整笔不准捕获(源码 :4011)
+	}
+	return true;
+}
+
+// 把「攻方条件道具是否齐备」投影到 L3 输入面(捕获前置门 ④)。
+//
+// ★★ 与 `capturable`(守方世界态投影,见 makeCombatantFromEnemy)同款分工:门 ④ 读的是
+//    **攻方背包**这个世界态,L3 纯函数看不到 ⇒ World 在 `resolveTurn` **之前**按本回合
+//    每条 CAPTURE 指令算好、写进攻方 `Combatant::mods.capture_item_ok`。
+//   ⚠️★ **必须在 resolveTurn 前**:门不过则 L3 不进 rollCapture ⇒ 不摇 rng(与原版一致:
+//     没道具连骰子都不掷)。若放到 resolveTurn 后于世界写阶段补判,rng 序列会与原版分叉。
+//   ★ 默认 `capture_item_ok = true`(Combatant.h)⇒ 非捕获指令 / 无 L2 敌人 / 无需求怪
+//     一律不改,门自动满足,现有用例不受影响。
+void projectCaptureItemGate(BattleInstance &b, PlayerPool &players,
+                            const EnemyPool &enemies, const ItemPool &items)
+{
+	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+	{
+		if (!b.commands.present[slot])
+			continue;
+		const SA::Domain::BattleCommand &cmd = b.commands.commands[slot];
+		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::CAPTURE)
+			continue;
+
+		SA::Rules::Combatant &atk = b.field.at(slot);
+		if (!atk.occupied)
+			continue;
+
+		// 被捕目标的 L2 敌人实体 ⇒ 取其 pet_id 作为需求表匹配键。
+		const int tgt_slot = static_cast<int>(cmd.command.capture.target);
+		if (tgt_slot < 0 || tgt_slot >= SA::Rules::kSlotCount)
+			continue;
+		const SA::Model::Enemy *tgt_enemy =
+		    enemies.resolve(b.enemy_of_slot[static_cast<std::size_t>(tgt_slot)]);
+		if (tgt_enemy == nullptr)
+			continue; // demo foe / PvP:无 pet_id ⇒ 门保持默认 true(满足)
+
+		SA::Model::Player *owner =
+		    players.resolve(b.player_of_slot[static_cast<std::size_t>(slot)]);
+		if (owner == nullptr)
+			continue; // 攻方无 L2 玩家实体(不该发生在真捕获路径)⇒ 门保持默认
+
+		atk.mods.capture_item_ok = hasCaptureItems(*owner, tgt_enemy->pet_id, items);
+	}
+}
+
 // ★★ 按事件列表把结果写回世界状态。
 //
 // 这一步**必须由调用方做**,不是 world 多管闲事:批次 0.5 的裁定
@@ -586,9 +725,22 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 			// ⬜ **第 4 步** `CaptureOkFunction`(:3538)⇒ NPC 行为绑定。
 			//    ★ 03 §2.3 已裁定**不复刻**字符串→函数指针的运行期绑定
 			//      (原版三处可断且全部静默,18+16+6 例)⇒ 届时用接口 / 函数值直接注册。
-			// ⬜ **第 5 步** `BATTLE_CaptureItemDelAll`(:3540)⇒ 道具系统(DR-BT10「全删」)。
-			//    ⚠️ 这一步做不了正是「捕获仍不完整」的最后一环:原版**扣了道具**才给宠物,
-			//      我们现在是白给。别把它读成"差不多做完了"。
+			// ── ✅ **第 5 步** `BATTLE_CaptureItemDelAll`(:3540,DR-BT10「全删」)────
+			//    原版**扣了道具才给宠物**;此前是白给,本批(捕获扣道具)补上。
+			//    ★ 前置门 `CaptureItemCheck`(§6.2 门 ④)已在 resolveTurn **之前**由
+			//      `projectCaptureItemGate` 投影到攻方 `capture_item_ok`,门不过则根本不产
+			//      成功事件 ⇒ 走到这里的成功捕获,道具必然齐备,这里只管**删**。
+			//    ⚠️ `src_enemy == nullptr`(demo foe / PvP)⇒ 无 pet_id ⇒ captureItemDelAll
+			//      内 `isNeedCaptureItem` 返 -1、无删,与门那侧默认满足一致。
+			if (ctx.items != nullptr && src_enemy != nullptr)
+			{
+				if (SA::Model::Player *owner = ctx.players->resolve(
+				        (*ctx.player_of_slot)[cap.actor]);
+				    owner != nullptr)
+				{
+					captureItemDelAll(*owner, src_enemy->pet_id, *ctx.items);
+				}
+			}
 
 			// ── 第 6 步(源码 :3542):捕获计数 +1 ────────────────────────
 			if (SA::Model::Player *owner =
@@ -1488,6 +1640,10 @@ void World::tick()
 			// ★ 敌方 AI 先填指令(见 FillEnemyCommands 卷首:这是 battle.h 指定的分工)。
 			fillEnemyCommands(b.field, b.commands);
 
+			// ★★ 捕获前置门 ④:把「攻方条件道具是否齐备」投影进 L3 输入面 —— **必须在
+			//    resolveTurn 之前**(门不过则不摇 rng,与原版一致,见 projectCaptureItemGate)。
+			projectCaptureItemGate(b, s.players, s.enemies, s.items);
+
 			// 结算一个回合。⚠️ 返回 false = 事件超过 256 条被迫截断。
 			//   05 §10.4 记着原版无上界 strcat 的教训 ⇒ **必须处理**,不可当没看见。
 			const bool ok = SA::Rules::resolveTurn(b.field, b.commands,
@@ -1513,6 +1669,7 @@ void World::tick()
 			wctx.player_of_slot = &b.player_of_slot;
 			wctx.enemies = &s.enemies;
 			wctx.enemy_of_slot = &b.enemy_of_slot;
+			wctx.items = &s.items;
 			wctx.logger = &s.logger;
 			applyEvents(b.events, b.field, wctx);
 
@@ -2064,6 +2221,31 @@ void World::loadEncounterTables(std::vector<EncountArea> areas,
 void World::loadSpawnPoints(std::vector<SpawnPoint> points)
 {
 	_impl->spawn_points = std::move(points);
+}
+
+int World::giveItemToPlayer(SA::Net::SessionId session, const SA::Model::Item &item)
+{
+	Impl &s = *_impl;
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (p == nullptr)
+		return -1; // 门 ①:无 L2 玩家实体
+
+	// 门 ②:背包有空槽(照 findFreeItemSlot,只在背包段找)。
+	const int slot = p->findFreeItemSlot();
+	if (slot < 0)
+		return -1;
+
+	// 门 ③:道具池有空位。★ 三门全过才写 ⇒ 失败不留孤儿(同 spawnEnemyToField)。
+	const SA::Model::ItemHandle h = s.items.allocate();
+	if (!h.valid())
+		return -1;
+	SA::Model::Item *slot_item = s.items.resolve(h);
+	if (slot_item == nullptr)
+		return -1; // 走不到(刚 allocate),守零成本
+
+	*slot_item = item;
+	p->items[static_cast<std::size_t>(slot)] = h;
+	return slot;
 }
 
 std::size_t World::battleCount() const noexcept { return _impl->battles.size(); }
@@ -2682,6 +2864,18 @@ int World::playerItemSlotsUsed(SA::Net::SessionId session) const
 			++used;
 	}
 	return used;
+}
+
+const SA::Model::Item *World::playerItemAt(SA::Net::SessionId session, int slot) const
+{
+	if (slot < 0 || static_cast<std::size_t>(slot) >= SA::Model::kMaxItemHave)
+		return nullptr;
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return nullptr;
+	// ⚠️ 槽里的句柄可能悬空(道具已回池)⇒ resolve 返 nullptr,与空槽同一个答案。
+	return _impl->items.resolve(p->items[static_cast<std::size_t>(slot)]);
 }
 
 const SA::Rules::BattleField *World::battleField(BattleId id) const
@@ -3411,6 +3605,11 @@ SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, const EnemyEncounter &enc
 
 	// ── 名字(源码 :1108-1110)──────────────────────────────────────
 	out.name = tmpl.name;
+
+	// ── 模板号(源码 :1200 `CHAR_PETID = *(tp + E_T_TEMPNO)`)──────────
+	// ★ `CHAR_PETID` 的值 = 模板号,捕获扣道具 `IsNeedCaptureItem` 据它查 `NeedEnemy[]` 表。
+	//   ⚠️ 别与 `ENEMY_ID`(遇敌表,归 D 线)混,见 `Enemy.h` 的 `pet_id` 注释。
+	out.pet_id = tmpl.temp_no;
 
 	// ── 捕获相关(源码 :1165-1166)★ 两个 WORK 字段,来源两张表 ─────────
 	//

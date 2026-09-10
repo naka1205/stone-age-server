@@ -136,6 +136,17 @@ struct Enemy
 	std::int32_t origin_image = 0;
 	std::int32_t base_image = 0;
 
+	// ── 模板号(源码 :1200 `CHAR_PETID = *(tp + E_T_TEMPNO)`,捕获扣道具批次)──
+	//
+	// ★★ `CHAR_PETID` 的**值就是模板号 `E_T_TEMPNO`** —— 敌人生成时从模板行直接拷
+	//    (`enemy.c:1200/1656/1763/2030` 四处生成路径都是同一句)。它不是"宠物 id",
+	//    是这只怪出自哪个模板的编号,正是 `EnemyTemplate::temp_no`。
+	// ★ **消费方 = 捕获扣道具**:`IsNeedCaptureItem` 按 `CHAR_getInt(idx, CHAR_PETID)`
+	//    在 `NeedEnemy[]` 表里查这只怪要不要"喂道具"(源码 `battle_event.c:3931`)。
+	// ⚠️★ **别与 `CHAR_PETENEMYID`(= `ENEMY_ID`)混**:那个才依赖遇敌表、归 D 线(文末 ②)。
+	//    `pet_id` 的值在**已导入的模板行**里,不需要外部数据导入 ⇒ 当初记成"归 D 线不建"是误判。
+	std::int32_t pet_id = 0;
+
 	// 名字(源码 :1108-1110,取自模板 `E_T_NAME`)。上限 31 字节(DR-TS5)。
 	//
 	// ⚠️★ **它是 `enemybase1.txt` 里唯一的非 ASCII 列** ⇒ 落真数据要过
@@ -207,9 +218,10 @@ struct Enemy
 //    CONFUSION)⇒ L4 状态系统未移植。★ 与 `Pet.h` 文末 ① 同批来:反击(DR-BT17 余项)
 //    也排在 L4 之后、依赖同一个 `BATTLE_GetDamageReact` 状态面。
 //
-// ② `CHAR_RARE` / `CHAR_PETID`(= `E_T_TEMPNO`)/ `CHAR_PETENEMYID`(= `ENEMY_ID`)
-//    (源码 :1086-1087, :1090)⇒ L4 内容导入(D 线)。★ 其中 `PETENEMYID` 还依赖
-//    **遇敌表**(见 `level` 的注释),不只是模板表。
+// ② `CHAR_RARE`(源码 :1086)/ `CHAR_PETENEMYID`(= `ENEMY_ID`,源码 :1090)⇒ L4 内容导入
+//    (D 线)。★ 其中 `PETENEMYID` 还依赖**遇敌表**(见 `level` 的注释),不只是模板表。
+//    ⚠️★ **校正**:`CHAR_PETID`(= `E_T_TEMPNO`,源码 :1087/:1200)此前也记在本条"归 D 线",
+//    **是误判** —— 它的值在已导入的模板行里,已由捕获扣道具批次建为上方 `pet_id`,不再属本条。
 //
 // ③ `CHAR_CRITIAL` / `CHAR_COUNTER`(源码 :1088-1089)⇒ 暴击已在 A.3 走
 //    `Rules::CombatModifiers.equip_critical`;反击排在 L4 之后。

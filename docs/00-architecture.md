@@ -4258,6 +4258,33 @@ I.1(§9.0.48)落 `shared/model/Item.h` 新增 + `Player.h` 改 ⇒ watched 路�
 
 ---
 
+### 9.0.50 ★★ 批次 I.2 —— 捕获扣道具:CaptureItemCheck 前置门 + CaptureItemDelAll 全删(DR-DT21,2026-09-10)
+
+道具域第二批。补 §9.0.26 / §9.0.48 留下的「白给」缺口 —— 原版**扣了道具才给宠物**,此前捕获链缺了这一环。让 I.1 的 `itemCount` 从「恒 0」变成「能减」。
+
+**取证(stoneage85 全宏 + StoneAge 双源交叉核,纪律 ①,已闭合)**:
+- `_CAPTURE_FREES` **开**(三源一致)⇒ 全删语义 `BATTLE_CaptureItemDelAll`,DR-BT10 记载正确。
+- ⚠️★★ **`_NEED_ITEM_ENEMY` 关**(双源无 `#define`)⇒ 读 `needitemeneny.txt` 的加载器 `need_item_eneny_init()` **根本不编译**,8.0 净核用**源码内硬编码的 `NeedEnemy[]` 表**(`battle_event.c:3890`)。⇒ 记忆/欠债表里「需 `needitemeneny.txt` 敌人侧表」这条**已更正** —— 文件躺在 `csa8.0/gmsv/data/` 但净核不读它(纪律 ①「文件存在 ≠ 被读」的又一例)。
+- `_DEL_NOT_25_NEED_ITEM` 关 + `_WOLF_TAKE_AXE` 关(正式 `version.h` 无,仅 `.bak`)⇒ 净核有效行 **9 条**(524/961/953/962/777/796/812/1105/8;双头狼 145/146 不含)。
+- `getDelNeedItem()` 门属 `_NEED_ITEM_ENEMY` 段 ⇒ 8.0 **无条件删**。Lua 回调族(`RunItemDetachEvent`/`CaptureOkFunction`/`_ALLBLUES_LUA_*`)**全关**,不复刻(与 I.1 同结论)。
+- ★ **匹配键来源被源码钉死**:`IsNeedCaptureItem` 按 `CHAR_getInt(idx, CHAR_PETID)` 匹配,而敌人生成时 `CHAR_PETID = *(tp + E_T_TEMPNO)`(`enemy.c:1200` 等四处)⇒ 匹配键 = **模板号** = `EnemyTemplate::temp_no`。⇒ `Enemy.h` 文末 ② 把 `PETID` 记成「归 D 线不建」**是误判**(它的值在已导入的模板行里),本批建为 `Enemy::pet_id` 并已更正文末登记。
+
+**交付**:
+- `shared/model/Enemy.h`:加 `pet_id`(= `CHAR_PETID`,`spawnEnemy` 落值 = `tmpl.temp_no`,1:1 移植 `enemy.c:1200`)。
+- `shared/rules/CaptureItem.h`(**新文件**,纯规则常量 + 纯函数,归 `sa_shared`):`kNeedItemEnemy[9]` 硬编码表 + `isNeedCaptureItem(pet_id)`。
+- **前置门 ④ `CaptureItemCheck`**(§6.2):原版 `flg = ItemCheck && CaptureCheck`(`battle_event.c:4101`)。道具门读**攻方背包**(世界态),L3 纯函数看不到 ⇒ **与 `capturable` 同款**:World 在 `resolveTurn` **之前**据本回合 capture 指令算好、投影到攻方 `Combatant::mods.capture_item_ok`(`Battle.cpp` 捕获门加 `&& actor.mods.capture_item_ok`)。⚠️★ **必须在摇 rng 前** —— 无道具则不进 `rollCapture`、不消耗捕获 rng(与原版一致)。
+- **CaptureItemDelAll**(捕获第 5 步,`World.cpp` 捕获事件写回):`isNeedCaptureItem(src_enemy->pet_id)` → 遍历攻方背包段全删命中道具(清槽 + 释放实体成对,**不 break** = 全删,源码 :4074)。`CHAR_complianceParameter`(:4073)装备加成未移植 ⇒ 无可观察后果、不调,登记划出。
+- **注入 seam**:`World::giveItemToPlayer(session, Item)`(同 `spawnEnemyToField`/`loadEncounterTables` 性质:灌入点,写入链路 = 掉落/捡起是后续批次)+ 只读面 `playerItemAt(session, slot)`(同 `playerPetAt`)。
+
+**复验**:`ctest` **16/16** · `ci_verify` 六项 · `world_tick` 78→**85 例**(捕获扣道具 6 组:全删 / 门④拦 / 不在表内不删 / 多个同 id 全删 / 多条件缺一即拦 / seam 三门)· `rules_battle` 76→**77 例**(L3 门④ + 不摇捕获 rng)· 反向验证两处逐条转红(注入 A「全删空操作」⇒ 3 组红;注入 B「去门④」⇒ 拦截类 + L3 门④ 红),还原后跨秒重编复跑 16/16、工作树无残留。
+
+⚠️★ 动 `shared/model/Enemy.h` + 新增 `shared/rules/CaptureItem.h` ⇒ watched 路径变 ⇒ **锁定 ref 须前推 `shared-v0.20.0`** + 客户端换 pin 验发布态(推送窗口待办,随窗口带上 `81075ee` 文档 ahead)。
+
+**登记残缺**(有据划出,非遗漏):① `CHAR_complianceParameter` 删道具后重算(装备加成域);② 道具入背包的**写入链路**(掉落/捡起,道具域后两批)—— 当前只有 `giveItemToPlayer` 注入 seam;③ `needitemeneny.txt` 文件加载器(`_NEED_ITEM_ENEMY` 8.0 关,净核不需要)。
+
+---
+
+
 ### 10.1 R-b:无解的结构性事实
 
 每条标【单源未交叉】/【8.5 源码推定】的规则,实现时**只能靠人工复核**,没有任何自动化验证手段。
@@ -4371,3 +4398,4 @@ I.1(§9.0.48)落 `shared/model/Item.h` 新增 + `Player.h` 改 ⇒ watched 路�
 | 2026-09-10 | ★ **文档面清账:补 W.5 变更行 + 补记两个推送窗口执行记录**(新增 **§9.0.47**,道具域批次开工前)。核实三仓实际状态时发现两处文档滞后于代码:① §12 变更记录**缺 W.5(§9.0.46)行**(W.2+W.3 有、W.5 漏 —— 同「落一节补一行变更记录没执行者」,§9.0.30 末已预言、这是第三次);② `shared-v0.17.0`/`v0.18.0` **无独立推送窗口执行记录节**(W.2+W.3 与 W.5 连续推、记录留到本次一起补,同 §9.0.43 节奏但跨两窗口)。⇒ 补 W.5 变更行(上一行)+ 新增 §9.0.47(两窗口凭据:双远端 SHA/tag 一致、server CI #34/#35、client CI #23/#24 全 `success`、本地 pin 实读 v0.18.0)。★ 凭据现取(gho_ token 查 API + `ls-remote` + 读 `SaShared.cmake`),非凭记忆(§9.0.10)。⚠️ 未同批处理:`SaShared.cmake:38` 注释滞后(仍写 v0.14.0)留客户端仓下次动 pin 时改。 |
 | 2026-09-10 | ★★ **批次 I.1 —— 背包 L2 地基:Item 族 + 道具池 + Player 背包槽**(新增 **§9.0.48**;`11` 新增 **DR-DT20**;`01` §13 欠债表更新;`03` Item 族归属)。道具域(使用道具 + 掉落 + 捕获扣道具)第一批 —— 三条链的共同前置。交付 `shared/model/Item.h`(Item 族 POD + `ItemHandle` + 63 字节道具名)· `Player.h` 加 `items[54]`(装备位 9 + 背包 45 连续布局)+ `findFreeItemSlot`/`clearItemSlot` · `World` 挂 `EntityPool<Item,10000>` + 观察面 `itemCount`/`playerItemSlotsUsed`。**只建槽 + 池 + 观察面,不接扣/掉/用**。取证:容量 54/10000 均展开视图 + `setup.cf` 实证;★★ **Item 不进 EntityKind 五族**(背包道具是原版全局 `ITEM_item[]` 成员、非 Char);★★ **functable/Lua 全段不复刻**,连带抓到 **unifdef_80 第二次宏误判**(`_ALLBLUES_LUA_1_8` 判开、StoneAge 全树关 ⇒ 以 StoneAge 为准,继 W.3 后 evidence-workflow 第二强样本)。复验:`ctest` **16/16** · `ci_verify` 六项 · `model_pool` 20→**35 例**、`world_tick` 77→**78 例** · 反向验证两处转红 + **一处诚实的"注入不红"**(起点错在 world 层无区分力,由 model_pool 覆盖)。⚠️★ 动 `shared/model/` ⇒ 锁定 ref 须前推 **`shared-v0.19.0`**(✅ 已推,§9.0.49,含 `234d4cc` 一起推;server CI #36 + client CI #25 三平台全绿、发布态 fetch v0.19.0 核实)。 |
 | 2026-09-10 | ★ **推送窗口执行记录 —— shared-v0.19.0**(新增 **§9.0.49**)。I.1(§9.0.48)前推锁定 ref 的窗口闭合:server master → `655c02d` + tag(含 `234d4cc` 文档清账 ahead 1 一起推)· client pin v0.18→v0.19(`62a1ff1`,顺带修 `SaShared.cmake:38` §9.0.47 留的滞后注释)· 两仓×两远端 SHA/tag 一致、tag 集合差空 · server CI #36 / client CI #25 三平台全 `success` + 发布态 FetchContent 日志核实锁定 ref=v0.19.0 与源码一致。凭据现取(§9.0.10)。 |
+| 2026-09-10 | ★★ **批次 I.2 —— 捕获扣道具:CaptureItemCheck 前置门 + CaptureItemDelAll 全删**(新增 **§9.0.50**;`11` 新增 **DR-DT21**;`01` §13 欠债 31)。道具域第二批,补 §9.0.26 /§9.0.48「白给」缺口 —— 原版**扣了道具才给宠物**。交付 `Enemy.h` 加 `pet_id`(= `CHAR_PETID` = 模板号,`spawnEnemy` 落值)· 新增 `shared/rules/CaptureItem.h`(硬编码 `NeedEnemy[9]` + `isNeedCaptureItem`)· **前置门 ④** 投影攻方 `capture_item_ok`(World 在 resolveTurn 前算、L3 做 `&&` 门,无道具不摇 rng)· **全删** 落捕获第 5 步(`World.cpp`,不 break,清槽+释放成对)· 注入 seam `giveItemToPlayer` + 只读面 `playerItemAt`。取证(双源交叉核):★★ **`_NEED_ITEM_ENEMY` 关 ⇒ 8.0 不读 `needitemeneny.txt`,用源码硬编码表**(更正记忆/DR-DT20 ⑥/欠债 30 ①);★ 匹配键 `CHAR_PETID = E_T_TEMPNO` ⇒ `Enemy.h` 文末「PETID 归 D 线不建」是误判、已更正;`_CAPTURE_FREES` 开(全删,DR-BT10 正确)· Lua 回调不复刻。复验:`ctest` **16/16** · `ci_verify` 六项 · `world_tick` 78→**85 例**、`rules_battle` 76→**77 例** · 反向验证两处转红(全删空操作 / 去门④),还原后 16/16、无残留。⚠️★ 动 `shared/model/Enemy.h` + 新增 `shared/rules/CaptureItem.h` ⇒ 锁定 ref 须前推 **`shared-v0.20.0`**(待用户确认,含 `81075ee` ahead 1 一起推)。 |

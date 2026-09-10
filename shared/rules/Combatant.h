@@ -145,6 +145,17 @@ struct CombatModifiers
 	// ⚠️ 原版在 `BATTLE_Capture` 里用完即清零(`:4121`)—— 那是**一次性道具/技能**
 	//    的效果。清零是世界写,属调用方(与逃跑计数器 ++ 同一分工),不进 L3。
 	std::int32_t capture_bonus = 0;
+
+	// ★★ 攻方「条件道具已满足」(原 `BATTLE_CaptureItemCheck`,`battle_event.c:3986`)。
+	//   ⚠️★ 这是**捕获前置门 ④**(§6.2):原版 `flg = ItemCheck && CaptureCheck`
+	//     (`:4101`)—— 某些怪(见 `CaptureItem.h::kNeedItemEnemy`)必须攻方身上带指定
+	//     道具才准捕获,没带则**整笔失败、连概率都不摇**(rng 不消耗)。
+	//   ★ 它读**攻方背包**,是世界态 ⇒ L3 纯函数看不到 ⇒ 与 `capturable`(读守方世界态)
+	//     同款:World 层在 `resolveTurn` **之前**据本回合 capture 指令算好、投影到攻方
+	//     这个字段(见 World.cpp)。⇒ L3 只做 `&& capture_item_ok` 的门判定,不读背包。
+	//   ★ **默认 true**:无需求怪 / demo foe / PvP / 玩家侧非捕获场景一律满足 ⇒ 门不拦,
+	//     现有用例不受影响(同 `isNeedCaptureItem` 返 -1 即视为满足)。
+	bool capture_item_ok = true;
 };
 
 // ── 一个战斗单位 ──────────────────────────────────────────────

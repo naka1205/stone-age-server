@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "model/Enemy.h"
+#include "model/Item.h"
 #include "model/Pet.h"
 #include "net/Api.h"
 #include "platform/Api.h"
@@ -660,6 +661,16 @@ class World final : public SA::Net::TransportEvents,
 	//    那份敌人表 / 模板表 ⇒ **两个 load 都要调**,否则查不到即该点刷不出(落 warn、不崩)。
 	void loadSpawnPoints(std::vector<SpawnPoint> points);
 
+	// 往某会话玩家的背包放一个道具(批次「捕获扣道具」的**注入 seam**)。
+	//
+	// ★★ 与 `spawnEnemyToField` / `loadEncounterTables` 同性质:是个**灌入点**,不是玩法。
+	//    捕获扣道具批次要**删**背包里的条件道具,而写入链路(掉落 / 捡起)是后续批次 ——
+	//    本 seam 让"扣"这条链现在就有东西可扣、可观察(同那两个注入表让遇敌有数据可遇)。
+	//    ⇒ 真玩法接掉落 / 捡起后,道具由那些路径进背包,本 seam 退回纯测试注入。
+	// 返回:放入的背包槽下标(∈ [kStartItemArray, kMaxItemHave));失败(无 L2 玩家 /
+	//    背包满 / 道具池满)返 −1,且**世界一个字节都没动**(门在任何写之前,同捕获三门)。
+	int giveItemToPlayer(SA::Net::SessionId session, const SA::Model::Item &item);
+
 	// ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
 	void requestShutdown() noexcept;
 	bool stopped() const noexcept;
@@ -751,6 +762,12 @@ class World final : public SA::Net::TransportEvents,
 	// ★ 只数背包段 `[kStartItemArray, kMaxItemHave)` 的**有引用**槽(悬空句柄也算,
 	//   两步分工同 `playerPetSlotsUsed`)。本批恒 0(无写入者)⇒ 用例断言之。
 	int playerItemSlotsUsed(SA::Net::SessionId session) const;
+
+	// 某会话背后 Player 的第 slot 个道具槽(只读,批次「捕获扣道具」)。
+	// 空槽 / 悬空句柄 / 无实体返回 nullptr。★ 与 `playerPetAt` 同形(返回整个 const 视图,
+	//   不逐字段漏)—— 捕获扣道具用例要能断言"命中的道具被删、不命中的还在"。
+	// ⚠️ slot 是**全域**下标 [0, kMaxItemHave):装备位段也可读(卸装校验将来会用)。
+	const SA::Model::Item *playerItemAt(SA::Net::SessionId session, int slot) const;
 
 	// 当前出战宠在 `pets[]` 的槽号(原 `CHAR_DEFAULTPET`)。-1 = 无实体 / 无出战宠。
 	// ★ DR-BT21 的测试观察面:换宠(PET_OUT/PET_IN)是否写对 `default_pet`。

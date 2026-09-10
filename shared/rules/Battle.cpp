@@ -1193,10 +1193,14 @@ bool resolveTurn(const BattleField &field,
 				continue;
 
 			bool ok = false;
-			// 前置门 ①②③(§6.2)。★ 等级门:`myLv + 5 < targetLv` 直接失败。
+			// 前置门 ①②③④(§6.2)。★ 等级门:`myLv + 5 < targetLv` 直接失败。
 			//   ⚠️ 原版有 `PickAllPet`(全收特殊技)可跳过等级门,属技能链路(B 批次)
 			//     ⇒ 本批次不接,在此按"无该技"处理,实现处记明、不猜。
-			if (tgt.isEnemy() && tgt.mods.capturable &&
+			// ★ 门 ④ 条件道具(`actor.mods.capture_item_ok`)—— 原版 `flg = ItemCheck &&
+			//   CaptureCheck`(`battle_event.c:4101`)。它读攻方背包,由 World 层在 resolveTurn
+			//   之前投影到此字段(见 Combatant.h / World.cpp);L3 只做 `&&` 门判定,不读背包。
+			//   ⚠️★ 门不过 ⇒ 不进 rollCapture ⇒ **不摇 rng**,与原版一致(没道具连骰子都不掷)。
+			if (tgt.isEnemy() && tgt.mods.capturable && actor.mods.capture_item_ok &&
 			    !(actor.level + kCaptureLevelGate < tgt.level))
 			{
 				ok = rollCapture(actor.level, tgt.level, actor.quick, tgt.quick,

@@ -269,6 +269,7 @@ P5 文件名 PascalCase + guard `__SA_<File>_H__` · P6 clang-format 引擎款�
 | **DR-DT18** | ★★ **世界敌人线 W.2+W.3(地图刷怪 + 游荡 AI + 视野看敌人)**:摊还用时间预算还是条数 · 刷怪来源 · 视野怎么扩到敌人 · 游荡 AI 怎么建 | ✅ **① 条数制摊还**(★ `_CHAR_LOOP_TIME` 8.0 三证关(15 §5.2 C18)⇒ 走 #else,`EnemyMoveNum` 每 tick 上限 + `charcnt` 游标;⚠️ `unifdef_80` 把它误当时间预算是**选错分支**)· **② 刷怪点 = 不阻塞 D6 的注入式替身**(原版 NPC/Lua 脚本刷、脚本层未落地;`enemy_id → findEnemyEncounter → spawnEnemy` 单一真源)· **③ 视野扩「玩家看敌人」**(`CharAppear/Move/Disappear` 加 `entity_type`、`CharAppear` 加 `image`;★ 单向,敌人无会话不接收)· **④ 游荡 AI 数据驱动**(节拍到期 → 随机方向 + `mapWalkable` + 半径门 + world_rng;不移植函数指针 `CHAR_LOOPFUNC` / Lua `RunCharLoopEvent`)· **⑤ 划出**:明雷触发战斗(解 W.4「明雷退回」)/ 完整 AI(追击) / Lua 事件 / 时间预算截断路径。范围 = 宽(含 IDL + `Enemy` 加位置 ⇒ **两处 watched 变更,前推 shared**)。批次 W.2+W.3 | 见 §2.20;★★ **二度反转**(先照 `unifdef_80` 记时间预算制 → `15 §5.2` 三证纠为条数制);`world_map` 15→**26 例 / 213 断言**,反向验证三处逐条转红 |
 | **DR-DT19** | ★★ **明雷触发战斗 W.5(撞明雷退回 + EV 事件开战)**:开战走什么触发 · 退回做不做 · 复活怎么算 | ✅ **① 忠实原版 EV 事件驱动**(用户裁定):新增 `EventRequest`(0x0305)/`EventResult`(0x0306)+ `SessionHost::onEvent`;`World::onEvent` 移植 `EVENT_main`(event.c:37,全仓唯一调用点 `callfromcli.c:1405`)净核 —— 玩家**权威**坐标 + dir 算面前格 → 扫 `world_enemies` 命中 `ENTITY_ENEMY` → 开战 → 回执 `EventResult{seqno,ok}`。★ 只接明雷一路,通用派发骨架(传送点等)预留 · **② 明雷开战用已存在实体**(`triggerNpcEnemyBattle`,移植 `NPC_NPCEnemy_BattleIn`→`BATTLE_CreateVsEnemy(player,_,enemy)`,npc_npcenemy.c:672):`startBattle`+`joinBattle`+`enterEnemyToField` 把地图上那只投影进战场,★★ **转移 handle 所有权**(不 allocate/不 spawnEnemy/不耗战斗 rng)⇒ `enemyCount` 守恒 · **③ 撞明雷退回**(移植 `char_walk.c:585`):走到有世界敌人的格 ⇒ 弹回原格,★ 与开战**解耦**(退回≠开战,原版两条独立机制)· **④ 复活 = count 补齐**(进战斗即从 `world_enemies` 移除 + 广播消失,战斗结束回池 → `spawnWorldEnemies` 按 count 补;⚠️ 立即补齐、精确 `REVIVALTIME` 划出)· **⑤ 划出**:NPC `argstr` 脚本门(gym/item/startmsg/steal ⇒ D6)· 胜利掉落(道具域)· `gym`→mode 2 决斗点场(PvP)· 完整事件表(传送点)· 客户端坐标纠正 XYD。范围 = 宽(含 IDL ⇒ 前推 `shared`)。批次 W.5 | 见 §2.21;★★ **勘误 DR-DT17⑤/DR-DT18⑤「明雷退回」** —— 勘察发现退回**从未实现**、明雷交互整个是缺口(非"改退回为开战") |
 | **DR-DT20** | ★★ **背包 L2 地基 I.1**(道具域第一批):Item 归族 · 背包槽布局 · 道具池容量 | ✅ **① Item 不进 `EntityKind` 五族**(用户裁定):五族判别键是 `CHAR_TYPE`(全是 Char 实体),背包道具是原版**独立全局池** `ITEM_item[itemnum]`(`item.c:486`)成员、非 Char ⇒ 建独立 `EntityPool<Item,10000>` + `ItemHandle`(与 `EntityHandle` 同机制的语义别名,不改池模板)· **② 背包槽照原版连续布局**(用户裁定):`Player.items[kMaxItemHave=54]` = 装备位 9(`CHAR_EQUIPPLACENUM`,`CHAR_HEAD`..`CHAR_EQGLOVE`)+ 背包 15×3=45,`kStartItemArray=9` 为背包起点(捕获扣道具循环 `for(i=CHAR_STARTITEMARRAY;…)` 依赖它);`findFreeItemSlot` 只在背包段找、`clearItemSlot` 全域可清;装备位穿戴语义留装备域 · **③ 容量 10000**(`csa8.0/setup.cf:318` `itemnum`,运行期硬边界 `ITEM_CHECKINDEX`;不可配置化,同 kMaxPlayers)· **④ 字段取展开视图 `ITEM_DATAINT`/`ITEM_DATACHAR` 启用下标 + `itemset6.txt` 实列**,只建背包地基必需(id/name/unique_code/type/level/cost/堆叠两列/掉落两列/主人反指),逐条登记不建 · **⑤ functable/Lua 全段不复刻**(8.0 无 Lua)· **⑥ 划出**:扣/掉/用链路(后三批)· 装备加成 / 合成 / 镶嵌 / 魔法道具 / 状态附加(各属其域)· `current_pile` 运行期状态(写入侧)· `needitemeneny.txt`(捕获扣道具批)。范围 = 宽(动 `shared/model/` ⇒ 前推 `shared-v0.19.0`)。批次 I.1 | 见 §2.22;★★ 连带抓到 **unifdef_80 第二次宏误判**(`_ALLBLUES_LUA_1_8` 判开、StoneAge 全树关 ⇒ 以 StoneAge 为准) |
+| **DR-DT21** | ★★ **捕获扣道具 I.2**(道具域第二批):条件道具需求表来源 · 前置门 CaptureItemCheck 分层 · 全删语义 | ✅ **① 需求表 = 源码硬编码 `NeedEnemy[9]`,不读文件**:`_NEED_ITEM_ENEMY` 双源**关** ⇒ `need_item_eneny_init()`(读 `needitemeneny.txt`)不编译,净核用 `battle_event.c:3890` 硬编码表(524/961/953/962/777/796/812/1105/8;`_DEL_NOT_25`/`_WOLF_TAKE_AXE` 关)⇒ 移植为 `shared/rules/CaptureItem.h::kNeedItemEnemy` 常量 + `isNeedCaptureItem`。⚠️ **更正 DR-DT20 ⑥「需 `needitemeneny.txt`」**:文件在 data/ 但 8.0 净核不读它 · **② 匹配键 = 模板号**:`IsNeedCaptureItem` 读 `CHAR_PETID`,而 `CHAR_PETID = *(tp+E_T_TEMPNO)`(`enemy.c:1200` 四处)⇒ = `EnemyTemplate::temp_no` ⇒ `Enemy.h` 加 `pet_id`、`spawnEnemy` 落值;⚠️ **更正 `Enemy.h` 文末 ②「PETID 归 D 线不建」**(值在已导入模板行里,非外部导入)· **③ 前置门 ④ CaptureItemCheck 分层**(§6.2):原版 `flg = ItemCheck && CaptureCheck`,道具门读**攻方背包**(世界态)⇒ 与 `capturable` 同款:World 在 `resolveTurn` **前**投影到攻方 `Combatant::mods.capture_item_ok`,L3 只做 `&&` 门判定 ⇒ ★ 无道具则不摇捕获 rng(与原版一致);⚠️ 不放 rollCapture 之后补判(会平移 rng 序列)· **④ 全删无条件**:`_CAPTURE_FREES` 开 ⇒ `BATTLE_CaptureItemDelAll` 遍历需求行**全删**命中道具(不 break,源码 :4074);`getDelNeedItem` 门属 `_NEED_ITEM_ENEMY` 关段 ⇒ 无条件删;Lua detach 回调不复刻(8.0 无 Lua)· **⑤ 注入 seam**:`giveItemToPlayer`(同 `spawnEnemyToField` 性质,写入链路=掉落/捡起后续批次)+ 只读面 `playerItemAt` · **⑥ 划出**:`CHAR_complianceParameter` 删后重算(装备域,当前无可观察后果) · 道具入包写入链路(道具域后两批)。范围 = 宽(动 `shared/model/Enemy.h` + 新增 `shared/rules/CaptureItem.h` ⇒ 前推 `shared-v0.20.0`)。批次 I.2 | 见 §2.23;`00` §9.0.50 |
 
 ---
 
@@ -1085,6 +1086,52 @@ D 线入库时导入器**不得**顺手纠正它。用例钉住其**可观察后
 (数 0..54 与 9..54 都是 0);同 §9.0.35「断言的形状没有区分力」族,该起点的区分力由 `model_pool` 反向验证①覆盖(那里可直接往 `items[0..8]` 塞句柄)。
 ⚠️★ 动 `shared/model/`(新 `Item.h` + `Player.h` 改)⇒ watched 变更 ⇒ 锁定 ref 须前推 **`shared-v0.19.0`**(待用户确认)。
 按「只数行」口径:§1–§12 **126 → 127 行**,⚠️/⏳ 仍为 **0 / 7**。
+
+### 2.23 DR-DT21 —— 捕获扣道具 I.2:需求表来源 / CaptureItemCheck 分层 / 全删语义(批次 I.2)
+
+**移植来源**:`battle/battle_event.c` 的 `NeedEnemy[]`(:3890,`_CAPTURE_FREES` 分支)· `IsNeedCaptureItem`(:3927)· `BATTLE_CaptureItemCheck`(:3986)·
+`BATTLE_CaptureItemDelAll`(:4028)· `BATTLE_Capture` 门 `flg = ItemCheck && CaptureCheck`(:4101)· `char/enemy.c:1200` `CHAR_PETID = *(tp+E_T_TEMPNO)`。
+★ 取证基准 = `stoneage85/` 全宏 + `StoneAge/` 交叉核(双源一致);数据基准 = `csa8.0/gmsv/data/`。
+
+**为什么是它**:补 `00` §9.0.26 / §9.0.48 留下的「白给」缺口 —— 原版**扣了道具才给宠物**(某些怪要玩家先持有指定道具才准捕获、捕获成功后全删),
+此前捕获链缺这一环。让 I.1 的 `itemCount` 从「恒 0」变成「能减」。
+
+**① 需求表 = 源码硬编码 `NeedEnemy[9]`,不读文件(纪律 ①「文件存在 ≠ 被读」)**:`_NEED_ITEM_ENEMY` 双源**关**(stoneage85/StoneAge 均无 `#define`)
+⇒ 读 `needitemeneny.txt` 的加载器 `need_item_eneny_init()`(`:3903`)**根本不编译**,8.0 净核用 `battle_event.c:3890` 的硬编码表。
+净核有效行 **9 条**(524→{2456}·961→{20219}·953→{20223}·962→{20222}·777→{20253}·796→{20247}·812→{20259}·1105→{1690,1691,1692}·8→{1810};
+`_DEL_NOT_25_NEED_ITEM` 关 ⇒ 伊甸任务几行**在数组里不被 `#ifndef` 包故计入**,`_WOLF_TAKE_AXE` 关 ⇒ 145/146 双头狼两行不计入)。
+⇒ 移植为 `shared/rules/CaptureItem.h::kNeedItemEnemy` 编译期常量 + `isNeedCaptureItem(pet_id)`。⚠️ **更正 DR-DT20 ⑥ 与 `Item.h` 文末「需 `needitemeneny.txt` 敌人侧表」**:
+文件在 `csa8.0/gmsv/data/` 但 8.0 净核不读它。
+
+**② 匹配键 = 模板号(源码钉死,`Enemy.h` 文末登记误判已更正)**:`IsNeedCaptureItem` 按 `CHAR_getInt(idx, CHAR_PETID)` 匹配(`:3931`),
+而敌人生成时 `CHAR_PETID = *(tp+E_T_TEMPNO)`(`enemy.c:1200/1656/1763/2030` 四处生成路径同一句)⇒ 匹配键 = **模板号** = `EnemyTemplate::temp_no`。
+⇒ `Enemy.h` 加 `pet_id`、`spawnEnemy` 落值 `= tmpl.temp_no`。⚠️ **更正 `Enemy.h` 文末 ②「`CHAR_PETID(=E_T_TEMPNO)` 归 D 线内容导入不建」是误判** ——
+它的值在**已导入的模板行**里,不需要外部导入;`CHAR_PETENEMYID(=ENEMY_ID)` 仍留 D 线(那个才依赖遇敌表)。
+
+**③ 前置门 ④ CaptureItemCheck 的分层(§6.2)**:原版 `BATTLE_Capture` 是 `flg = CaptureItemCheck && CaptureCheck`(:4101)—— 道具门与概率门**并列**,
+没所需道具则整笔失败、连概率都不摇。⚠️ 实现仓把概率判定(`rollCapture`)放在 **L3 纯函数**(`shared/rules/Battle.cpp`,不能读背包),
+而道具门读**攻方背包**(世界态)⇒ **与 `capturable` 同款**:World 在 `resolveTurn` **之前**据本回合 capture 指令跑 `hasCaptureItems`、投影到攻方
+`Combatant::mods.capture_item_ok`(`projectCaptureItemGate`);L3 捕获门加 `&& actor.mods.capture_item_ok`(`Battle.cpp:1199`)。
+⚠️★ **必须在摇 rng 前** —— 门不过 ⇒ 不进 `rollCapture` ⇒ **不消耗捕获 rng**(与原版一致:没道具连骰子都不掷);放 rollCapture 之后补判会平移 rng 序列。
+`Battle.cpp:1183` 注释早预留此落点。默认 `capture_item_ok=true`(无需求怪 / demo foe / PvP / 非捕获场景一律满足)。
+
+**④ 全删无条件**:`_CAPTURE_FREES` 开 ⇒ 捕获成功后走 `BATTLE_CaptureItemDelAll`(第 5 步,`World.cpp` 捕获事件写回)——
+`isNeedCaptureItem(src_enemy->pet_id)` → 对需求行每个非 -1 道具遍历攻方背包段、命中即 `clearItemSlot` + `items.release`(清槽 + 释放实体**成对**,M.1 那条纪律),
+**不 break**(源码 :4074 那句被注释掉的 break ⇒ 同 id 多个全删)。⚠️ `getDelNeedItem()` 门属 `_NEED_ITEM_ENEMY` **关**段 ⇒ 8.0 无条件删,不看配置开关。
+⚠️ `ITEM_DETACHFUNC` 函数指针 + `RunItemDetachEvent` Lua 回调(:4060-4070)**不复刻**(8.0 无 Lua,同 DR-DT20 ⑤)。
+
+**⑤ 注入 seam + 只读面**:`World::giveItemToPlayer(session, Item)` 往背包放道具(三门:无 L2 玩家 / 背包满 / 池满 ⇒ -1 且世界不动)——
+与 `spawnEnemyToField`/`loadEncounterTables` 同性质(灌入点,真写入链路 = 掉落/捡起是道具域后两批);`playerItemAt(session, slot)` 只读面(同 `playerPetAt`)。
+
+**⑥ 划出批次 / 登记不建**:`CHAR_complianceParameter`(删道具后重算属性,:4073)—— 装备加成未移植 ⇒ 本批**无可观察后果**,不调,属装备域 ·
+道具入背包的**写入链路**(掉落/捡起,道具域后两批,当前只有 `giveItemToPlayer` 注入 seam)· `needitemeneny.txt` 文件加载器(`_NEED_ITEM_ENEMY` 8.0 关,净核不需要)。
+
+**验证**:`ctest` **16/16** · `ci_verify` 六项全过(`SA_WERROR` 0 告警)· `world_tick` 78→**85 例**(捕获扣道具 6 组 + spawnEnemy pet_id 落值)·
+`rules_battle` 76→**77 例**(L3 门 ④ + 不摇捕获 rng,靠与门 ② 对比 rng 末态而非「state 不变」——`buildActionOrder` 本就消耗 rng)。
+★ **反向验证两处逐条转红**(注入 A「`captureItemDelAll` 空操作」⇒ 3 组全删用例红;注入 B「去 `&& capture_item_ok`」⇒ 拦截类 + L3 门 ④ 红),
+还原后跨秒重编复跑 16/16、工作树无 `REVVAL` 残留(纪律 ③:反验改动与还原成对)。
+⚠️★ 动 `shared/model/Enemy.h` + 新增 `shared/rules/CaptureItem.h` ⇒ watched 变更 ⇒ 锁定 ref 须前推 **`shared-v0.20.0`**(待用户确认)。
+按「只数行」口径:§1–§12 **127 → 128 行**,⚠️/⏳ 仍为 **0 / 7**。
 
 ### 3.1 逐条裁定理由
 

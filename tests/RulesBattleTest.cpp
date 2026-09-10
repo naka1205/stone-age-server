@@ -1530,6 +1530,52 @@ TEST_CASE("ResolveTurn:前置门任一不过 ⇒ 仍产 CaptureAct 但 flags=0(�
 	                { t.kind = CombatantKind::kPet; }) == 0u);
 }
 
+TEST_CASE("ResolveTurn:条件道具门 ④ ——攻方 capture_item_ok=false ⇒ flags=0 且不摇捕获 rng")
+{
+	// ★★ 捕获前置门 ④(`BATTLE_CaptureItemCheck`,§6.2)。原版 `flg = ItemCheck &&
+	//    CaptureCheck`(`battle_event.c:4101`):攻方没带所需条件道具 ⇒ 整笔失败,连
+	//    概率都不摇。道具门读背包(世界态),由 World 层在 resolveTurn 前投影到攻方
+	//    `mods.capture_item_ok`(见 Combatant.h / World.cpp);L3 只做 `&&` 门判定。
+	auto run = [](void (*mut)(Duel &)) -> std::pair<std::uint32_t, std::uint64_t>
+	{
+		Duel d = makeDuel();
+		d.field.at(0).charm = 100;
+		d.field.at(0).level = 50;
+		d.field.at(10).level = 10;
+		d.field.at(10).hp = 0;
+		d.field.at(10).max_hp = 100;
+		d.field.at(10).mods.capturable = true;
+		d.field.at(10).mods.capture_difficulty = 30;
+		mut(d);
+		setCapture(d.cmds, 0, 10);
+		d.cmds.present[10] = false;
+		SeededRandom rng{0xF00D};
+		SA::Domain::BattleEvents ev{};
+		resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev);
+		REQUIRE(ev.events.size() == 1);
+		REQUIRE(ev.events[0].body_kind == SA::Domain::BattleEvent::BodyKind::CAPTURE_ACT);
+		return {ev.events[0].body.capture_act.flags, rng.state()};
+	};
+
+	// 门 ④ 不过(缺条件道具)⇒ flags=0。
+	const auto gate4 = run([](Duel &d)
+	                       { d.field.at(0).mods.capture_item_ok = false; });
+	CHECK(gate4.first == 0u);
+
+	// ★★ 与门 ②(capturable=false)对比:两者都在 rollCapture **之前**被拦 ⇒ **消耗同样
+	//    多的 rng**(都只花在 buildActionOrder 的排序上,没摇捕获骰子)。⇒ 末态相等。
+	//    若哪天有人把门 ④ 挪到 rollCapture 之后,这条会红(gate4 会多摇一次)。
+	const auto gate2 = run([](Duel &d)
+	                       { d.field.at(10).mods.capturable = false; });
+	CHECK(gate2.first == 0u);
+	CHECK(gate4.second == gate2.second); // ★ rng 末态一致 = 都没摇捕获骰子
+
+	// 对照:两门全开 ⇒ 摇了捕获骰子 ⇒ 成功 + rng 末态与被拦路径不同。
+	const auto open = run([](Duel &) {});
+	CHECK(open.first == 1u);
+	CHECK(open.second != gate4.second); // ★ 多摇了一次 ⇒ 末态不同
+}
+
 TEST_CASE("ResolveTurn:等级门 myLv + 5 < targetLv ⇒ 直接失败(battle_event.c:3834)")
 {
 	Duel d = makeDuel();
