@@ -4285,6 +4285,37 @@ I.1(§9.0.48)落 `shared/model/Item.h` 新增 + `Player.h` 改 ⇒ watched 路�
 ---
 
 
+### 9.0.51 ★★ 批次 I.3 —— 野怪掉落:spawn 千分率摇 → 结算逐件随机拾取 → 灌背包(DR-DT22,2026-09-10)
+
+道具域第三批。让 I.1 的 `itemCount` 从「只减(捕获扣)」到「也能加(战斗掉落)」。
+
+**★★ 开工亲验勘误(纪律①,对象是任务书/记忆)**:掉落被定位到 `NPC_NPCEnemy_Dying`,回源码
+(stoneage85 全宏 + StoneAge 双核)实证那是**明雷专用** `additem`(`npc_npcenemy.c:489`,依赖 NPC
+argstr 脚本层 = DR-DT19 划出的 D6);**野怪掉落是另一套三阶段** `BATTLE_AddExpItem`。⇒ 用户拍板
+本批只做野怪三阶段。⚠️★ 连带:`grep -a` 坑扩大到源码树(`.c/.h` 含 GBK 注释被判 binary,不加
+`-a` 对 `ENEMY_ITEM` 假阴性)。裁定详见 `11` §2.24 / DR-DT22。
+
+**交付(三阶段,行号 = stoneage85 全宏)**:
+- ①`shared/model/Enemy.h` 加 `dropped_items[10]`/`drop_count`;`spawnEnemy`(`rollSpawnStats` 后)
+  千分率 `RAND(0,999)<prob`(`enemy.c:1210`,`_FIX_ITEMPROB` `version.h:117` ON,prob=0 不摇 rng)
+  摇进预掉落槽(紧凑存 `item_id`、保摇号序)。
+- ②`world/Api.h EnemyEncounter` 加 `item[10]`/`item_prob[10]`;战果结算段逐件 `RAND(0,allnum-1)`
+  选在场单位(含宠折算回主人)入局部 `getitem[≤3]`,满则 50/50(`battle.c:6486`,用 `b.rng`)。
+- ③`giveItemIntoPlayer`(抽出与 `giveItemToPlayer` seam 共用,DR-BT5)灌背包,满则丢弃(`battle.c:4471`)。
+
+**三处自主决策(源码/纪律支持)**:紧凑存 `item_id`+延迟 `makeItem`(省池、rng 一致)· 本批不下发
+客户端(服务端权威 + 观察面)· 拾取用 `b.rng`(战斗结束用完即弃)。
+
+**复验**:`ctest` **16/16** · `ci_verify` 六项全过(`SA_WERROR` 0 告警)· `world_tick` 85→**88 例
+/ 1200 断言** · ★ **反向验证三处逐条精确转红**(A 摇号判定恒假 ⇒ drop_count/进背包红、calls 绿;
+B 不灌包 ⇒ 仅进背包红;C prob=0 也摇 ⇒ 仅 calls 断言红),还原后 16/16、`INJECT` 残留 0。
+
+⚠️★ 动 `shared/model/Enemy.h` ⇒ watched 变更 ⇒ **锁定 ref 须前推 `shared-v0.20.0`**(与 I.2 合窗口,
+推送待用户确认)。**登记残缺**:明雷 additem(D6)· 掉落展示/满包提示 DR-UX1(客户端下发)·
+Item 仅 `item_id`(道具表 D 线)· 组队掉落归属(组队未落地)。
+
+---
+
 ### 10.1 R-b:无解的结构性事实
 
 每条标【单源未交叉】/【8.5 源码推定】的规则,实现时**只能靠人工复核**,没有任何自动化验证手段。
@@ -4399,3 +4430,4 @@ I.1(§9.0.48)落 `shared/model/Item.h` 新增 + `Player.h` 改 ⇒ watched 路�
 | 2026-09-10 | ★★ **批次 I.1 —— 背包 L2 地基:Item 族 + 道具池 + Player 背包槽**(新增 **§9.0.48**;`11` 新增 **DR-DT20**;`01` §13 欠债表更新;`03` Item 族归属)。道具域(使用道具 + 掉落 + 捕获扣道具)第一批 —— 三条链的共同前置。交付 `shared/model/Item.h`(Item 族 POD + `ItemHandle` + 63 字节道具名)· `Player.h` 加 `items[54]`(装备位 9 + 背包 45 连续布局)+ `findFreeItemSlot`/`clearItemSlot` · `World` 挂 `EntityPool<Item,10000>` + 观察面 `itemCount`/`playerItemSlotsUsed`。**只建槽 + 池 + 观察面,不接扣/掉/用**。取证:容量 54/10000 均展开视图 + `setup.cf` 实证;★★ **Item 不进 EntityKind 五族**(背包道具是原版全局 `ITEM_item[]` 成员、非 Char);★★ **functable/Lua 全段不复刻**,连带抓到 **unifdef_80 第二次宏误判**(`_ALLBLUES_LUA_1_8` 判开、StoneAge 全树关 ⇒ 以 StoneAge 为准,继 W.3 后 evidence-workflow 第二强样本)。复验:`ctest` **16/16** · `ci_verify` 六项 · `model_pool` 20→**35 例**、`world_tick` 77→**78 例** · 反向验证两处转红 + **一处诚实的"注入不红"**(起点错在 world 层无区分力,由 model_pool 覆盖)。⚠️★ 动 `shared/model/` ⇒ 锁定 ref 须前推 **`shared-v0.19.0`**(✅ 已推,§9.0.49,含 `234d4cc` 一起推;server CI #36 + client CI #25 三平台全绿、发布态 fetch v0.19.0 核实)。 |
 | 2026-09-10 | ★ **推送窗口执行记录 —— shared-v0.19.0**(新增 **§9.0.49**)。I.1(§9.0.48)前推锁定 ref 的窗口闭合:server master → `655c02d` + tag(含 `234d4cc` 文档清账 ahead 1 一起推)· client pin v0.18→v0.19(`62a1ff1`,顺带修 `SaShared.cmake:38` §9.0.47 留的滞后注释)· 两仓×两远端 SHA/tag 一致、tag 集合差空 · server CI #36 / client CI #25 三平台全 `success` + 发布态 FetchContent 日志核实锁定 ref=v0.19.0 与源码一致。凭据现取(§9.0.10)。 |
 | 2026-09-10 | ★★ **批次 I.2 —— 捕获扣道具:CaptureItemCheck 前置门 + CaptureItemDelAll 全删**(新增 **§9.0.50**;`11` 新增 **DR-DT21**;`01` §13 欠债 31)。道具域第二批,补 §9.0.26 /§9.0.48「白给」缺口 —— 原版**扣了道具才给宠物**。交付 `Enemy.h` 加 `pet_id`(= `CHAR_PETID` = 模板号,`spawnEnemy` 落值)· 新增 `shared/rules/CaptureItem.h`(硬编码 `NeedEnemy[9]` + `isNeedCaptureItem`)· **前置门 ④** 投影攻方 `capture_item_ok`(World 在 resolveTurn 前算、L3 做 `&&` 门,无道具不摇 rng)· **全删** 落捕获第 5 步(`World.cpp`,不 break,清槽+释放成对)· 注入 seam `giveItemToPlayer` + 只读面 `playerItemAt`。取证(双源交叉核):★★ **`_NEED_ITEM_ENEMY` 关 ⇒ 8.0 不读 `needitemeneny.txt`,用源码硬编码表**(更正记忆/DR-DT20 ⑥/欠债 30 ①);★ 匹配键 `CHAR_PETID = E_T_TEMPNO` ⇒ `Enemy.h` 文末「PETID 归 D 线不建」是误判、已更正;`_CAPTURE_FREES` 开(全删,DR-BT10 正确)· Lua 回调不复刻。复验:`ctest` **16/16** · `ci_verify` 六项 · `world_tick` 78→**85 例**、`rules_battle` 76→**77 例** · 反向验证两处转红(全删空操作 / 去门④),还原后 16/16、无残留。⚠️★ 动 `shared/model/Enemy.h` + 新增 `shared/rules/CaptureItem.h` ⇒ 锁定 ref 须前推 **`shared-v0.20.0`**(待用户确认,含 `81075ee` ahead 1 一起推)。 |
+| 2026-09-10 | ★★ **批次 I.3 —— 野怪掉落:spawn 千分率摇 → 结算逐件随机拾取 → 灌背包**(新增 **§9.0.51**;`11` 新增 **DR-DT22** + §2.24)。道具域第三批,`itemCount` 从「只减」到「也能加」。★★ 亲验勘误:`NPC_NPCEnemy_Dying` 是明雷 additem(依赖 D6 argstr),**野怪掉落是三阶段** `BATTLE_AddExpItem`(spawn 千分率摇进 `Enemy.dropped_items` → 结算逐件 `RAND(0,allnum-1)` 随机选人入 `getitem[≤3]`、满则 50/50 → `giveItemIntoPlayer` 灌背包、满则丢弃)。三处自主决策(紧凑存 `item_id`+延迟 makeItem / 不下发客户端 / 拾取用 `b.rng`)。⚠️★ `grep -a` 坑扩大到源码树(`.c/.h` 含 GBK 注释)。复验:`ctest` **16/16** · `ci_verify` 六项 · `world_tick` 85→**88 例/1200 断言** · ★ 反向验证三处逐条转红(判定恒假/不灌包/prob=0 也摇),还原后无 `INJECT` 残留。⚠️ 动 `shared/model/Enemy.h` ⇒ 锁定 ref 须前推 **`shared-v0.20.0`**(与 I.2 合窗口,待确认)。登记残缺:明雷 additem(D6)· 掉落展示/满包提示(客户端下发)· Item 仅 id(道具表 D 线)· 组队掉落归属。 |

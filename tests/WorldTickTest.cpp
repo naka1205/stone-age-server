@@ -2900,3 +2900,160 @@ TEST_CASE("捕获扣道具:giveItemToPlayer 注入 seam —— 三门与背包�
 	REQUIRE(it != nullptr);
 	CHECK(it->item_id == 42);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  掉落(道具域第三批 I.3,野怪表驱动:spawn 千分率摇 → 结算逐件随机拾取 → 灌背包)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("掉落:spawn 期摇号 —— 千分率、prob=0 不耗 rng、紧凑存保持摇号序")
+{
+	using SA::Rules::RulesConfig;
+	// script 值 500 ⇒ rand(0,999)=500;prob=1000 场景 500<1000 必掉。够长(≫ rollSpawnStats)。
+	const std::vector<int> script(40, 500);
+
+	// A:无掉落配置 ⇒ drop_count 0,记基准取数次数(= rollSpawnStats,baselevel>0 不摇等级)。
+	ScriptedRandom ra(script);
+	const SA::Model::Enemy a =
+	    spawnEnemy(makeWuliTemplate(), makeWuliEncounterFixedLv1(), 18, ra, RulesConfig{});
+	CHECK(a.drop_count == 0);
+	const int base_calls = ra.calls();
+
+	// B:槽0/槽2 prob=1000 必掉,槽1 prob=0 跳过。
+	ScriptedRandom rb(script);
+	EnemyEncounter enc = makeWuliEncounterFixedLv1();
+	enc.item[0] = 11;
+	enc.item_prob[0] = 1000;
+	enc.item[1] = 22;
+	enc.item_prob[1] = 0; // ★ prob=0 ⇒ 不摇
+	enc.item[2] = 33;
+	enc.item_prob[2] = 1000;
+	const SA::Model::Enemy b = spawnEnemy(makeWuliTemplate(), enc, 18, rb, RulesConfig{});
+
+	// ★ 只摇 2 次(prob!=0 的两槽),prob=0 的槽1 未耗 rng ⇒ 序列不平移。
+	CHECK(rb.calls() == base_calls + 2);
+	// ★ 紧凑存 + 保持摇号顺序(跳过槽1 ⇒ [11,33] 而非 [11,_,33])。
+	REQUIRE(b.drop_count == 2);
+	CHECK(b.dropped_items[0] == 11);
+	CHECK(b.dropped_items[1] == 33);
+	// ★ 掉落摇号在四维之后 ⇒ 不影响四维(A/B 同 script 四维逐值相同)。
+	CHECK(a.vital == b.vital);
+	CHECK(a.str == b.str);
+	CHECK(a.tough == b.tough);
+	CHECK(a.dex == b.dex);
+
+	// C:prob=500、rand 返回 600 ⇒ 600<500 false ⇒ 没摇中(千分率真判定,非恒掉)。
+	ScriptedRandom rc(std::vector<int>(40, 600));
+	EnemyEncounter enc2 = makeWuliEncounterFixedLv1();
+	enc2.item[0] = 44;
+	enc2.item_prob[0] = 500;
+	const SA::Model::Enemy c = spawnEnemy(makeWuliTemplate(), enc2, 18, rc, RulesConfig{});
+	CHECK(c.drop_count == 0);
+}
+
+namespace
+{
+// 强场秒杀 + 刷一只带指定 enc 的乌力 + 推进到战斗结束(端到端打赢野怪)。
+void winBattleAgainst(Fixture &f, SA::Net::ConnectionId id, const EnemyEncounter &enc)
+{
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = 100000;
+	me.max_hp = 100000;
+	me.attack = 100000; // 秒杀
+	me.defense = 10000;
+	me.quick = 500; // 先手
+	me.luck = 10;
+	const BattleId battle = f.world.startBattle(pf);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	REQUIRE(f.world.spawnEnemyToField(battle, SA::Rules::kSideOffset, makeWuliTemplate(),
+	                                  enc, /*baselevel=*/10));
+	for (int i = 0; i < 30; ++i)
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		if (fld == nullptr)
+			break;
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = fld->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd.command.attack.target = static_cast<std::uint32_t>(SA::Rules::kSideOffset);
+		f.world.onBattleCommand(id, cmd);
+		f.clock.advance(2000);
+		f.world.tick();
+	}
+}
+} // namespace
+
+TEST_CASE("掉落:端到端 —— 打赢配掉落的野怪,战利品逐件进玩家背包(阶段①②③)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+	REQUIRE(f.world.itemCount() == 0);
+
+	// 刷必掉两件(1234 + 5678,均 1000‰)的乌力。
+	EnemyEncounter enc = makeWuliEncounterFixedLv1();
+	enc.item[0] = 1234;
+	enc.item_prob[0] = 1000;
+	enc.item[1] = 5678;
+	enc.item_prob[1] = 1000;
+	winBattleAgainst(f, id, enc);
+
+	// ★ 两件都进了背包(单玩家 ⇒ 逐件都归他)。
+	CHECK(f.world.itemCount() == 2);
+	bool got1234 = false, got5678 = false;
+	for (std::size_t s = SA::Model::kStartItemArray; s < SA::Model::kMaxItemHave; ++s)
+	{
+		const SA::Model::Item *pit = f.world.playerItemAt(id, static_cast<int>(s));
+		if (pit == nullptr)
+			continue;
+		if (pit->item_id == 1234)
+			got1234 = true;
+		if (pit->item_id == 5678)
+			got5678 = true;
+	}
+	CHECK(got1234);
+	CHECK(got5678);
+}
+
+TEST_CASE("掉落:未配掉落打赢背包不增 + 背包满则丢弃(源码满销毁)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	SUBCASE("未配掉落表 ⇒ 打赢背包仍空(向后兼容,同 I.1 默认恒 0)")
+	{
+		winBattleAgainst(f, id, makeWuliEncounterFixedLv1()); // item_prob 全 0
+		CHECK(f.world.itemCount() == 0);
+	}
+
+	SUBCASE("背包满 ⇒ 战利品丢弃、不崩、itemCount 不超")
+	{
+		int put = 0;
+		while (f.world.giveItemToPlayer(id, makeItem(7)) >= 0)
+			++put;
+		const std::size_t full = f.world.itemCount();
+		CHECK(f.world.playerItemSlotsUsed(id) == put); // 背包段全满
+		REQUIRE(put > 0);
+
+		EnemyEncounter enc = makeWuliEncounterFixedLv1();
+		enc.item[0] = 1234;
+		enc.item_prob[0] = 1000;
+		enc.item[1] = 5678;
+		enc.item_prob[1] = 1000;
+		winBattleAgainst(f, id, enc);
+
+		CHECK(f.world.itemCount() == full); // ★ 无空位 ⇒ 掉落丢弃,池没涨
+	}
+}

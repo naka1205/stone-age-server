@@ -415,6 +415,25 @@ void captureItemDelAll(SA::Model::Player &owner, std::int32_t pet_id, ItemPool &
 	}
 }
 
+// 往玩家背包放一件道具(三门:无空槽 / 池满 ⇒ 返回 -1 且不写)。道具域第三批 I.3 抽出,
+// 供掉落灌包(战果结算段)与 `World::giveItemToPlayer`(注入 seam)共用,避免双份实现(DR-BT5)。
+// ★ 与 `spawnEnemyToField` 同性质:三门全过才写 ⇒ 失败不留孤儿。
+int giveItemIntoPlayer(SA::Model::Player &owner, const SA::Model::Item &item, ItemPool &items)
+{
+	const int slot = owner.findFreeItemSlot(); // 门 ①:背包段有空槽(只在背包段找)
+	if (slot < 0)
+		return -1;
+	const SA::Model::ItemHandle h = items.allocate(); // 门 ②:道具池有空位
+	if (!h.valid())
+		return -1;
+	SA::Model::Item *slot_item = items.resolve(h);
+	if (slot_item == nullptr)
+		return -1; // 走不到(刚 allocate),守零成本
+	*slot_item = item;
+	owner.items[static_cast<std::size_t>(slot)] = h;
+	return slot;
+}
+
 // 攻方背包里是否**齐备**捕获这只怪所需的全部条件道具(捕获前置门 ④)。
 //
 // ★★ 1:1 移植 `BATTLE_CaptureItemCheck`(展开视图 `battle_event.c:3986-4013`,
@@ -1764,6 +1783,32 @@ void World::tick()
 
 				if (player_won && !dp_battle)
 				{
+					// ── 掉落拾取的暂存与选人范围(源码 `BATTLE_AddExpItem`,批次 I.3)────
+					//
+					// ★ 原版每死一敌即 `BATTLE_AddExpItem`,把敌人预掉落道具逐件随机分给
+					//   一名攻击方 entry(玩家或宠物,宠物折算回主人),暂存到 entry 的
+					//   `getitem[≤3]`,战斗结束再灌背包。⚠️★ 我们在**回合末统一**遍历死敌
+					//   (同经验的时机差异,已登记),`getitem` 用局部数组、per 玩家槽。
+					// ★ **选人范围 `allnum` = 己方在场战斗单位(玩家 + 宠物,源码含宠)**:
+					//   `k = RAND(0,allnum-1)` 选第 k 个在场单位,宠位(≥kBattlePlayerMax)
+					//   折算回主人(`slot-5`,源码 :6462)⇒ 战利品记给玩家。
+					// ⚠️ **rng 用 `b.rng`**:战斗已结束、该 rng 用完即弃 ⇒ 选人的精确分布
+					//   不平移任何后续序列,只定"这场掉落归谁"。
+					// ⚠️★ **组队/死者边角登记**:当前每会话独立一场(§9.0.16)⇒ 己方通常
+					//   单玩家(+宠)⇒ 归属无歧义;精确 `pBidList`(活/全部)与组队掉落分布
+					//   待组队玩法落地复核。
+					std::array<int, SA::Rules::kSideOffset> present_slots{};
+					int allnum = 0;
+					for (int sl = 0; sl < SA::Rules::kSideOffset; ++sl)
+						if (b.field.at(sl).occupied)
+							present_slots[static_cast<std::size_t>(allnum++)] = sl;
+
+					// getitem 暂存:per 玩家槽(0..kBattlePlayerMax-1)3 格,-1 = 空。
+					std::array<std::array<std::int32_t, 3>, SA::Rules::kBattlePlayerMax>
+					    getitem;
+					for (auto &g : getitem)
+						g.fill(-1);
+
 					// 外层:每个还挂在 `enemy_of_slot` 的敌人 = 被打死的(被捕的已清句柄)。
 					for (int es = SA::Rules::kSideOffset; es < SA::Rules::kSlotCount; ++es)
 					{
@@ -1807,6 +1852,58 @@ void World::tick()
 							}
 							p->exp += nowexp;
 							gained[static_cast<std::size_t>(ps)] += nowexp;
+						}
+
+						// ── 掉落拾取(源码 `battle.c:6486-6516`)★ 逐件随机选人入 getitem ──
+						//   与经验同在这只死敌的处理里(源码同一函数、同一 entry 循环)。
+						for (int d = 0; d < e->drop_count && allnum > 0; ++d)
+						{
+							const std::int32_t item_id =
+							    e->dropped_items[static_cast<std::size_t>(d)];
+							// 逐件 `RAND(0,allnum-1)` 选一名在场单位(源码 :6497)。
+							const int slot_k = present_slots[static_cast<std::size_t>(
+							    b.rng.rand(0, allnum - 1))];
+							// 宠位折算回主人(源码 :6462 `subnum-5`)⇒ 战利品记玩家。
+							const int owner =
+							    slot_k >= SA::Rules::kBattlePlayerMax
+							        ? slot_k - SA::Rules::kBattlePlayerMax
+							        : slot_k;
+							const std::size_t oi = static_cast<std::size_t>(owner);
+							// 入主人 getitem 空位;满(3 格)则 50% 覆盖随机格 / 50% 弃(源码 :6504)。
+							int gl = 0;
+							for (; gl < 3; ++gl)
+								if (getitem[oi][static_cast<std::size_t>(gl)] < 0)
+								{
+									getitem[oi][static_cast<std::size_t>(gl)] = item_id;
+									break;
+								}
+							if (gl >= 3 && b.rng.rand(0, 1)) // 50% 覆盖(源码 :6505 `RAND(0,1)`)
+								getitem[oi][static_cast<std::size_t>(b.rng.rand(0, 2))] = item_id;
+							// else(gl>=3 且 rand==0):丢弃该道具(源码 :6513);未 makeItem 实体
+							//   ⇒ 无需 release,item_id 不记即弃。
+						}
+					}
+
+					// ── 灌背包(源码 `BATTLE_GetExpGold:4471`)★ 每个玩家 getitem → 背包 ──
+					//   有空位进包(`CHAR_addItemSpecificItemIndex`);满则源码销毁 ⇒ 我方丢弃。
+					// ⚠️ Item 仅填 `item_id` —— 其余列(name/type/level/cost)待道具表 D 线导入
+					//   (同敌人模板 fixture,登记残缺)。满包提示(DR-UX1)属客户端展示,与掉落
+					//   下发一并留后续(本批服务端权威,不动 IDL)。
+					for (int ps = 0; ps < SA::Rules::kBattlePlayerMax; ++ps)
+					{
+						SA::Model::Player *p = s.players.resolve(
+						    b.player_of_slot[static_cast<std::size_t>(ps)]);
+						if (p == nullptr)
+							continue;
+						for (int gl = 0; gl < 3; ++gl)
+						{
+							const std::int32_t item_id =
+							    getitem[static_cast<std::size_t>(ps)][static_cast<std::size_t>(gl)];
+							if (item_id < 0)
+								continue;
+							SA::Model::Item item{};
+							item.item_id = item_id;
+							(void)giveItemIntoPlayer(*p, item, s.items); // -1 = 背包满 ⇒ 丢弃
 						}
 					}
 				}
@@ -2229,23 +2326,8 @@ int World::giveItemToPlayer(SA::Net::SessionId session, const SA::Model::Item &i
 	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
 	if (p == nullptr)
 		return -1; // 门 ①:无 L2 玩家实体
-
-	// 门 ②:背包有空槽(照 findFreeItemSlot,只在背包段找)。
-	const int slot = p->findFreeItemSlot();
-	if (slot < 0)
-		return -1;
-
-	// 门 ③:道具池有空位。★ 三门全过才写 ⇒ 失败不留孤儿(同 spawnEnemyToField)。
-	const SA::Model::ItemHandle h = s.items.allocate();
-	if (!h.valid())
-		return -1;
-	SA::Model::Item *slot_item = s.items.resolve(h);
-	if (slot_item == nullptr)
-		return -1; // 走不到(刚 allocate),守零成本
-
-	*slot_item = item;
-	p->items[static_cast<std::size_t>(slot)] = h;
-	return slot;
+	// 门 ②③(背包空槽 / 池满)抽到 `giveItemIntoPlayer`,与掉落灌包共用(道具域第三批 I.3)。
+	return giveItemIntoPlayer(*p, item, s.items);
 }
 
 std::size_t World::battleCount() const noexcept { return _impl->battles.size(); }
@@ -3644,6 +3726,25 @@ SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, const EnemyEncounter &enc
 	if (enc.duelpoint <= 0)
 	{
 		out.exp = enc.exp != -1 ? enc.exp : enemyExp(tmpl, out.level, out.pet_rank);
+	}
+
+	// ── 预掉落道具(源码 :1210-1224)★ 千分率摇进敌人预掉落槽,道具域第三批 I.3 ──────
+	//
+	// ⚠️★ **必须在 `rollSpawnStats`(上方四维)之后摇** —— 源码顺序四维 :1067 → 掉落 :1210,
+	//    其间无 rng 消耗 ⇒ 放这里(rank/name/hp/exp 之后)与源码同种子下逐位一致。
+	// ★ 只在 `item_prob != 0` 的槽摇(源码 :1211 `if(ITEMPROB != 0)`)⇒ prob=0 不耗 rng
+	//   ⇒ 未配掉落的敌人 rng 序列与本批之前一致(现有用例不受影响,同 I.1「默认恒 0」)。
+	// ★ 千分率 `RAND(0,999) < prob`(源码 :1213,`_FIX_ITEMPROB` ON);紧凑存 item_id、
+	//   保持摇号顺序(见 `Enemy.h` dropped_items 注释)。
+	for (int i = 0; i < SA::Model::Enemy::kMaxDrops; ++i)
+	{
+		if (enc.item_prob[i] == 0)
+			continue;
+		if (rng.rand(0, 999) < enc.item_prob[i])
+		{
+			out.dropped_items[static_cast<std::size_t>(out.drop_count)] = enc.item[i];
+			++out.drop_count;
+		}
 	}
 
 	return out;

@@ -188,6 +188,25 @@ struct Enemy
 	std::int32_t exp = 0;
 	std::int32_t duelpoint = 0;
 
+	// ── 预掉落道具(源码全宏 `char/enemy.c:1210-1224` `ENEMY_ITEM*` 概率掉落,I.3)────
+	//
+	// ★★ **两阶段掉落的第一阶段落点**:原版在 `ENEMY_createEnemy`(spawn)时就逐槽按
+	//    **千分率** `RAND(0,999) < ITEMPROB`(`_FIX_ITEMPROB` ON,`version.h:117`)摇,
+	//    摇中的道具塞进敌人自己背包前 10 格;敌人被打死后 `BATTLE_AddExpItem`
+	//    (`battle.c:6486`)才把它们拾取给玩家(阶段②/③,在 World 战果结算段)。
+	// ⚠️★ **rng 必须在 spawn 期摇**(源码顺序:四维 `:1067` → 掉落 `:1210`)——挪到死亡时
+	//    摇会平移同种子下的战斗序列、而无一处报错。⇒ `spawnEnemy` 在 `rollSpawnStats`
+	//    之后摇,结果存这里等死亡结算拾取。★ 只在 `item_prob != 0` 的槽摇(prob=0 不耗
+	//    rng ⇒ 未配掉落的敌人 rng 序列与本批之前逐位一致,现有用例不受影响)。
+	// ★ **存 item_id、紧凑存储**(非原版稀疏的敌人背包句柄):原版 spawn 即
+	//    `ITEM_makeItemAndRegist` 造实体占池,我们延到灌包才 `makeItem` —— 不摇 rng ⇒
+	//    序列一致,且省 Item 池、敌人离场/被捕无需清掉落实体(实体创建时机差异无可观察
+	//    后果,登记)。`drop_count` 个有效,顺序 = 摇号顺序(= 原版拾取遍历顺序 ⇒ 阶段②
+	//    逐件选人的 rng 消耗顺序一致)。
+	static constexpr int kMaxDrops = 10; // = 源码 (ENEMY_ITEMPROB10 - ENEMY_ITEM1 + 1) / 2
+	std::int32_t drop_count = 0;
+	std::int32_t dropped_items[kMaxDrops] = {};
+
 	// ── 世界态:位置与游荡节拍(批次 W.2 / W.3)──────────────────────────────
 	//
 	// ★ 原版敌人是 `Char` 结构,与玩家共用 `CHAR_FLOOR/X/Y/DIR`(在地图上游荡)。
@@ -253,11 +272,13 @@ struct Enemy
 //    敌人那个槽存的是 AI 模式;② 捕获公式(§6.2 `× charm / 50`)读的是**攻方**魅力,
 //    攻方是玩家 ⇒ 敌人侧根本不参与。
 //
-// ⑩ 装备与掉落(源码 :1120-1151:`ENEMY_ITEM*` 概率掉落 + `ENEMY_STYLE` → 武器)
-//    ⇒ 道具系统(与 `USE_ITEM` 同批,见 `01` §13 欠债 1 的余项)。
-//    ⚠️★ 这一条有战斗后果、不只是掉落:`ENEMY_STYLE` 给敌人**发一把武器**
-//      ⇒ 影响 `CombatModifiers.unarmed` / `weapon`(§3.9 空手可达 10 段连击)。
-//      本批敌人一律空手 ⇒ **比接了武器的原版更容易触发多段**,是登记在案的偏差。
+// ⑩ 装备与掉落(源码 :1120-1151)⇒ **两半,I.3 建了掉落这半**:
+//    · `ENEMY_ITEM*` 概率掉落 ⇒ ✅ **道具域第三批已建**为上方 `dropped_items`
+//      (spawn 期千分率摇、死亡结算拾取灌包,见该字段注释);
+//    · `ENEMY_STYLE` → 武器 ⇒ **仍留**(装备/武器域,与 `USE_ITEM` 等余项)。
+//      ⚠️★ 它有战斗后果:给敌人发武器 ⇒ 影响 `CombatModifiers.unarmed` / `weapon`
+//      (§3.9 空手可达 10 段连击);本批敌人仍一律空手 ⇒ 比接武器的原版更易触发多段,
+//      **实测仅影响 2%**(`ENEMY_STYLE` 98% 为 0,见 `Api.h` 文末⑤),登记在案的偏差。
 //
 // ⑪ `ENEMY_RandomChange`(源码 :910-987,在 :1152 被调)⇒ 道场 / 宠物族的随机变异
 //    (按 `tempno` 落在三段区间才生效)⇒ 属 L4 内容 + 遇敌表。

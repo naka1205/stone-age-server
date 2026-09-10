@@ -270,6 +270,7 @@ P5 文件名 PascalCase + guard `__SA_<File>_H__` · P6 clang-format 引擎款�
 | **DR-DT19** | ★★ **明雷触发战斗 W.5(撞明雷退回 + EV 事件开战)**:开战走什么触发 · 退回做不做 · 复活怎么算 | ✅ **① 忠实原版 EV 事件驱动**(用户裁定):新增 `EventRequest`(0x0305)/`EventResult`(0x0306)+ `SessionHost::onEvent`;`World::onEvent` 移植 `EVENT_main`(event.c:37,全仓唯一调用点 `callfromcli.c:1405`)净核 —— 玩家**权威**坐标 + dir 算面前格 → 扫 `world_enemies` 命中 `ENTITY_ENEMY` → 开战 → 回执 `EventResult{seqno,ok}`。★ 只接明雷一路,通用派发骨架(传送点等)预留 · **② 明雷开战用已存在实体**(`triggerNpcEnemyBattle`,移植 `NPC_NPCEnemy_BattleIn`→`BATTLE_CreateVsEnemy(player,_,enemy)`,npc_npcenemy.c:672):`startBattle`+`joinBattle`+`enterEnemyToField` 把地图上那只投影进战场,★★ **转移 handle 所有权**(不 allocate/不 spawnEnemy/不耗战斗 rng)⇒ `enemyCount` 守恒 · **③ 撞明雷退回**(移植 `char_walk.c:585`):走到有世界敌人的格 ⇒ 弹回原格,★ 与开战**解耦**(退回≠开战,原版两条独立机制)· **④ 复活 = count 补齐**(进战斗即从 `world_enemies` 移除 + 广播消失,战斗结束回池 → `spawnWorldEnemies` 按 count 补;⚠️ 立即补齐、精确 `REVIVALTIME` 划出)· **⑤ 划出**:NPC `argstr` 脚本门(gym/item/startmsg/steal ⇒ D6)· 胜利掉落(道具域)· `gym`→mode 2 决斗点场(PvP)· 完整事件表(传送点)· 客户端坐标纠正 XYD。范围 = 宽(含 IDL ⇒ 前推 `shared`)。批次 W.5 | 见 §2.21;★★ **勘误 DR-DT17⑤/DR-DT18⑤「明雷退回」** —— 勘察发现退回**从未实现**、明雷交互整个是缺口(非"改退回为开战") |
 | **DR-DT20** | ★★ **背包 L2 地基 I.1**(道具域第一批):Item 归族 · 背包槽布局 · 道具池容量 | ✅ **① Item 不进 `EntityKind` 五族**(用户裁定):五族判别键是 `CHAR_TYPE`(全是 Char 实体),背包道具是原版**独立全局池** `ITEM_item[itemnum]`(`item.c:486`)成员、非 Char ⇒ 建独立 `EntityPool<Item,10000>` + `ItemHandle`(与 `EntityHandle` 同机制的语义别名,不改池模板)· **② 背包槽照原版连续布局**(用户裁定):`Player.items[kMaxItemHave=54]` = 装备位 9(`CHAR_EQUIPPLACENUM`,`CHAR_HEAD`..`CHAR_EQGLOVE`)+ 背包 15×3=45,`kStartItemArray=9` 为背包起点(捕获扣道具循环 `for(i=CHAR_STARTITEMARRAY;…)` 依赖它);`findFreeItemSlot` 只在背包段找、`clearItemSlot` 全域可清;装备位穿戴语义留装备域 · **③ 容量 10000**(`csa8.0/setup.cf:318` `itemnum`,运行期硬边界 `ITEM_CHECKINDEX`;不可配置化,同 kMaxPlayers)· **④ 字段取展开视图 `ITEM_DATAINT`/`ITEM_DATACHAR` 启用下标 + `itemset6.txt` 实列**,只建背包地基必需(id/name/unique_code/type/level/cost/堆叠两列/掉落两列/主人反指),逐条登记不建 · **⑤ functable/Lua 全段不复刻**(8.0 无 Lua)· **⑥ 划出**:扣/掉/用链路(后三批)· 装备加成 / 合成 / 镶嵌 / 魔法道具 / 状态附加(各属其域)· `current_pile` 运行期状态(写入侧)· `needitemeneny.txt`(捕获扣道具批)。范围 = 宽(动 `shared/model/` ⇒ 前推 `shared-v0.19.0`)。批次 I.1 | 见 §2.22;★★ 连带抓到 **unifdef_80 第二次宏误判**(`_ALLBLUES_LUA_1_8` 判开、StoneAge 全树关 ⇒ 以 StoneAge 为准) |
 | **DR-DT21** | ★★ **捕获扣道具 I.2**(道具域第二批):条件道具需求表来源 · 前置门 CaptureItemCheck 分层 · 全删语义 | ✅ **① 需求表 = 源码硬编码 `NeedEnemy[9]`,不读文件**:`_NEED_ITEM_ENEMY` 双源**关** ⇒ `need_item_eneny_init()`(读 `needitemeneny.txt`)不编译,净核用 `battle_event.c:3890` 硬编码表(524/961/953/962/777/796/812/1105/8;`_DEL_NOT_25`/`_WOLF_TAKE_AXE` 关)⇒ 移植为 `shared/rules/CaptureItem.h::kNeedItemEnemy` 常量 + `isNeedCaptureItem`。⚠️ **更正 DR-DT20 ⑥「需 `needitemeneny.txt`」**:文件在 data/ 但 8.0 净核不读它 · **② 匹配键 = 模板号**:`IsNeedCaptureItem` 读 `CHAR_PETID`,而 `CHAR_PETID = *(tp+E_T_TEMPNO)`(`enemy.c:1200` 四处)⇒ = `EnemyTemplate::temp_no` ⇒ `Enemy.h` 加 `pet_id`、`spawnEnemy` 落值;⚠️ **更正 `Enemy.h` 文末 ②「PETID 归 D 线不建」**(值在已导入模板行里,非外部导入)· **③ 前置门 ④ CaptureItemCheck 分层**(§6.2):原版 `flg = ItemCheck && CaptureCheck`,道具门读**攻方背包**(世界态)⇒ 与 `capturable` 同款:World 在 `resolveTurn` **前**投影到攻方 `Combatant::mods.capture_item_ok`,L3 只做 `&&` 门判定 ⇒ ★ 无道具则不摇捕获 rng(与原版一致);⚠️ 不放 rollCapture 之后补判(会平移 rng 序列)· **④ 全删无条件**:`_CAPTURE_FREES` 开 ⇒ `BATTLE_CaptureItemDelAll` 遍历需求行**全删**命中道具(不 break,源码 :4074);`getDelNeedItem` 门属 `_NEED_ITEM_ENEMY` 关段 ⇒ 无条件删;Lua detach 回调不复刻(8.0 无 Lua)· **⑤ 注入 seam**:`giveItemToPlayer`(同 `spawnEnemyToField` 性质,写入链路=掉落/捡起后续批次)+ 只读面 `playerItemAt` · **⑥ 划出**:`CHAR_complianceParameter` 删后重算(装备域,当前无可观察后果) · 道具入包写入链路(道具域后两批)。范围 = 宽(动 `shared/model/Enemy.h` + 新增 `shared/rules/CaptureItem.h` ⇒ 前推 `shared-v0.20.0`)。批次 I.2 | 见 §2.23;`00` §9.0.50 |
+| **DR-DT22** | ★★ **野怪掉落 I.3**(道具域第三批):`NPC_NPCEnemy_Dying` 是不是掉落 · 掉给谁 · 落地形态 · rng 时序 | ✅ **① 亲验勘误**:`NPC_NPCEnemy_Dying` 是**明雷专用** `additem`(固定道具塞全队、依赖 NPC argstr 脚本层 = DR-DT19 划出的 D6、未落地)⇒ 划出;**野怪掉落是另一套三阶段**(`BATTLE_AddExpItem`,`11` §3 主表记对了)· **② 三阶段**:①spawn `enemy.c:1210` 千分率 `RAND(0,999)<prob`(`_FIX_ITEMPROB` ON,prob=0 不摇 rng)摇进 `Enemy.dropped_items` →②结算 `battle.c:6486` 逐件 `RAND(0,allnum-1)` 随机选在场单位(含宠折算回主人 `subnum-5`)入 `getitem[≤3]`(满则 `RAND(0,1)` 50%覆盖/50%弃)→③ `battle.c:4471` `giveItemIntoPlayer` 直接进背包(满则销毁、不落地不捡起)· **③ rng 保序**:摇在 `rollSpawnStats` 后(源码四维→掉落序);拾取用 `b.rng`(战斗结束用完即弃)· **④ 自主决策**:紧凑存 `item_id`+延迟 `makeItem`(省池、rng 一致)· 本批不下发客户端(服务端权威 + 观察面)· **⑤ 划出**:明雷 additem(D6)· 掉落展示/满包提示 DR-UX1(客户端下发)· Item 完整列(道具表 D 线,仅填 `item_id`)· 组队掉落归属(组队玩法未落地)。范围 = 宽(动 `shared/model/Enemy.h` ⇒ 前推 `shared-v0.20.0`,与 I.2 合窗口)。批次 I.3 | 见 §2.24;`00` §9.0.51 |
 
 ---
 
@@ -1132,6 +1133,45 @@ D 线入库时导入器**不得**顺手纠正它。用例钉住其**可观察后
 还原后跨秒重编复跑 16/16、工作树无 `REVVAL` 残留(纪律 ③:反验改动与还原成对)。
 ⚠️★ 动 `shared/model/Enemy.h` + 新增 `shared/rules/CaptureItem.h` ⇒ watched 变更 ⇒ 锁定 ref 须前推 **`shared-v0.20.0`**(待用户确认)。
 按「只数行」口径:§1–§12 **127 → 128 行**,⚠️/⏳ 仍为 **0 / 7**。
+
+### 2.24 DR-DT22 —— 野怪掉落 I.3:两套机制勘误 / 三阶段 / rng 保序(批次 I.3)
+
+★★ **开工亲验勘误(纪律①,对象是任务书/记忆)**:掉落被定位到 `NPC_NPCEnemy_Dying`,回源码
+(stoneage85 全宏 + StoneAge 双核)实证那是**明雷专用** `additem`(`npc_npcenemy.c:489`,
+`NPC_Util_GetStrFromStrWithDelim(argstr,"additem",…)` ⇒ 依赖 NPC argstr 脚本层 = DR-DT19
+划出的 D6、未落地);**野怪表驱动掉落**是另一套三阶段 `BATTLE_AddExpItem`(实现仓 `11` §3 主表
+「掉落 = `BATTLE_AddExpItem`」记对了)。⇒ 用户 2026-09-10 拍板本批只做野怪三阶段。
+⚠️★ 连带发现 `grep -a` 坑扩大到源码树(`.c/.h` 含 GBK 注释被判 binary,不加 `-a` 对 `ENEMY_ITEM`
+假阴性 0 命中,险些下「8.0 不读掉落列」的错结论)。
+
+**三阶段(行号 = stoneage85 全宏)**:
+- ① **spawn 摇**(`enemy.c:1210-1224`):10 槽逐个 `if(ITEMPROB!=0)` 才 `RAND(0,999)<prob`
+  (千分率,`_FIX_ITEMPROB` `version.h:117` ON)摇。⇒ `spawnEnemy` 在 `rollSpawnStats`(四维)后
+  摇进 `Enemy.dropped_items`(紧凑存 `item_id`、保摇号序),prob=0 不耗 rng(⇒ 未配掉落的敌人
+  序列与本批前逐位一致,同 I.1「默认恒 0」)。
+- ② **拾取**(`battle.c:6486-6516`):敌死 → 逐件 `k=RAND(0,allnum-1)` 选一名攻击方在场 entry
+  (`allnum` **含宠物**,宠位折算回主人 `subnum-5`,`:6462`)入 `getitem[≤3]`,满则 `RAND(0,1)`
+  50%覆盖随机格 / 50%弃。⇒ 结算段局部 `getitem`,用 `b.rng`。
+- ③ **灌包**(`battle.c:4471`):`CHAR_findEmptyItemBox>=0` 则 `CHAR_addItemSpecificItemIndex`
+  进背包,满则 `ITEM_endExistItemsOne` 销毁(**不落地、不捡起**)。⇒ `giveItemIntoPlayer`
+  (抽出与 `giveItemToPlayer` seam 共用,DR-BT5 不双份实现)。
+
+**三处自主决策(源码/纪律支持,非新裁定)**:紧凑存 `item_id`+延迟 `makeItem`(原版 spawn 即造实体
+占池,我延到灌包 ⇒ 不摇 rng、省 Item 池、敌人离场/被捕无需清掉落实体);本批不下发客户端(服务端
+权威 + `itemCount`/`playerItemAt` 观察面,展示留后续);拾取用 `b.rng`(战斗结束用完即弃 ⇒ 选人
+分布不平移任何后续序列,只定「这场掉落归谁」)。
+
+**登记残缺**:① 明雷 `additem`(依赖 D6 argstr)· ② 掉落展示 + 满包提示(DR-UX1)= 客户端下发
+(动 IDL,留后续)· ③ Item 仅填 `item_id`,其余列(name/type/level/cost)待道具表 D 线导入 ·
+④ 组队掉落归属精确 `pBidList`(活/全部)待组队玩法落地复核(当前每会话独立一场 ⇒ 己方单玩家、
+归属无歧义)。
+
+**验证**:`ctest` **16/16** · `ci_verify` 六项全过(`SA_WERROR` 0 告警)· `world_tick` 85→**88 例
+/ 1200 断言**(spawn 摇号 + 端到端进背包 + 未配不掉 + 满包丢弃)· ★ **反向验证三处逐条精确转红**
+(A 摇号判定恒假 ⇒ drop_count/进背包红、calls 绿;B 不灌包 ⇒ 仅进背包红;C prob=0 也摇 ⇒ 仅 calls
+断言红),还原后 16/16、`INJECT` 残留 0(纪律 ③)。⚠️★ 动 `shared/model/Enemy.h`(加 `dropped_items`)
+⇒ watched 变更 ⇒ 锁定 ref 须前推 **`shared-v0.20.0`**(与 I.2 合窗口,待用户确认)。
+按「只数行」口径:§1–§12 **128 → 129 行**,⚠️/⏳ 仍为 **0 / 7**。⚠️ 行号基准 = `stoneage85/` 全宏。
 
 ### 3.1 逐条裁定理由
 

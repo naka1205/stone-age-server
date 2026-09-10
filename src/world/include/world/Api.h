@@ -334,6 +334,18 @@ struct EnemyEncounter
 	// ⚠️ `enemyExp()` 只读**模板**列 + level + rank,不读本表(校正见 `Enemy.h` 文末 ⑥)。
 	std::int32_t exp = -1;
 	std::int32_t duelpoint = 0;
+
+	// ── 掉落表(`ENEMY_ITEM1-10` c15-24 / `ENEMY_ITEMPROB1-10` c25-34,批次 I.3)──────
+	//
+	// ★ 实测 948/2154 行(44%)配了掉落;概率是**千分数**(源码全宏 `enemy.c:1213`
+	//   `RAND(0,999) < prob`,`_FIX_ITEMPROB` ON)。`spawnEnemy` 逐槽摇 → `Enemy.dropped_items`。
+	// ⚠️★ **两段等长且相邻**:源码循环上界 `(ENEMY_ITEMPROB10 - ENEMY_ITEM1 + 1) / 2`
+	//   要求 item 段与 prob 段各 `kMaxDrops` 个、位置配对(`item[i]` 配 `item_prob[i]`)。
+	// ★ 判据是 `item_prob[i] != 0`(不是 item 列):prob=0 ⇒ 该槽不摇、不耗 rng ⇒
+	//   默认全 0 = 无掉落 ⇒ 未配掉落的敌人行为与本批之前逐位一致(同 I.1「默认恒 0」)。
+	// ⚠️ 内容表放 `world/`(不前推 shared),同 `capturable` / 等级区间:客户端不刷怪。
+	std::int32_t item[SA::Model::Enemy::kMaxDrops] = {};
+	std::int32_t item_prob[SA::Model::Enemy::kMaxDrops] = {};
 };
 
 // ── 敌人表里源码写了、本批**有意不建**的列(逐条记明,均非遗漏)───────────────
@@ -365,10 +377,11 @@ struct EnemyEncounter
 //    ⇒ 「我们的敌人一律空手 ⇒ 比原版更容易触发空手多段」这条偏差**仍然成立,
 //      但只影响 42 行(2%)**,不是全部敌人。★ M.4b 写它时没有数据,现在有了。
 //
-// ⑥ `ENEMY_ITEM1-10`(c15-24)· `ENEMY_ITEMPROB1-10`(c25-34)⇒ 掉落,道具系统。
+// ⑥ ✅ `ENEMY_ITEM1-10`(c15-24)· `ENEMY_ITEMPROB1-10`(c25-34)⇒ **批次 I.3 已建**为
+//    上方 `item[]` / `item_prob[]`,`spawnEnemy` 逐槽千分率摇 → `Enemy.dropped_items`。
 //    ★ 实测 **948/2154 行(44%)配了掉落**;概率是千分数(源码 :1121 `RAND(0,999) <  prob`)。
 //    ⚠️ 源码的循环上界写成 `(ENEMY_ITEMPROB10 - ENEMY_ITEM1 + 1) / 2`(:1119)——
-//      即"两段列宽的一半" ⇒ 它**要求两段等长且相邻**,这个隐含约束在改表结构时会断。
+//      即"两段列宽的一半" ⇒ 它**要求两段等长且相邻**,已用 `kMaxDrops` 钉住两段等长。
 //
 // ⑦ `ENEMY_ID` 写进 `Model::Enemy`(`CHAR_PETENEMYID`)⇒ 见 `enemy_id` 字段那条。
 //
