@@ -4148,6 +4148,60 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 
 ★ 只在 Apple clang 21 跑过,GCC/MSVC 交 CI。
 
+### 9.0.46 ★★ 批次 W.5 —— 明雷触发战斗:EV 事件开战 + 撞明雷退回(DR-DT19,2026-09-10)
+
+> 补全明雷交互闭环:世界游荡怪(明雷,W.2+W.3)此前**撞上无反应** —— `walkStep` 只判地形、敌人不占格、不进 `olink`
+> ⇒ 玩家能直接走上明雷格,既不退回也不开战。本批从零做**退回 + EV 事件开战**两者。裁定详见 `11` §2.21 DR-DT19。
+
+⚠️★★ **勘误(承 §9.0.45 ⑤ 未做表首行)**:那条写「明雷触发战斗…解 W.4 明雷退回」,隐含"退回已实现、W.5 改成开战"。
+勘察实证**退回从未实现** ⇒ 明雷交互(退回 + 开战)整个是缺口,W.5 做两者,不是"改退回为开战"。
+
+交付面:
+- **IDL**(前推面):`world_map.proto` 加 `EventRequest`(0x0305:x/y/dir/event_type/seqno)/ `EventResult`(0x0306:seqno/ok);
+  重跑 `saidl_gen.py`(`ids.h` + `world_map.sa.h` 生成 + `msg_ids.json` 注册)。
+- **net**:`SessionHost::onEvent`(照 W.1 `onWalk` 族)· `Session::handleEventRequest`(0x0305 分发,状态门 kOnline,照 `handleWalkRequest`)。
+- **world(核心)**:`World::onEvent` 移植 `EVENT_main` 净核 · `triggerNpcEnemyBattle` 明雷开战 · `walkStep` 后加退回门。
+
+#### ① EV 事件驱动:开战是客户端主动发,不是服务端自动(取证纠正)
+
+原版 `EVENT_main`(`event.c:37`)**全仓唯一调用点在 `callfromcli.c:1405`**(即 `lssproto_EV_recv`)⇒ 明雷开战由**客户端发 EV**驱动
+(玩家面向明雷格 → 扫面前格事件对象 → 命中 `CHAR_EVENT_ENEMY` → `NPC_NPCEnemy_BattleIn` → `BATTLE_CreateVsEnemy(player,_,enemy)`),
+**不是**服务端走路后自动开战。⇒ W.5 建最小 EV 事件通道:`onEvent` 用**权威玩家坐标 + `dir`** 算面前格(不信 `req.x/y`,同 `onWalk` 防瞬移)。
+★ 只接 `ENTITY_ENEMY`;`functbl[event]` 通用派发(传送点 `_MAP_WARPPOINT` 等)骨架预留、本批不接。
+
+#### ② 明雷开战用已存在实体,转移所有权(与暗雷 triggerEncounter 的关键区别)
+
+暗雷当场 `spawnEnemyToField`(allocate + `spawnEnemy` 生成)。明雷那只**早在地图上生成好**(W.2)⇒ `triggerNpcEnemyBattle`:
+`startBattle` + `joinBattle`(玩家 Side[0])+ `enterEnemyToField(kSideOffset, *已有 Enemy)`,★★ **把 `EntityHandle` 从 `world_enemies`
+转移给 `enemy_of_slot`**(不 allocate/不 spawnEnemy/**不耗战斗 rng**)⇒ `enemyCount` 守恒。开战即从 `world_enemies` 移除 + 单向广播消失。
+★ 复活 = count 补齐:进战斗腾出名额 ⇒ 下 tick `spawnWorldEnemies` 补(⚠️ 立即补、精确 `REVIVALTIME` 划出)。
+
+#### ③ 撞明雷退回,与开战解耦(移植 char_walk.c:585)
+
+`kCharLoop` 玩家段 `walkStep` 成功后,`worldEnemyAt(新格)` 命中 ⇒ 弹回原格 + `moved=false`(复用撞墙处理,不广播 move)。
+★ **退回≠开战**:原版两条独立机制——退回是位置保护(走不进敌人格),开战靠玩家主动发 EV。⚠️ 客户端坐标纠正(`XYD_send:588`)划出(W.1 未建 XYD)。
+
+#### ④ 复验
+
+`ctest` **16/16**(`world_map` 26 → **30 例 / 270 断言**,+4:撞明雷退回 / 面向发 EV 开战+池守恒 / 打空格 ok=false / 战后 count 补齐;
+`net_framing` +1:EV 0x0305 的 kOnline 门 + 路由 + 字段解码)· `ci_verify` 六项全过(`SA_WERROR` 清洁构建 0 告警)· `idl_verify`
+(schema 改 + 重跑一致)· `dr_table`(§2 加 DT19 + §2.21)· `code_format`。★ **反向验证两处逐条精确转红**:禁退回门 ⇒ **仅**「撞明雷退回」红
+(开战用例仍绿 ⇒ 坐实两机制解耦)· 禁 `world_enemies` 移除 ⇒ 开战 + 复活红(退回仍绿),恢复后全绿。★ `enemyCount` 守恒断言正常跑通过即证「转移非新建」。
+
+#### ⑤ ⚠️ 未做 / 登记残缺
+
+| 项 | 归属 |
+|---|---|
+| NPC `argstr` 脚本门(`gym`/`item`/`startmsg`/`steal`/`deniedmsg`,`NPC_NPCEnemy_BattleIn` 全靠它)| D6 脚本层未落地 |
+| 胜利掉落(`NPC_NPCEnemy_Dying`)| 道具域 |
+| `gym`→`BATTLE_CreateVsEnemy` mode 2 决斗点场 | PvP / saac 域 |
+| 通用事件表(传送点 `_MAP_WARPPOINT` 等)| `EVENT_main` 骨架已留,只接明雷一路 |
+| 精确复活时机(`DIETIME`/`REVIVALTIME`)| 状态系统;当前用 count 立即补齐替代 |
+| 客户端 EV 实装 + 坐标纠正 XYD | 客户端仓 / W.1 走路同步残缺 |
+
+⚠️★★ **`world_map.proto` 加 EV 两消息 ⇒ `idl/generated` watched 变更 ⇒ 锁定 ref 须前推 `shared-v0.18.0`**(推送窗口待办)。
+★ 只在 Apple clang 21 跑过,GCC/MSVC 交 CI。
+
 ---
 
 ### 10.1 R-b:无解的结构性事实

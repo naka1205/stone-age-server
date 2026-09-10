@@ -610,6 +610,7 @@ class SessionBridge final : public TransportEvents, public SessionHost
 	void onSessionReady(SessionId id) override { ready.push_back(id); }
 	void onBattleCommand(SessionId, const SA::Domain::BattleCommand &) override {}
 	void onWalk(SessionId, const SA::Domain::WalkRequest &) override {}
+	void onEvent(SessionId, const SA::Domain::EventRequest &) override {}
 	void onSessionClosed(SessionId) override {}
 
 	ConnectionId conn() const { return _conn; }

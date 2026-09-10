@@ -104,6 +104,45 @@ inline void decode(SA::IDL::Reader& r, CharDisappear& m) {
   m.entity_type = r.u32();
 }
 
+struct EventRequest {
+  std::int32_t x;
+  std::int32_t y;
+  std::uint32_t dir;
+  std::uint32_t event_type;
+  std::uint32_t seqno;
+};
+
+inline void encode(SA::IDL::Writer& w, const EventRequest& m) {
+  w.i32(m.x);
+  w.i32(m.y);
+  w.u32(m.dir);
+  w.u32(m.event_type);
+  w.u32(m.seqno);
+}
+
+inline void decode(SA::IDL::Reader& r, EventRequest& m) {
+  m.x = r.i32();
+  m.y = r.i32();
+  m.dir = r.u32();
+  m.event_type = r.u32();
+  m.seqno = r.u32();
+}
+
+struct EventResult {
+  std::uint32_t seqno;
+  bool ok;
+};
+
+inline void encode(SA::IDL::Writer& w, const EventResult& m) {
+  w.u32(m.seqno);
+  w.b(m.ok);
+}
+
+inline void decode(SA::IDL::Reader& r, EventResult& m) {
+  m.seqno = r.u32();
+  m.ok = r.b();
+}
+
 }  // namespace Domain
 }  // namespace SA
 

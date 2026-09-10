@@ -673,6 +673,7 @@ class World final : public SA::Net::TransportEvents,
 	// ── SessionHost ──
 	void onSessionReady(SA::Net::SessionId id) override;
 	void onWalk(SA::Net::SessionId id, const SA::Domain::WalkRequest &req) override;
+	void onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req) override;
 	void onBattleCommand(SA::Net::SessionId id,
 	                     const SA::Domain::BattleCommand &cmd) override;
 	void onSessionClosed(SA::Net::SessionId id) override;
@@ -777,6 +778,16 @@ class World final : public SA::Net::TransportEvents,
 	// ⚠️ `area_row` 是 `findEncountArea` 已命中的区域下标(kCharLoop 里算好);返回是否真开了战
 	//   (无可用编组 / 空敌人列表 ⇒ false,与原版「本次不遇敌」等价)。
 	bool triggerEncounter(SA::Net::SessionId session, std::int32_t area_row);
+
+	// 明雷开战(批次 W.5,内部)——移植 EV 事件链 `EVENT_main`(event.c:37)→ `NPC_NPCEnemy_Encount`
+	//   → `NPC_NPCEnemy_BattleIn` → `BATTLE_CreateVsEnemy(player,_,enemy)`(npc_npcenemy.c:672/674)。
+	// ★★ 与暗雷 `triggerEncounter` 的关键区别:明雷用**世界态已存在的敌人实体**
+	//    (`world_enemies[idx]`,把 `EntityHandle` 从世界态**转移**给战斗态 `enemy_of_slot`),
+	//    ⇒ 不 `allocate`、不 `spawnEnemy`、**不耗战斗 rng**(敌人已在地图上,四维早已定)。
+	//    开战即从 `world_enemies` 移除 + `broadcastEnemyDespawn`(原版明雷进战斗态即从地图消失)。
+	// ⚠️ 战斗结束时 `enemy_of_slot` 的 handle 按暗雷同一路径回池 ⇒ 下个 tick `spawnWorldEnemies`
+	//    据 `SpawnPoint.count` 补齐 ⇒ 自然复活(精确 REVIVALTIME 划出)。返回是否真开了战。
+	bool triggerNpcEnemyBattle(SA::Net::SessionId session, std::size_t world_enemy_idx);
 
 	struct Impl;
 	std::unique_ptr<Impl> _impl;

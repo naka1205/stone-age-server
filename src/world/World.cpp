@@ -954,6 +954,10 @@ struct World::Impl
 	// ── 世界敌人:生成 / 游荡 / 视野(批次 W.2 / W.3)──────────────────────────
 	//   ★ 都是 Impl 成员:要碰 enemies 池 / world_enemies / olink / 视野下行,自由函数装不下。
 	//
+	// 找站在 (floor,x,y) 的世界敌人在 world_enemies 的下标;无则返回 world_enemies.size()(批次 W.5)。
+	//   ★ 退回(kCharLoop 撞明雷)与开战(onEvent 面前格)共用:两处都问"这格有没有明雷"。
+	//   ⚠️ 线性扫(world_enemies 数量小,同项目对内容表线性扫的取向,见 findEncountArea)。
+	std::size_t worldEnemyAt(std::int32_t floor, std::int32_t x, std::int32_t y);
 	// kNpcSpawn:据 spawn_points 把世界态敌人补齐到各点的 count(不足则 spawnEnemy 生成 + 入池)。
 	void spawnWorldEnemies();
 	// kCharLoop 非玩家段:条数制摊还,本 tick 最多处理 max_this_tick 只(到期的游荡一步)。
@@ -1294,6 +1298,19 @@ void World::Impl::refreshEnemyView(SA::Net::ConnectionId viewer, const SA::Model
 			sendTo(viewer, dis);
 		}
 	}
+}
+
+// (floor,x,y) 上的世界敌人在 world_enemies 的下标;无则返回 world_enemies.size()(批次 W.5)。
+//   ★ 撞明雷退回(kCharLoop)与明雷开战(onEvent 面前格)共用这一个「这格有没有明雷」查询。
+std::size_t World::Impl::worldEnemyAt(std::int32_t floor, std::int32_t x, std::int32_t y)
+{
+	for (std::size_t i = 0; i < world_enemies.size(); ++i)
+	{
+		const SA::Model::Enemy *e = enemies.resolve(world_enemies[i].handle);
+		if (e != nullptr && e->floor == floor && e->x == x && e->y == y)
+			return i;
+	}
+	return world_enemies.size();
 }
 
 // kNpcSpawn:据刷怪点把世界态敌人补齐到各点 count。★ 不阻塞 D6 的注入式刷怪(见 Api.h SpawnPoint)。
@@ -1705,6 +1722,17 @@ void World::tick()
 		// ⚠️ 非法字符也消费掉,不卡住整串(原版 ctodirmode 不校验,越界由 VALIDATEDIR 兜)。
 		c.walk_seq.erase(c.walk_seq.begin());
 		c.next_walk_at_ms = s.now_ms + kWalkIntervalMs;
+
+		// ── W.5:撞明雷退回(移植 char_walk.c:585-593)────────────────────────
+		//   走到的新格若有世界敌人(明雷)⇒ 弹回原格,不占敌人格(朝向已落,保留)。
+		//   ★ 与开战解耦:开战靠玩家主动发 EV(onEvent);走路撞上只退回 —— 原版两条独立机制。
+		//   ⚠️ 客户端坐标纠正(原版 XYD_send:588)划出:W.1 未建 XYD 下行,同其走路同步残缺。
+		if (moved && s.worldEnemyAt(p->floor, p->x, p->y) != s.world_enemies.size())
+		{
+			p->x = ox;
+			p->y = oy;
+			moved = false;
+		}
 
 		// 里程碑②:位置变了 ⇒ 更新 olink(旧格摘、新格挂)+ 视野广播(扫格 diff)。
 		if (moved)
@@ -2126,6 +2154,61 @@ bool World::triggerEncounter(SA::Net::SessionId session, std::int32_t area_row)
 	return placed > 0;
 }
 
+// ══ 明雷开战(批次 W.5)═══════════════════════════════════════════════
+//   移植 EV 事件链 EVENT_main → NPC_NPCEnemy_Encount → NPC_NPCEnemy_BattleIn →
+//   BATTLE_CreateVsEnemy(player,_,enemy)(npc_npcenemy.c:672/674)的净核。
+//   ★ 与暗雷 triggerEncounter 的关键区别见 Api.h 声明处:用世界态**已存在**的敌人实体,
+//     转移 handle 所有权,不 allocate / 不 spawnEnemy / 不耗战斗 rng。
+bool World::triggerNpcEnemyBattle(SA::Net::SessionId session, std::size_t world_enemy_idx)
+{
+	Impl &s = *_impl;
+	if (world_enemy_idx >= s.world_enemies.size())
+		return false;
+	// ★ 拷一份 WorldEnemy:下面要 erase(world_enemies),持有引用会失效。
+	const Impl::WorldEnemy we = s.world_enemies[world_enemy_idx];
+	SA::Model::Enemy *enemy = s.enemies.resolve(we.handle);
+	if (enemy == nullptr)
+		return false;
+	// 记世界坐标:广播消失要在 erase 前用它(enterEnemyToField 只改战场投影,不动 Enemy 的 x/y)。
+	const std::int32_t ex = enemy->x;
+	const std::int32_t ey = enemy->y;
+
+	// ── 建场 + 玩家入场(Side[0] 首位,同 triggerEncounter)──────────────────
+	SA::Rules::BattleField field{};
+	field.at(0) = makePlayerCombatant();
+	const BattleId battle = startBattle(field);
+	if (!joinBattle(battle, session, 0))
+	{
+		s.logger.log(SA::Platform::LogLevel::kError,
+		             SA::Platform::LogEvent::kBattleJoinFailed,
+		             {{"battle_id", battle},
+		              {"session_id", session},
+		              {"reason", std::string_view("npcenemy_join_failed")}});
+		return false;
+	}
+
+	// ── 明雷入场(敌方首槽 kSideOffset)——★ 用**已存在**的敌人实体,转移所有权 ──────────
+	const auto bit = s.battles.find(battle);
+	if (bit == s.battles.end())
+		return false; // 走不到(startBattle 刚建),守它零成本(同 spawnEnemyToField)。
+	BattleInstance &b = bit->second;
+	const std::uint8_t slot = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+	if (b.enemy_of_slot[slot].valid())
+		return false; // 敌方首槽被占(空场刚建,不该发生)——守它。
+	if (!enterEnemyToField(b.field, static_cast<int>(slot), *enemy))
+		return false; // 入场门(槽越界/被占):空战斗留 tick 收尾,同 triggerEncounter。
+	// ★★ 所有权转移:同一 EntityHandle 从世界态挪到战斗态(enemy_of_slot),不 allocate/不 release
+	//    ⇒ 战斗结束按暗雷同一路径回池;enemyCount() 守恒(不是新建一只)。
+	b.enemy_of_slot[slot] = we.handle;
+
+	// ── 从世界态移除 + 广播消失(原版明雷进战斗态即从地图消失)───────────────────
+	//   ⚠️ 先广播(用移除前的世界坐标)再 erase;broadcastEnemyDespawn 单向发给视野内玩家。
+	s.broadcastEnemyDespawn(ex, ey, encodeHandle(we.handle));
+	s.world_enemies.erase(s.world_enemies.begin() +
+	                      static_cast<std::ptrdiff_t>(world_enemy_idx));
+	return true;
+}
+
 // ══ TransportEvents ═════════════════════════════════════════════
 void World::onConnected(SA::Net::ConnectionId id)
 {
@@ -2412,6 +2495,40 @@ void World::onWalk(SA::Net::SessionId id, const SA::Domain::WalkRequest &req)
 	//      kCharLoop 玩家段按 walksendinterval 消费(CHAR_walkcall)。
 	it->second.walk_seq = std::string(req.direction.c_str());
 	it->second.next_walk_at_ms = 0; // 立即可走第一步(now_ms >= 0)
+}
+
+void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
+{
+	// 移植 lssproto_EV_recv(callfromcli.c:1405)→ EVENT_main(event.c:37)净核:
+	//   算面前格 → 扫该格事件对象 → 命中明雷则开战。★ 本批只接 ENTITY_ENEMY 一路
+	//   (原版 functbl[event] 是通用派发,传送点 warppoint 等其他事件族为后续预留)。
+	Impl &s = *_impl;
+	bool ok = false;
+
+	// 只处理明雷(ENTITY_ENEMY);其他 event_type ⇒ ok=false(未接的事件族,不报错、不断连)。
+	if (req.event_type ==
+	    static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY))
+	{
+		const auto it = s.conns.find(id); // 1.5:SessionId == ConnectionId
+		SA::Model::Player *p = s.players.resolve(s.player_of_session.find(id));
+		if (it != s.conns.end() && p != nullptr && req.dir < 8)
+		{
+			// 面前格 = 玩家**权威**坐标朝 dir 前一格(不信 req.x/y,同 onWalk 防瞬移;原版
+			//   callfromcli.c:1402 CHAR_getCoordinationDir(dir, CHAR_X, CHAR_Y, 1, &fx, &fy))。
+			const std::int32_t fx = p->x + kDirDelta[req.dir].dx;
+			const std::int32_t fy = p->y + kDirDelta[req.dir].dy;
+			const std::size_t we = s.worldEnemyAt(p->floor, fx, fy);
+			if (we != s.world_enemies.size())
+				ok = triggerNpcEnemyBattle(id, we);
+		}
+	}
+
+	// 回执(原版 lssproto_EV_send(fd, seqno, rc)):seqno 原样带回,ok = 是否命中并开战。
+	//   ★ 靠 seqno 关联(不依赖传输层 corr_id),同原版 EV 的 seqno 机制。
+	SA::Domain::EventResult res{};
+	res.seqno = req.seqno;
+	res.ok = ok;
+	s.sendTo(id, res);
 }
 
 void World::onSessionClosed(SA::Net::SessionId id)

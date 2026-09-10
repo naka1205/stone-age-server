@@ -35,12 +35,18 @@ class RecordingHost final : public SessionHost
 		walks.push_back(req);
 		last_command_session = id;
 	}
+	void onEvent(SessionId id, const SA::Domain::EventRequest &req)
+	{
+		events.push_back(req);
+		last_command_session = id;
+	}
 	void onSessionClosed(SessionId id) { closed.push_back(id); }
 
 	std::vector<SessionId> ready;
 	std::vector<SessionId> closed;
 	std::vector<SA::Domain::BattleCommand> commands;
 	std::vector<SA::Domain::WalkRequest> walks;
+	std::vector<SA::Domain::EventRequest> events;
 	SessionId last_command_session = 0;
 };
 
@@ -412,6 +418,38 @@ TEST_CASE("战斗指令要求 kOnline")
 		CHECK(s.handleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
 		REQUIRE(host.commands.size() == 1);
 		CHECK(host.commands[0].command.attack.target == 10u);
+		CHECK(host.last_command_session == 7u);
+	}
+}
+
+// ⚠️ 只有在世的会话能触发事件(EV 明雷开战)—— 同战斗指令,net 层状态门(handleEventRequest)。
+TEST_CASE("事件请求(EV,0x0305)要求 kOnline,在世则解码转交宿主")
+{
+	RecordingHost host;
+	Session s(7, kVersion, kHeartbeat, &host);
+	std::vector<std::uint8_t> out;
+	const std::vector<std::uint8_t> hs = handshakeFrame(kVersion);
+	REQUIRE(s.handleFrame(hs.data() + 4, static_cast<std::uint32_t>(hs.size() - 4), out));
+
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY);
+	ev.seqno = 42;
+	const std::vector<std::uint8_t> in = framed(0, ev);
+
+	SUBCASE("仅已认证 ⇒ 拒绝")
+	{
+		CHECK_FALSE(s.handleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
+		CHECK(host.events.empty());
+	}
+	SUBCASE("在世 ⇒ 转交宿主(0x0305 路由 + 字段解码)")
+	{
+		s.markOnline();
+		CHECK(s.handleFrame(in.data() + 4, static_cast<std::uint32_t>(in.size() - 4), out));
+		REQUIRE(host.events.size() == 1);
+		CHECK(host.events[0].seqno == 42u);
+		CHECK(host.events[0].event_type ==
+		      static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY));
 		CHECK(host.last_command_session == 7u);
 	}
 }

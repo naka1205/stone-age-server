@@ -787,3 +787,132 @@ TEST_CASE("W.3视野:玩家走出敌人视野 ⇒ 收到敌人 CharDisappear")
 	mv.feed(f.transport.sent(viewer));
 	CHECK(countId(mv.disappears, eid) >= 1);
 }
+
+// ══ 里程碑:W.5 明雷触发战斗(撞明雷退回 + 面向发 EV 开战)════════════════════════
+//
+// ★ 与 W.4 暗雷(走路骰子即时 spawn 到战场)不同:明雷是**地图上已存在**的世界敌人 ——
+//   撞上格子只退回(char_walk.c:585),开战靠玩家主动发 EV(lssproto_EV_recv → EVENT_main →
+//   NPC_NPCEnemy_BattleIn),把那只**已存在**的敌人(含其等级/血量)投影进战场、转移所有权。
+
+namespace
+{
+
+// 从会话出站字节里找 seqno 对应的 EventResult.ok(找不到返回 false)。批次 W.5。
+//   ⚠️ 回执经 sendTo → conn.outbound,须 tick 一次 flush 到 transport.sent 后才读得到。
+bool eventResultOk(const std::vector<std::uint8_t> &sent, std::uint32_t seqno)
+{
+	if (sent.empty())
+		return false;
+	SA::Net::FrameReader reader;
+	REQUIRE(reader.push(sent.data(), sent.size()));
+	bool ok = false;
+	for (;;)
+	{
+		const std::uint8_t *p = nullptr;
+		std::uint32_t len = 0;
+		const SA::Net::FrameStatus st = reader.next(&p, &len);
+		if (st == SA::Net::FrameStatus::kNeedMore)
+			break;
+		REQUIRE(st == SA::Net::FrameStatus::kOk);
+		SA::Net::EnvelopeView env;
+		REQUIRE(SA::Net::decodeEnvelope(p, len, env));
+		if (static_cast<SA::IDL::MsgId>(env.msg_id) == SA::IDL::MsgId::EventResult)
+		{
+			SA::IDL::Reader rd(env.body, env.body_len);
+			SA::Domain::EventResult m;
+			decode(rd, m);
+			if (m.seqno == seqno)
+				ok = m.ok;
+		}
+		reader.pop();
+	}
+	return ok;
+}
+
+// 造一条 EV 事件请求(明雷开战,event_type = ENTITY_ENEMY)。
+SA::Domain::EventRequest makeEnemyEvent(std::uint32_t dir, std::uint32_t seqno)
+{
+	SA::Domain::EventRequest ev{};
+	ev.dir = dir;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY);
+	ev.seqno = seqno;
+	return ev;
+}
+
+} // namespace
+
+TEST_CASE("W.5:撞明雷退回 —— 走向明雷格被弹回,坐标不变、不开战")
+{
+	MoveFixture f;
+	const auto id = f.spawn();                                                    // 玩家中心 (32,32)
+	loadWorldEnemyFixture(f.world, 1, /*radius=*/0, /*interval=*/100000, 33, 32); // 明雷东邻,不游荡
+	f.world.tick();                                                               // 刷明雷到 (33,32)
+	REQUIRE(f.world.worldEnemyCount() == 1);
+
+	f.sendWalk(id, "c"); // 'c' = 东 ⇒ 目标格 (33,32) 有明雷
+	f.world.tick();
+
+	const auto p = f.world.playerPos(id);
+	CHECK(p.x == 32); // ★ 退回:没走进敌人格(char_walk.c:585)
+	CHECK(p.y == 32);
+	CHECK(p.dir == 2);                     // 朝向已落(东)——原版退回前先 setInt(CHAR_DIR)
+	CHECK(f.world.battleCount() == 0);     // 撞上不开战(开战靠 EV,两条独立机制)
+	CHECK(f.world.worldEnemyCount() == 1); // 明雷仍在世界(没被拉进战斗)
+}
+
+TEST_CASE("W.5:面向明雷发 EV ⇒ 开战,明雷从世界移入战斗(转移所有权,池守恒)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f); // ★ 握手过 ⇒ joinBattle 不被拒(非 kAnonymous)
+	loadWorldEnemyFixture(f.world, 1, 0, 100000, 33, 32);
+	f.world.tick(); // 刷明雷到 (33,32)
+	REQUIRE(f.world.worldEnemyCount() == 1);
+	const std::size_t enemies_before = f.world.enemyCount();
+	REQUIRE(enemies_before == 1);
+
+	f.world.onEvent(id, makeEnemyEvent(/*dir=*/2, /*seqno=*/7)); // 面向东 ⇒ 面前格 (33,32) 有明雷
+
+	CHECK(f.world.battleCount() == 1);             // 开了一场
+	CHECK(f.world.worldEnemyCount() == 0);         // 明雷从世界态移除(进战斗即从地图消失)
+	CHECK(f.world.enemyCount() == enemies_before); // ★★ 池守恒:转移 handle 所有权,不是新建一只
+	// 首场 battleId==1;玩家 Side[0] slot0,明雷 Side[1] 首槽 kSideOffset。
+	const SA::Rules::BattleField *fld = f.world.battleField(1);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->at(0).kind == SA::Rules::CombatantKind::kPlayer);
+	CHECK(fld->at(SA::Rules::kSideOffset).occupied);
+	CHECK(f.world.battleEnemyAt(1, SA::Rules::kSideOffset) != nullptr);
+
+	f.world.tick();                                // flush 回执到 transport.sent
+	CHECK(eventResultOk(f.transport.sent(id), 7)); // 回执 ok=true(原版 EV_send)
+}
+
+TEST_CASE("W.5:EV 面前格无明雷 ⇒ 不开战,回执 ok=false")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	loadWorldEnemyFixture(f.world, 1, 0, 100000, 33, 32); // 明雷在东邻 (33,32)
+	f.world.tick();
+	REQUIRE(f.world.worldEnemyCount() == 1);
+
+	f.world.onEvent(id, makeEnemyEvent(/*dir=*/0, /*seqno=*/3)); // 面向北 ⇒ 面前格 (32,31) 空
+
+	CHECK(f.world.battleCount() == 0);                   // 面前格无明雷 ⇒ 不开战
+	CHECK(f.world.worldEnemyCount() == 1);               // 明雷没动
+	f.world.tick();                                      // flush 回执
+	CHECK_FALSE(eventResultOk(f.transport.sent(id), 3)); // ok=false
+}
+
+TEST_CASE("W.5:明雷开战后刷怪点补齐世界敌人(维持 count;精确复活时机 REVIVALTIME 划出)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	loadWorldEnemyFixture(f.world, 1, 0, 100000, 33, 32);
+	f.world.tick(); // 刷 1 明雷
+	f.world.onEvent(id, makeEnemyEvent(2, 1));
+	REQUIRE(f.world.battleCount() == 1);
+	REQUIRE(f.world.worldEnemyCount() == 0); // 明雷移入战斗 ⇒ 世界态空
+
+	f.world.tick(); // kNpcSpawn 发现 alive 0 < count 1 ⇒ 补齐一只新明雷到世界
+	CHECK(f.world.worldEnemyCount() == 1);
+	// ⚠️ 立即补齐(非死后 REVIVALTIME 延迟):刷怪点维持 count 只;精确复活时机随状态系统划出。
+}

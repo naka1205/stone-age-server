@@ -91,6 +91,8 @@ bool Session::handleFrame(const std::uint8_t *frame, std::uint32_t len,
 		return handleBattleCommand(env);
 	case SA::IDL::MsgId::WalkRequest:
 		return handleWalkRequest(env);
+	case SA::IDL::MsgId::EventRequest:
+		return handleEventRequest(env);
 	default:
 		// ⚠️ 未知或方向错的消息 ⇒ 协议违规,关闭连接。
 		//   不"忽略并继续":那会让客户端的 bug 表现为"服务端没反应",
@@ -208,6 +210,28 @@ bool Session::handleWalkRequest(const EnvelopeView &env)
 	//   net 只负责"这条消息在这个状态下允不允许出现"(同 onBattleCommand)。
 	if (_host != nullptr)
 		_host->onWalk(_id, req);
+	return true;
+}
+
+bool Session::handleEventRequest(const EnvelopeView &env)
+{
+	// ⚠️ 只有在世(kOnline)的会话能触发事件 —— 同 handleWalkRequest 的取向。
+	if (_state != SessionState::kOnline)
+	{
+		_lastRejectMsgId = env.msg_id;
+		return false;
+	}
+
+	SA::IDL::Reader r(env.body, env.body_len);
+	SA::Domain::EventRequest req;
+	decode(r, req);
+	if (!r.ok())
+		return false;
+
+	// ★ 事件命中判定(面前格有没有明雷)是**世界态**判定 ⇒ 归宿主的 onEvent;
+	//   回执 EventResult 由 world 侧经会话下推(靠 seqno 关联,同原版 EV_send),net 不管回执。
+	if (_host != nullptr)
+		_host->onEvent(_id, req);
 	return true;
 }
 

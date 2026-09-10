@@ -77,3 +77,36 @@ message CharDisappear {
   uint64 entity_id   = 1;
   uint32 entity_type = 2; // EntityType(批次 W.3)
 }
+
+// ── 事件触发(批次 W.5)。★ 对应原版 EV(callfromcli.c:1405 是 EVENT_main 全仓唯一调用点)──────────
+//   原版明雷开战是**客户端事件驱动**:玩家面向明雷格发 EV → 服务端 EVENT_main(event.c:37)扫面前格
+//   的事件对象 → 命中 CHAR_EVENT_ENEMY 的明雷 → NPC_NPCEnemy_Encount → NPC_NPCEnemy_BattleIn
+//   → BATTLE_CreateVsEnemy(player,_,enemy)(npc_npcenemy.c:672/674)。
+//   ⚠️★ 与 char_walk.c:585 的「撞明雷退回」是**两条独立机制**:退回是走路时的位置保护(玩家进不了
+//     敌人格),开战是玩家主动面向发事件 —— W.5 两者都做。
+//   ★ 本批 EVENT_main 只接 ENTITY_ENEMY 一路;通用派发骨架(传送点 warppoint 等)为后续预留。
+
+// 事件触发请求(上行,原版 EV,lssproto_EV_recv 入参 callfromcli.c:1405)。
+//   x / y      = 客户端声明坐标。★ 服务端**不信**,用权威玩家坐标 + dir 算面前格(同 WalkRequest 防瞬移)。
+//   dir        = 面朝方向(0-7);面前格 = 玩家坐标朝 dir 前一格(callfromcli.c:1402)。
+//   event_type = 事件族(复用 EntityType:ENTITY_ENEMY=明雷开战)。
+//   seqno      = 业务层请求序号,回执原样带回(客户端据此匹配;原版 EV_send 的 seqno)。
+message EventRequest {
+  option (sa.msg_id) = 0x0305;
+
+  sint32 x          = 1;
+  sint32 y          = 2;
+  uint32 dir        = 3;
+  uint32 event_type = 4;
+  uint32 seqno      = 5;
+}
+
+// 事件触发回执(下行,原版 lssproto_EV_send(fd, seqno, rc))。
+//   seqno = 原样回带 EventRequest.seqno;ok = 事件是否命中并处理(明雷开战成功 ⇒ true;
+//           面前格无该事件对象 / 开战失败 ⇒ false)。
+message EventResult {
+  option (sa.msg_id) = 0x0306;
+
+  uint32 seqno = 1;
+  bool   ok    = 2;
+}

@@ -28,6 +28,8 @@ enum class MsgId : std::uint32_t {
   CharAppear = 0x0302,
   CharMove = 0x0303,
   CharDisappear = 0x0304,
+  EventRequest = 0x0305,
+  EventResult = 0x0306,
   WindowOpen = 0x0601,
   WindowReply = 0x0602,
 };
@@ -146,6 +148,18 @@ template <>
 struct MsgTraits<SA::Domain::CharDisappear> {
   static constexpr MsgId kId = MsgId::CharDisappear;
   static constexpr const char* kName = "sa.domain.CharDisappear";
+};
+
+template <>
+struct MsgTraits<SA::Domain::EventRequest> {
+  static constexpr MsgId kId = MsgId::EventRequest;
+  static constexpr const char* kName = "sa.domain.EventRequest";
+};
+
+template <>
+struct MsgTraits<SA::Domain::EventResult> {
+  static constexpr MsgId kId = MsgId::EventResult;
+  static constexpr const char* kName = "sa.domain.EventResult";
 };
 
 template <>

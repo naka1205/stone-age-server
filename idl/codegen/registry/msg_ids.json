@@ -243,6 +243,8 @@
     "sa.domain.CharAppear": 770,
     "sa.domain.CharDisappear": 772,
     "sa.domain.CharMove": 771,
+    "sa.domain.EventRequest": 773,
+    "sa.domain.EventResult": 774,
     "sa.domain.WalkRequest": 769,
     "sa.domain.WindowOpen": 1537,
     "sa.domain.WindowReply": 1538,

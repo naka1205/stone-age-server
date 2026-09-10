@@ -267,6 +267,8 @@ class SessionHost
 	                             const SA::Domain::BattleCommand &cmd) = 0;
 	// 客户端上行的走路请求(0x0301,批次 W.1)。★ 防瞬移与碰撞是世界态判定 ⇒ 归宿主。
 	virtual void onWalk(SessionId id, const SA::Domain::WalkRequest &req) = 0;
+	// 客户端上行的事件触发(0x0305,批次 W.5)。★ 明雷开战:面前格有明雷则开战 —— 世界态判定,归宿主。
+	virtual void onEvent(SessionId id, const SA::Domain::EventRequest &req) = 0;
 	virtual void onSessionClosed(SessionId id) = 0;
 
   protected:
@@ -314,6 +316,7 @@ class Session
 	bool handlePing(const EnvelopeView &env, std::vector<std::uint8_t> &out);
 	bool handleBattleCommand(const EnvelopeView &env);
 	bool handleWalkRequest(const EnvelopeView &env);
+	bool handleEventRequest(const EnvelopeView &env);
 
 	SessionId _id;
 	std::uint32_t _protocolVersion;
