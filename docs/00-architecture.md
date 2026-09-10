@@ -4316,6 +4316,19 @@ Item 仅 `item_id`(道具表 D 线)· 组队掉落归属(组队未落地)。
 
 ---
 
+### 9.0.52 ★ 推送窗口执行记录 —— shared-v0.20.0(I.2 捕获扣道具 + I.3 野怪掉落,2026-09-10)
+
+I.2(§9.0.50)动 `shared/model/Enemy.h` + 新增 `shared/rules/CaptureItem.h`、I.3(§9.0.51)又动 `shared/model/Enemy.h` ⇒ 两批 watched 路径变更,**合一个窗口推**(2026-09-10 用户拍板「暂不单独推 v0.20.0、与掉落批一起推」的兑现)。本次窗口含 server `81075ee`(§9.0.49 v0.19 执行记录,原 ahead)+ `179969d`(I.2)+ `6a8384f`(I.3)三 commit 一起推。
+
+- **server**:master `655c02d` → `6a8384f`(gitee+github 两远端一致)+ tag `shared-v0.20.0`(轻量 tag,指向 `6a8384f` = I.3);★ **tag 集合差两远端均空**(`comm -3` 本地 vs `ls-remote`,双端各 20 个 `shared-v*`,无顺带无遗漏);推 tag 用精确 tag 名(不 `--follow-tags`,免顺带别的 tag)。
+- **client**:pin `v0.19.0` → `v0.20.0`(`9fcb992`,`SaShared.cmake` :38 注释 + :109 值共 3 处),master 两远端一致。
+- **复验**:server `ctest` 16/16 · `ci_verify` 六项(I.2/I.3 落地时已本地过);client 发布态由 CI 覆盖(见下)。
+- **CI**:**server CI #37 全 `success`**(Linux·GCC / Windows·MSVC / macOS·AppleClang + `client 联调 D2(FetchContent)` 集成 job)· **client CI #26 三平台全 `success`**(D2 闸门 × 三平台)+ **发布态 FetchContent 日志核实**(取 Linux·GCC job 日志正文,§9.0.10):`shared/(D2)= 发布态(FetchContent + 锁定 ref)` · `锁定 ref: shared-v0.20.0` · `HEAD: 6a8384f…` · `★ 锁定 ref 与源码一致 —— shared-v0.20.0` ⇒ 本地联调态覆盖不到的那半(发布态从锁定 ref 拉 gitee 源码)已绿。
+
+⇒ **§9.0.50 / §9.0.51 ⚠️「锁定 ref 前推 `shared-v0.20.0`」推送窗口待办双双兑现闭合**;server `81075ee` ahead 一并清零。
+
+---
+
 ### 10.1 R-b:无解的结构性事实
 
 每条标【单源未交叉】/【8.5 源码推定】的规则,实现时**只能靠人工复核**,没有任何自动化验证手段。
