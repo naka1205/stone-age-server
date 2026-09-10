@@ -1265,6 +1265,69 @@ bool resolveTurn(const BattleField &field,
 			continue;
 		}
 
+		// ── 使用道具:战斗内 HP 恢复药(批次 I.4,道具域第四批)──────────────
+		//
+		// ⚠️★ 本批只落 **HP 恢复药**(源码 `ITEM_useRecovery_Battle` 的 `"体"`→BD_KIND_HP
+		//    分支,battle_item.c:237)—— 唯一无未移植前置、且战斗中可观察(会掉血)的 usefunc。
+		//    MP 恢复 / 状态药 / 变身 / 传送 及场景内使用(useRecovery_Field)全划出,理由见
+		//    00 §9.0.53 / DR-DT23。
+		// ★ 基数 `actor.mods.item_heal_power` 由 World 在 resolveTurn **之前**查道具效果表
+		//    投影(`projectItemUsePower`,与捕获门 ④ `capture_item_ok` 同款:读道具表 + 背包
+		//    是世界态,L3 看不到)⇒ L3 拿基数摇恢复量 + 产 SetHp,**不读背包**。
+		// ★ 扣道具(消耗一个 pile)是世界写,由调用方 `consumeUsedItems` 在 ApplyEvents 后做
+		//    —— 同捕获删道具 / 逃跑计数 ++ 的分工(L3 不写世界态)。
+		if (cmd.command_kind == SA::Domain::BattleCommand::CommandKind::USE_ITEM)
+		{
+			// power <= 0 ⇒ 非有效恢复药(未投影 / 非 HP 药)⇒ 什么都不发生**且不摇 rng**
+			//   (源码不匹配 arg 关键字即 return、进不到 MultiRecovery,battle_item.c:284)。
+			const std::int32_t power = actor.mods.item_heal_power;
+			if (power <= 0)
+				continue;
+
+			const int use_target = static_cast<int>(cmd.command.use_item.target);
+			if (use_target < 0 || use_target >= kSlotCount)
+				continue;
+			const Combatant &utgt = field.at(use_target);
+			if (!utgt.occupied || dead[use_target])
+				continue; // ⚠️ 原版此处改打随机活人,见下「登记划出」
+
+			// ★★ **恢复量要摇**:`UpPoint = RAND(power*0.9, power*1.1)`(battle_magic.c:419)
+			//    ⇒ ±10% 区间随机、**消耗一次 rng**。⚠️ 别把它当确定值 —— 那会让用道具之后
+			//    的所有 rng 消耗整体平移,而「恢复了多少」的断言抓不到(同 DR-BT23 那族)。
+			//   ★ 8.0 的 `_MAGIC_REHPAI` **开** ⇒ `#else` 段不编译 ⇒ **无** `per` 百分比缩放、
+			//     **无** `GetRecoveryRate(vital)` 修正(两者都在 `#else` 里,battle_magic.c:421-425)
+			//     ⇒ 净核就是这一摇 + clamp,不引入体力系数,也不引入浮点。
+			//   ★★ 区间**照原版 double 表达式的取值集合**,但用整数算(避开浮点/FMA):
+			//     原版 `RAND(x,y)` 展开 = `x + (int)((y-x+1)*u)`,x=0.9p、y=1.1p 均为 double
+			//     ⇒ 取值集合 = { floor(0.9p)+k : k=0..ceil(0.2p+1)-1 }
+			//     ⇒ `lo = 9p/10`、`hi = lo + (p+9)/5 - 1`(整数除法)。
+			//     ⓘ 已穷举 p=0..100000 验证两式取值集合逐个相等(§9.0.53 附验证程序)。
+			//     ⚠️ 遗留偏差(登记在 DR-DT23 ②,不修):原版 `(int)(N*u)` 在 N 非整数时**尾值
+			//       概率偏低**,本实现 `r % span` 是均匀的 —— 与「xorshift64* ≠ glibc rand()」
+			//       同层次的不可比项(`00` §0 第③层),取值集合一致即止。
+			const int heal_lo = 9 * static_cast<int>(power) / 10;
+			const int heal_hi = heal_lo + (static_cast<int>(power) + 9) / 5 - 1;
+			const std::int32_t heal = static_cast<std::int32_t>(rng.rand(heal_lo, heal_hi));
+
+			// clamp maxhp(源码 `BATTLE_MultiRecovery` BD_KIND_HP:workhp = oldhp + UpPoint,
+			//   > maxhp 取 maxhp,battle_magic.c:427-431)。★ 用**回合内镜像** `hp[]` 而非
+			//   `utgt.hp` —— 同回合可能已被别的行动改过,与攻击链读写同一份镜像(见上 hp[] 卷首)。
+			std::int32_t new_hp = hp[use_target] + heal;
+			if (new_hp > utgt.max_hp)
+				new_hp = utgt.max_hp;
+
+			SA::Domain::BattleEvent *ev =
+			    sink.push(SA::Domain::BattleEvent::BodyKind::SET_HP);
+			if (ev == nullptr)
+				break;
+			ev->body.set_hp.target = static_cast<std::uint32_t>(use_target);
+			ev->body.set_hp.hp = new_hp;
+			hp[use_target] = new_hp; // 回合内镜像同步(同攻击链),后续行动看到新值
+			if (sink.overflowed())
+				break;
+			continue;
+		}
+
 		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::ATTACK)
 		{
 			// GUARD 与 WAIT 本身不产事件:防御的效果体现在**被攻击时**的减伤(§3.5),

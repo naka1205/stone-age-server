@@ -271,6 +271,7 @@ P5 文件名 PascalCase + guard `__SA_<File>_H__` · P6 clang-format 引擎款�
 | **DR-DT20** | ★★ **背包 L2 地基 I.1**(道具域第一批):Item 归族 · 背包槽布局 · 道具池容量 | ✅ **① Item 不进 `EntityKind` 五族**(用户裁定):五族判别键是 `CHAR_TYPE`(全是 Char 实体),背包道具是原版**独立全局池** `ITEM_item[itemnum]`(`item.c:486`)成员、非 Char ⇒ 建独立 `EntityPool<Item,10000>` + `ItemHandle`(与 `EntityHandle` 同机制的语义别名,不改池模板)· **② 背包槽照原版连续布局**(用户裁定):`Player.items[kMaxItemHave=54]` = 装备位 9(`CHAR_EQUIPPLACENUM`,`CHAR_HEAD`..`CHAR_EQGLOVE`)+ 背包 15×3=45,`kStartItemArray=9` 为背包起点(捕获扣道具循环 `for(i=CHAR_STARTITEMARRAY;…)` 依赖它);`findFreeItemSlot` 只在背包段找、`clearItemSlot` 全域可清;装备位穿戴语义留装备域 · **③ 容量 10000**(`csa8.0/setup.cf:318` `itemnum`,运行期硬边界 `ITEM_CHECKINDEX`;不可配置化,同 kMaxPlayers)· **④ 字段取展开视图 `ITEM_DATAINT`/`ITEM_DATACHAR` 启用下标 + `itemset6.txt` 实列**,只建背包地基必需(id/name/unique_code/type/level/cost/堆叠两列/掉落两列/主人反指),逐条登记不建 · **⑤ functable/Lua 全段不复刻**(8.0 无 Lua)· **⑥ 划出**:扣/掉/用链路(后三批)· 装备加成 / 合成 / 镶嵌 / 魔法道具 / 状态附加(各属其域)· `current_pile` 运行期状态(写入侧)· `needitemeneny.txt`(捕获扣道具批)。范围 = 宽(动 `shared/model/` ⇒ 前推 `shared-v0.19.0`)。批次 I.1 | 见 §2.22;★★ 连带抓到 **unifdef_80 第二次宏误判**(`_ALLBLUES_LUA_1_8` 判开、StoneAge 全树关 ⇒ 以 StoneAge 为准) |
 | **DR-DT21** | ★★ **捕获扣道具 I.2**(道具域第二批):条件道具需求表来源 · 前置门 CaptureItemCheck 分层 · 全删语义 | ✅ **① 需求表 = 源码硬编码 `NeedEnemy[9]`,不读文件**:`_NEED_ITEM_ENEMY` 双源**关** ⇒ `need_item_eneny_init()`(读 `needitemeneny.txt`)不编译,净核用 `battle_event.c:3890` 硬编码表(524/961/953/962/777/796/812/1105/8;`_DEL_NOT_25`/`_WOLF_TAKE_AXE` 关)⇒ 移植为 `shared/rules/CaptureItem.h::kNeedItemEnemy` 常量 + `isNeedCaptureItem`。⚠️ **更正 DR-DT20 ⑥「需 `needitemeneny.txt`」**:文件在 data/ 但 8.0 净核不读它 · **② 匹配键 = 模板号**:`IsNeedCaptureItem` 读 `CHAR_PETID`,而 `CHAR_PETID = *(tp+E_T_TEMPNO)`(`enemy.c:1200` 四处)⇒ = `EnemyTemplate::temp_no` ⇒ `Enemy.h` 加 `pet_id`、`spawnEnemy` 落值;⚠️ **更正 `Enemy.h` 文末 ②「PETID 归 D 线不建」**(值在已导入模板行里,非外部导入)· **③ 前置门 ④ CaptureItemCheck 分层**(§6.2):原版 `flg = ItemCheck && CaptureCheck`,道具门读**攻方背包**(世界态)⇒ 与 `capturable` 同款:World 在 `resolveTurn` **前**投影到攻方 `Combatant::mods.capture_item_ok`,L3 只做 `&&` 门判定 ⇒ ★ 无道具则不摇捕获 rng(与原版一致);⚠️ 不放 rollCapture 之后补判(会平移 rng 序列)· **④ 全删无条件**:`_CAPTURE_FREES` 开 ⇒ `BATTLE_CaptureItemDelAll` 遍历需求行**全删**命中道具(不 break,源码 :4074);`getDelNeedItem` 门属 `_NEED_ITEM_ENEMY` 关段 ⇒ 无条件删;Lua detach 回调不复刻(8.0 无 Lua)· **⑤ 注入 seam**:`giveItemToPlayer`(同 `spawnEnemyToField` 性质,写入链路=掉落/捡起后续批次)+ 只读面 `playerItemAt` · **⑥ 划出**:`CHAR_complianceParameter` 删后重算(装备域,当前无可观察后果) · 道具入包写入链路(道具域后两批)。范围 = 宽(动 `shared/model/Enemy.h` + 新增 `shared/rules/CaptureItem.h` ⇒ 前推 `shared-v0.20.0`)。批次 I.2 | 见 §2.23;`00` §9.0.50 |
 | **DR-DT22** | ★★ **野怪掉落 I.3**(道具域第三批):`NPC_NPCEnemy_Dying` 是不是掉落 · 掉给谁 · 落地形态 · rng 时序 | ✅ **① 亲验勘误**:`NPC_NPCEnemy_Dying` 是**明雷专用** `additem`(固定道具塞全队、依赖 NPC argstr 脚本层 = DR-DT19 划出的 D6、未落地)⇒ 划出;**野怪掉落是另一套三阶段**(`BATTLE_AddExpItem`,`11` §3 主表记对了)· **② 三阶段**:①spawn `enemy.c:1210` 千分率 `RAND(0,999)<prob`(`_FIX_ITEMPROB` ON,prob=0 不摇 rng)摇进 `Enemy.dropped_items` →②结算 `battle.c:6486` 逐件 `RAND(0,allnum-1)` 随机选在场单位(含宠折算回主人 `subnum-5`)入 `getitem[≤3]`(满则 `RAND(0,1)` 50%覆盖/50%弃)→③ `battle.c:4471` `giveItemIntoPlayer` 直接进背包(满则销毁、不落地不捡起)· **③ rng 保序**:摇在 `rollSpawnStats` 后(源码四维→掉落序);拾取用 `b.rng`(战斗结束用完即弃)· **④ 自主决策**:紧凑存 `item_id`+延迟 `makeItem`(省池、rng 一致)· 本批不下发客户端(服务端权威 + 观察面)· **⑤ 划出**:明雷 additem(D6)· 掉落展示/满包提示 DR-UX1(客户端下发)· Item 完整列(道具表 D 线,仅填 `item_id`)· 组队掉落归属(组队玩法未落地)。范围 = 宽(动 `shared/model/Enemy.h` ⇒ 前推 `shared-v0.20.0`,与 I.2 合窗口)。批次 I.3 | 见 §2.24;`00` §9.0.51 |
+| **DR-DT23** | ★★ **使用道具 I.4**(道具域第四批·收官):usefunc 分发机制 · 恢复量摇不摇 rng · 区间口径 | ✅ **① usefunc 分发 = 硬编码 C 名字表,不走 Lua**(推翻 §9.0.48 开工前取证的 8.5 形态):`CHAR_ItemUse`(`char_item.c:663`)→ `ITEM_getFunctionPointer`(`item.c:691`)→ 表由 `ITEM_constructFunctable`(`item.c:680`)按道具表函数名查 `getFunctionPointerFromName`(`function.c:774`)填,而映射本体 `correspondStringAndFunctionTable[]`(`function.c:165`)是 **C 数组**,`{"ITEM_useRecovery", ITEM_useRecovery, 0}` 在 `:188` ⇒ 净核链路通、不必等 D6 · **② ⚠️★★ 恢复量要摇 rng**(推翻**本批开工时工作树里已有实现**的注释断言):`sscanf` 出的 `power` 只是基数,`BATTLE_MultiRecovery` 里还有 `UpPoint = RAND(power*0.9, power*1.1)`(`battle_magic.c:419`)⇒ 投影**基数**(`mods.item_heal_power`)、**摇在 L3** 用战斗 rng;⚠️ 不许在 World 投影函数里摇(取数落到 resolveTurn 外 ⇒ 序列错位)。★ 危害形状 = **用过道具后 rng 整体平移**,返回值断言抓不到(同 DR-BT23 族)⇒ 用例逐条断言 `calls()`(实测基线 1 = 行动顺序 dex 抖动,另立用例钉住)· **③ 净核**:`_MAGIC_REHPAI` **开** ⇒ `#else` 段不编译 ⇒ **无** `per` 缩放 / **无** `GetRecoveryRate` 体力系数 ⇒ 不引入浮点;`_MAGICPET_SKILL`(`power==-1` 全满)· `_TYPE_TOXICATION`(`CanCureFlg` 门)均开但依赖未移植面 ⇒ 划出;`BATTLE_MultiList` 单目标(`battle.c:236`),⚠️ 目标已死时原版「随机改打活人」消耗**不定次** rng + 全死 UB ⇒ **不复刻**,已知行为差 · **④ 区间口径**:原版 `RAND` 两参是 **double** ⇒ 取值集合 `{floor(0.9p)+k : k=0..ceil(0.2p+1)-1}`,**不等于** `[(int)0.9p, (int)1.1p]`(p=7 原版 {6,7,8}、朴素截断少一个)⇒ 实现取 `lo=9p/10`、`hi=lo+(p+9)/5-1`,**穷举 p=0..100000 实测等价**(手算曾在 p=15 出错 ⇒ 等价性必须验不能推);⚠️ 已知偏差不修:原版尾值概率偏低 vs 本实现均匀,与「xorshift ≠ glibc rand」同层次(`00` §0 ③)· **⑤ 分层**:`current_pile` 归 `Item.h`(兑现 DR-DT20 ④ 登记),扣道具走 `consumeUsedItems`(applyEvents 后、清槽+release 成对),`ItemEffect`/`loadItemEffects` 默认空 · **⑥ 划出**:MP/状态/变身/传送等其余 usefunc · 场景内 `useRecovery_Field` · `ITEM_TYPE` 穿装备门 · `power==-1` 全满 · `CanCureFlg`(L4)· 效果表真数据(D 线)· 客户端表现。范围 = 宽(动 `shared/model/Item.h` + `shared/rules/` ⇒ 前推 `shared-v0.21.0`)。批次 I.4 | 见 §2.25;`00` §9.0.53 |
 
 ---
 
@@ -1172,6 +1173,102 @@ D 线入库时导入器**不得**顺手纠正它。用例钉住其**可观察后
 断言红),还原后 16/16、`INJECT` 残留 0(纪律 ③)。⚠️★ 动 `shared/model/Enemy.h`(加 `dropped_items`)
 ⇒ watched 变更 ⇒ 锁定 ref 须前推 **`shared-v0.20.0`**(与 I.2 合窗口,待用户确认)。
 按「只数行」口径:§1–§12 **128 → 129 行**,⚠️/⏳ 仍为 **0 / 7**。⚠️ 行号基准 = `stoneage85/` 全宏。
+
+### 2.25 DR-DT23 —— 使用道具 I.4:usefunc 分发机制 / 恢复量摇不摇 rng / 区间口径(批次 I.4)
+
+★★ **本条有两个「已有记载被源码推翻」的裁定,都是纪律 ① 的兑现,而对象各不相同。**
+
+**① usefunc 分发 = 硬编码 C 名字表,不走 Lua(推翻 §9.0.48 开工前取证)。**
+`§9.0.48` 记「效果走 functable 分发(`mylua/function.c`),functable 本体是 Lua 表 ⇒ 8.0 无 Lua
+下这套怎么落地要单独核」—— 那是 **8.5 形态**,8.0 链路完全不同(行号 = `StoneAge/gmsv/src/` 8.0 树):
+`lssproto_ID_recv`(`callfromcli.c:802`)→ `CHAR_ItemUse`(`char_item.c:663`)
+→ `usefunc = ITEM_getFunctionPointer(itemindex, ITEM_USEFUNC)`(`item.c:691`,读道具实例上的
+`itm.functable[]`)→ 该表由 `ITEM_constructFunctable`(`item.c:680`)在建道具时按**道具表里的函数名
+字符串**逐项 `getFunctionPointerFromName(...)`(`function.c:774`,hashpjw + strcmp)填
+→ 而名字→指针的映射 `correspondStringAndFunctionTable[]`(`function.c:165`)**是硬编码 C 数组**,
+`{"ITEM_useRecovery", ITEM_useRecovery, 0}` 在 `:188`。
+⇒ **8.0 净核里道具使用链是通的**,`mylua/` 与它无关 ⇒ I.4 立得住,不需要等 D6 脚本层。
+⚠️ 这也解掉了 §9.0.48「⑤ functable/Lua 全段不复刻」留下的疑问:不复刻的是 **Lua 回调那几列**
+(`INITFUNC`/`DETACHFUNC` 等),而 `USEFUNC` 这一列在 8.0 是 C 函数名 ⇒ 移植成 `ItemEffect` 表
+的一行(数据驱动 enum/字段,不复刻函数指针机制,同 DR-DT18 对 `CHAR_LOOPFUNC` 的处置)。
+
+**② ⚠️★★ 恢复量**要摇 rng**——「不摇」是本批开工时工作树里已有实现的错,不是源码的形状。**
+工作树(2026-09-10 22:09 未提交)写的是 `new_hp = hp + heal`(确定值),注释断言
+「⚠️ 无 rng(恢复量确定 —— `battle_item.c:289` 直接 `sscanf` 出 power)⇒ 用道具不摇骰」。
+回源码往下跟一层即推翻:`ITEM_useRecovery_Battle`(`battle_item.c:237`)`sscanf` 出的 `power`
+**只是基数**,它把 power 交给 `BATTLE_MultiRecovery`(`:304`),后者在 `BD_KIND_HP` 分支里
+**`UpPoint = RAND(power*0.9, power*1.1)`**(`battle_magic.c:419`)⇒ 恢复量是 ±10% 区间随机,
+**且消耗一次随机数**。
+⇒ 裁定:`Combatant::mods` 投影的是**基数**(字段名随之改为 `item_heal_power`),
+**摇在 L3**(`resolveTurn` 内、用战斗 rng);⚠️ **不许在 World 的投影函数里摇** —— 那会让取数落到
+`resolveTurn` 之外,战斗 rng 序列错位(与 W.4「遇敌 rng 与战斗 rng 分离」是同一条约束的另一面)。
+★ **这条错的危害形状**:它不体现为「恢复多少不对」,而是**用过道具之后所有 rng 消耗整体平移**,
+任何「返回值对不对」的断言都抓不到 —— 与 DR-BT23(退化区间照常消耗)完全同族。
+⇒ 用例**逐条断言 `calls()`**;⚠️ 实测基线 = 1(单指令 Duel 的行动顺序 dex 抖动
+`Battle.cpp:713`,`quick==0` 走退化区间照常消耗)⇒ 另立一条用例把基线显式钉住,
+免得基线变了被读成「USE_ITEM 的消耗变了」。
+★★ **教训归档**:纪律 ① 这次的对象是**上一次会话自己写的实现与注释** —— 病灶是
+「只跟到取到值的那一行就下结论,少跟了一层调用」,并且给这个结论**补了一个看起来有据的理由**
+(引了准确的行号 `:289`,而那一行确实是 `sscanf`)⇒ 纪律 ⓪「别给照抄的源码编造理由」的变体:
+**这次编造的是「不必照抄」的理由**,比编造「它很要紧」更难发现,因为它省掉了代码而非增加代码。
+
+**③ 净核判定(三个相关宏都回 `StoneAge/gmsv/src/include/version.h` 核过,均为开)**:
+- `_MAGIC_REHPAI` **开** ⇒ `battle_magic.c:421-425` 的 `#else` 段**不编译** ⇒ **无** `per` 百分比
+  缩放、**无** `GetRecoveryRate(vital)` 体力系数(`char.c:8676`,`1.0+0.0001*VITAL`)。
+  ⇒ 净核 = 一摇 + `min(hp+UpPoint, maxhp)`,**不引入任何浮点** ⇒ 免了 §9.0.6 那类 FMA 跨平台风险。
+  ⚠️ 若照 `#else` 段实现会凭空多出体力修正,而它在 8.0 根本不生效。
+- `_MAGICPET_SKILL` 开 ⇒ `power == -1` 的「全满恢复」分支存在,但是否有该数据取决于道具表
+  ⇒ 划出(D 线)。`_TYPE_TOXICATION` 开 ⇒ `CHAR_CanCureFlg(toindex,"HP")` 不可治疗门存在
+  ⇒ 依赖 L4 状态系统,划出。
+- **目标展开**:`BATTLE_MultiList`(`battle.c:236`)在 `toNo ∈ [0,19]`(单人目标)时
+  `ToList[0]=toNo; cnt=1` ⇒ **单目标**,与本实现一致。⚠️ 但目标 `BATTLE_TargetCheck==FALSE`
+  (已死/不在场)时原版 `while((toNo = nLifeArea[rand()%10]) == -1);` **随机改打一个活人**、
+  消耗**不定次数** rng;全死时 `return -1` 而 `BATTLE_MultiRecovery` **不检查返回值**、
+  照样遍历未初始化的 `ToList`(原版 UB)。⇒ **不复刻**:目标不可用即什么都不发生、不摇 rng。
+  **已知行为差,登记在案**(不定次 rng 消耗无法在保序前提下安全复刻,且原版那条路径本身是 UB)。
+
+**④ 区间口径 —— 照原版 double 表达式的**取值集合**,但用整数算。**
+原版 `RAND(x,y)` 宏(`util.h:79`)展开 `x + (int)((y-(x-1))*rand()/(RAND_MAX+1.0))`,
+而这里 `x = power*0.9`、`y = power*1.1` **都是 double** ⇒ 取值集合
+`{ floor(0.9p) + k : k = 0..ceil(0.2p+1)-1 }` —— ⚠️ **不等于** `[(int)(0.9p), (int)(1.1p)]`:
+p=7 时原版是 `(int)(6.3+{0,1,2}) = {6,7,8}`,而朴素截断给 `[6,7]`,**少一个值**。
+⇒ 实现取 **`lo = 9p/10`、`hi = lo + (p+9)/5 - 1`**(整数除法)。
+ⓘ **穷举 p=0..100000 实测两式取值集合逐个相等,0 处不匹配** —— 这条是**实测不是推导**:
+手算推导时在 p=15 上差点算错(误判 `0.2*15` 的 double 舍入方向)⇒ 等价性必须验,不能推。
+⚠️ **已知偏差(不修)**:原版 `(int)(N*u)` 在 N 非整数时**尾值概率偏低**,本实现 `r % span`
+是均匀的 —— 与「`xorshift64*` ≠ glibc `rand()`」同层次的不可比项(`00` §0 第③层:无法与原版
+比对、只能与自己的历史比对)⇒ **取值集合一致即止**,不为分布形状增加机制。
+
+**⑤ 分层**:`current_pile`(运行期堆叠数,原版 `workint`)归 `shared/model/Item.h` —— 兑现
+DR-DT20 ④ / `Item.h` 文末 ④ 登记的「留写入侧批次按各自语义建」;扣道具走
+`consumeUsedItems`(applyEvents 后,世界写)⇒ 与 `captureItemDelAll` 同分工、清槽 + release 成对。
+道具效果表 `ItemEffect{item_id, heal_power}` + `loadItemEffects` **默认空**(同 `loadEncounterTables`:
+世界层不含 GBK 解析器,真数据 D 线导入期灌入)。
+
+**⑥ 划出登记**:MP 恢复 `BD_KIND_MP` / 状态药 / 变身 / 传送 / 解猪 / 属性旋转等其余 usefunc(各依赖
+未移植子系统)· 场景内使用 `ITEM_useRecovery_Field`(`item_event.c:1073` 按 `WORKBATTLEMODE` 分流;
+需场景态 HP 与提示链)· `CHAR_ItemUse` 的 `ITEM_TYPE` 非 `ITEM_OTHER`/`ITEM_DISH` ⇒ 穿装备门
+(`CHAR_moveEquipItem`,装备域)· `BATTLE_CHARMODE_INIT` 态什么都不做(本实现无 INIT 态)·
+`power == -1` 全满恢复 · `CanCureFlg` 门(L4)· 道具效果表真数据(D 线 `itemset6.txt` 的
+`usefunc` / `ITEM_ARGUMENT` 两列)· 客户端表现(用药动画 / 飘字)。
+
+范围 = 宽(动 `shared/model/Item.h` + `shared/rules/{Battle.cpp,Combatant.h}` ⇒ 前推
+**`shared-v0.21.0`**,待确认)。批次 I.4。
+
+**复验**:`ctest` **16/16** · `ci_verify` 六项(`SA_WERROR` 0 告警)·
+`rules_battle` 77→**84 例 / 2493 断言** · `world_tick` 88→**95 例 / 1262 断言** ·
+★ **反向验证四处逐条转红**(A 恢复量改回确定值 ⇒ 4 例/13 断言;B 上界改朴素 `11p/10` ⇒
+**精确红 1 条** `bounds(7)`,印证特意选 p=7;C 清槽不 release ⇒ 2 例;D 投影挪到 resolveTurn 后
+⇒ 3 例),还原后 16/16、`INJECT` 残留 0(纪律 ③)。
+⚠️★ **一处诚实的「注入不红」**:A 在 `world_tick` 侧全绿 —— 世界侧断言恢复量落在区间内,
+而 `heal_lo` 也在区间内 ⇒ 对「摇不摇」无区分力。分层的自然结果(区间由 L3 侧逐值验),
+如实记下:**同一处缺陷在不同层的用例里区分力不同**。
+按 `tools/check_dr_table.py` **实测**:§1–§12 主表 **134 → 135 行**(编号唯一)· 展开小节 17 → **18** 个全部在表内。
+⚠️★ **口径注记**:§2.22–§2.24 末尾续写的「§1–§12 12x → 12x 行」与实测值**已经对不上**
+(DR-DT22 写 129,实测彼时应为 134)—— 那串数字是历次手写累加、没有执行者校对,
+而 `check_dr_table.py` 每次 `ctest` 都在数。⇒ 本条起**只写实测值**,不再续写手算链
+(同 §9.0.47「落一节补一行变更记录没执行者」那族:**没有校验的计数一定会漂**)。
+⚠️ 行号基准:标 `StoneAge/gmsv/src/` 的为 8.0 树,其余为 `stoneage85/` 全宏。
 
 ### 3.1 逐条裁定理由
 

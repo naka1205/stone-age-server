@@ -156,6 +156,22 @@ struct CombatModifiers
 	//   ★ **默认 true**:无需求怪 / demo foe / PvP / 玩家侧非捕获场景一律满足 ⇒ 门不拦,
 	//     现有用例不受影响(同 `isNeedCaptureItem` 返 -1 即视为满足)。
 	bool capture_item_ok = true;
+
+	// ★★ 攻方「本回合使用的 HP 恢复药的恢复力基数 `power`」(批次 I.4「战斗内使用道具」)。
+	//   ⚠️★ 与 `capture_item_ok` 同款分工:`power` 来自**道具效果表**(世界态,原版
+	//     `ITEM_getChar(itemindex, ITEM_ARGUMENT)` → `strstr"体"` + `sscanf`,battle_item.c:244/289),
+	//     L3 纯函数看不到 ⇒ World 在 `resolveTurn` **之前**按本回合 USE_ITEM 指令查道具效果表
+	//     算好、投影到攻方此字段(见 World.cpp `projectItemUsePower`)。
+	//   ⚠️★★ **它是基数不是恢复量** —— 恢复量由 L3 摇:`BATTLE_MultiRecovery` 拿到 power 后
+	//     还要 `UpPoint = RAND(power*0.9, power*1.1)`(battle_magic.c:419)⇒ **用道具要消耗
+	//     一次 rng**,恢复量在 ±10% 区间内随机。⚠️ 早先本字段名为 `item_heal_hp`、注释断言
+	//     「无 rng、恢复量确定」是**错的**:只跟到 `sscanf` 出 power 就下了结论,没跟进
+	//     `MultiRecovery`。这条错会让「用了道具之后的所有 rng 消耗整体平移」,而返回值断言
+	//     抓不到(同 DR-BT23 退化区间那族)⇒ 已按源码更正,见 `00` §9.0.53 / DR-DT23 ①。
+	//   ★ **默认 0** ⇒ 无 USE_ITEM 指令 / 非 HP 恢复药一律不恢复**且不摇 rng**
+	//     (对应原版 arg 不含关键字即 `return`、根本进不到 `MultiRecovery`,battle_item.c:284)
+	//     ⇒ 现有用例的 rng 序列不受影响。
+	std::int32_t item_heal_power = 0;
 };
 
 // ── 一个战斗单位 ──────────────────────────────────────────────

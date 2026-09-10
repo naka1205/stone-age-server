@@ -2744,12 +2744,52 @@ BattleId joinWithNeedItemEnemy(Fixture &f, SA::Net::ConnectionId id,
 	return battle;
 }
 
-// 造一个指定 id 的道具(其余字段留默认,本批只按 item_id 匹配)。
-SA::Model::Item makeItem(std::int32_t item_id)
+// 造一个指定 id 的道具。★ `current_pile = 1` = 「这一格里有一件」——
+//   ⚠️ 批次 I.4 起**必须填**:`current_pile <= 0` 被使用链路视同空格(用不了、不扣)。
+//   掉落路径在 World 内部自己填(World.cpp),经 `giveItemToPlayer` seam 灌入的由调用方填。
+SA::Model::Item makeItem(std::int32_t item_id, std::int32_t pile = 1)
 {
 	SA::Model::Item it{};
 	it.item_id = item_id;
+	it.current_pile = pile;
 	return it;
+}
+
+// 发一条「使用道具」战斗指令并推进一个回合(批次 I.4)。
+void useItemTurn(Fixture &f, SA::Net::ConnectionId id, BattleId battle, int item_slot,
+                 int target_slot)
+{
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = f.world.battleField(battle)->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::USE_ITEM;
+	cmd.command.use_item.item_slot = static_cast<std::uint32_t>(item_slot);
+	cmd.command.use_item.target = static_cast<std::uint32_t>(target_slot);
+	f.world.onBattleCommand(id, cmd);
+	f.clock.advance(2000);
+	f.world.tick();
+}
+
+// 开一场「玩家残血、敌方槽空」的战斗:用来看恢复药到底加没加血。
+//   ★ hp 起点由参数给 ⇒ 与 max_hp 拉开距离,恢复才有可观察后果(满血会被 clamp 抹平)。
+BattleId startHurtPlayerBattle(Fixture &f, SA::Net::ConnectionId id, std::int32_t hp,
+                               std::int32_t max_hp)
+{
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = hp;
+	me.max_hp = max_hp;
+	me.attack = 100;
+	me.defense = 100;
+	me.quick = 500;
+	me.luck = 10;
+	const BattleId battle = f.world.startBattle(pf);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	return battle;
 }
 } // namespace
 
@@ -3056,4 +3096,189 @@ TEST_CASE("掉落:未配掉落打赢背包不增 + 背包满则丢弃(源码满�
 
 		CHECK(f.world.itemCount() == full); // ★ 无空位 ⇒ 掉落丢弃,池没涨
 	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  使用道具(批次 I.4,道具域第四批)—— 世界侧:投影 + 扣道具
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 世界侧要验的是 L3 之外的那两半(L3 的恢复量/区间/clamp 在 RulesBattleTest 里):
+//   ① `projectItemUsePower` —— 读道具效果表 + 攻方背包,把 `power` 投影进 mods;
+//   ② `consumeUsedItems`    —— applyEvents 之后扣一个 pile,归零则清槽 + release。
+// ⚠️★ ② 的「清槽 + release 成对」漏一半不会有任何一处报错(同 `captureItemDelAll`)
+//    ⇒ 必须同时断言 `playerItemSlotsUsed`(槽)与 `itemCount`(池)。
+
+TEST_CASE("使用道具:端到端 —— 残血玩家喝药回血,堆叠减一(阶段①②)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	// 道具效果表:1001 号药 power = 100 ⇒ 恢复量 ∈ [90, 110](L3 侧已逐值验过区间)。
+	f.world.loadItemEffects({{/*item_id=*/1001, /*heal_power=*/100}});
+
+	const BattleId battle = startHurtPlayerBattle(f, id, /*hp=*/500, /*max_hp=*/100000);
+	const int slot = f.world.giveItemToPlayer(id, makeItem(1001, /*pile=*/3));
+	REQUIRE(slot >= 0);
+	REQUIRE(f.world.itemCount() == 1);
+	REQUIRE(f.world.playerItemPile(id, slot) == 3);
+
+	useItemTurn(f, id, battle, slot, /*target_slot=*/0); // 给自己用
+
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	const std::int32_t hp_now = fld->at(0).hp;
+	// ★★ 血确实加了,且落在原版 RAND(0.9p,1.1p) 区间内 —— 这一条同时证明
+	//    「投影到了」+「L3 产了 SetHp」+「applyEvents 写回了世界」三段都通。
+	CHECK(hp_now >= 500 + 90);
+	CHECK(hp_now <= 500 + 110);
+
+	// ★ 扣了一个 pile,但槽与池都还在(3 → 2)。
+	CHECK(f.world.playerItemPile(id, slot) == 2);
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+	CHECK(f.world.itemCount() == 1);
+}
+
+TEST_CASE("使用道具★★:最后一个 pile 用掉 ⇒ 清槽 + 释放实体(成对,阶段②)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	f.world.loadItemEffects({{1001, 100}});
+
+	const BattleId battle = startHurtPlayerBattle(f, id, 500, 100000);
+	const int slot = f.world.giveItemToPlayer(id, makeItem(1001, /*pile=*/1));
+	REQUIRE(slot >= 0);
+	REQUIRE(f.world.itemCount() == 1);
+	REQUIRE(f.world.playerItemSlotsUsed(id) == 1);
+
+	useItemTurn(f, id, battle, slot, 0);
+
+	// ★★ 槽与池**同时**归零 —— 只清槽不 release 会让池只增不减(泄漏),
+	//    只 release 不清槽会留下悬空句柄,两种都没有一处会报错。
+	CHECK(f.world.playerItemPile(id, slot) == -1); // 空槽
+	CHECK(f.world.playerItemAt(id, slot) == nullptr);
+	CHECK(f.world.playerItemSlotsUsed(id) == 0);
+	CHECK(f.world.itemCount() == 0);
+	// 血照样回了(删道具与恢复是两件事)。
+	CHECK(f.world.battleField(battle)->at(0).hp >= 500 + 90);
+}
+
+TEST_CASE("使用道具:满血喝药 ⇒ 血被 clamp 不变,但道具照样扣(battle_item.c:323 无条件删)")
+{
+	// ★ 原版 `ITEM_useRecovery_Battle` 末尾 `CHAR_DelItemMess` 在 `BATTLE_MultiRecovery`
+	//   之后**无条件**执行 —— 满血也照扣。⚠️ 若把扣道具挂在「血有变化」上,这条会红。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	f.world.loadItemEffects({{1001, 100}});
+
+	const BattleId battle = startHurtPlayerBattle(f, id, /*hp=*/1000, /*max_hp=*/1000);
+	const int slot = f.world.giveItemToPlayer(id, makeItem(1001, 2));
+	REQUIRE(slot >= 0);
+
+	useItemTurn(f, id, battle, slot, 0);
+
+	CHECK(f.world.battleField(battle)->at(0).hp == 1000); // clamp ⇒ 没变
+	CHECK(f.world.playerItemPile(id, slot) == 1);         // ★ 照样扣了一个
+}
+
+TEST_CASE("使用道具:道具不在效果表 ⇒ 不回血、不扣(power 投影恒 0)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	f.world.loadItemEffects({{1001, 100}}); // 表里只有 1001
+
+	const BattleId battle = startHurtPlayerBattle(f, id, 500, 100000);
+	const int slot = f.world.giveItemToPlayer(id, makeItem(/*item_id=*/9999, 2)); // 非药
+	REQUIRE(slot >= 0);
+
+	useItemTurn(f, id, battle, slot, 0);
+
+	CHECK(f.world.battleField(battle)->at(0).hp == 500); // 没回血
+	CHECK(f.world.playerItemPile(id, slot) == 2);        // ★ 也没扣 —— 用不了就不该消耗
+	CHECK(f.world.itemCount() == 1);
+}
+
+TEST_CASE("使用道具:效果表默认空 ⇒ 任何道具都没效果(不注入即不受影响)")
+{
+	// ★ 与 `loadEncounterTables` 同取向:不注入 = 该玩法不生效,现有用例不必改。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	// ⚠️ 故意不调 loadItemEffects
+
+	const BattleId battle = startHurtPlayerBattle(f, id, 500, 100000);
+	const int slot = f.world.giveItemToPlayer(id, makeItem(1001, 2));
+	REQUIRE(slot >= 0);
+
+	useItemTurn(f, id, battle, slot, 0);
+
+	CHECK(f.world.battleField(battle)->at(0).hp == 500);
+	CHECK(f.world.playerItemPile(id, slot) == 2);
+}
+
+TEST_CASE("使用道具:空槽 / 越界槽 / 堆叠已空 ⇒ 不回血、不扣、不崩")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	f.world.loadItemEffects({{1001, 100}});
+
+	const BattleId battle = startHurtPlayerBattle(f, id, 500, 100000);
+	// 背包里放一个**堆叠为 0** 的 1001(模拟未回填 current_pile 的写入者)。
+	const int empty_pile_slot = f.world.giveItemToPlayer(id, makeItem(1001, /*pile=*/0));
+	REQUIRE(empty_pile_slot >= 0);
+
+	// ① 完全空的槽 · ② 越界槽 · ③ 堆叠为 0 的槽 —— 三者都应「什么都不发生」。
+	const int free_slot = empty_pile_slot + 1;
+	for (const int slot : {free_slot, -1, static_cast<int>(SA::Model::kMaxItemHave),
+	                       empty_pile_slot})
+	{
+		useItemTurn(f, id, battle, slot, 0);
+		CHECK(f.world.battleField(battle)->at(0).hp == 500);
+	}
+	CHECK(f.world.itemCount() == 1); // 那个 pile=0 的道具还在池里,没被误 release
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+}
+
+TEST_CASE("使用道具★:掉落进背包的道具可以直接喝(掉落回填了 current_pile)")
+{
+	// ★★ 这条把 I.3(掉落)与 I.4(使用)接在一起 —— 掉落路径若忘了填 `current_pile`,
+	//    道具进了背包却**用不了**,而 I.3 自己的用例(只数 itemCount)全绿。
+	//    ⇒ 是「地基绿而运行时不接」(欠债 20)在两个批次接缝上的形态。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	f.world.loadItemEffects({{/*item_id=*/7777, /*heal_power=*/100}});
+
+	// 打赢一只必掉 7777 的野怪 ⇒ 战利品进背包。
+	EnemyEncounter enc = makeWuliEncounterFixedLv1();
+	enc.item[0] = 7777;
+	enc.item_prob[0] = 1000; // 千分率 ⇒ 必掉
+	winBattleAgainst(f, id, enc);
+	REQUIRE(f.world.itemCount() == 1);
+	REQUIRE(f.world.playerItemPile(id, SA::Model::kStartItemArray) == 1); // ★ 掉落填了 1
+
+	// 再开一场残血战斗,把刚掉的药喝掉。
+	const BattleId battle = startHurtPlayerBattle(f, id, 500, 100000);
+	useItemTurn(f, id, battle, SA::Model::kStartItemArray, 0);
+
+	CHECK(f.world.battleField(battle)->at(0).hp >= 500 + 90);
+	CHECK(f.world.itemCount() == 0); // 喝光 ⇒ 清槽 + 释放
 }

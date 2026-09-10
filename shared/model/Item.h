@@ -82,10 +82,18 @@ struct Item
 	//
 	// ★ `ITEM_CANBEPILE`(可否堆叠)/ `ITEM_USEPILENUMS`(单格堆叠上限)。掉落与使用
 	//   都要它(掉落判断能否并进已有格、使用消耗一个 pile)⇒ 背包地基必需。
-	// ⚠️ **当前堆叠数量**(某一格里现在堆了几个)不在道具表、是运行期状态,归属未定
-	//   (原版存 workint)⇒ 本批**不建** current_pile,留写入侧批次(见文末 ④)。
+	// ⚠️ **当前堆叠数量**(某一格里现在堆了几个)不在道具表、是运行期状态(原版存 workint)。
 	std::int32_t can_be_pile = 0;
 	std::int32_t use_pile_nums = 0;
+
+	// ── 运行期堆叠数(批次 I.4「使用道具」建)──────────────────────────────
+	//
+	// ★ 某一格现在堆了几个。原版存 `workint`(运行期,非道具表)。I.1 文末 ④ 登记「留写入侧
+	//   批次按各自语义建」—— 使用道具是第一个消费方:每用一个 `--current_pile`,归零则清槽
+	//   + 释放实体(见 src/world/World.cpp `consumeUsedItems`)。
+	// ⚠️ 写入路径(掉落 / 注入 seam)造 Item 时置为该格实际堆叠数(单个道具 = 1);`<=0` 视同
+	//   不可用(空格)。⚠️ 掉落/捕获路径回填 current_pile 已随本批补上(World.cpp 造 Item 处)。
+	std::int32_t current_pile = 0;
 
 	// ── 掉落 / 存档行为(源码 `ITEM_DATAINT`,展开视图启用)────────────────
 	//
@@ -122,8 +130,9 @@ struct Item
 //    PARALYSIS/SLEEP/STONE/DRUNK/CONFUSION`,item.h:172-177)⇒ 使用道具批次 + L4
 //    状态系统(与 `Pet.h` 文末 ① 同一个 L4 前置)。
 //
-// ④ **运行期状态**:`current_pile`(某格现堆几个)· `workint[]` 全段(除主人反指)
-//    ⇒ 写入侧状态,由捡起 / 掉落 / 使用批次按各自语义建,本批不猜其归属。
+// ④ **运行期状态**:`current_pile`(某格现堆几个)✅ **批次 I.4 建**(见上「运行期堆叠数」)·
+//    `workint[]` 其余全段(除主人反指 / 现堆叠数)⇒ 仍属写入侧状态,由各自批次按语义建,
+//    本批不猜其归属。
 //
 // ⑤ ★★ **functable / Lua 回调名全段**(`ITEM_INITFUNC`..`ITEM_LASTFUNCTION`,
 //    它们**占用 `string[]` 下标空间**故 `ITEM_DATACHARNUM == ITEM_LASTFUNCTION`)

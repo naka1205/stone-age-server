@@ -594,6 +594,23 @@ struct WorldEnemyPos
 	std::int32_t image = 0; // E_T_IMGNUMBER(CharAppear.image 的源)
 };
 
+// 道具效果表的一行(批次 I.4「使用道具」)—— 按 `item_id` 查「用了会怎样」。
+//
+// ⚠️★★ **不是 itemset6.txt 的 1:1 移植**,同 `loadEncounterTables` 取向:世界层不含 GBK
+//    文件解析器(道具表 D 线导入器尚未落地)。本表是**不阻塞 D 线的最小切法**,只承载
+//    「使用道具」净核需要的一列 —— 战斗内 HP 恢复力基数。真数据由 D 线导入期解析
+//    itemset6.txt 的 `usefunc == "ITEM_useRecovery"` 行、按 `ITEM_ARGUMENT` 的 `"体"+数字`
+//    (battle_item.c:245/289)取出 `power` 后经 `loadItemEffects` 注入;当前由 fixture 注入。
+// ★ 只做 HP 恢复药:MP / 状态 / 变身 / 传送 等其余 usefunc 依赖未移植子系统,不在本表(DR-DT23)。
+struct ItemEffect
+{
+	std::int32_t item_id = 0; // 道具表主键(= Item::item_id 的匹配键)
+	// 战斗内 HP 恢复力**基数** `power`;<= 0 视同非恢复药(不恢复、不摇 rng、不扣道具)。
+	// ⚠️★ **不是恢复量** —— 实际恢复量 = `RAND(power*0.9, power*1.1)`,由 L3 在结算时摇
+	//    (battle_magic.c:419)⇒ 用一次道具消耗一次 rng。见 `Combatant::mods.item_heal_power`。
+	std::int32_t heal_power = 0;
+};
+
 class World final : public SA::Net::TransportEvents,
 
                     public SA::Net::SessionHost
@@ -673,6 +690,13 @@ class World final : public SA::Net::TransportEvents,
 	//    `loadEncounterTables`)。⇒ 刷怪点用 `enemy_id` 查的是 `loadEncounterTables` 注入的
 	//    那份敌人表 / 模板表 ⇒ **两个 load 都要调**,否则查不到即该点刷不出(落 warn、不崩)。
 	void loadSpawnPoints(std::vector<SpawnPoint> points);
+
+	// 注入道具效果表(批次 I.4「使用道具」)—— 按 `item_id` 查「用了恢复多少 HP」。
+	//
+	// ⚠️★ **默认空 ⇒ 任何道具用了都没效果**(power 投影恒 0 ⇒ L3 的 USE_ITEM 分支直接跳过、
+	//    **不摇 rng**)。现有用例不注入即不受影响;使用道具用例显式注入 fixture。同
+	//    `loadEncounterTables`:真数据由 D 线导入期解析 itemset6.txt 后经本接口灌入,本表不解析文件。
+	void loadItemEffects(std::vector<ItemEffect> effects);
 
 	// 往某会话玩家的背包放一个道具(批次「捕获扣道具」的**注入 seam**)。
 	//
@@ -781,6 +805,11 @@ class World final : public SA::Net::TransportEvents,
 	//   不逐字段漏)—— 捕获扣道具用例要能断言"命中的道具被删、不命中的还在"。
 	// ⚠️ slot 是**全域**下标 [0, kMaxItemHave):装备位段也可读(卸装校验将来会用)。
 	const SA::Model::Item *playerItemAt(SA::Net::SessionId session, int slot) const;
+
+	// 某会话玩家某背包槽的当前堆叠数 `current_pile`(只读,批次 I.4「使用道具」)。
+	//   -1 = 无 L2 玩家 / 槽越界 / 空槽(悬空句柄)。★ 供用例断言「使用道具后堆叠数减一 /
+	//   用完清槽」这条端到端接上了(欠债 20 那族:没有观察面就没东西能断言消耗真的发生)。
+	std::int32_t playerItemPile(SA::Net::SessionId session, int slot) const;
 
 	// 当前出战宠在 `pets[]` 的槽号(原 `CHAR_DEFAULTPET`)。-1 = 无实体 / 无出战宠。
 	// ★ DR-BT21 的测试观察面:换宠(PET_OUT/PET_IN)是否写对 `default_pet`。

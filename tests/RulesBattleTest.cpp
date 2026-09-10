@@ -1016,8 +1016,13 @@ TEST_CASE("ResolveTurn:批次 0.5 未接入的指令一律跳过,不产事件")
 	//    留着会掩盖"捕获对可捕目标应产事件"。
 	// ⚠️★ PET_IN / PET_OUT 已于批次 DR-BT21 接入(产 PetSwitch 意图事件)⇒ **从本表移除**。
 	//    它们的行为由「换宠」系列用例钉住(本文件 resolveTurn 侧 + WorldTickTest 世界写侧)。
+	// ⚠️★ USE_ITEM 已于批次 I.4 接入(有效恢复药产 SetHp)⇒ **从本表移除**。
+	//    ★★ 它当初留在表里**没有变红**,因为 `makeDuel` 的 `mods.item_heal_power` 默认 0
+	//    ⇒ 恰好走「非恢复药 ⇒ 不产事件」那支 —— 与 CAPTURE 当年一样是**巧合命中**,
+	//    不是覆盖边界。留着会掩盖「用有效恢复药应当产 SetHp 且摇一次 rng」。
+	//    它现在的行为由下面「使用道具」系列用例钉住。
 	using K = SA::Domain::BattleCommand::CommandKind;
-	for (const auto k : {K::GUARD, K::WAIT, K::USE_ITEM,
+	for (const auto k : {K::GUARD, K::WAIT,
 	                     K::PET_SKILL, K::PROF_SKILL, K::SPELL})
 	{
 		Duel d = makeDuel();
@@ -1027,6 +1032,208 @@ TEST_CASE("ResolveTurn:批次 0.5 未接入的指令一律跳过,不产事件")
 		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 		CHECK(ev.events.size() == 0);
 	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  使用道具(批次 I.4,道具域第四批)—— 战斗内 HP 恢复药
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 链路(8.0 净核,已回 `StoneAge/gmsv/src/` 双源核实):
+//   `lssproto_ID_recv` → `CHAR_ItemUse`(char_item.c:663)
+//     → `usefunc = getFunctionPointerFromName(...)`(item.c:685)
+//       ★ 8.0 的名字→指针表是**硬编码 C 数组** `correspondStringAndFunctionTable[]`
+//         (function.c:165,`{"ITEM_useRecovery", ITEM_useRecovery, 0}` 在 :188)
+//         ⇒ **不走 Lua**(8.5 的 `mylua/function.c` 是另一套,8.0 不用)
+//     → `ITEM_useRecovery`(item_event.c:1073,按 WORKBATTLEMODE 分战斗/场景)
+//     → `ITEM_useRecovery_Battle`(battle_item.c:237)
+//     → `BATTLE_MultiRecovery` BD_KIND_HP(battle_magic.c:413)
+//
+// ⚠️★★ 恢复量**要摇 rng**:`UpPoint = RAND(power*0.9, power*1.1)`(battle_magic.c:419)。
+//    `power` 只是 `sscanf` 出的基数(battle_item.c:289)。⇒ 用一次道具消耗一次随机数;
+//    把它当确定值会让此后所有 rng 消耗整体平移,而「恢复了多少」的断言抓不到
+//    (同 DR-BT23 退化区间那族)⇒ 本系列**逐条断言 `calls()`**。
+// ★ 8.0 的 `_MAGIC_REHPAI` 开 ⇒ `#else` 段不编译 ⇒ **无** `per` 百分比缩放、
+//   **无** `GetRecoveryRate(vital)` 修正(battle_magic.c:421-425 都在 `#else` 里)。
+//
+// ⓘ **`calls()` 的基线 = 1**(实测,非推断):`makeDuel` 只有 slot 0 有指令,
+//   行动顺序那一步对它摇一次 dex 抖动(`Battle.cpp:713` `rng.rand(0, quick*ratio)`;
+//   `quick == 0` ⇒ 退化区间,**照常消耗**,DR-BT23)。⇒ 下面「不该摇」= 1、
+//   「摇了一次」= 2。★ 下一条用例把这个基线**显式钉住**,免得基线变了却被读成
+//   「USE_ITEM 的消耗变了」。
+
+TEST_CASE("ResolveTurn:rng 基线 —— 单指令 Duel 的行动顺序抖动恒摇一次")
+{
+	// ★ 本条不测道具,只把上面那个基线固定下来:同一个 Duel 下 WAIT 摇 1 次。
+	//   ⇒ 使用道具系列里的 `calls() == 1 / == 2` 才有意义(1 = 只有基线,2 = 基线 + 恢复量)。
+	Duel d = makeDuel();
+	setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::WAIT);
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({50});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+	CHECK(ev.events.size() == 0);
+	CHECK(rng.calls() == 1); // ← 基线
+}
+
+TEST_CASE("ResolveTurn:使用有效恢复药 ⇒ 摇一次 rng、产 SetHp、按 RAND(0.9p,1.1p) 恢复")
+{
+	// power = 100 ⇒ 原版取值集合 = { (int)(0.9*100) + k : k = 0..ceil(0.2*100+1)-1 }
+	//              = { 90 + 0..20 } = [90, 110](见 Battle.cpp 的整数复刻式)。
+	auto run = [](int script_value, int *calls_out)
+	{
+		Duel d = makeDuel();
+		d.field.at(0).hp = 500;
+		d.field.at(0).max_hp = 100000; // 抬高 max 把 clamp 从本条里摘出去
+		d.field.at(0).mods.item_heal_power = 100;
+		setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::USE_ITEM);
+		d.cmds.commands[0].command.use_item.target = 0; // 给自己用
+		SA::Domain::BattleEvents ev{};
+		// ★ 脚本第一个值被基线(dex 抖动)吃掉,第二个才是恢复量那一摇。
+		ScriptedRandom rng({0, script_value});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		*calls_out = rng.calls();
+		REQUIRE(ev.events.size() == 1);
+		REQUIRE(ev.events[0].body_kind == SA::Domain::BattleEvent::BodyKind::SET_HP);
+		CHECK(ev.events[0].body.set_hp.target == 0u);
+		return static_cast<int>(ev.events[0].body.set_hp.hp);
+	};
+
+	int calls = 0;
+	// ★ ScriptedRandom::rand 把脚本值**钳制**到 [lo,hi] ⇒ 用越界值直接读出区间两端。
+	CHECK(run(-999999, &calls) == 500 + 90); // 下界 = 9p/10 = 90
+	CHECK(calls == 2);                       // ★★ 基线 1 + 恢复量 1
+	CHECK(run(999999, &calls) == 500 + 110); // 上界 = 90 + (100+9)/5 - 1 = 110
+	CHECK(calls == 2);
+	CHECK(run(97, &calls) == 500 + 97); // 区间内原值透传
+	CHECK(calls == 2);
+}
+
+TEST_CASE("ResolveTurn:恢复量区间 = 原版 RAND(power*0.9,power*1.1) 的取值集合")
+{
+	// ★★ 原版参数是 **double**(`power*0.9` / `power*1.1`),经 RAND 宏
+	//    `x + (int)((y-x+1)*u)` 后整体截断 ⇒ 取值集合 **不等于** [(int)(0.9p), (int)(1.1p)]。
+	//    ⚠️ p=7 就是分水岭:原版 = (int)(6.3 + {0,1,2}) = {6,7,8},而按 (int)(1.1*7)=7
+	//    截断会得 [6,7] —— **少一个值**。本条把这个易错点钉死。
+	//    ⓘ 整数复刻式 lo=9p/10、hi=lo+(p+9)/5-1 已穷举 p=0..100000 与原版 double 式比对相等。
+	auto bounds = [](int power)
+	{
+		auto one = [power](int script_value)
+		{
+			Duel d = makeDuel();
+			d.field.at(0).hp = 0;
+			d.field.at(0).max_hp = 100000;
+			d.field.at(0).mods.item_heal_power = power;
+			setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::USE_ITEM);
+			d.cmds.commands[0].command.use_item.target = 0;
+			SA::Domain::BattleEvents ev{};
+			ScriptedRandom rng({0, script_value}); // 首值给基线
+			resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev);
+			REQUIRE(ev.events.size() == 1);
+			return static_cast<int>(ev.events[0].body.set_hp.hp); // hp 起点 0 ⇒ 即恢复量
+		};
+		return std::make_pair(one(-999999), one(999999));
+	};
+
+	CHECK(bounds(1) == std::make_pair(0, 1));      // 0.9*1=0.9→0;ceil(1.2)-1=1
+	CHECK(bounds(3) == std::make_pair(2, 3));      // 2.7→2;ceil(1.6)-1=1
+	CHECK(bounds(7) == std::make_pair(6, 8));      // ★ 6.3→6;ceil(2.4)-1=2 ⇒ 上界 8 > (int)7.7
+	CHECK(bounds(10) == std::make_pair(9, 11));    // 整数档:9;ceil(3.0)-1=2
+	CHECK(bounds(15) == std::make_pair(13, 16));   // 13.5→13;ceil(4.0)-1=3
+	CHECK(bounds(100) == std::make_pair(90, 110)); // 90;ceil(21)-1=20
+}
+
+TEST_CASE("ResolveTurn:使用恢复药 clamp 到 max_hp(battle_magic.c:427-431)")
+{
+	Duel d = makeDuel();
+	d.field.at(0).hp = 990;
+	d.field.at(0).max_hp = 1000;
+	d.field.at(0).mods.item_heal_power = 100; // 上界 110 ⇒ 990+110 = 1100 > 1000
+	setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::USE_ITEM);
+	d.cmds.commands[0].command.use_item.target = 0;
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({0, 999999});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+	REQUIRE(ev.events.size() == 1);
+	CHECK(ev.events[0].body.set_hp.hp == 1000u); // min(workhp, maxhp)
+	CHECK(rng.calls() == 2);                     // ★ clamp 不影响「摇过一次」
+}
+
+TEST_CASE("ResolveTurn:非恢复药(power <= 0)⇒ 不产事件**且不额外消耗 rng**")
+{
+	// ★★ 这是 rng 保序的关键一条:原版 arg 不含 `"体"`/`"气"` 等关键字即 `return`
+	//    (battle_item.c:284),**根本进不到** `BATTLE_MultiRecovery` ⇒ 一次都不摇。
+	//    ⚠️ 若实现改成「先摇再判」,返回值断言全绿而 rng 序列自此平移 ⇒ 必须断言 calls()。
+	for (const int power : {0, -1, -100})
+	{
+		Duel d = makeDuel();
+		d.field.at(0).mods.item_heal_power = power;
+		setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::USE_ITEM);
+		d.cmds.commands[0].command.use_item.target = 0;
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({50});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		CHECK(ev.events.size() == 0);
+		CHECK(rng.calls() == 1); // ★★ 只有基线 ⇒ USE_ITEM 一次都没摇
+	}
+}
+
+TEST_CASE("ResolveTurn:恢复药目标空槽 / 越界 ⇒ 不产事件且不额外摇 rng")
+{
+	// ⚠️★ **登记划出的原版分叉**:原版 `BATTLE_MultiList`(battle.c:236)在目标
+	//    `BATTLE_TargetCheck == FALSE`(已死/不在场)时会
+	//    `while((toNo = nLifeArea[rand()%10]) == -1);` —— **随机改打一个活人**,
+	//    且那个 while 消耗**不定次数** rng;全死时 `return -1` 而 `BATTLE_MultiRecovery`
+	//    **不检查返回值**、直接遍历未初始化的 ToList(原版 UB)。
+	//    ⇒ 本批不复刻「改打随机活人」(见 DR-DT23 ③):目标不可用即**什么都不发生**,
+	//      且**不额外摇 rng**。⚠️ 这是与原版的**已知行为差**,不是遗漏。
+	for (const int target : {5, 1, -1, kSlotCount})
+	{
+		Duel d = makeDuel(); // 只有 slot 0 与 slot 10 被占用
+		d.field.at(0).mods.item_heal_power = 100;
+		setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::USE_ITEM);
+		d.cmds.commands[0].command.use_item.target = static_cast<std::uint32_t>(target);
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({50});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		CHECK(ev.events.size() == 0);
+		CHECK(rng.calls() == 1); // 只有基线
+	}
+}
+
+TEST_CASE("ResolveTurn:恢复药读的是**回合内 hp 镜像**,不是回合开始时的 hp")
+{
+	// ★ 同回合里 slot 10 先打了 slot 0,slot 0 再给自己用药 ⇒ 恢复应叠在**挨打之后**
+	//   的血量上(与攻击链共用一份 `hp[]` 镜像)。⚠️ 若读 `field.at(i).hp`(回合初值),
+	//   SetHp 会把这一回合已经吃到的伤害**抹掉** —— 那正是本条要抓的。
+	Duel d = makeDuel();
+	d.field.at(0).hp = 5000; // 够厚,确保挨一下不死(死了就走 dead 分支、不产 SetHp)
+	d.field.at(0).max_hp = 100000;
+	d.field.at(0).mods.item_heal_power = 100; // MaxRandom ⇒ 恢复量取上界 110
+	d.field.at(0).quick = 0;                  // 慢 ⇒ 后手用药
+	d.field.at(10).quick = 999;               // 敌人先手打
+	setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::USE_ITEM);
+	d.cmds.commands[0].command.use_item.target = 0;
+	setAttack(d.cmds, 10, 0);
+
+	SA::Domain::BattleEvents ev{};
+	MaxRandom rng;
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	int dmg_total = 0;
+	int set_hp = -1;
+	for (std::size_t i = 0; i < ev.events.size(); ++i)
+	{
+		const auto &e = ev.events[i];
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE &&
+		    e.body.damage.target == 0u)
+			dmg_total += -e.body.damage.hp_delta; // hp_delta 是负数
+		else if (e.body_kind == SA::Domain::BattleEvent::BodyKind::SET_HP)
+			set_hp = static_cast<int>(e.body.set_hp.hp);
+	}
+	REQUIRE(dmg_total > 0); // 前提:敌人确实打到了(否则本条没有区分力)
+	REQUIRE(set_hp >= 0);
+	// ★★ 有区分力的那条:读镜像 ⇒ 5000-dmg+110;读回合初值 ⇒ 5000+110。
+	CHECK(set_hp == 5000 - dmg_total + 110);
+	CHECK(set_hp != 5000 + 110);
 }
 
 TEST_CASE("ResolveTurn:守方防御 ⇒ 减伤且置 GUARD;混乱值 > 0 时不减伤")

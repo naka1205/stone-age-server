@@ -515,6 +515,102 @@ void projectCaptureItemGate(BattleInstance &b, PlayerPool &players,
 	}
 }
 
+// 道具效果表按 item_id 线性查 HP 恢复力基数 power(批次 I.4)。表内无此道具 ⇒ 0(非恢复药)。
+//   ★ 线性查同 `findEnemyEncounter` —— 表小(只装恢复药),不值当上哈希。
+std::int32_t findItemHealPower(const std::vector<ItemEffect> &effects, std::int32_t item_id)
+{
+	for (const ItemEffect &e : effects)
+		if (e.item_id == item_id)
+			return e.heal_power;
+	return 0;
+}
+
+// 把「本回合 USE_ITEM 指令的 HP 恢复力基数」投影到 L3 输入面(批次 I.4「使用道具」)。
+//
+// ★★ 与 `projectCaptureItemGate`(捕获门 ④)同款分工:基数要读**道具效果表 + 攻方背包**
+//    这两个世界态,L3 纯函数看不到 ⇒ World 在 `resolveTurn` **之前**按每条 USE_ITEM 指令
+//    查好、写进攻方 `Combatant::mods.item_heal_power`。
+//   ⚠️★★ **只投影基数,不在这里摇 rng** —— 实际恢复量 `RAND(power*0.9, power*1.1)`
+//     (battle_magic.c:419)由 L3 在结算时用**战斗 rng** 摇。若在这里摇,取数就落在
+//     resolveTurn 之外 ⇒ 战斗 rng 序列错位(同 W.4「遇敌 rng 与战斗 rng 分离」的反面教训)。
+//   ⚠️★ **必须在 resolveTurn 前**:同捕获门,值备好 L3 才能纯读。
+//   ★ 每回合按本回合指令重算(先归 0)⇒ 上回合的投影不残留;非 USE_ITEM 指令 / 无 L2 玩家 /
+//     空槽 / 非恢复药一律保持 0 ⇒ L3 分支跳过且不摇 rng(现有用例的 rng 序列不受影响)。
+void projectItemUsePower(BattleInstance &b, PlayerPool &players, const ItemPool &items,
+                         const std::vector<ItemEffect> &effects)
+{
+	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+	{
+		if (!b.commands.present[slot])
+			continue;
+		const SA::Domain::BattleCommand &cmd = b.commands.commands[slot];
+		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::USE_ITEM)
+			continue;
+
+		SA::Rules::Combatant &atk = b.field.at(slot);
+		if (!atk.occupied)
+			continue;
+		atk.mods.item_heal_power = 0; // 每回合重算
+
+		// 攻方 L2 玩家 + 其指定背包槽的道具 ⇒ item_id ⇒ 查效果表得恢复力基数。
+		SA::Model::Player *owner =
+		    players.resolve(b.player_of_slot[static_cast<std::size_t>(slot)]);
+		if (owner == nullptr)
+			continue; // 敌人 / demo(无 L2 玩家)用道具本批不支持 ⇒ 保持 0
+		const int item_slot = static_cast<int>(cmd.command.use_item.item_slot);
+		if (item_slot < 0 || item_slot >= static_cast<int>(SA::Model::kMaxItemHave))
+			continue;
+		const SA::Model::Item *it =
+		    items.resolve(owner->items[static_cast<std::size_t>(item_slot)]);
+		if (it == nullptr || it->current_pile <= 0)
+			continue; // 空槽 / 悬空句柄 / 无堆叠 ⇒ 不能用
+		const std::int32_t power = findItemHealPower(effects, it->item_id);
+		if (power > 0)
+			atk.mods.item_heal_power = power;
+	}
+}
+
+// 使用道具成功后扣掉一个(消耗一个 pile),归零则清槽 + 释放实体。批次 I.4「使用道具」。
+//
+// ★★ 与 `captureItemDelAll`(删道具)同分工:世界写,由调用方在 `applyEvents` 后做。
+//    判据 = `atk.mods.item_heal_power > 0`(`projectItemUsePower` 投影过 ⇒ 本回合确实用了
+//    有效恢复药)—— 与 L3 的 USE_ITEM 分支同一判据,不重复读道具表 / 不重判 target。
+//   ⚠️ 源码 `ITEM_useRecovery_Battle` 末尾 `CHAR_DelItemMess`(battle_item.c:323)删一个;
+//     我们按堆叠语义 `--current_pile`,归零才清槽 + 释放(单格即一个道具,行为一致)。
+//   ⚠️★ 清槽 + 释放**成对**(同 `captureItemDelAll`:漏一半会让池只增不减 / 槽永久占用,
+//     而没有一处报错)。
+void consumeUsedItems(BattleInstance &b, PlayerPool &players, ItemPool &items)
+{
+	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+	{
+		if (!b.commands.present[slot])
+			continue;
+		const SA::Domain::BattleCommand &cmd = b.commands.commands[slot];
+		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::USE_ITEM)
+			continue;
+		const SA::Rules::Combatant &atk = b.field.at(slot);
+		if (atk.mods.item_heal_power <= 0)
+			continue; // 未投影 ⇒ 非有效使用(空槽 / 非恢复药 / 无 L2 玩家)⇒ 不扣
+
+		SA::Model::Player *owner =
+		    players.resolve(b.player_of_slot[static_cast<std::size_t>(slot)]);
+		if (owner == nullptr)
+			continue;
+		const int item_slot = static_cast<int>(cmd.command.use_item.item_slot);
+		if (item_slot < 0 || item_slot >= static_cast<int>(SA::Model::kMaxItemHave))
+			continue;
+		const SA::Model::ItemHandle h = owner->items[static_cast<std::size_t>(item_slot)];
+		SA::Model::Item *it = items.resolve(h);
+		if (it == nullptr)
+			continue;
+		if (--it->current_pile <= 0)
+		{
+			owner->clearItemSlot(item_slot);
+			(void)items.release(h);
+		}
+	}
+}
+
 // ★★ 按事件列表把结果写回世界状态。
 //
 // 这一步**必须由调用方做**,不是 world 多管闲事:批次 0.5 的裁定
@@ -1100,6 +1196,11 @@ struct World::Impl
 	std::vector<EnemyEncounter> encounters{};
 	std::vector<EnemyTemplate> enemy_templates{};
 
+	// ── 道具效果表(批次 I.4「使用道具」)──────────────────────────────────
+	//   ★ 默认空 ⇒ 任何道具 heal 投影恒 0 ⇒ L3 的 USE_ITEM 分支跳过(现有用例不受影响)。
+	//     由 `loadItemEffects` 注入(fixture / 阶段 2 D 线导入)。按 item_id 线性查(表小)。
+	std::vector<ItemEffect> item_effects{};
+
 	// ── 世界刷怪点与世界态敌人(批次 W.2 / W.3)──────────────────────────────
 	//   spawn_points:注入的刷怪点(loadSpawnPoints,默认空 ⇒ 世界无常驻怪);
 	//   world_enemies:当前在地图上的敌人。★ 与战斗态敌人**共用 `enemies` 池但分开跟踪** ——
@@ -1663,6 +1764,12 @@ void World::tick()
 			//    resolveTurn 之前**(门不过则不摇 rng,与原版一致,见 projectCaptureItemGate)。
 			projectCaptureItemGate(b, s.players, s.enemies, s.items);
 
+			// ★ 使用道具门:把「本回合 USE_ITEM 指令的 HP 恢复力基数」投影进攻方 mods(批次 I.4)
+			//   —— 同捕获门,读道具表 / 背包是世界态,必须在 resolveTurn 前。
+			//   ⚠️★ 只投基数,**恢复量由 L3 用战斗 rng 摇**(在这儿摇会让取数落在 resolveTurn
+			//     之外 ⇒ 战斗 rng 序列错位)。
+			projectItemUsePower(b, s.players, s.items, s.item_effects);
+
 			// 结算一个回合。⚠️ 返回 false = 事件超过 256 条被迫截断。
 			//   05 §10.4 记着原版无上界 strcat 的教训 ⇒ **必须处理**,不可当没看见。
 			const bool ok = SA::Rules::resolveTurn(b.field, b.commands,
@@ -1691,6 +1798,10 @@ void World::tick()
 			wctx.items = &s.items;
 			wctx.logger = &s.logger;
 			applyEvents(b.events, b.field, wctx);
+
+			// ★ 使用道具的世界写:扣掉本回合用掉的道具(消耗一个 pile)—— 同捕获删道具的分工,
+			//   在 applyEvents 之后(HP 已由 SET_HP 事件落地)。批次 I.4。
+			consumeUsedItems(b, s.players, s.items);
 
 			b.stats.events_emitted += static_cast<std::uint32_t>(b.events.events.size());
 			++b.stats.turns_resolved;
@@ -1903,6 +2014,7 @@ void World::tick()
 								continue;
 							SA::Model::Item item{};
 							item.item_id = item_id;
+							item.current_pile = 1;                       // ★ I.4:掉落回填堆叠数(一件)⇒ 使用侧读得到
 							(void)giveItemIntoPlayer(*p, item, s.items); // -1 = 背包满 ⇒ 丢弃
 						}
 					}
@@ -2318,6 +2430,11 @@ void World::loadEncounterTables(std::vector<EncountArea> areas,
 void World::loadSpawnPoints(std::vector<SpawnPoint> points)
 {
 	_impl->spawn_points = std::move(points);
+}
+
+void World::loadItemEffects(std::vector<ItemEffect> effects)
+{
+	_impl->item_effects = std::move(effects);
 }
 
 int World::giveItemToPlayer(SA::Net::SessionId session, const SA::Model::Item &item)
@@ -2958,6 +3075,19 @@ const SA::Model::Item *World::playerItemAt(SA::Net::SessionId session, int slot)
 		return nullptr;
 	// ⚠️ 槽里的句柄可能悬空(道具已回池)⇒ resolve 返 nullptr,与空槽同一个答案。
 	return _impl->items.resolve(p->items[static_cast<std::size_t>(slot)]);
+}
+
+std::int32_t World::playerItemPile(SA::Net::SessionId session, int slot) const
+{
+	if (slot < 0 || static_cast<std::size_t>(slot) >= SA::Model::kMaxItemHave)
+		return -1;
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return -1;
+	const SA::Model::Item *it =
+	    _impl->items.resolve(p->items[static_cast<std::size_t>(slot)]);
+	return it == nullptr ? -1 : it->current_pile; // 空槽 / 悬空句柄 ⇒ -1
 }
 
 const SA::Rules::BattleField *World::battleField(BattleId id) const
