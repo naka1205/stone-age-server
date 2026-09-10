@@ -701,6 +701,15 @@ class World final : public SA::Net::TransportEvents,
 	//    跑够久才表现为捕获突然失败"。敌人池同族 ⇒ 用例断言"战斗结束后回落到 0"。
 	std::size_t enemyCount() const noexcept;
 
+	// 道具池的活跃数(批次 I.1)。
+	//
+	// ★★ 加它的理由与 `petCount`/`enemyCount` 同一条:背包 L2 是"地基先落、写入链路
+	//    后接"的分层,而**没有观察面就没有任何东西能断言接上了**(欠债 20 的要害)。
+	// ⚠️ 本批它**恒 0** —— 没有任何写入者 allocate 道具。这不是 bug,是登记在案的留白;
+	//    用例专门断言"本批恒 0",将来接掉落 / 捡起时,这条断言会被新用例改写成"非 0"。
+	//    ★ 它同时是将来的**泄漏探针**(同 petCount:释放道具不清槽 ⇒ 池只增不减)。
+	std::size_t itemCount() const noexcept;
+
 	// 当前活跃战斗数(批次 W.4 遇敌触发的探针)。
 	// ★ 遇敌用例断言「走动后从 0 变 1」—— 没有它,「遇敌真的开了一场战」无从断言
 	//   (同 `enemyCount` 的理由:不接的静默只有观察面能戳破)。
@@ -737,6 +746,12 @@ class World final : public SA::Net::TransportEvents,
 	//    (同 EntityIndex::find 未命中给明确空值那一条)。
 	int playerCaptureCount(SA::Net::SessionId session) const;
 	int playerPetSlotsUsed(SA::Net::SessionId session) const;
+
+	// 某会话背后 Player 已占**背包**槽数(批次 I.1)。-1 = 会话无 L2 实体(同上,与真 0 区分)。
+	// ★ 只数背包段 `[kStartItemArray, kMaxItemHave)` 的**有引用**槽(悬空句柄也算,
+	//   两步分工同 `playerPetSlotsUsed`)。本批恒 0(无写入者)⇒ 用例断言之。
+	int playerItemSlotsUsed(SA::Net::SessionId session) const;
+
 	// 当前出战宠在 `pets[]` 的槽号(原 `CHAR_DEFAULTPET`)。-1 = 无实体 / 无出战宠。
 	// ★ DR-BT21 的测试观察面:换宠(PET_OUT/PET_IN)是否写对 `default_pet`。
 	int playerDefaultPet(SA::Net::SessionId session) const;

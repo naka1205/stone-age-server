@@ -268,6 +268,7 @@ P5 文件名 PascalCase + guard `__SA_<File>_H__` · P6 clang-format 引擎款�
 | **DR-DT17** | ★★ **遇敌触发闭环 W.4(走动 → 遇敌 → 战斗 → 拿经验)**:遇敌骰子放哪 · 遇敌 rng 用哪个 · 遇敌数据怎么进 world · 玩家进场四维哪来 | ✅ **① 遇敌判定在 `kCharLoop` 玩家段**(走一格后,移植 `char_walk.c:585` 骰子 `randMod(120*getEnemyAction()) < cep`;命中 → `EN_recv` 净核清走路串 + `BATTLE_CreateVsEnemy(_,0,-1)` 组装:`pickEnemyGroup`→`rollEnemyList`→`startBattle`→`joinBattle`→ 逐只 `spawnEnemyToField`)· **② 遇敌用世界 rng `world_rng`**(原版 `ENEMY_getEnemy` 在建 battle 前用全局 rand;种子从 `masterSeed` 派生**不调 `nextSeed`** ⇒ 不动战斗种子序列,敌人四维仍用战斗 rng)· **③ 遇敌四表经 `loadEncounterTables` 注入**(默认空 ⇒ 不遇敌;真数据 D 线导入,同 `EnemyEncounter` 判据)· **④ 玩家进场四维占位**(`makePlayerCombatant`;1.5 无选角来源 ⇒ 登记残缺,同 §9.0.42 名字留空)· **⑤ 划出**:传送点抑制 / 明雷退回(依赖 `kNpcSpawn`/W.3)· 自由服魔改(`getEqNoenemy` 等)· 组队 / 技能固定遇敌率(系统未移植)· `cep++` 战斗态分支(走路走不到,照抄不硬接)。范围 = 中(全在 `src/world/`,watched 零改动)。批次 W.4 | 见 §2.19;★ 绝大部分复用遇敌链 M.5-M.7 + 战斗生命周期;`enemyCount` 区分力由握手 bug 真实兑现 |
 | **DR-DT18** | ★★ **世界敌人线 W.2+W.3(地图刷怪 + 游荡 AI + 视野看敌人)**:摊还用时间预算还是条数 · 刷怪来源 · 视野怎么扩到敌人 · 游荡 AI 怎么建 | ✅ **① 条数制摊还**(★ `_CHAR_LOOP_TIME` 8.0 三证关(15 §5.2 C18)⇒ 走 #else,`EnemyMoveNum` 每 tick 上限 + `charcnt` 游标;⚠️ `unifdef_80` 把它误当时间预算是**选错分支**)· **② 刷怪点 = 不阻塞 D6 的注入式替身**(原版 NPC/Lua 脚本刷、脚本层未落地;`enemy_id → findEnemyEncounter → spawnEnemy` 单一真源)· **③ 视野扩「玩家看敌人」**(`CharAppear/Move/Disappear` 加 `entity_type`、`CharAppear` 加 `image`;★ 单向,敌人无会话不接收)· **④ 游荡 AI 数据驱动**(节拍到期 → 随机方向 + `mapWalkable` + 半径门 + world_rng;不移植函数指针 `CHAR_LOOPFUNC` / Lua `RunCharLoopEvent`)· **⑤ 划出**:明雷触发战斗(解 W.4「明雷退回」)/ 完整 AI(追击) / Lua 事件 / 时间预算截断路径。范围 = 宽(含 IDL + `Enemy` 加位置 ⇒ **两处 watched 变更,前推 shared**)。批次 W.2+W.3 | 见 §2.20;★★ **二度反转**(先照 `unifdef_80` 记时间预算制 → `15 §5.2` 三证纠为条数制);`world_map` 15→**26 例 / 213 断言**,反向验证三处逐条转红 |
 | **DR-DT19** | ★★ **明雷触发战斗 W.5(撞明雷退回 + EV 事件开战)**:开战走什么触发 · 退回做不做 · 复活怎么算 | ✅ **① 忠实原版 EV 事件驱动**(用户裁定):新增 `EventRequest`(0x0305)/`EventResult`(0x0306)+ `SessionHost::onEvent`;`World::onEvent` 移植 `EVENT_main`(event.c:37,全仓唯一调用点 `callfromcli.c:1405`)净核 —— 玩家**权威**坐标 + dir 算面前格 → 扫 `world_enemies` 命中 `ENTITY_ENEMY` → 开战 → 回执 `EventResult{seqno,ok}`。★ 只接明雷一路,通用派发骨架(传送点等)预留 · **② 明雷开战用已存在实体**(`triggerNpcEnemyBattle`,移植 `NPC_NPCEnemy_BattleIn`→`BATTLE_CreateVsEnemy(player,_,enemy)`,npc_npcenemy.c:672):`startBattle`+`joinBattle`+`enterEnemyToField` 把地图上那只投影进战场,★★ **转移 handle 所有权**(不 allocate/不 spawnEnemy/不耗战斗 rng)⇒ `enemyCount` 守恒 · **③ 撞明雷退回**(移植 `char_walk.c:585`):走到有世界敌人的格 ⇒ 弹回原格,★ 与开战**解耦**(退回≠开战,原版两条独立机制)· **④ 复活 = count 补齐**(进战斗即从 `world_enemies` 移除 + 广播消失,战斗结束回池 → `spawnWorldEnemies` 按 count 补;⚠️ 立即补齐、精确 `REVIVALTIME` 划出)· **⑤ 划出**:NPC `argstr` 脚本门(gym/item/startmsg/steal ⇒ D6)· 胜利掉落(道具域)· `gym`→mode 2 决斗点场(PvP)· 完整事件表(传送点)· 客户端坐标纠正 XYD。范围 = 宽(含 IDL ⇒ 前推 `shared`)。批次 W.5 | 见 §2.21;★★ **勘误 DR-DT17⑤/DR-DT18⑤「明雷退回」** —— 勘察发现退回**从未实现**、明雷交互整个是缺口(非"改退回为开战") |
+| **DR-DT20** | ★★ **背包 L2 地基 I.1**(道具域第一批):Item 归族 · 背包槽布局 · 道具池容量 | ✅ **① Item 不进 `EntityKind` 五族**(用户裁定):五族判别键是 `CHAR_TYPE`(全是 Char 实体),背包道具是原版**独立全局池** `ITEM_item[itemnum]`(`item.c:486`)成员、非 Char ⇒ 建独立 `EntityPool<Item,10000>` + `ItemHandle`(与 `EntityHandle` 同机制的语义别名,不改池模板)· **② 背包槽照原版连续布局**(用户裁定):`Player.items[kMaxItemHave=54]` = 装备位 9(`CHAR_EQUIPPLACENUM`,`CHAR_HEAD`..`CHAR_EQGLOVE`)+ 背包 15×3=45,`kStartItemArray=9` 为背包起点(捕获扣道具循环 `for(i=CHAR_STARTITEMARRAY;…)` 依赖它);`findFreeItemSlot` 只在背包段找、`clearItemSlot` 全域可清;装备位穿戴语义留装备域 · **③ 容量 10000**(`csa8.0/setup.cf:318` `itemnum`,运行期硬边界 `ITEM_CHECKINDEX`;不可配置化,同 kMaxPlayers)· **④ 字段取展开视图 `ITEM_DATAINT`/`ITEM_DATACHAR` 启用下标 + `itemset6.txt` 实列**,只建背包地基必需(id/name/unique_code/type/level/cost/堆叠两列/掉落两列/主人反指),逐条登记不建 · **⑤ functable/Lua 全段不复刻**(8.0 无 Lua)· **⑥ 划出**:扣/掉/用链路(后三批)· 装备加成 / 合成 / 镶嵌 / 魔法道具 / 状态附加(各属其域)· `current_pile` 运行期状态(写入侧)· `needitemeneny.txt`(捕获扣道具批)。范围 = 宽(动 `shared/model/` ⇒ 前推 `shared-v0.19.0`)。批次 I.1 | 见 §2.22;★★ 连带抓到 **unifdef_80 第二次宏误判**(`_ALLBLUES_LUA_1_8` 判开、StoneAge 全树关 ⇒ 以 StoneAge 为准) |
 
 ---
 
@@ -1037,6 +1038,53 @@ D 线入库时导入器**不得**顺手纠正它。用例钉住其**可观察后
 `ci_verify` 六项全过(`SA_WERROR` 清洁构建 0 告警)· `idl_verify`(schema 改 + 重跑一致)· `dr_table` · `code_format`。★ **反向验证两处逐条精确转红**:
 禁用退回门 ⇒ **仅**「撞明雷退回」红(开战用例仍绿,坐实两机制解耦)· 禁用 `world_enemies` 移除 ⇒ 开战 + 复活用例红(退回仍绿);恢复后全绿。
 ★ `enemyCount` 守恒断言在正常跑中通过即证明「转移非新建」。
+
+### 2.22 DR-DT20 —— 背包 L2 地基 I.1:Item 归族 / 背包槽布局 / 道具池容量(批次 I.1)
+
+**移植来源**:`include/item.h` 的 `ITEM_Item`(`data[ITEM_DATAINT]`/`string[ITEM_DATACHAR]`/`workint`/functable)· `include/char_base.h` 的
+`CHAR_MAXITEMHAVE`/`CHAR_EQUIPPLACENUM`/`CHAR_MAXITEMNUM`· `item.c:486` 全局池 `ITEM_item[itemnum]`· `csa8.0/setup.cf:318` `itemnum=10000`。
+★ 字段来源基准 = 展开视图 `stoneage-plan/tools/unifdef_80/`;数据表基准 = `csa8.0/gmsv/data/itemset6.txt`(`setup.cf:335`)。
+
+**为什么是它**:道具域(使用道具 + 掉落 + 捕获扣道具)三条链**共同前置** —— 背包 L2 实体从未建(`Player.h` 文末 ④ 早登记「背包是捕获第 5 步
+`BATTLE_CaptureItemDelAll` 的落脚点」;`world/Api.h:513` 遇敌两道道具门因道具未移植传空背包)。本批只建地基,**不接扣/掉/用**。
+
+**① Item 不进 `EntityKind` 五族(用户裁定)**:五族判别键 = `CHAR_TYPE`(五族全是 `Char` 实体);背包道具在原版是**独立全局池** `ITEM_item[itemnum]`
+成员(角色经 `CHAR_getItemIndex` 存池下标引用它,`item.c:497`),**不在** `CHAR_chara[]` 三段式角色池 ⇒ 塞进 `EntityKind` 会污染 M2 硬约束。
+⇒ 建独立 `EntityPool<Item,10000>` + `ItemHandle`(= `EntityHandle` 的**语义别名**:机制复用 index+generation,类型注释层面表达「道具句柄 ≠ 实体句柄」;
+取别名而非新 struct 是因 `EntityPool::allocate/resolve` 以 `EntityHandle` 为句柄类型,新 struct 会要求改那个模板)。
+
+**② 背包槽照原版连续布局(用户裁定)**:`Player.items[kMaxItemHave]` 照原版 `indexOfExistItems[CHAR_MAXITEMHAVE]` —— 装备位 + 背包**连续一个数组**。
+常量(展开视图 `char_base.h:312-314`,8.0 走 `*3` 支非宏关时代 `*1`):`kEquipPlaceNum=9`(`CHAR_EQUIPPLACENUM`,`CHAR_HEAD`..`CHAR_EQGLOVE`,
+含 `_ITEM_EQUITSPACE`/`_EQUIT_NEWGLOVE` 展开的 EQBELT/EQSHIELD/EQSHOES/EQGLOVE 4 项)· `kItemNumPerKind=15`(`CHAR_MAXITEMNUM`)· `kMaxItemHave=9+15*3=54` ·
+`kStartItemArray=9`(背包起点)。`findFreeItemSlot` **只在背包段** `[9,54)` 找(照原版 `getFreeItemSpace` 从 `CHAR_STARTITEMARRAY` 起)、
+`clearItemSlot` 全域可清(卸装也走它);捕获扣道具循环 `for(i=CHAR_STARTITEMARRAY;i<CheckCharMaxItem;i++)` 依赖这个连续布局。装备位穿戴语义留装备域。
+
+**③ 道具池容量 10000**:`csa8.0/setup.cf:318` `itemnum=10000` = 原版全局池维度 + 运行期硬边界(`ITEM_CHECKINDEX`,`15` §2 C5)。不可配置化
+(Capacity 是 `EntityPool` 模板参数,同 kMaxPlayers/kMaxEnemies)。⚠️ 它是背包 + 地面道具**共用**的全局池 ⇒ 同 kMaxEnemies「敌人+NPC 共用第三段」族:
+将来地面道具不另开池,共用本池;本批只有背包一个写入面(且未接写入)⇒ 暂取全额。
+
+**④ 字段取展开视图启用下标 + `itemset6.txt` 实列,只建背包地基必需**:`item_id`(`ITEM_ID`)· `name`(`ITEM_NAME`)· `unique_code`(`ITEM_UNIQUECODE`)·
+`type`(`ITEM_TYPE`/`ITEM_CATEGORY`)· `level`/`cost`· 堆叠 `can_be_pile`/`use_pile_nums`(`_ITEMSET4_TXT`,展开视图启用)· 掉落 `vanish_at_drop`/`drop_at_logout`·
+主人反指 `owner`(原 `workint[ITEM_WORKCHARAINDEX]` 换成带 generation 的玩家句柄,M10)。道具名上限 = **63 字节**(`STRING64`,`util.h:15`)——
+★ 与角色名 31(DR-TS5)**不是同一个上限**,单列 `kItemNameMaxBytes` 防长名静默截断。
+
+**⑤ functable / Lua 全段不复刻**:`ITEM_Item` 的 `string[]` 后段是 `ITEM_INITFUNC`..`ITEM_LASTFUNCTION` 回调名字符串(`ITEM_DATACHARNUM==ITEM_LASTFUNCTION`)。
+8.0 无 Lua ⇒ 不建。双依据:(a) 同捕获链 `CaptureOkFunction`(`_ALLBLUES_LUA_*` 在 StoneAge 全树无 `#define`,`04 §3.3.3`「8.0 无 Lua」);
+(b) `EntityKind.h` §2.3 已裁定不复刻字符串→函数指针运行期绑定(`getFunctionPointerFromName`+名表,查不到返回 NULL 不报错)。
+⚠️★★ **连带抓到 unifdef_80 第二次宏误判**:它把 `_ALLBLUES_LUA_1_8` 判**开**、展开视图 `battle_event.c:3538` 残留 `CaptureOkFunction`;
+而 StoneAge 全树无该 `#define`(关)且符号在 StoneAge `battle_event.c` 一次不出现 ⇒ 以 StoneAge 为准。继 W.3 `_CHAR_LOOP_TIME` 后 evidence-workflow
+第二强样本 —— 争议处必回 StoneAge/stoneage85 双核。
+
+**⑥ 划出批次 / 登记不建**:扣 / 掉 / 用任一链路(道具域后三批)· `current_pile` 当前堆叠数(运行期状态,写入侧建)· 装备加成 `MODIFY*`(装备域)·
+合成 / 镶嵌 / 套装(各域)· 魔法道具 + 状态附加(使用批 + L4)· 图号 / 密名 / 效果串(显示面)· `ITEM_CDKEY` 绑定(账号域)· `needitemeneny.txt` 敌人侧表(捕获扣道具批)。
+
+**验证**:`ctest` **16/16** · `ci_verify` 六项全过(`SA_WERROR` 0 告警;`code_format` 就地格式化后过)· `model_pool` 20→**35 例 / 238 断言** ·
+`world_tick` 77→**78 例 / 1076 断言**。★ **反向验证两处**:① `findFreeItemSlot` 起点 `kStartItemArray`→`0` ⇒ `model_pool` 3 例转红,恢复绿;
+② `playerItemSlotsUsed` 的 `-1` 哨兵→`0` ⇒ `world_tick` 转红,恢复绿(⚠️ 又踩 make 秒级 mtime 坑,`sleep+touch` 隔秒重编才采信真绿)。
+⚠️★ **一处诚实的"注入不红"**:`playerItemSlotsUsed` 起点错在 world 层不转红 —— 本批无写装备位段的公开路径 ⇒ 无法构造「装备位有、背包空」区分两个起点
+(数 0..54 与 9..54 都是 0);同 §9.0.35「断言的形状没有区分力」族,该起点的区分力由 `model_pool` 反向验证①覆盖(那里可直接往 `items[0..8]` 塞句柄)。
+⚠️★ 动 `shared/model/`(新 `Item.h` + `Player.h` 改)⇒ watched 变更 ⇒ 锁定 ref 须前推 **`shared-v0.19.0`**(待用户确认)。
+按「只数行」口径:§1–§12 **126 → 127 行**,⚠️/⏳ 仍为 **0 / 7**。
 
 ### 3.1 逐条裁定理由
 

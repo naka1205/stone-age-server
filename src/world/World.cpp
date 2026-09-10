@@ -61,9 +61,21 @@ inline constexpr std::size_t kMaxPets = 2000;
 //      本批只有敌人一族 ⇒ 暂取全额,这条留在这里等那一批来读。
 inline constexpr std::size_t kMaxEnemies = 10000;
 
+// 道具池容量(批次 I.1)。
+//
+// ★ 源码依据:`csa8.0/setup.cf:318` **itemnum = 10000** —— 原版全局道具池
+//   `ITEM_item[itemnum]`(`item.c:486` 的 `ITEM_itemnum`)的维度,同时是运行期硬边界
+//   (`ITEM_CHECKINDEX`,`15` §2 C5)。照 M.1 / M.4b 取 setup.cf 实测值,不可配置化
+//   (Capacity 是模板参数,见 kMaxPlayers 那条)。
+// ⚠️ 它是背包 + 地面道具**共用**的全局池(原版所有道具实例都在这一个数组里)⇒ 与
+//   kMaxEnemies「敌人+NPC 共用第三段」同族:将来若地面道具也来抢这 10000,不另开一池,
+//   共用本池;本批只有背包一个写入面(且还没接写入)⇒ 暂取全额。
+inline constexpr std::size_t kMaxItems = 10000;
+
 using PlayerPool = SA::Model::EntityPool<SA::Model::Player, kMaxPlayers>;
 using PetPool = SA::Model::EntityPool<SA::Model::Pet, kMaxPets>;
 using EnemyPool = SA::Model::EntityPool<SA::Model::Enemy, kMaxEnemies>;
+using ItemPool = SA::Model::EntityPool<SA::Model::Item, kMaxItems>;
 
 // 世界写的落脚点集合(批次 M.1)。
 //
@@ -889,6 +901,13 @@ struct World::Impl
 	//    ⇒ Impl 的 sizeof 随之涨,而 Impl 在 `unique_ptr` 里 ⇒ 仍是**启动期一次**堆分配,
 	//    运行期零分配不变(15 §9.1 支柱 ①)。
 	EnemyPool enemies{};
+
+	// ★ 道具池(批次 I.1)。⚠️ 与 enemies 同为 10,000 槽 ⇒ Impl 的 sizeof 再涨一档
+	//    (Item 含三个 64B 名字槽,单槽约 200B ⇒ 本池约 2MB),但仍是**启动期一次**堆分配
+	//    (Impl 在 unique_ptr 里),运行期零分配不变(15 §9.1 支柱 ①)。
+	// ⚠️★ **本批不接任何写入者** —— 没有捡起 / 掉落 / 捕获扣道具会 allocate 它 ⇒
+	//    `itemCount()` 恒 0,是**登记在案的留白**(池地基先于写入链路落地,同 M.1 的分层)。
+	ItemPool items{};
 
 	// 会话 → Player 实体。★ 03 §8.2 三条查找路径之一(原 `getCharindexFromFdid`
 	//   那族**全表扫** + 每格加解锁,`fdnum=1000` 下每条应答扫 1,000 次)。
@@ -2575,6 +2594,9 @@ std::size_t World::petCount() const noexcept { return _impl->pets.size(); }
 // ── 敌人池的观察面(批次 M.4b)────────────────────────────────────
 std::size_t World::enemyCount() const noexcept { return _impl->enemies.size(); }
 
+// ── 道具池的观察面(批次 I.1)。⚠️ 本批恒 0(无写入者),见 Api.h 声明处。──
+std::size_t World::itemCount() const noexcept { return _impl->items.size(); }
+
 const SA::Model::Enemy *World::battleEnemyAt(BattleId id, std::uint8_t slot) const
 {
 	if (slot >= SA::Rules::kSlotCount)
@@ -2641,6 +2663,22 @@ int World::playerPetSlotsUsed(SA::Net::SessionId session) const
 	for (std::size_t i = 0; i < SA::Model::kMaxPetHave; ++i)
 	{
 		if (p->pets[i].valid())
+			++used;
+	}
+	return used;
+}
+
+int World::playerItemSlotsUsed(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return -1;
+	// ★ 只数背包段(装备位段不是"拿到的道具",两步分工同 findFreeItemSlot)。
+	int used = 0;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		if (p->items[i].valid())
 			++used;
 	}
 	return used;

@@ -788,6 +788,28 @@ TEST_CASE("L2:会话就绪即有 Player 实体,断线即释放")
 	CHECK(f.world.playerCaptureCount(id) == -1);
 }
 
+TEST_CASE("I.1:道具池 + 背包槽的观察面 —— 本批恒 0(地基已接、写入链路未接)")
+{
+	// ★ 背包 L2 是"地基先落、写入链路后接"的分层(捕获扣道具 / 掉落 / 使用是后三批)。
+	//   本批唯一能断言的就是**观察面存在且读得到 0** —— 没有它,「池挂上了 World 吗」
+	//   与欠债 20 那条静默(地基绿而运行时不接)无从区分。
+	// ⚠️ 这条断言将来会被写入批次改写成"非 0":接掉落 / 捡起后,itemCount 会涨。
+	Fixture f;
+	CHECK(f.world.itemCount() == 0);             // 池挂在 World 上、初始空
+	CHECK(f.world.playerItemSlotsUsed(1) == -1); // ★ 没有实体是 −1,不是 0(同 pet)
+
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	CHECK(f.world.itemCount() == 0);             // ★ 有玩家了,但没有写入者 ⇒ 池仍恒 0
+	CHECK(f.world.playerItemSlotsUsed(id) == 0); // 有实体了,背包确实是空的(0 而非 -1)
+
+	f.transport.close(id);
+	CHECK(f.world.playerItemSlotsUsed(id) == -1);
+}
+
 TEST_CASE("L2:捕获成功 ⇒ 宠物进池、挂进主人槽、计数 +1、目标离场")
 {
 	Fixture f;

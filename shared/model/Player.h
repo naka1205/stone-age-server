@@ -18,6 +18,7 @@
 
 #include "model/EntityKind.h"
 #include "model/Handle.h"
+#include "model/Item.h"
 #include "model/Pet.h"
 
 namespace SA::Model
@@ -25,6 +26,24 @@ namespace SA::Model
 
 // 宠物槽数 = `CHAR_MAXPETHAVE`(展开视图 `include/char_base.h:31`)。
 inline constexpr std::size_t kMaxPetHave = 5;
+
+// ── 背包 / 装备槽数(批次 I.1,展开视图 `include/char_base.h`)──────────────
+//
+// ★ 原版 `indexOfExistItems[CHAR_MAXITEMHAVE]` 是**装备位 + 背包连续一个数组**:
+//     kEquipPlaceNum   = 9   `CHAR_EQUIPPLACENUM`(枚举 CHAR_HEAD..CHAR_EQGLOVE)
+//     kItemNumPerKind  = 15  `CHAR_MAXITEMNUM`
+//     kMaxItemHave     = 9 + 15*3 = 54  `CHAR_MAXITEMHAVE`(:314,8.0 走 *3 支)
+//     kStartItemArray  = 9   `CHAR_STARTITEMARRAY`(= kEquipPlaceNum,背包起点下标)
+//   ⚠️★ 8.0 走 `*3` 支(展开视图 :314),不是 `*1`(:316,宏关闭时代)—— 回展开视图核过。
+//   ⚠️ 装备位 4 项(EQBELT/EQSHIELD/EQSHOES/EQGLOVE)在原始 8.5 由 `_ITEM_EQUITSPACE`/
+//     `_EQUIT_NEWGLOVE` 包裹,展开视图判为 8.0 启用 ⇒ kEquipPlaceNum = 9。
+// ★★ **本批只建槽位、照原版连续布局**(捕获扣道具的循环 `for(i=CHAR_STARTITEMARRAY;
+//    i<CheckCharMaxItem; i++)` 依赖这个布局)。装备位段(0..kStartItemArray-1)的
+//    **穿戴语义**留装备域批次填 —— 本批不赋含义,只留可寻址的槽。
+inline constexpr std::size_t kEquipPlaceNum = 9;
+inline constexpr std::size_t kItemNumPerKind = 15;
+inline constexpr std::size_t kStartItemArray = kEquipPlaceNum;
+inline constexpr std::size_t kMaxItemHave = kEquipPlaceNum + kItemNumPerKind * 3; // 54
 
 // 宠技槽数 = `CHAR_MAXPETSKILLHAVE`(同上 :36)。★ 本批不用,记在此处是因为
 // 03 §3.2 已裁定 `unionTable` **保留但拆开** —— 宠物槽与宠物技能槽是两件事,
@@ -51,6 +70,17 @@ struct Player
 	//    ⇒ **释放一只 Pet 时必须同步 clearPetSlot()**,否则那个槽永久占用而
 	//      没有任何一处会报错。★ ModelPoolTest 有一条用例专门钉这个后果。
 	std::array<EntityHandle, kMaxPetHave> pets{};
+
+	// ── 背包 / 装备槽(原 `indexOfExistItems[CHAR_MAXITEMHAVE]`,批次 I.1)──────
+	//
+	// ★ 与 `pets[]` 完全同一条纪律:存**句柄**(带 generation,M10)而不是池下标 ——
+	//   道具槽被回收重分配后,旧下标会指向新主人的道具(定长池固有问题,Handle.h ②)。
+	//   ⇒ **释放一个 Item 时必须同步 clearItemSlot()**,否则那个槽永久占用而无处报错。
+	//
+	// ★ 连续布局:`[0, kStartItemArray)` 是装备位、`[kStartItemArray, kMaxItemHave)`
+	//   是背包格。本批只建槽,不赋装备位穿戴语义(留装备域)。
+	// ⚠️ 悬空句柄会被 `findFreeItemSlot()` 算作"占用"—— 与 pets 的两步分工同理。
+	std::array<ItemHandle, kMaxItemHave> items{};
 
 	// 当前出战宠在 `pets[]` 中的下标(原 `CHAR_DEFAULTPET`)。-1 = 无出战宠。
 	// ★ 唯一写者 = 换宠指令 PET_OUT(设槽号)/ PET_IN(设 -1)(DR-BT21);`joinBattle`
@@ -129,6 +159,37 @@ struct Player
 		pets[static_cast<std::size_t>(slot)] = kNullHandle;
 		return true;
 	}
+
+	// ── 背包槽操作(批次 I.1)──────────────────────────────────────────
+	//
+	// 找一个空**背包**槽,满则返回 −1。
+	//
+	// ★★ 只在背包段 `[kStartItemArray, kMaxItemHave)` 找 —— 照原版
+	//    `getFreeItemSpace`(展开视图 `char_base.c`,循环从 `CHAR_STARTITEMARRAY`
+	//    起)。装备位段 `[0, kStartItemArray)` **不是**放"新拿到的道具"的地方
+	//    (那是穿戴槽,由装备域按位置写),故不在候选内。
+	// ⚠️ 悬空句柄算作占用(两步分工:本结构只管"哪个槽有引用",引用是否指向活道具
+	//    是 `EntityPool::resolve` 的活)⇒ 释放 Item 的那侧必须 `clearItemSlot`。
+	int findFreeItemSlot() const noexcept
+	{
+		for (std::size_t i = kStartItemArray; i < kMaxItemHave; ++i)
+		{
+			if (!items[i].valid())
+				return static_cast<int>(i);
+		}
+		return -1;
+	}
+
+	// 清空某个道具槽(原 `CHAR_setItemIndex(charaindex, i, -1)`)。
+	// ★ 释放 Item 的那一侧必须调它,理由见 `items` 的注释。
+	// ⚠️ 全域 `[0, kMaxItemHave)` 都可清(装备位卸下也走它),不限背包段。
+	bool clearItemSlot(int slot) noexcept
+	{
+		if (slot < 0 || static_cast<std::size_t>(slot) >= kMaxItemHave)
+			return false;
+		items[static_cast<std::size_t>(slot)] = kNullHandle;
+		return true;
+	}
 };
 
 // ── 文末:本批**有意不建**的 Player 字段(举其要,均非遗漏)────────────────
@@ -143,8 +204,11 @@ struct Player
 // ③ `addressBook[80]` ⇒ 03 §3.2 已裁定**移出实体做成独立聚合**(占 sizeof(Char) 的
 //    39% 却是纯社交数据,且 17 §5.5 已证它参与删角 Saga)。
 //
-// ④ 背包 / 仓库 / 称号 / 家族 ⇒ 各属其域。⚠️ 其中**背包**是捕获第 5 步
-//    (`BATTLE_CaptureItemDelAll`,DR-BT10「全删」)的落脚点 ⇒ 那一步在本批仍不做。
+// ④ ✅ ~~背包~~ ⇒ **2026-09-10 批次 I.1 已建**,见上方 `items[]` + `findFreeItemSlot` /
+//    `clearItemSlot`。⚠️ 只建**槽 + 空/满判定**,不接扣 / 掉 / 用任一玩法链路(道具域
+//    后续三批)。仓库 / 称号 / 家族仍各属其域,未建。★ 捕获第 5 步
+//    (`BATTLE_CaptureItemDelAll`,DR-BT10「全删」)的落脚点由此解锁,但那一步仍待
+//    捕获扣道具批次做(它还需 `needitemeneny.txt` 敌人侧表,见 Item.h 与欠债表)。
 
 } // namespace SA::Model
 

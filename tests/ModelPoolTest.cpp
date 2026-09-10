@@ -24,6 +24,7 @@
 #include "model/EntityIndex.h"
 #include "model/EntityKind.h"
 #include "model/EntityPool.h"
+#include "model/Item.h"
 #include "model/Pet.h"
 #include "model/Player.h"
 
@@ -444,4 +445,172 @@ TEST_CASE("Enemy:池的分配 / 回收 / 悬空与前两族一致(M10)")
 	REQUIRE(b.index == a.index);
 	REQUIRE(pool.resolve(b) != nullptr);
 	CHECK(pool.resolve(b)->vital == 0);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  批次 I.1:Item 族 + Player 背包槽的结构约束(道具域第一批)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ★ 同前几组:守**结构**不守玩法。Item 是第一个**不进 EntityKind 五族**的池
+//   (背包道具是原版全局 itemsofworld[] 成员、非 Char 实体,Item.h 卷首)。
+//   本批不接扣 / 掉 / 用任一链路 ⇒ 用例断言的是:池语义与前三族一致(M10)、
+//   背包槽的空 / 满 / 越界与两步分工(悬空句柄算占用)、以及 POD 三根支柱。
+
+TEST_CASE("Item:是独立池语义,不进 EntityKind 五族(kEntityKindCount 仍是 5)")
+{
+	// ★ Item 没有 kKind —— 它不是实体族。若哪天有人给它加 kKind 并塞进 EntityKind,
+	//   这条注释与 kEntityKindCount==5 的断言会把人引回 Item.h 卷首那条裁定。
+	static_assert(kEntityKindCount == 5, "Item 不进五族 ⇒ 族数仍是 5");
+	// ItemHandle 与 EntityHandle 同机制(index+generation),用别名表达语义独立。
+	static_assert(std::is_same<ItemHandle, EntityHandle>::value,
+	              "ItemHandle 是 EntityHandle 的语义别名(机制复用,见 Item.h)");
+	CHECK(true);
+}
+
+TEST_CASE("Item:POD —— 与前三族同一条支柱")
+{
+	static_assert(std::is_trivially_copyable<Item>::value, "");
+	static_assert(std::is_standard_layout<Item>::value, "");
+	CHECK(true);
+}
+
+TEST_CASE("Item:道具名上限 63 字节,与角色名 31 不是同一个上限")
+{
+	// ★★ 借用角色名常量会让长道具名被静默截断 —— Item.h 单列 kItemNameMaxBytes 的理由。
+	CHECK(ItemNameStr::capacity() == kItemNameMaxBytes);
+	CHECK(kItemNameMaxBytes == 63);
+	static_assert(kItemNameMaxBytes != kNameMaxBytes, "道具名 63 ≠ 角色名 31");
+
+	Item it{};
+	CHECK(it.name.assign(std::string(63, 'x').c_str()));
+	CHECK(it.name.size() == 63);
+	// 64 字节 ⇒ 拒绝,不截断、不改原值。
+	CHECK_FALSE(it.name.assign(std::string(64, 'x').c_str()));
+	CHECK(it.name.size() == 63);
+}
+
+TEST_CASE("Item:池的分配 / 回收 / 悬空与前三族一致(M10)")
+{
+	// ★ 容量取 4 而非真实的 10,000:验的是语义,不是容量。
+	EntityPool<Item, 4> pool;
+	const EntityHandle a = pool.allocate();
+	REQUIRE(a.valid());
+	Item *it = pool.resolve(a);
+	REQUIRE(it != nullptr);
+	it->item_id = 20033; // 小斧头(itemset6.txt 首行实测 ITEM_ID)
+	CHECK(pool.resolve(a)->item_id == 20033);
+
+	REQUIRE(pool.release(a));
+	CHECK(pool.resolve(a) == nullptr); // 悬空即 nullptr,不脏读
+
+	// 复用同槽必须发干净实体(否则新道具带着上一个的 item_id)。
+	const EntityHandle b = pool.allocate();
+	REQUIRE(b.index == a.index);
+	REQUIRE(pool.resolve(b) != nullptr);
+	CHECK(pool.resolve(b)->item_id == 0);
+}
+
+TEST_CASE("Item:主人反指句柄带 generation —— 主人下线后 resolve 返回 nullptr(M10)")
+{
+	// ★ 与 Pet 的 owner 同一条:道具池成员反指主人,主人下线不脏读复用槽。
+	EntityPool<Player, 4> players;
+	EntityPool<Item, 4> items;
+
+	const EntityHandle owner_h = players.allocate();
+	REQUIRE(owner_h.valid());
+	const EntityHandle item_h = items.allocate();
+	REQUIRE(item_h.valid());
+
+	Item *it = items.resolve(item_h);
+	REQUIRE(it != nullptr);
+	it->owner = owner_h;
+	CHECK(players.resolve(it->owner) != nullptr);
+
+	REQUIRE(players.release(owner_h));
+	CHECK(players.resolve(it->owner) == nullptr);
+	// 同 index 被新玩家复用后,旧的主人句柄仍解析不到他。
+	const EntityHandle reused = players.allocate();
+	CHECK(reused.index == owner_h.index);
+	CHECK(reused.generation != owner_h.generation);
+	CHECK(players.resolve(it->owner) == nullptr);
+}
+
+TEST_CASE("Player:背包常量照原版连续布局(装备位 + 45 背包格 = 54)")
+{
+	// ★ 展开视图 char_base.h:314 —— 8.0 走 *3 支,不是宏关闭时代的 *1。
+	static_assert(kEquipPlaceNum == 9, "CHAR_EQUIPPLACENUM(CHAR_HEAD..CHAR_EQGLOVE)");
+	static_assert(kItemNumPerKind == 15, "CHAR_MAXITEMNUM");
+	static_assert(kStartItemArray == kEquipPlaceNum, "背包起点 = 装备位数");
+	static_assert(kMaxItemHave == kEquipPlaceNum + kItemNumPerKind * 3, "CHAR_MAXITEMHAVE=54");
+	CHECK(kMaxItemHave == 54);
+}
+
+TEST_CASE("Player:空背包槽从 kStartItemArray 开始给,不返回装备位段")
+{
+	Player p{};
+	// ★★ 首个空槽是背包起点(9),不是 0 —— 装备位段不是"放新道具"的地方。
+	CHECK(p.findFreeItemSlot() == static_cast<int>(kStartItemArray));
+
+	// 占掉背包首格 ⇒ 下一个给它后面一格。
+	p.items[kStartItemArray] = ItemHandle{7, 1};
+	CHECK(p.findFreeItemSlot() == static_cast<int>(kStartItemArray) + 1);
+
+	// ⚠️ 装备位段被占**不影响**背包找空槽(它们不在候选内)。
+	Player q{};
+	for (std::size_t i = 0; i < kStartItemArray; ++i)
+		q.items[i] = ItemHandle{static_cast<std::uint32_t>(i + 1), 1};
+	CHECK(q.findFreeItemSlot() == static_cast<int>(kStartItemArray));
+}
+
+TEST_CASE("Player:背包 45 格全满 ⇒ −1,且装备位空不解救")
+{
+	Player p{};
+	for (std::size_t i = kStartItemArray; i < kMaxItemHave; ++i)
+		p.items[i] = ItemHandle{static_cast<std::uint32_t>(i + 1), 1};
+	// ★ 装备位段(0..8)全空,但背包满 ⇒ 仍 −1(装备位不是背包)。
+	CHECK(p.findFreeItemSlot() == -1);
+}
+
+TEST_CASE("Player:悬空道具句柄仍被算作占用 —— 与宠物槽同一条两步分工")
+{
+	// ★ 释放 Item 的那侧必须 clearItemSlot,否则槽永久占用而无处报错。
+	EntityPool<Item, 64> items;
+	Player p{};
+
+	// 填满整个背包段。
+	for (std::size_t i = kStartItemArray; i < kMaxItemHave; ++i)
+	{
+		const EntityHandle h = items.allocate();
+		REQUIRE(h.valid());
+		p.items[i] = h;
+	}
+	REQUIRE(p.findFreeItemSlot() == -1);
+
+	// 全部 release,但不清槽 ⇒ 悬空句柄仍算占用。
+	for (std::size_t i = kStartItemArray; i < kMaxItemHave; ++i)
+		(void)items.release(p.items[i]);
+	CHECK(p.findFreeItemSlot() == -1); // ★ 那个后果
+
+	// 清槽之后才真正腾出来(从背包起点开始给)。
+	for (std::size_t i = kStartItemArray; i < kMaxItemHave; ++i)
+		CHECK(p.clearItemSlot(static_cast<int>(i)));
+	CHECK(p.findFreeItemSlot() == static_cast<int>(kStartItemArray));
+}
+
+TEST_CASE("Player:clearItemSlot 全域可清(含装备位),越界拒绝")
+{
+	Player p{};
+	CHECK_FALSE(p.clearItemSlot(-1));
+	CHECK_FALSE(p.clearItemSlot(static_cast<int>(kMaxItemHave)));
+	// ★ 装备位段也能清(卸下走它),不限背包段。
+	CHECK(p.clearItemSlot(0));
+	CHECK(p.clearItemSlot(static_cast<int>(kStartItemArray)));
+	CHECK(p.clearItemSlot(static_cast<int>(kMaxItemHave) - 1));
+}
+
+TEST_CASE("Player:加了 items[] 后仍是 POD(三根支柱不破)")
+{
+	static_assert(std::is_trivially_copyable<Player>::value, "");
+	static_assert(std::is_standard_layout<Player>::value, "");
+	CHECK(true);
 }
