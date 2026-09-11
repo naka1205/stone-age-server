@@ -74,6 +74,7 @@ EXPECTED_TESTS = {
     "idl_verify",       # ★ schema 与生成物同步(需 protoc)
     "code_format",      # ★★ .clang-format 纪律的执行者(需 clang-format,欠债 24)
     "dr_table",         # ★★ 11 §14「数标记」那个口径的执行者(M.5;主表漏行 ⇒ 计数失去凭据)
+    "docs_index",       # ★★ docs 三分类的可追溯性(2026-09-11 重构;漏搬一节 ⇒ 约 600 处引用静默悬空)
     # ── 阶段 1.5(2026-09-04 接入构建时补齐)──────────────────────
     "net_framing",        # 帧层 / 信封层 / 会话状态机
     "net_tcp",            # ★ TcpTransport —— 1.5 收尾项,真 socket 上跑

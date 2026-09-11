@@ -230,6 +230,26 @@ if(Python3_FOUND)
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_SOURCE_DIR}/tools/check_dr_table.py)
 
+  # ── ★★ docs 三分类与导航的可追溯性(2026-09-11 文档重构)──────────────
+  #
+  # 那次重构把 `00` §9.0.1–9.0.55(4,050 行 / 占全文 86%)整体迁入 `docs/journal/`,
+  # 并立了一条**被反复引用的前提**:「编号一律沿用,搬家未改号 ⇒ 全仓约 600 处
+  # 旧引用继续有效」。
+  # ⚠️ 而那句话架在三个没有执行者的前提上:每个编号恰好定义一次 ·
+  #    映射表覆盖全部编号 · 留在 `00`/`01`/`11` 的指针指向真实文件。
+  # ★★ 后果不是"导航不好看":
+  #    · 漏搬一节 ⇒ 指向它的那些引用**静默悬空**(读者只看到"查不到",
+  #      不会知道它本来应该存在);
+  #    · 一节被复制到两个文件 ⇒ 两份各自被后续批次追加、**无声分叉**
+  #      (00 §10.4 第一类:不报错、不崩溃、内容烂掉);
+  #    · 而 ctest 全绿,因为**文档不参与编译**。
+  #
+  # ★ 与 dr_table 同族(都守**文档自身的可追溯性**)、同样**只读仓内文档、
+  #   不依赖任何外部工具** ⇒ 无条件注册。
+  add_test(NAME docs_index
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_SOURCE_DIR}/tools/check_docs_index.py)
+
   find_program(SA_CLANG_FORMAT
       NAMES clang-format
       # ⚠️★★ 必须是 PATHS 而**不是** HINTS —— 这不是同义写法:
