@@ -56,13 +56,10 @@
 
 > **「反击排在 L4 状态系统之后」—— 这个四份文档一致的前提,有一半不成立。**
 
-- `BATTLE_GetDamageReact`(`battle_event.c:1819`)读的是 **5 个独立 work 字段**
-  (`WORKDAMAGEVANISH` / `ABSROB` / `REFLEC` / `WORKTRAP` / `WORKACUPUNCTURE`),
-  **一个都不在 `StatusTbl` 的 44 项里**、不受 §4.1 全局互斥约束;
-- `BATTLE_CounterCheckPlayer`(`:3465`)更是**一个 status 槽都不读**。
-
-⇒ 那 5 个字段的写入者是宠技 / 职技 / 魔法(均未移植)⇒ 净核里恒 0 ⇒ `react` 恒 `NONE`
-⇒ **反击可在 `react == NONE` 路径上独立落地,不必等状态系统**。
+`BATTLE_GetDamageReact`(`battle_event.c:1819`)与 `BATTLE_CounterCheckPlayer`(`:3465`)
+**都不依赖 44 个状态槽** ⇒ 反击可独立落地,不必等状态系统。
+**五个字段的清单、逐个不在 `StatusTbl` 的实证、以及"恒 NONE"那条推导,
+正文在 [§9.0.55](../journal/15-status.md)** —— 本节不复制,只标出它推翻了什么。
 
 ★ 与第 1 节第 5 条同族,**但这次错的是排期依赖图不是公式** —— 它影响的是**做什么的顺序**。
 → [§9.0.55](../journal/15-status.md) · `11` DR-DT24
