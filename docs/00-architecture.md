@@ -4417,6 +4417,45 @@ C 清槽不 release ⇒ `world_tick` 2 例红;D 投影挪到 resolveTurn 后 ⇒
 
 ---
 
+### 9.0.54 ★ 推送窗口执行记录 —— shared-v0.21.0(I.4 使用道具,2026-09-11)
+
+I.4(§9.0.53)动 `shared/model/Item.h` + `shared/rules/{Battle.cpp,Combatant.h}` ⇒ watched 路径变更。
+本次窗口含 server `6e57229`(§9.0.52 推送记录,原 ahead)+ `1708cab`(I.4)两 commit。
+
+- **server**:master `6a8384f` → `1708cab`(gitee+github 两远端一致)+ 轻量 tag `shared-v0.21.0`(指向 `1708cab`);
+  ★ **tag 集合差两远端均空**(`comm -3` 本地 vs `ls-remote`,推送前本地 21 / 远端各 20、差恰为 `shared-v0.21.0`,
+  推送后各 21、差空 ⇒ 无顺带无遗漏);推 tag 用精确 ref(`refs/tags/shared-v0.21.0`,不 `--follow-tags`)。
+  ⓘ **计数口径提醒**:`ls-remote --tags` 不滤 `^{}` 解引用行时会数出 37 个(实为 20)——
+  ★ 这正是「核 tag 用集合差不用计数」的另一个理由(§9.0.34 那条只说了「计数答不了顺带推了什么」)。
+- **client**:pin `v0.20.0` → `v0.21.0`(`d89f675`,`SaShared.cmake` :38 注释 + :113 值,两处同批改),
+  master 两远端一致。
+- **★ 本批在推送前多做了一步(值得成为惯例)**:tag 打在本地、**尚可 `git tag -d` 重来**时,
+  先用 **GCC 15.2 本地全量验**(`SA_WERROR=ON`:零告警 + `ctest` 16/16)⇒ 把「CI 的 Linux·GCC 红了
+  只能再打一个 tag」这条风险提前出清。⚠️ MSVC 仍只能靠 CI(无本地 Windows)。
+- **复验**:server `ctest` 16/16 · `ci_verify` 六项 · client `d2-only`(**联调态**)84 例 / 2493 断言全绿。
+  ⚠️ 联调态编的是工作树那份,**不能替发布态作证**(`SaShared.cmake` 卷首自述)⇒ 发布态见下。
+- **CI**:**server CI #38 三平台 jobs 逐个 `success`**(Windows·MSVC / Linux·GCC / macOS·AppleClang)
+  = **I.4 的 MSVC 首验通过** · **client CI #27 三平台 `success`**(D2 闸门 × 三平台)+
+  **发布态 FetchContent 日志正文核实**(取 Linux·GCC job,§9.0.10):
+  `shared/(D2)= 发布态(FetchContent + 锁定 ref)` · `HEAD: 1708cab28e851dab…` ·
+  `锁定 ref: shared-v0.21.0` · `✅ ★★ 锁定 ref 与源码一致 —— shared-v0.21.0`。
+- **★★ 最该记的一条数字**:**84 例 / 2493 断言在三处逐位一致** —— 本地 server(clang)·
+  本地 client `d2-only`(联调态)· CI 发布态(从 gitee 拉 `shared-v0.21.0` 源码重编)。
+  ⇒ 本批**改变了 rng 消耗**(用一次恢复药多摇一次,`battle_magic.c:419`),属 R.1/DR-BT23 同族的
+  「序列平移」类改动 —— 三处一致正是这类改动**唯一**能拿到的正确性证据(§0 第③层)。
+
+⚠️★ **顺带勘误一处旧记(现取实据,非凭记忆)**:§9.0.52 写「server CI #37 全 success
+(**三平台 + client-integration**)」—— 调 API 取 #37 的 jobs 列表实为
+`['macOS · Apple clang', 'Linux · GCC', 'Windows · MSVC']`,**没有 client-integration job**
+(#38 同样三个)。⇒ 那半句是写记录时想当然添的。★ 同族第 N 次:**凭据要现取,"应该有的东西"
+不会因为写进文档就存在**(§9.0.10)。
+
+⇒ **§9.0.53 / `01` §13 欠债 32 ⚠️「锁定 ref 前推 `shared-v0.21.0`」推送窗口待办兑现闭合**;
+server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
+⇒ ★ **道具域(I.1–I.4)四批至此全部落地并全部推送完毕**。
+
+---
+
 ### 10.1 R-b:无解的结构性事实
 
 每条标【单源未交叉】/【8.5 源码推定】的规则,实现时**只能靠人工复核**,没有任何自动化验证手段。
