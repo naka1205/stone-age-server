@@ -35,6 +35,8 @@
 
 #include "rules/Battle.h"
 
+#include "rules/Status.h" // 批次 L4.1:状态施加 / 每回合推进
+
 #include <cmath>
 
 namespace SA::Rules
@@ -1109,16 +1111,139 @@ bool resolveTurn(const BattleField &field,
 	// ★ 打飞累加器的**本地**镜像(同 hp[]):判定要读它、多段之间要看到累加,
 	//   但世界写(持久化 + 命中清零)由调用方按事件在 ApplyEvents 做。
 	std::int32_t ult_acc[kSlotCount];
+	// ★★ 状态槽的**本地**镜像(批次 L4.1,同 hp[])—— 两个理由缺一不可:
+	//   ① 施加:全局互斥(§4.1)判的是"目标此刻身上有没有状态",而同一回合里
+	//      前面的攻击可能刚给它挂上 ⇒ 读 `field` 的快照会让同回合第二次施加也成功;
+	//   ② 结算:`tickStatus` 的递减/解除要在派发前生效,而 `field` 是 const。
+	std::uint8_t status[kSlotCount];
+	std::int32_t status_turns[kSlotCount];
 	for (int i = 0; i < kSlotCount; ++i)
 	{
 		hp[i] = field.at(i).hp;
 		pet_hp[i] = field.at(i).ride_hp;
 		dead[i] = field.at(i).dead;
 		ult_acc[i] = field.at(i).ultimate_accumulator;
+		status[i] = field.at(i).status;
+		status_turns[i] = field.at(i).status_turns;
 	}
 
 	std::uint8_t order[kSlotCount] = {};
 	const int actor_count = buildActionOrder(field, commands, rng, order);
+
+	// ── 状态推进(`BATTLE_StatusSeq`,`battle.c:5423`,批次 L4.1)──────────────
+	//
+	// ★★ **位置即语义**:原版在**每个角色轮到自己行动时**逐个跑(`battle.c:7074`,
+	//    在指令派发之前),**不是**回合开始时统一跑一遍。⇒ 下面的 actor 循环逐个调
+	//    `tick_one`,顺序与 `buildActionOrder` 一致:
+	//      · 行动顺序靠前的先掉毒血;
+	//      · **先被打死的单位跑不到自己那一趟** ⇒ 不掉这一回合的毒血;
+	//      · ★ 快的一方给慢的一方**当回合**上的状态,慢的那方在自己那一趟就会
+	//        先递减一次并结算一次伤害 —— 原版同结构,不是我们的偏差。
+	//    ⚠️ 挪到循环外统一跑会改变以上三条,而**返回值断言一条都抓不到**。
+	//
+	// ⚠️ 入选条件与原版一致:原版跳过 `WORKBATTLEMODE != BATTLE_CHARMODE_C_OK`
+	//    (指令未就绪)的单位,本实现跳过 `!commands.present[i]` —— 同一件事。
+	//    ★ 世界侧敌人的指令由 `fillEnemyCommands`(`World.cpp`)填齐,与原版 AI 同位,
+	//      ⇒ 场上活人都会推进。⚠️ 曾误判为「敌人 AI 未移植 ⇒ 敌人永不推进」并据此
+	//      加过一段「补跑无指令槽」——**那个前提是错的**(`fillEnemyCommands` 一直在),
+	//      补跑只会在 L3 用例的 fixture 里触发 ⇒ 已删除。真正的缺陷是下面第 ③ 条
+	//      (缺 `StatusTick` 回写),由 world_tick 用例抓到。
+	//
+	bool status_cmd_cleared[kSlotCount] = {};
+
+	// 推进一个槽的状态并产出对应事件。返回 false = 事件缓冲已满,调用方须停。
+	const auto tick_one = [&](int i) noexcept -> bool
+	{
+		const Combatant &c = field.at(i);
+		if (status[i] == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_NONE))
+			return true;
+
+		// ★ 喂**镜像值**而不是 field 快照(同 hp[]:同回合前面的写要看得见)。
+		Combatant tick_in = c;
+		tick_in.status = status[i];
+		tick_in.status_turns = status_turns[i];
+
+		const StatusTickResult tick =
+		    tickStatus(tick_in, hp[i], pet_hp[i], c.has_ride && pet_hp[i] > 0);
+
+		status[i] = tick.status;
+		status_turns[i] = tick.turns;
+		status_cmd_cleared[i] = tick.command_cleared;
+
+		// ① 掉血(毒)—— 人物与骑宠各一份,合进**一条** Damage 事件。
+		//    ⚠️ `hp_down == 0` 也要产事件(hp==1 时"留 1 HP"⇒ 掉 0):
+		//      原版 `downs >= 0` 即发 BD 串,那是"毒还在生效"的可观察证据。
+		if (tick.hp_down > 0 || tick.pet_hp_down > 0 ||
+		    (!tick.cleared && !tick.deep_poison_kill &&
+		     status[i] == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON)))
+		{
+			SA::Domain::BattleEvent *pev =
+			    sink.push(SA::Domain::BattleEvent::BodyKind::DAMAGE);
+			if (pev == nullptr)
+				return false;
+			SA::Domain::Damage &pd = pev->body.damage;
+			pd.target = static_cast<std::uint32_t>(i);
+			pd.hp_delta = -tick.hp_down;
+			pd.pet_hp_delta = -tick.pet_hp_down;
+			pd.mp_delta = 0;
+			pd.flags = static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);
+			pd.status_applied = SA::Domain::BattleStatus::BATTLE_ST_NONE;
+			hp[i] -= tick.hp_down;
+			pet_hp[i] -= tick.pet_hp_down;
+		}
+
+		// ② 剧毒直死(`battle.c:5536`)—— HP ≤ 1 或剩余回合 ≤ 1 ⇒ **直接死**。
+		//    ⚠️ 不走"留 1 HP":那是普通毒的性质,剧毒恰恰相反。
+		if (tick.deep_poison_kill)
+		{
+			SA::Domain::BattleEvent *kev =
+			    sink.push(SA::Domain::BattleEvent::BodyKind::DAMAGE);
+			if (kev == nullptr)
+				return false;
+			SA::Domain::Damage &kd = kev->body.damage;
+			kd.target = static_cast<std::uint32_t>(i);
+			kd.hp_delta = -hp[i]; // 归零
+			kd.pet_hp_delta = 0;
+			kd.mp_delta = 0;
+			kd.flags = static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL) |
+			           static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DEATH);
+			kd.status_applied = SA::Domain::BattleStatus::BATTLE_ST_NONE;
+			hp[i] = 0;
+			dead[i] = true;
+		}
+
+		// ③ ★★ 计时回写(`StatusTick`)—— **权威态,不是演出**。
+		//    ⚠️★ 这一条是被 `world_tick` 用例逼出来的:没有它,世界态的
+		//      `status_turns` 会一直停在施加时的值,直到某回合突然消失。
+		//    ⚠️★★ **不能让世界侧自己减一** —— 虚弱/魔障会把递减加回去(§4.2),
+		//      世界侧自己算等于把那条规则实现第二遍(DR-BT5),而分叉点恰是
+		//      「虚弱/魔障永不自然解除」这条玩法级强约束。⇒ 同 A.4 的 KnockbackState。
+		//    ★ 只在**值变化时**产出:虚弱/魔障被冻结 ⇒ 值不变 ⇒ 不发(低频)。
+		if (tick.turns != tick_in.status_turns)
+		{
+			SA::Domain::BattleEvent *tev =
+			    sink.push(SA::Domain::BattleEvent::BodyKind::STATUS_TICK);
+			if (tev == nullptr)
+				return false;
+			tev->body.status_tick.target = static_cast<std::uint32_t>(i);
+			tev->body.status_tick.turns = tick.turns;
+		}
+
+		// ④ 解除 ⇒ StatusChange(applied = false)。
+		//    ★ 酒醉解除的敏捷回写是**世界写**,由调用方按本事件落地(见 World.cpp)。
+		if (tick.cleared)
+		{
+			SA::Domain::BattleEvent *sev =
+			    sink.push(SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE);
+			if (sev == nullptr)
+				return false;
+			sev->body.status_change.target = static_cast<std::uint32_t>(i);
+			sev->body.status_change.status =
+			    static_cast<SA::Domain::BattleStatus>(tick_in.status);
+			sev->body.status_change.applied = false;
+		}
+		return !sink.overflowed();
+	};
 
 	for (int n = 0; n < actor_count; ++n)
 	{
@@ -1126,7 +1251,25 @@ bool resolveTurn(const BattleField &field,
 		const Combatant &actor = field.at(actor_slot);
 
 		// 回合内先被打死的单位不再行动(原版同样在派发前查存活)。
+		// ⚠️★ 这一道**在状态推进之前** ⇒ 被先手打死的单位跑不到自己那一趟,
+		//    因而**不掉这一回合的毒血** —— 顺序即语义,照原版(`battle.c:7051`
+		//    的 `CHAR_getInt(HP) <= 0 continue` 在 `:7074` 的 StatusSeq 之前)。
 		if (dead[actor_slot])
+			continue;
+
+		// ★ 本单位的状态推进(原版 `battle.c:7074`,在指令派发之前)。
+		if (!tick_one(actor_slot))
+			break;
+		// 剧毒可能刚把自己打死 ⇒ 不再行动。
+		if (dead[actor_slot])
+			continue;
+
+		// ★★ 状态清掉了本回合指令 ⇒ 不行动(原版把 COM 置成 `BATTLE_COM_NONE`)。
+		// ⚠️★ 判据来自**递减之前**的状态(见上方状态预推进段)⇒ **本回合到期解除的
+		//    角色这一趟仍不能动**。★ 它必须在下面那道 `checkCanAct` **之前** ——
+		//    `checkCanAct` 读的是 `actor`(快照,状态可能已在预推进里解除)⇒ 只靠它
+		//    会放行,被清掉的指令就"复活"了。
+		if (status_cmd_cleared[actor_slot])
 			continue;
 
 		// ★ DR-BT5:能否行动的**唯一**判据。上行校验与结算走同一个函数。
@@ -1494,6 +1637,55 @@ bool resolveTurn(const BattleField &field,
 			{
 				dead[target_slot] = true;
 				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DEATH);
+			}
+
+			// ── 普攻附带状态:带毒装备(`battle_event.c:2903`,批次 L4.1)────
+			//
+			// ★★ 这是**净核里唯一的普攻附带状态来源**(`_SUIT_ADDPART4`,8.0 开):
+			//      if (gBattleStausChange == -1 && SUITPOISON > 0)
+			//          gBattleStausChange = POISON, gBattleStausTurn = 3, suitpoison = SUITPOISON;
+			//    ⇒ 与 A.3 暴击 / A.4 打飞同族,是**普攻链路自己的机制**,不依赖宠技职技。
+			//
+			// ⚠️★ 三处顺序/判据都照源码,任一处挪动都会改 rng 序列:
+			//    ① 在 `BATTLE_DamageSub` **之后**(伤害、分摊、打飞、HP 写都已完成);
+			//    ② 判据是 `damage > 0` —— 用**分摊前的总伤害**(源码 `*pDamage` 只在
+			//       SHOWMERCY 分支被改写,分摊值落局部变量 ⇒ 这里的 damage 仍是总伤);
+			//    ③ `gBattleStausChange == -1` 那道门:技能已指定状态时**装备毒让位** ——
+			//       本批无技能路径 ⇒ 恒成立,照抄但不声称它要紧(纪律 ⓪)。
+			// ⚠️★★ **默认 `suit_poison == 0` ⇒ 整段不进 ⇒ 不摇 rng** ⇒ 既有用例的
+			//    rng 序列逐位不变(同 I.4 的 `item_heal_power` 默认 0)。
+			if (damage > 0 && actor.mods.suit_poison > 0)
+			{
+				// ★ 喂**镜像**状态:同回合前面若已给它挂上状态,全局互斥必须看得见。
+				Combatant tgt_now = target;
+				tgt_now.status = status[target_slot];
+				tgt_now.status_turns = status_turns[target_slot];
+
+				const int st = static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+				int per = 0;
+				if (rollStatusAttack(field.is_pvp, actor, tgt_now, st,
+				                     actor.mods.suit_poison, kSuitPoisonRange,
+				                     kSuitPoisonBai, rng, &per))
+				{
+					// ★★ 落地回合数 = 声明值 + 1(`:2918` 的 `gBattleStausTurn + 1`)——
+					//    带毒装备声明 3 ⇒ 实际 **4**。同 DR-BT15「逃跑首次即 2」那族。
+					status[target_slot] = static_cast<std::uint8_t>(st);
+					status_turns[target_slot] = statusTurnsOnApply(kSuitPoisonTurns);
+
+					// ★ 附带状态走 `Damage.status_applied`(IDL 为此留的字段),
+					//   不另发 StatusChange —— 后者对应原版的 `BM`,本批只在**解除**时用。
+					d.status_applied = SA::Domain::BattleStatus::BATTLE_ST_POISON;
+
+					// ⚠️★ **有意不落地:施加当场清目标指令**(`:2932-2937`)。
+					//    原版对**麻痹 / 睡眠 / 石化 / 魔障**四种在施加当场把目标的
+					//    `BATTLE_COM_NONE` 写掉(目标若尚未行动,这一趟就被跳过)。
+					//    ★ 本批唯一的施加者是带毒装备 ⇒ 状态恒为**毒**,而毒**不在**那四种里
+					//      ⇒ 这段逻辑在本批**没有任何输入能让它执行**,写下来就是
+					//      **无法反向验证的死代码**(纪律 ⓪:冗余的分支没有能区分它的输入)。
+					//    ⇒ 判据函数 `clearsCommandOnApply()` 已在 Status.h 建好并有单元用例,
+					//      接入技能/魔法施加路径的那一批在此处消费它。
+					(void)per; // per 是原版用于广播文案的命中率,本批不下发
+				}
 			}
 
 			// ⚠️ 反击(§3.5)在此处插入 —— 批次 0.5 未实现,理由见 battle.h。

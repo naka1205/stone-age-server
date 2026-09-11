@@ -272,6 +272,7 @@ P5 文件名 PascalCase + guard `__SA_<File>_H__` · P6 clang-format 引擎款�
 | **DR-DT21** | ★★ **捕获扣道具 I.2**(道具域第二批):条件道具需求表来源 · 前置门 CaptureItemCheck 分层 · 全删语义 | ✅ **① 需求表 = 源码硬编码 `NeedEnemy[9]`,不读文件**:`_NEED_ITEM_ENEMY` 双源**关** ⇒ `need_item_eneny_init()`(读 `needitemeneny.txt`)不编译,净核用 `battle_event.c:3890` 硬编码表(524/961/953/962/777/796/812/1105/8;`_DEL_NOT_25`/`_WOLF_TAKE_AXE` 关)⇒ 移植为 `shared/rules/CaptureItem.h::kNeedItemEnemy` 常量 + `isNeedCaptureItem`。⚠️ **更正 DR-DT20 ⑥「需 `needitemeneny.txt`」**:文件在 data/ 但 8.0 净核不读它 · **② 匹配键 = 模板号**:`IsNeedCaptureItem` 读 `CHAR_PETID`,而 `CHAR_PETID = *(tp+E_T_TEMPNO)`(`enemy.c:1200` 四处)⇒ = `EnemyTemplate::temp_no` ⇒ `Enemy.h` 加 `pet_id`、`spawnEnemy` 落值;⚠️ **更正 `Enemy.h` 文末 ②「PETID 归 D 线不建」**(值在已导入模板行里,非外部导入)· **③ 前置门 ④ CaptureItemCheck 分层**(§6.2):原版 `flg = ItemCheck && CaptureCheck`,道具门读**攻方背包**(世界态)⇒ 与 `capturable` 同款:World 在 `resolveTurn` **前**投影到攻方 `Combatant::mods.capture_item_ok`,L3 只做 `&&` 门判定 ⇒ ★ 无道具则不摇捕获 rng(与原版一致);⚠️ 不放 rollCapture 之后补判(会平移 rng 序列)· **④ 全删无条件**:`_CAPTURE_FREES` 开 ⇒ `BATTLE_CaptureItemDelAll` 遍历需求行**全删**命中道具(不 break,源码 :4074);`getDelNeedItem` 门属 `_NEED_ITEM_ENEMY` 关段 ⇒ 无条件删;Lua detach 回调不复刻(8.0 无 Lua)· **⑤ 注入 seam**:`giveItemToPlayer`(同 `spawnEnemyToField` 性质,写入链路=掉落/捡起后续批次)+ 只读面 `playerItemAt` · **⑥ 划出**:`CHAR_complianceParameter` 删后重算(装备域,当前无可观察后果) · 道具入包写入链路(道具域后两批)。范围 = 宽(动 `shared/model/Enemy.h` + 新增 `shared/rules/CaptureItem.h` ⇒ 前推 `shared-v0.20.0`)。批次 I.2 | 见 §2.23;`00` §9.0.50 |
 | **DR-DT22** | ★★ **野怪掉落 I.3**(道具域第三批):`NPC_NPCEnemy_Dying` 是不是掉落 · 掉给谁 · 落地形态 · rng 时序 | ✅ **① 亲验勘误**:`NPC_NPCEnemy_Dying` 是**明雷专用** `additem`(固定道具塞全队、依赖 NPC argstr 脚本层 = DR-DT19 划出的 D6、未落地)⇒ 划出;**野怪掉落是另一套三阶段**(`BATTLE_AddExpItem`,`11` §3 主表记对了)· **② 三阶段**:①spawn `enemy.c:1210` 千分率 `RAND(0,999)<prob`(`_FIX_ITEMPROB` ON,prob=0 不摇 rng)摇进 `Enemy.dropped_items` →②结算 `battle.c:6486` 逐件 `RAND(0,allnum-1)` 随机选在场单位(含宠折算回主人 `subnum-5`)入 `getitem[≤3]`(满则 `RAND(0,1)` 50%覆盖/50%弃)→③ `battle.c:4471` `giveItemIntoPlayer` 直接进背包(满则销毁、不落地不捡起)· **③ rng 保序**:摇在 `rollSpawnStats` 后(源码四维→掉落序);拾取用 `b.rng`(战斗结束用完即弃)· **④ 自主决策**:紧凑存 `item_id`+延迟 `makeItem`(省池、rng 一致)· 本批不下发客户端(服务端权威 + 观察面)· **⑤ 划出**:明雷 additem(D6)· 掉落展示/满包提示 DR-UX1(客户端下发)· Item 完整列(道具表 D 线,仅填 `item_id`)· 组队掉落归属(组队玩法未落地)。范围 = 宽(动 `shared/model/Enemy.h` ⇒ 前推 `shared-v0.20.0`,与 I.2 合窗口)。批次 I.3 | 见 §2.24;`00` §9.0.51 |
 | **DR-DT23** | ★★ **使用道具 I.4**(道具域第四批·收官):usefunc 分发机制 · 恢复量摇不摇 rng · 区间口径 | ✅ **① usefunc 分发 = 硬编码 C 名字表,不走 Lua**(推翻 §9.0.48 开工前取证的 8.5 形态):`CHAR_ItemUse`(`char_item.c:663`)→ `ITEM_getFunctionPointer`(`item.c:691`)→ 表由 `ITEM_constructFunctable`(`item.c:680`)按道具表函数名查 `getFunctionPointerFromName`(`function.c:774`)填,而映射本体 `correspondStringAndFunctionTable[]`(`function.c:165`)是 **C 数组**,`{"ITEM_useRecovery", ITEM_useRecovery, 0}` 在 `:188` ⇒ 净核链路通、不必等 D6 · **② ⚠️★★ 恢复量要摇 rng**(推翻**本批开工时工作树里已有实现**的注释断言):`sscanf` 出的 `power` 只是基数,`BATTLE_MultiRecovery` 里还有 `UpPoint = RAND(power*0.9, power*1.1)`(`battle_magic.c:419`)⇒ 投影**基数**(`mods.item_heal_power`)、**摇在 L3** 用战斗 rng;⚠️ 不许在 World 投影函数里摇(取数落到 resolveTurn 外 ⇒ 序列错位)。★ 危害形状 = **用过道具后 rng 整体平移**,返回值断言抓不到(同 DR-BT23 族)⇒ 用例逐条断言 `calls()`(实测基线 1 = 行动顺序 dex 抖动,另立用例钉住)· **③ 净核**:`_MAGIC_REHPAI` **开** ⇒ `#else` 段不编译 ⇒ **无** `per` 缩放 / **无** `GetRecoveryRate` 体力系数 ⇒ 不引入浮点;`_MAGICPET_SKILL`(`power==-1` 全满)· `_TYPE_TOXICATION`(`CanCureFlg` 门)均开但依赖未移植面 ⇒ 划出;`BATTLE_MultiList` 单目标(`battle.c:236`),⚠️ 目标已死时原版「随机改打活人」消耗**不定次** rng + 全死 UB ⇒ **不复刻**,已知行为差 · **④ 区间口径**:原版 `RAND` 两参是 **double** ⇒ 取值集合 `{floor(0.9p)+k : k=0..ceil(0.2p+1)-1}`,**不等于** `[(int)0.9p, (int)1.1p]`(p=7 原版 {6,7,8}、朴素截断少一个)⇒ 实现取 `lo=9p/10`、`hi=lo+(p+9)/5-1`,**穷举 p=0..100000 实测等价**(手算曾在 p=15 出错 ⇒ 等价性必须验不能推);⚠️ 已知偏差不修:原版尾值概率偏低 vs 本实现均匀,与「xorshift ≠ glibc rand」同层次(`00` §0 ③)· **⑤ 分层**:`current_pile` 归 `Item.h`(兑现 DR-DT20 ④ 登记),扣道具走 `consumeUsedItems`(applyEvents 后、清槽+release 成对),`ItemEffect`/`loadItemEffects` 默认空 · **⑥ 划出**:MP/状态/变身/传送等其余 usefunc · 场景内 `useRecovery_Field` · `ITEM_TYPE` 穿装备门 · `power==-1` 全满 · `CanCureFlg`(L4)· 效果表真数据(D 线)· 客户端表现。范围 = 宽(动 `shared/model/Item.h` + `shared/rules/` ⇒ 前推 `shared-v0.21.0`)。批次 I.4 | 见 §2.25;`00` §9.0.53 |
+| **DR-DT24** | ★★ **状态异常 L4.1**(L4 域第一批):覆盖面 · `RegTbl` 缺陷 · 四维归属 · 计时回写 | ✅ **① 覆盖面 = 状态 1..11**(用户 2026-09-11 拍板)——★ 边界是**源码的宏块边界**:`StatusTbl`(`battle_event.c:90`)基础段 10 + `_PET_SKILL_SARS` 毒煞 1,其后才是 `_PROFESSION_SKILL` 19 与 `_PROFESSION_ADDSKILL` 13;也恰是 `05` §4.6 给全了六维行为的那 11 种 · **② ⚠️★★ `RegTbl` 只有 31 项 ⇒ 31..43 抵抗恒 0,照抄原版缺陷**(用户拍板):实测 = 11+1+19,**无** `_PROFESSION_ADDSKILL` 段;源码 `:5119` 有越界防护 ⇒ 可观察的玩法事实不是崩溃(`05` §4.5 要求 ①)⇒ 立 `kOriginalResistTableLen = 31` + 断言 `!= kBattleStatusEnd`,★ 挡的是「将来顺手补齐到 44」——补了会**静默**改掉 13 种状态的命中率 · **③ ⚠️★★ 原始四维进 `Combatant`,不由 World 预算后投影**:状态系统两条公式**直接读四维**(命中率体力占比 `:5088`、毒掉血 `battle.c:5251`)⇒ 预算后投影等于**把一条公式切两半**,与 `capture_item_ok`(读背包)那类**不是一回事**——四维是守方自己的属性不是世界态;★ 分工照 M.4b:L2 持有、World **直接拷贝**;★ 连带**骑宠四维 `ride_*` 也要建**(毒的掉血人与骑宠各算一份,不建就是「漏掉半边」,同 M.1 漏宠物那族,**没有一处会报错**)· **④ ⚠️★★★ 计时回写单开 `StatusTick` 事件**(被 `world_tick` 用例逼出来的):初版只在解除时发 `StatusChange` ⇒ 递减只活在 L3 回合内镜像里、**没有事件把它带回世界** ⇒ 世界态 `status_turns` 永远停在施加值,而 `rules_battle` 102 例**全绿**;★ **也不能让世界侧自己减一** —— 递减不是 `-1`,§4.2 虚弱/魔障会把它**加回去**,自己算 = DR-BT5 双份实现,**分叉点恰是最要紧的那种状态**(「虚弱/魔障永不自然解除」当场失效)⇒ 形状照 A.4 `KnockbackState`:权威态回写、8B、只在值变化时产出,不进 `Damage` 热路径 · **⑤ 施加者 = 带毒装备**(`_SUIT_ADDPART4` 8.0 开,`:2903`,普攻链路自己的机制,同 A.3/A.4)⇒ 本批不是空地基;⚠️ 落地回合数 = 声明 **+1**(`:2918`,声明 3 ⇒ 实际 4,同 DR-BT15「首次即 2」族);`suit_poison` 默认 0 ⇒ 不摇 rng、既有序列逐位不变 · **⑥ 划出**:状态 12..43 · 职业施加路径(能绕互斥的只有 11 种)· 精灵/魔法两组参数 · 施加当场清指令(本批**无输入能执行** ⇒ 只建判据函数不写死代码)· 酒醉解除骑宠分支(`has_ride` 世界侧从未被写入 ⇒ 不可达,⚠️ 接骑乘时会静默走错)· `CanCureFlg` · 客户端表现。⚠️★★★ **连带更正一条排期依赖**:「反击排在 L4 之后」四份文档一致,而 `BATTLE_GetDamageReact`(`:1819`)读 **5 个独立 work 字段**、`CounterCheckPlayer`(`:3465`)**一个 status 槽都不读** ⇒ **反击不依赖状态槽**,可在 `react==NONE` 路径独立落地(同 M.3「一致不等于对」族,但错的是**排期依赖图**)⇒ 用户裁定 L4 后单开一批。范围 = 宽(动 `shared/rules/` + `idl/generated` ⇒ 前推 `shared-v0.22.0`)。批次 L4.1 | 见 §2.26;`00` §9.0.55 |
 
 ---
 
@@ -1269,6 +1270,66 @@ DR-DT20 ④ / `Item.h` 文末 ④ 登记的「留写入侧批次按各自语义�
 而 `check_dr_table.py` 每次 `ctest` 都在数。⇒ 本条起**只写实测值**,不再续写手算链
 (同 §9.0.47「落一节补一行变更记录没执行者」那族:**没有校验的计数一定会漂**)。
 ⚠️ 行号基准:标 `StoneAge/gmsv/src/` 的为 8.0 树,其余为 `stoneage85/` 全宏。
+
+### 2.26 DR-DT24 —— 状态异常 L4.1:覆盖面 / `RegTbl` 缺陷 / 四维归属 / 计时回写(批次 L4.1)
+
+★★ **本条的四个裁定里,有三个是「已有记载被源码推翻」,而第四个是被用例逼出来的。**
+
+**① 覆盖面 = 状态 1..11(用户 2026-09-11 拍板)。**
+毒 1 / 麻痹 2 / 睡眠 3 / 石化 4 / 酒醉 5 / 混乱 6 / 虚弱 7 / 剧毒 8 / 魔障 9 / 沉默 10 / 毒煞 11。
+★ 这个边界**不是拍脑袋划的,是源码的宏块边界**:`StatusTbl`(`battle_event.c:90`)的基础段
+10 项 + `_PET_SKILL_SARS` 的毒煞 1 项,其后才是 `_PROFESSION_SKILL` 的 19 项与
+`_PROFESSION_ADDSKILL` 的 13 项。⇒ 余下 32 种属宠技/职技域,随那些域接入。
+★ 它们也恰好是 `05` §4.6「关键状态的六维行为」表给全了的那 11 种。
+
+**② ⚠️★★ `RegTbl` 只有 31 项 ⇒ 状态 31..43 抵抗恒 0 —— 照抄原版缺陷(用户拍板)。**
+实测 `RegTbl`(`battle_event.c:126`)= 基础 11 + SARS 1 + `_PROFESSION_SKILL` 19 = **31**,
+**没有** `_PROFESSION_ADDSKILL` 那 13 项 ⇒ 三属抗 / 水附体 / 附身 / 恐惧 / 冰爆术 2-10
+**无法被抵抗**。源码 `:5119` 有越界防护(`status >= arraysizeof(RegTbl) ⇒ Df_Reg = 0`)
+⇒ **是可观察的玩法事实,不是崩溃**(`05` §4.5 要求 ① 的判据)。
+⇒ 裁定照抄,并在 `Status.h` 立 `kOriginalResistTableLen = 31` + 一条用例断言
+`kOriginalResistTableLen != kBattleStatusEnd` —— ★ 那条断言挡的是「将来有人顺手补齐到 44」,
+补了就会**静默地**改掉 13 种状态的命中率。
+
+**③ ⚠️★★ 原始四维进 `Combatant`,不由 World 预算后投影。**
+状态系统的**两条**核心公式**直接读四维**:命中率的体力占比
+`fVitalP = VITAL/(V+S+T+D)`(`battle_event.c:5088-5093`)与毒的每回合掉血
+`((Σ/100)−20)/4`(`battle.c:5251-5255`)。
+⇒ 若改成由 World 预先算好 `vital_p` 投影进来,等于**把一条公式切成两半**、一半落在 L3 之外
+—— 与 `capture_item_ok`(读背包,L3 够不着)那类投影**不是一回事**:四维是守方自己的属性,
+不是世界态。★ 分工照 M.4b 既有形状:L2 实体持有四维,World 投影时**直接拷贝**(不是计算)。
+★ 连带:**骑宠四维 `ride_*` 也要建** —— 毒的掉血人与骑宠**各算一份**(`Compute_Down` 的
+`flg != -1` 那半段),不建就只能让骑宠不吃毒伤害,而那是「漏掉半边」式的缺陷
+(同 M.1 断线回收漏了宠物、DR-BT2 分摊漏了无损性),**没有任何一处会报错**。
+
+**④ ⚠️★★★ 计时回写单开 `StatusTick` 事件 —— 这一条是被 `world_tick` 用例逼出来的。**
+初版只在**解除**时发 `StatusChange` ⇒ 递减只存在于 L3 的**回合内镜像**里,
+**没有任何事件把它带回世界** ⇒ 世界态 `status_turns` 一直停在施加时的值,直到某回合突然消失。
+⚠️ 而 `rules_battle` 102 例**全绿** —— L3 自己的镜像是对的,错的是它没有出口。
+⇒ ★ **也不能让世界侧自己减一**:递减**不是** `-1` —— `05` §4.2 的虚弱/魔障会把递减
+**加回去**(`battle.c:5451-5456`),那正是「虚弱/魔障永不自然解除」这条玩法级强约束的来源;
+世界侧自己算 = 把那条规则实现第二遍(DR-BT5「双份实现必漂移」),
+而分叉点恰是**最要紧的那一种状态**:虚弱/魔障会开始自然解除,「持续到战斗结束」当场失效。
+⇒ 形状照 A.4 的 `KnockbackState`:**权威态回写,不是演出事件**,8 字节、只在值变化时产出
+(冻结中的单位不发)⇒ 不进 `Damage` 那个 ×256 的热路径,不影响 8 KB 零分配红线。
+
+**⑤ 施加者 = 带毒装备,这一批不是空地基。**
+净核里普攻附带状态的**唯一**来源是 `_SUIT_ADDPART4`(8.0 开,`battle_event.c:2903`):
+攻方 `CHAR_SUITPOISON > 0` 时,普攻**造成伤害后**摇一次命中判定,成功则守方中毒。
+★ 与 A.3 暴击 / A.4 打飞同族:**普攻链路自己的机制**。
+⚠️ 落地回合数 = `gBattleStausTurn + 1`(`:2918`)⇒ 声明 3 ⇒ **实际 4**,
+与 DR-BT15「逃跑首次即 2」同族的 `+1` 陷阱:照「声明值」实现会让每种状态都短一回合,
+而任何「中了没中」的断言都抓不到。
+⚠️ `suit_poison` 由套装系统写(装备域未移植)⇒ 同 `equip_critical`(A.3)/
+`capture_item_ok`(I.2):**默认 0 ⇒ 不附带状态且不摇 rng**,既有用例的 rng 序列逐位不变。
+
+**⑥ 划出**:状态 12..43(宠技职技域)· 职业技能施加路径(能绕过互斥的**只有 11 种**)·
+精灵/魔法两组调用参数(需技能表)· 施加当场清指令(本批唯一施加者产出的是毒,
+不在麻痹/睡眠/石化/魔障四种里 ⇒ **无输入能执行**,只建判据函数不写死代码)·
+酒醉解除的骑宠分支(`has_ride` 世界侧从未被写入 ⇒ 不可达,⚠️ 接骑乘时会静默走错)·
+`CanCureFlg` 门 · 客户端表现。
+
+---
 
 ### 3.1 逐条裁定理由
 

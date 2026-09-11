@@ -300,6 +300,21 @@ inline void decode(SA::IDL::Reader& r, KnockbackState& m) {
   m.accumulator = r.i32();
 }
 
+struct StatusTick {
+  std::uint32_t target;
+  std::int32_t turns;
+};
+
+inline void encode(SA::IDL::Writer& w, const StatusTick& m) {
+  w.u32(m.target);
+  w.i32(m.turns);
+}
+
+inline void decode(SA::IDL::Reader& r, StatusTick& m) {
+  m.target = r.u32();
+  m.turns = r.i32();
+}
+
 struct StatusChange {
   std::uint32_t target;
   SA::Domain::BattleStatus status;
@@ -657,6 +672,7 @@ struct BattleEvent {
     FIRE_HUNT = 23,
     KNOCKBACK_STATE = 24,
     PET_SWITCH = 25,
+    STATUS_TICK = 26,
   };
   BodyKind body_kind;
   union BodyUnion {
@@ -685,6 +701,7 @@ struct BattleEvent {
     SA::Domain::FireHunt fire_hunt;
     SA::Domain::KnockbackState knockback_state;
     SA::Domain::PetSwitch pet_switch;
+    SA::Domain::StatusTick status_tick;
   } body;
 };
 
@@ -765,6 +782,9 @@ inline void encode(SA::IDL::Writer& w, const BattleEvent& m) {
       break;
     case BattleEvent::BodyKind::PET_SWITCH:
       encode(w, m.body.pet_switch);
+      break;
+    case BattleEvent::BodyKind::STATUS_TICK:
+      encode(w, m.body.status_tick);
       break;
     case BattleEvent::BodyKind::NONE:
     default:
@@ -876,6 +896,10 @@ inline void decode(SA::IDL::Reader& r, BattleEvent& m) {
       case 25:
         decode(r, m.body.pet_switch);
         m.body_kind = BattleEvent::BodyKind::PET_SWITCH;
+        break;
+      case 26:
+        decode(r, m.body.status_tick);
+        m.body_kind = BattleEvent::BodyKind::STATUS_TICK;
         break;
       case 0:
         break;

@@ -299,6 +299,30 @@ message KnockbackState {
   int32  accumulator = 2;  // 累加后的新值(命中打飞时为 0)
 }
 
+// ★ 状态异常计时的权威态回写(原 `CHAR_setWorkInt(idx, StatusTbl[i], --cnt)`,
+//   `battle.c:5449`,§4.2,批次 L4.1)。
+//
+// ⚠️★★ **为什么必须单开一个事件、而不是让世界侧自己减一**:
+//    递减**不是**简单的 `-1` —— `05` §4.2 的虚弱 / 魔障会把递减**加回去**
+//    (`battle.c:5451-5456`)⇒ 中虚弱或魔障期间回合数**不减**,这正是
+//    「虚弱/魔障永不自然解除」这条玩法级强约束的来源。
+//    ⇒ 世界侧若自己 `-1`,等于把那条规则实现第二遍(DR-BT5「双份实现必漂移」),
+//      而分叉点恰恰是**最要紧的那一种状态**:虚弱/魔障会开始自然解除,
+//      「持续到战斗结束」当场失效 —— 且没有任何一处会报错。
+//
+// ⚠️★ **也不能只在解除时发 StatusChange**(本批的初版就是这么写的,被 world_tick
+//    用例当场抓到):那样世界态的 `status_turns` 会**一直停在施加时的值**,
+//    客户端与存档看到的都是"毒还剩 4 回合"直到某回合突然消失。
+//    ★ 与 A.4 的 `KnockbackState` 同族:**权威态回写,不是演出事件** ——
+//      客户端不靠它演任何动作(掉血由 Damage 演、解除由 StatusChange 演)。
+//
+// ★ 体积:8 字节,与 KnockbackState 同规格;只在**计时变化时**产出(低频),
+//   不进 Damage 那个 ×256 的热路径 ⇒ 不影响 8 KB 零分配红线。
+message StatusTick {
+  uint32 target = 1;  // slot
+  int32  turns  = 2;  // 递减(或被虚弱/魔障冻结)之后的新值
+}
+
 // 状态异常变更(原 BM)。
 message StatusChange {
   uint32 target       = 1;
@@ -413,6 +437,7 @@ message BattleEvent {
     FireHunt       fire_hunt       = 23;
     KnockbackState knockback_state = 24;  // §3.8 A.4:打飞累加器回写(权威态,不演出)
     PetSwitch      pet_switch      = 25;  // DR-BT21:换宠意图(世界写锚点,不演出)
+    StatusTick     status_tick     = 26;  // §4.2 L4.1:状态计时回写(权威态,不演出)
   }
 }
 

@@ -21,6 +21,7 @@
 #include "model/Player.h"
 #include "rules/CaptureItem.h"
 #include "rules/Progression.h"
+#include "rules/Status.h"
 
 namespace SA::World
 {
@@ -675,11 +676,95 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 			//    要改准:不是"没有字段",而是 Battle.cpp:1354 已裁定它在**表现侧** ——
 			//    由调用方按打完后的 HP 判定并下发 BattleSnapshot,而 BattleSnapshot 本身
 			//    尚未下发(world/Api.h 卷首边界 ③)。
+			// ── ★★ 附带状态的世界写回(批次 L4.1)──────────────────────
+			//
+			// ★ 普攻附带状态走 `Damage.status_applied`(原版 `BATTLE_StatusAttackCheck`
+			//   成功后 `CHAR_setWorkInt(defindex, StatusTbl[st], turn + 1)`,
+			//   `battle_event.c:2918`)⇒ 与伤害同一条事件落地,不另发 StatusChange。
+			// ⚠️★ **回合数由世界侧按 `statusTurnsOnApply` 算,不是 L3 传过来的** ——
+			//    L3 只告诉"中了哪一种";落地 `+1` 是原版写 work 值那一步的语义。
+			//    ★ 本批唯一的施加者是带毒装备(声明 3 ⇒ 落地 4)。
+			// ⚠️ 不判"目标身上已有状态" —— 全局互斥已在 L3 的 `rollStatusAttack` 里挡过
+			//    (`Status.cpp` 前置 ②);在这里再判一次就是 DR-BT5 反对的双份实现。
+			if (d.status_applied != SA::Domain::BattleStatus::BATTLE_ST_NONE)
+			{
+				c.status = static_cast<std::uint8_t>(d.status_applied);
+				c.status_turns =
+				    SA::Rules::statusTurnsOnApply(SA::Rules::kSuitPoisonTurns);
+			}
+
 			if (c.hp <= 0)
 			{
 				c.hp = 0;
 				c.dead = true;
 			}
+			break;
+		}
+		case SA::Domain::BattleEvent::BodyKind::STATUS_TICK:
+		{
+			// ── 批次 L4.1:状态计时的世界写回 ────────────────────────────
+			//
+			// ★ L3 已算好递减(或被虚弱/魔障冻结)之后的新值,**直接写,不在此重算** ——
+			//   与 A.4 的 KnockbackState 同一条理由:重算等于把 §4.2 的冻结规则实现
+			//   第二遍(DR-BT5),而分叉点恰是「虚弱/魔障永不自然解除」这条强约束。
+			// ⚠️ 只有值**变化**时 L3 才发本事件 ⇒ 冻结中的单位收不到,值自然保持不变。
+			const SA::Domain::StatusTick &st = e.body.status_tick;
+			if (st.target >= static_cast<std::uint32_t>(SA::Rules::kSlotCount))
+				break;
+			SA::Rules::Combatant &c = field.at(static_cast<int>(st.target));
+			if (!c.occupied)
+				break;
+			c.status_turns = st.turns;
+			break;
+		}
+		case SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE:
+		{
+			// ── 批次 L4.1:状态**解除**的世界写回(原版 `BM` 子命令)────────
+			//
+			// ★ L3 的 `tickStatus` 在计时归零时产 `StatusChange(applied = false)`。
+			// ⚠️★ `applied == true` 这一支**本批不产**(附带状态走 Damage.status_applied)
+			//    ⇒ 但仍照事件语义写,因为技能 / 魔法施加路径接入后会用它。
+			const SA::Domain::StatusChange &sc = e.body.status_change;
+			if (sc.target >= static_cast<std::uint32_t>(SA::Rules::kSlotCount))
+				break;
+			SA::Rules::Combatant &c = field.at(static_cast<int>(sc.target));
+			if (!c.occupied)
+				break;
+
+			if (sc.applied)
+			{
+				c.status = static_cast<std::uint8_t>(sc.status);
+				c.status_turns = SA::Rules::statusTurnsOnApply(SA::Rules::kSuitPoisonTurns);
+				break;
+			}
+
+			// ── 解除 ──────────────────────────────────────────────────
+			// ⚠️★★ **酒醉解除要回写敏捷**(`battle.c:5490`)—— 两支,幅度不同:
+			//      有骑宠:`quick += 骑宠的 quick`   无骑宠:`quick × 2`
+			//    ★ `05` §4.4 只写了后者(2026-09-11 回源码核出,纪律 ①)。
+			//    ⚠️ 这一步**必须在世界侧**:L3 看不到骑宠的 quick(它在另一个槽),
+			//      所以 `tickStatus` 只置 `drunk_quick_restore` 标志。
+			//    ★ 净效果 = 中酒醉再解除,敏捷变大(施加时从未减半)——
+			//      原版就是这样,`05` §4.4 已认下"不能照抄代码要照抄意图"。
+			//    ⚠️ 可观测窗口只有解除当回合的剩余结算:回合准备会把敏捷重置回基础值
+			//      (`BATTLE_TurnParam`,未移植)⇒ 现在它会**多留一会儿**,记明在案。
+			if (c.status == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_DRUNK))
+			{
+				// ⚠️★★ **只实现无骑宠那一支,有骑宠那一支有据地不做**:
+				//    原版有骑宠时是 `quick += 骑宠的 quick`(`battle.c:5492`),而
+				//    ① `Combatant` 没有 `ride_quick` 字段(骑宠只投了 attack/defense/hp);
+				//    ② 更要紧的是 **`has_ride` 在世界侧从未被写入过**(全仓实测:只有
+				//       用例在设)⇒ 骑乘系统整个未移植 ⇒ 那一支**运行时不可达**。
+				//    ⇒ 现在写它就是在猜一个没有输入能验证的实现(纪律 ⓪)。
+				// ⚠️★ **但它是一颗会静默引爆的雷**:骑乘系统接上之后 `has_ride` 变真,
+				//    这里会**照旧走 ×2** 而不报任何错 ⇒ 敏捷幅度悄悄错掉。
+				//    ⇒ 已在 `01` §13 欠债登记,并由 `Status.h` 的 `drunk_quick_restore`
+				//      注释指回本处(同 A.4 打飞下游「写下就是定时炸弹」的处置取向)。
+				c.quick *= 2;
+			}
+
+			c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_NONE);
+			c.status_turns = 0;
 			break;
 		}
 		case SA::Domain::BattleEvent::BodyKind::SET_HP:
@@ -3148,6 +3233,19 @@ bool enterPetToField(SA::Rules::BattleField &field, int owner_field_slot,
 	//   装备加成不含(Pet 无装备,原版 ITEM_equipEffect 对宠物输入全 0 即恒等,DR-DT9)。
 	const SA::Rules::DerivedStats stats =
 	    SA::Rules::deriveBaseStats(pet.vital, pet.str, pet.tough, pet.dex);
+
+	// ── ★★ 原始四维直拷(批次 L4.1)────────────────────────────────────
+	// ⚠️★ **拷的是原始四维,不是推导出的三围** —— 状态系统的两条公式直接读四维:
+	//    命中率的体力占比 `VITAL/(V+S+T+D)`(`battle_event.c:5088`)与毒的每回合
+	//    掉血 `((Σ/100)-20)/4`(`battle.c:5251`)。⇒ 用 attack/defense 代入会得到
+	//    **完全不同的数**,而两者都是"看起来合理"的正数 ⇒ 不会有任何一处报错。
+	//  ★ 这是**拷贝不是计算**:四维的来源是 L2 实体(M.4a `rollSpawnStats` 已落),
+	//    World 只负责搬过去(同 elements 那几行的分工)。
+	dst.vital = pet.vital;
+	dst.str = pet.str;
+	dst.tough = pet.tough;
+	dst.dex = pet.dex;
+
 	dst.attack = stats.attack;
 	dst.defense = stats.defense;
 	dst.quick = stats.quick;
@@ -3919,6 +4017,13 @@ bool enterEnemyToField(SA::Rules::BattleField &field, int field_slot,
 	// ── 属性推导:四维 → 基础三围 + max_hp(DR-DT9)────────────────────
 	const SA::Rules::DerivedStats stats =
 	    SA::Rules::deriveBaseStats(enemy.vital, enemy.str, enemy.tough, enemy.dex);
+
+	// ── ★★ 原始四维直拷(批次 L4.1,理由同 enterPetToField)──────────────
+	dst.vital = enemy.vital;
+	dst.str = enemy.str;
+	dst.tough = enemy.tough;
+	dst.dex = enemy.dex;
+
 	dst.attack = stats.attack;
 	dst.defense = stats.defense;
 	dst.quick = stats.quick;

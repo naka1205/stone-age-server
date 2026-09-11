@@ -172,6 +172,49 @@ struct CombatModifiers
 	//     (对应原版 arg 不含关键字即 `return`、根本进不到 `MultiRecovery`,battle_item.c:284)
 	//     ⇒ 现有用例的 rng 序列不受影响。
 	std::int32_t item_heal_power = 0;
+
+	// ── 状态异常(§4,批次 L4.1)──────────────────────────────────
+	//
+	// ★★ **攻方「带毒装备」**(原 `CHAR_SUITPOISON`,`_SUIT_ADDPART4` 在 8.0 **开**,
+	//    `battle_event.c:2903`)—— 这是**净核里唯一的普攻附带状态来源**:
+	//        if (gBattleStausChange == -1 && SUITPOISON > 0)
+	//            gBattleStausChange = BATTLE_ST_POISON, gBattleStausTurn = 3, suitpoison = SUITPOISON;
+	//    ⇒ 攻方装备带毒时,普攻**造成伤害后**摇一次状态命中判定,成功则守方中毒。
+	//    ★ 这个字段**一身兼两职**:`> 0` 是开关,值本身是命中率的 `PerOffset`(§4.3 第一组
+	//      调用参数 —— 原版把 `suitpoison` 直接传给 `BATTLE_StatusAttackCheck` 的 `PerOffset`)。
+	//    ⚠️★ 它由套装系统写(装备域未移植)⇒ 与 `equip_critical`(A.3)/ `capture_item_ok`(I.2)
+	//      完全同款分工:字段建在快照面、**默认 0 ⇒ 不附带状态且不摇 rng**,装备域接线后自动生效。
+	std::int32_t suit_poison = 0;
+
+	// ★★ **守方逐状态抗性**(原 `RegTbl[status]` → `CHAR_WORKMOD*`,`battle_event.c:126`)。
+	//
+	// ⚠️★★ **数组长度照抄原版缺陷,这是用户 2026-09-11 的显式裁定**:原版 `RegTbl`
+	//    实测只有 **31 项**(基础 11 + `_PET_SKILL_SARS` 1 + `_PROFESSION_SKILL` 19),
+	//    **没有 `_PROFESSION_ADDSKILL` 那 13 项** ⇒ 状态 31..43(三属抗 / 水附体 / 附身 /
+	//    恐惧 / 冰爆术 2-10)的抵抗值**恒为 0、无法被抵抗**。源码有越界防护
+	//    (`:5119` `if (status >= arraysizeof(RegTbl) || status < 0) Df_Reg = 0;`)
+	//    ⇒ 这是**可观察的玩法事实,不是崩溃**,照抄(`05` §4.5 要求 ①)。
+	//    ⇒ 本批只做 1..11(索引 0 = NONE 不用),数组开到 `kStatusResistCount`;
+	//      将来扩到全 44 种时,**上限仍是 31 而不是 44** —— 别"顺手补齐"。
+	std::int32_t status_resist[12] = {};
+
+	// ★ 守方「通用抗性」(原 `CHAR_WORKRESIST`,`_SUIT_ADDENDUM` 在 8.0 **开**,`:5136`)。
+	//   ⚠️ 与 `status_resist[]` 是两件事:前者对**所有**状态生效,后者逐状态。
+	std::int32_t general_resist = 0;
+
+	// ★ 守方「装备抗性」—— ⚠️★★ **只对虚弱 / 魔障 / 沉默三种状态存在**
+	//   (原 `CHAR_WORKEQUITWEAKEN` / `EQUITBARRIER` / `EQUITNOCAST`,
+	//    `_EQUIT_RESIST` 8.0 开,`:5141-5147`)。
+	//   ⚠️ `05` §4.3 把「− 装备抗性」写成通用一项,**与源码不符**:麻痹分支根本没有它,
+	//     通用分支也只有这三种减。⇒ 按源码分三个字段,不做成数组(避免暗示它有 44 项)。
+	std::int32_t equip_resist_weaken = 0;
+	std::int32_t equip_resist_barrier = 0;
+	std::int32_t equip_resist_nocast = 0;
+
+	// ★ 守方虚弱的**第二道**装备抗性(原 `CHAR_WORKRENOCAST`,`_SUIT_ADDPART3` 8.0 开,`:5150`)。
+	//   ⚠️★ 源码这里判的是 `status == CHAR_WORKWEAKEN` 而减的字段名却是 `RENOCAST`
+	//     ——「名字在骗人」的又一例(同 M.5 那族)⇒ 按**判据**命名,不按原字段名。
+	std::int32_t suit_resist_weaken = 0;
 };
 
 // ── 一个战斗单位 ──────────────────────────────────────────────
@@ -211,6 +254,26 @@ struct Combatant
 	// ★ 魅力(原 `CHAR_WORKFIXCHARM`)—— 捕获的**乘性主因子**(§6.2:`× charm / 50`
 	//   ⇒ 魅力 50 时系数为 1)。⚠️ 只在捕获判定里用,不参与伤害/回避 ⇒ 默认 0。
 	std::int32_t charm = 0;
+
+	// ── 原始四维(vital / str / tough / dex)——批次 L4.1 加入 ──────
+	//
+	// ⚠️★★ **为什么四维要进 `Combatant`(战斗输入子集)而不是留在 L2 实体里**:
+	//    状态系统的**两个**核心公式**直接读**它们,不是读推导后的三围 ——
+	//      ① 命中率的体力占比 `fVitalP = VITAL / (VITAL+STR+TOUGH+DEX)`
+	//         (`BATTLE_StatusAttackCheck`,`battle_event.c:5088-5093`)
+	//      ② 毒的每回合掉血 `(((V+S+D+T)/100)-20)/4`
+	//         (`Compute_Down`,`battle.c:5251-5255`)
+	//    ⇒ 若改成由 World 预先算好 `vital_p` 投影进来,等于**把一条公式切成两半**、
+	//      一半落在 L3 之外 —— 与 `capture_item_ok`(读背包,L3 够不着)那类投影
+	//      **不是一回事**:四维是守方自己的属性,不是世界态。
+	//    ★ 分工照 M.4b 既有形状:L2 实体(`Model::Pet` / `Model::Enemy`)持有四维,
+	//      World 在投影成 `Combatant` 时**直接拷贝**(不是计算)。
+	// ⚠️ 默认 0 ⇒ 未接线的调用方得到 `vital_p = 0`(Status.cpp 显式挡了除零)
+	//    与毒伤害下限 1,**不会崩**;但那是登记在案的残缺值,不是真值。
+	std::int32_t vital = 0;
+	std::int32_t str = 0;
+	std::int32_t tough = 0;
+	std::int32_t dex = 0;
 
 	// 「舍己」时防御直接取此值(**忽略装备**)。原 WORKFIXTOUGH。§3.1 第 2 步
 	std::int32_t fix_tough = 0;
@@ -305,6 +368,18 @@ struct Combatant
 	std::int32_t ride_defense = 0;
 	std::int32_t ride_hp = 0;
 	std::int32_t ride_max_hp = 0;
+
+	// ★ 骑宠的原始四维(批次 L4.1)—— 毒的每回合掉血**人物与骑宠各算一份**
+	//   (`Compute_Down` 的 `flg != -1` 那半段,`battle.c:5264-5281`:同一条公式,
+	//    各自的四维与各自的 HP)。
+	// ⚠️★ **不补这四个字段就只能让骑宠不吃毒伤害** —— 那是"漏掉半边"式的缺陷
+	//    (同 M.1 断线回收漏了宠物那半、DR-BT2 分摊漏了无损性),而且**没有任何
+	//    一处会报错**:骑宠照常在场、照常分摊伤害,只是毒不掉它的血。
+	//    ⇒ 宁可撑大快照面也要让公式完整,投影由 World 从 `Model::Pet` 直接拷。
+	std::int32_t ride_vital = 0;
+	std::int32_t ride_str = 0;
+	std::int32_t ride_tough = 0;
+	std::int32_t ride_dex = 0;
 
 	CombatModifiers mods{};
 

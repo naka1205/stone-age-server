@@ -15,6 +15,7 @@
 #include "model/Player.h"
 #include "rules/CaptureItem.h"
 #include "rules/Progression.h"
+#include "rules/Status.h"
 #include "support/ScriptedRandom.h"
 
 #include <cstdint>
@@ -3281,4 +3282,161 @@ TEST_CASE("使用道具★:掉落进背包的道具可以直接喝(掉落回填�
 
 	CHECK(f.world.battleField(battle)->at(0).hp >= 500 + 90);
 	CHECK(f.world.itemCount() == 0); // 喝光 ⇒ 清槽 + 释放
+}
+
+// ── L4.1 状态异常:世界侧写回 ───────────────────────────────────────────────
+//
+// ★★ 这一组存在的理由就是欠债 20 那族:L3 的状态机绿了,不代表世界态**真的**被
+//    写进去。`Combatant::status` 此前**只有用例在写**(全仓实测)⇒ 没有观察面就
+//    没东西能证明「中毒之后世界里真有这个状态」。
+
+namespace
+{
+// 开一场「玩家带毒装备 vs 一只可被打中的敌人」的战斗。
+BattleId startPoisonSuitBattle(Fixture &f, SA::Net::ConnectionId id, int suit_poison)
+{
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = me.max_hp = 10000;
+	me.attack = 5000;
+	me.defense = 100;
+	me.quick = 500;
+	me.luck = 10;
+	me.mods.suit_poison = suit_poison; // ★ 带毒装备:> 0 即开关,值即 PerOffset
+
+	SA::Rules::Combatant &foe = pf.at(10);
+	foe.occupied = true;
+	foe.kind = SA::Rules::CombatantKind::kEnemy;
+	foe.slot = 10;
+	foe.level = 1;
+	foe.hp = foe.max_hp = 100000; // 打不死 ⇒ 能看到多回合的毒
+	foe.attack = 1;
+	foe.defense = 1;
+	foe.quick = 1;
+	// 四维:体力占比 25/100 ⇒ 命中率里减 10;毒伤害 ((10000/100)-20)/4 = 20
+	foe.vital = 2500;
+	foe.str = 2500;
+	foe.tough = 2500;
+	foe.dex = 2500;
+
+	const BattleId battle = f.world.startBattle(pf);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	return battle;
+}
+
+void attackTurn(Fixture &f, SA::Net::ConnectionId id, BattleId battle, int target)
+{
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = f.world.battleField(battle)->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+	cmd.command.attack.target = static_cast<std::uint32_t>(target);
+	f.world.onBattleCommand(id, cmd);
+	f.clock.advance(2000);
+	f.world.tick();
+}
+} // namespace
+
+TEST_CASE("状态★★:带毒装备命中 ⇒ 世界态真的写上了毒 + 4 回合(欠债 20 那族的观察面)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	// per_offset 给 200 ⇒ 夹到 80% ⇒ 绝大多数种子都能中(下面断言不依赖具体种子:
+	// 只要中了,状态与回合数就必须对;没中则整组跳过并由 rng 用例覆盖判定本身)。
+	const BattleId battle = startPoisonSuitBattle(f, id, /*suit_poison=*/200);
+	attackTurn(f, id, battle, 10);
+
+	const SA::Rules::Combatant &foe = f.world.battleField(battle)->at(10);
+	if (foe.status != 0)
+	{
+		CHECK(foe.status ==
+		      static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON));
+		// ★★ 落地回合数 = 声明 3 + 1 = 4(`battle_event.c:2918`),**但断言的是 3**:
+		//    玩家 quick 高 ⇒ 先手上毒 ⇒ 敌人在**同一回合**轮到自己时就跑一次
+		//    `BATTLE_StatusSeq`,当场递减为 3 并结算一次毒伤害。
+		//    ★ 这是原版结构(`battle.c:7074` 的 StatusSeq 在 actor 循环内),不是偏差。
+		//    ⚠️ 我最初把它写成 4 并据此断言,是**没跟到"同回合还会推进一次"这一层**。
+		CHECK(foe.status_turns == SA::Rules::statusTurnsOnApply(SA::Rules::kSuitPoisonTurns) - 1);
+		CHECK(foe.status_turns == 3);
+	}
+}
+
+TEST_CASE("状态★★:中毒后逐回合掉血,4 回合后世界态被清空(端到端闭环)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	const BattleId battle = startPoisonSuitBattle(f, id, /*suit_poison=*/200);
+
+	// 直接把状态写进战场(绕开施加判定的随机性 —— 判定本身由 rules_battle 逐值验)。
+	// ⚠️ 这里改的是 World 内部的 field ⇒ 用公开的 battleField 拿 const 引用不行,
+	//    改用「先打一拳看中没中,没中就再打」的稳妥法:最多试 8 回合。
+	int tries = 0;
+	while (f.world.battleField(battle)->at(10).status == 0 && tries < 8)
+	{
+		attackTurn(f, id, battle, 10);
+		++tries;
+	}
+	REQUIRE(f.world.battleField(battle)->at(10).status != 0); // 前提不成立就别信结论
+
+	// ★ 上毒的那一回合敌人已自推进一次 ⇒ 起点是 3(见上一条用例的注记)。
+	const std::int32_t turns0 = f.world.battleField(battle)->at(10).status_turns;
+	REQUIRE(turns0 >= 1);
+	REQUIRE(turns0 <= 3);
+
+	// 之后每推一回合,剩余回合数递减 1;第 4 回合归零 ⇒ 状态被清空。
+	std::int32_t prev_turns = turns0;
+	for (int i = 0; i < 4; ++i)
+	{
+		attackTurn(f, id, battle, 10);
+		const SA::Rules::Combatant &foe = f.world.battleField(battle)->at(10);
+		if (foe.status == 0)
+		{
+			// ★★ 解除了 ⇒ 世界态两个字段**成对**清零(只清一个会留下幽灵回合数)。
+			CHECK(foe.status_turns == 0);
+			break;
+		}
+		CHECK(foe.status_turns < prev_turns); // 单调递减
+		prev_turns = foe.status_turns;
+	}
+	// 4 回合内必然解除。
+	CHECK(f.world.battleField(battle)->at(10).status == 0);
+	CHECK(f.world.battleField(battle)->at(10).status_turns == 0);
+}
+
+TEST_CASE("状态★★:投影拷的是**原始四维**而不是推导三围(拿三围代入不会报错但数全错)")
+{
+	// ⚠️★ 状态系统的两条公式直接读四维:命中率的体力占比(battle_event.c:5088)与
+	//    毒的每回合掉血(battle.c:5251)。⇒ 若 World 投影时漏拷四维,两条公式的输入
+	//    全是 0 —— 而 attack/defense 照常有值 ⇒ **战斗照打,只有状态相关的数悄悄错**。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	// 用真实敌人模板刷一只进战场 ⇒ 走 enterEnemyToField 的投影路径。
+	const BattleId battle = startPoisonSuitBattle(f, id, 0);
+	REQUIRE(f.world.spawnEnemyToField(battle, 11, makeWuliTemplate(),
+	                                  makeWuliEncounterFixedLv1(), /*baselevel=*/18));
+
+	const SA::Rules::Combatant &e = f.world.battleField(battle)->at(11);
+	// ★ 四维必须非 0(M.4a 的 rollSpawnStats 给的真值),且与三围**不是同一组数**。
+	CHECK(e.vital > 0);
+	CHECK(e.str > 0);
+	CHECK(e.tough > 0);
+	CHECK(e.dex > 0);
+	// ★★ 判据:四维之和与三围之和不相等 —— 若投影误把三围拷进四维,这条红。
+	CHECK((e.vital + e.str + e.tough + e.dex) != (e.attack + e.defense + e.quick));
 }

@@ -4456,6 +4456,115 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 
 ---
 
+### 9.0.55 ★★ 批次 L4.1 —— 状态异常系统:单槽状态机 + 带毒装备 + 每回合推进(DR-DT24,2026-09-11)
+
+L4 状态系统**第一批**。道具域收官后由用户 2026-09-11 拍板开此域,并同批拍板三处:
+覆盖面取**状态 1..11**、`RegTbl` 缺陷**照抄**、反击**记下来、L4 后单独一批**。
+
+**★★ 开工取证抓到 `05` §4 的六处偏差(纪律 ①,重灾区)** —— 多数**返回值断言抓不到**,
+所以每条都指明「按文档实现会怎样」:
+
+| # | 文档写的 | 源码实际(8.0 树) | 按文档实现的后果 |
+|---|---|---|---|
+| ① | §4.1「职业路径**没有**互斥循环」 | `:5195` **有**;只是三属抗 + 冰爆术 1-10 在循环**之前** `return 1` 绕过 | **所有**职技都能叠加状态,而原版只有 11 种能 |
+| ② | §4.3 麻痹「− 抗性 − **装备抗性**」 | `:5081-5083` 只减 `RegTbl[status]` | 麻痹命中率凭空变低 |
+| ③ | §4.3「`max(per, 0)`」 | 源码**没有** | 无可观察后果(`RAND(1,100) ≥ 1`)⇒ **冗余**,不补 |
+| ④ | §4.3 通用分支「− 装备抗性」 | `:5141-5151` **只对虚弱/魔障/沉默**三种,分属 `_EQUIT_RESIST` + `_SUIT_ADDPART3` | 其余 39 种命中率全偏 |
+| ⑤ | §4.3「命中率硬上限 80%」 | 在 `else` 内 ⇒ **麻痹不夹** | 无可观察后果(per 恒 20)⇒ **冗余** |
+| ⑥ | §4.4 酒醉解除「`QUICK *= 2`」 | `:5490` **有 ridepet 分支**:骑宠在场时 `quick += 骑宠 quick` | 有骑宠时敏捷幅度错 |
+
+★ 另一面:**四张表的长度 `05` §4.5 全对**(实测 `StatusTbl`=44 / `RegTbl`=**31** /
+`aszStatus`=32 / `aszStatusFull`=31)—— 难得一次文档逐项吻合,记下来免得下次连对的也去重核。
+
+**⚠️★★★ 一条排期级发现:「反击排在 L4 之后」这个四份文档一致的前提,有一半不成立。**
+`BATTLE_GetDamageReact`(`battle_event.c:1819`)读的是**5 个独立 work 字段**
+(`WORKDAMAGEVANISH` / `ABSROB` / `REFLEC` / `WORKTRAP` / `WORKACUPUNCTURE`),
+**一个都不在 `StatusTbl` 的 44 项里**、不受 §4.1 全局互斥约束;
+`BATTLE_CounterCheckPlayer`(`:3465`)更是**一个 status 槽都不读**
+(只读武器类型 + `CounterTbl` + `At_Luck` + `WORKCOUNTER`)。
+⇒ 那 5 个字段的写入者是宠技/职技/魔法(均未移植)⇒ 净核里恒 0 ⇒ `react` 恒 `NONE`
+⇒ **反击可在 `react == NONE` 路径上独立落地,不必等状态系统**。
+★ 与 M.3「四份文档一致地写了『+ 等级』而源码没有」同族,但这次错的是**排期依赖图**。
+⇒ 用户裁定:记录在案,L4 之后单开一批(不提前、也不再当作被 L4 阻塞)。
+
+**净核判定**(十个宏逐条回 `StoneAge/gmsv/src/include/version.h` 核过,**全开**):
+`_SUIT_ADDPART4`(带毒装备)· `_SUIT_ADDENDUM` · `_EQUIT_RESIST` · `_SUIT_ADDPART3` ·
+`_PET_SKILL_SARS` · `_MAGIC_WEAKEN` · `_MAGIC_BARRIER` · `_MAGIC_DEEPPOISON` ·
+`_PROFESSION_SKILL` · `_PROFESSION_ADDSKILL`;`_SUIT_ADDPART2` **关**。
+
+**★★ 施加者是谁 —— 这一批不是空地基**:净核里普攻附带状态的**唯一**来源是
+**带毒装备**(`_SUIT_ADDPART4`,`battle_event.c:2903`):攻方 `CHAR_SUITPOISON > 0` 时,
+普攻**造成伤害后**摇一次状态命中判定,成功则守方中毒(声明 3 回合 ⇒ **落地 4**)。
+⇒ 与 A.3 暴击 / A.4 打飞同族:**普攻链路自己的机制**,不依赖宠技/职技/魔法。
+⚠️ `suit_poison` 由套装系统写(装备域未移植)⇒ 与 `equip_critical`(A.3)/
+`capture_item_ok`(I.2)完全同款分工:**默认 0 ⇒ 不附带状态且不摇 rng**,装备域接线后自动生效。
+
+**交付**:
+
+- 新增 `shared/rules/Status.{h,cpp}`:`rollStatusAttack`(施加判定,含 ★★ 全局互斥)·
+  `computePoisonDown`(毒的每回合掉血)· `tickStatus`(每回合推进的纯函数化)·
+  `statusTurnsOnApply` / `clearsCommandOnApply`。
+- `Combatant.h`:**原始四维** `vital/str/tough/dex` + **骑宠四维** `ride_*`
+  (⚠️ 状态系统的两条公式**直接读四维**,不是推导三围 ⇒ 不能由 World 预算后投影,
+  那等于把一条公式切成两半)· `mods` 加 `suit_poison` / `status_resist[12]` /
+  `general_resist` / 三个 `equip_resist_*` / `suit_resist_weaken`。
+- `Battle.cpp`:actor 循环内逐个 `tick_one`(**位置即语义**,照 `battle.c:7074`)+
+  攻击段的带毒装备施加(在 `DamageSub` 之后、判据 `damage > 0`)。
+- **IDL 新增 `StatusTick`**(oneof 26)—— 状态计时的**权威态回写**,8 字节,
+  与 A.4 的 `KnockbackState` 同规格同理由(见下 ★★)。
+- `World.cpp`:两处投影补**四维直拷** · `applyEvents` 接 `STATUS_TICK`(直写不重算)
+  与 `STATUS_CHANGE`(解除 + 酒醉敏捷回写)· `Damage.status_applied` 落地。
+
+**★★ 本批最该记的一条:`StatusTick` 事件是被用例逼出来的,而缺它时 L3 全绿。**
+初版只在**解除**时发 `StatusChange` ⇒ 递减只存在于 L3 的**回合内镜像**里,
+**没有任何事件把它带回世界** ⇒ 世界态 `status_turns` 一直停在施加时的值,
+直到某回合突然消失。⚠️ `rules_battle` 102 例全绿,是 `world_tick` 的
+「逐回合掉血 ⇒ 4 回合后清空」当场抓到的。
+⇒ ★ **也不能让世界侧自己减一**:递减**不是** `-1` —— §4.2 的虚弱/魔障会把递减
+**加回去**,那正是「虚弱/魔障永不自然解除」这条玩法级强约束的来源;世界侧自己算
+= 把那条规则实现第二遍(DR-BT5),而分叉点恰是**最要紧的那一种状态**。
+
+**⚠️★★ 一处我自己造出来又拆掉的偏差(记教训)**:抓到上面那个 bug 时,我先归因成
+「敌人 AI 未移植 ⇒ `present[敌人]` 恒 false ⇒ 敌人不进 actor 循环 ⇒ 永不推进」,
+并据此加了一段「补跑无指令槽」的预推进。**那个前提是错的** ——
+`World.cpp` 的 `fillEnemyCommands` 一直在给敌人填 AI 指令(与原版 AI 同位)。
+⇒ 那段补跑只会在 L3 用例的 fixture 里触发,是**凭空造出来的行为偏差**,已删除。
+★ 教训:**归因要落到实证**(一次 `grep fillEnemyCommands` 就能证伪),
+而我是先写了修复、再由第二个失败用例把假前提暴露出来的。
+
+**⚠️★★ 另一处:`make` 秒级 mtime 坑第三次发作,这次让反向验证的结论整个失真。**
+反向验证 F(伤害门 `>0` 改 `>=0`)第一次跑出「不转红」,我据此在用例里写下
+「本条没有区分力」的注释;**换全新构建目录重跑,F 精确转红**。
+⇒ ★★ **此后反向验证一律用全新构建目录**(`mktemp -d` + 重新 configure),
+不再靠 `touch` + `sleep` 跨秒 —— 那只挡住了同秒,挡不住「整个目录已被上一次注入污染」。
+★ 那条注释的**结论**(闪避 SUBCASE 确实没有区分力)经干净目录单独复核仍成立,
+但**得出它的过程是错的**,已在用例里如实记明。
+
+**复验**:`ctest` **16/16** · `ci_verify` 六项全过(`SA_WERROR` 0 告警)·
+`rules_battle` 84→**102 例 / 2592 断言** · `world_tick` 95→**98 例 / 1289 断言** ·
+**GCC 15.2 本地全量 0 告警 + 16/16**(I.4 立的惯例)·
+**客户端联调态 102 例 / 2592 断言,与服务端逐位一致** ⇒ D2 在 L4.1 上成立。
+★ **反向验证九处逐条转红**(全新目录,逐条):A 去全局互斥 · B 去落地 +1 ·
+C 清指令判据挪后(红 2 例)· D 骑宠误用主人四维 · E 冻结条件恒假 ·
+F 伤害门 `>0`→`>=0` · I `StatusTick` 回写旧值(红 2 例)· J 世界侧回写多加一(红 2 例)·
+K 投影误把三围当四维。还原后 `INJECT` 残留 0、两套用例回绿。
+
+⚠️★ 动 `shared/rules/{Status.h,Status.cpp,Battle.cpp,Combatant.h}` + `idl/generated` ⇒
+watched 路径变更 ⇒ **锁定 ref 须前推 `shared-v0.22.0`**(推送待用户确认,
+含 server `1f9ac54` ahead 1 一起推)。
+
+**登记残缺**(有据划出,非遗漏):① **状态 12..43**(晕眩/天罗/冰爆术族等 32 种)——
+属宠技/职技域,随那些域接入;② **职业技能施加路径**(能绕过互斥的那 11 种,判据已记在
+`Status.h`);③ **精灵/魔法两组调用参数**(`Range=30` / `Bai=1.0`,需技能表);
+④ **施加当场清目标指令**(麻痹/睡眠/石化/魔障四种)—— 本批唯一施加者产出的是**毒**,
+不在那四种里 ⇒ 无输入能执行 ⇒ 判据函数已建并有单元用例,接技能路径那批消费它;
+⑤ **酒醉解除的骑宠分支**(`quick += 骑宠 quick`)—— `has_ride` 在世界侧从未被写入过
+(骑乘系统未移植)⇒ 不可达 ⇒ ⚠️ **接骑乘时会静默走错分支**,已登记(`01` §13 欠债 33);
+⑥ `CanCureFlg` 不可治疗门(兑现 I.4 划出的第 ⑥ 条的前置,但门本身需状态药路径);
+⑦ 客户端表现(中毒图标 / 掉血飘字)。
+
+---
+
 ### 10.1 R-b:无解的结构性事实
 
 每条标【单源未交叉】/【8.5 源码推定】的规则,实现时**只能靠人工复核**,没有任何自动化验证手段。
@@ -4572,3 +4681,4 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 | 2026-09-10 | ★★ **批次 I.2 —— 捕获扣道具:CaptureItemCheck 前置门 + CaptureItemDelAll 全删**(新增 **§9.0.50**;`11` 新增 **DR-DT21**;`01` §13 欠债 31)。道具域第二批,补 §9.0.26 /§9.0.48「白给」缺口 —— 原版**扣了道具才给宠物**。交付 `Enemy.h` 加 `pet_id`(= `CHAR_PETID` = 模板号,`spawnEnemy` 落值)· 新增 `shared/rules/CaptureItem.h`(硬编码 `NeedEnemy[9]` + `isNeedCaptureItem`)· **前置门 ④** 投影攻方 `capture_item_ok`(World 在 resolveTurn 前算、L3 做 `&&` 门,无道具不摇 rng)· **全删** 落捕获第 5 步(`World.cpp`,不 break,清槽+释放成对)· 注入 seam `giveItemToPlayer` + 只读面 `playerItemAt`。取证(双源交叉核):★★ **`_NEED_ITEM_ENEMY` 关 ⇒ 8.0 不读 `needitemeneny.txt`,用源码硬编码表**(更正记忆/DR-DT20 ⑥/欠债 30 ①);★ 匹配键 `CHAR_PETID = E_T_TEMPNO` ⇒ `Enemy.h` 文末「PETID 归 D 线不建」是误判、已更正;`_CAPTURE_FREES` 开(全删,DR-BT10 正确)· Lua 回调不复刻。复验:`ctest` **16/16** · `ci_verify` 六项 · `world_tick` 78→**85 例**、`rules_battle` 76→**77 例** · 反向验证两处转红(全删空操作 / 去门④),还原后 16/16、无残留。⚠️★ 动 `shared/model/Enemy.h` + 新增 `shared/rules/CaptureItem.h` ⇒ 锁定 ref 须前推 **`shared-v0.20.0`**(待用户确认,含 `81075ee` ahead 1 一起推)。 |
 | 2026-09-10 | ★★ **批次 I.3 —— 野怪掉落:spawn 千分率摇 → 结算逐件随机拾取 → 灌背包**(新增 **§9.0.51**;`11` 新增 **DR-DT22** + §2.24)。道具域第三批,`itemCount` 从「只减」到「也能加」。★★ 亲验勘误:`NPC_NPCEnemy_Dying` 是明雷 additem(依赖 D6 argstr),**野怪掉落是三阶段** `BATTLE_AddExpItem`(spawn 千分率摇进 `Enemy.dropped_items` → 结算逐件 `RAND(0,allnum-1)` 随机选人入 `getitem[≤3]`、满则 50/50 → `giveItemIntoPlayer` 灌背包、满则丢弃)。三处自主决策(紧凑存 `item_id`+延迟 makeItem / 不下发客户端 / 拾取用 `b.rng`)。⚠️★ `grep -a` 坑扩大到源码树(`.c/.h` 含 GBK 注释)。复验:`ctest` **16/16** · `ci_verify` 六项 · `world_tick` 85→**88 例/1200 断言** · ★ 反向验证三处逐条转红(判定恒假/不灌包/prob=0 也摇),还原后无 `INJECT` 残留。⚠️ 动 `shared/model/Enemy.h` ⇒ 锁定 ref 须前推 **`shared-v0.20.0`**(与 I.2 合窗口,待确认)。登记残缺:明雷 additem(D6)· 掉落展示/满包提示(客户端下发)· Item 仅 id(道具表 D 线)· 组队掉落归属。 |
 | 2026-09-11 | ★★ **批次 I.4 —— 使用道具:战斗内 HP 恢复药**(新增 **§9.0.53**;`11` 新增 **DR-DT23** + §2.25;`01` §13 欠债 32)。道具域**收官批** —— I.1 建槽 / I.2 能减 / I.3 能加,本批让道具**能用**。★★ **开工取证解掉两个悬了三批的未知**:① **8.0 的道具 usefunc 不走 Lua** —— `ITEM_constructFunctable`(`item.c:680`)按名字查的 `correspondStringAndFunctionTable[]`(`function.c:165`)是**硬编码 C 数组**,`{"ITEM_useRecovery", ITEM_useRecovery, 0}` 在 `:188` ⇒ 链路在净核里是通的(§9.0.48 记的 `mylua/function.c` 是 8.5 形态);② ⚠️★★ **恢复量要摇 rng,工作树里已有的实现写成了确定值、是错的** —— `sscanf` 出的 `power` 只是基数,`BATTLE_MultiRecovery` 还有一步 `UpPoint = RAND(power*0.9, power*1.1)`(`battle_magic.c:419`);错的后果是**用过道具后所有 rng 消耗整体平移**而返回值断言抓不到(同 DR-BT23 族)⇒ 字段改名 `item_heal_hp`→**`item_heal_power`**。★ 教训:纪律 ① 的对象这次是**上次会话自己的实现与注释**(只跟到取到值那一行就下结论,少跟一层调用;还替它编了理由 = 纪律 ⓪)。净核:`_MAGIC_REHPAI` 开 ⇒ `#else` 段不编译 ⇒ **无** `per` 缩放、**无** `GetRecoveryRate` 体力系数 ⇒ 不引入浮点。交付:`Item.h` 加 `current_pile`(兑现 I.1 文末 ④)· `Combatant.h` 加 `mods.item_heal_power`(基数,默认 0 ⇒ 不摇 rng)· L3 USE_ITEM 分支摇 `RAND(0.9p,1.1p)` + clamp + 写回合内 `hp[]` 镜像,区间**照原版 double 取值集合但用整数算**(`lo=9p/10`、`hi=lo+(p+9)/5-1`,**穷举 p=0..100000 实测等价**,手算曾在 p=15 差点出错)· `ItemEffect`/`loadItemEffects`(默认空)· `projectItemUsePower`(resolveTurn 前,只投基数不摇)· `consumeUsedItems`(applyEvents 后扣 pile,清槽+release 成对)· 只读面 `playerItemPile`。复验:`ctest` **16/16** · `ci_verify` 六项 · `rules_battle` 77→**84 例/2493 断言** · `world_tick` 88→**95 例/1262 断言** · ★ 反向验证**四处**逐条转红(去 rng 摇 / 上界改朴素 `11p/10`**精确红 1 条** `bounds(7)` / 清槽不 release / 投影挪后),还原后 `INJECT` 残留 0;⚠️★ 一处**诚实的注入不红**(去 rng 摇在 world 侧全绿 —— 区间断言对「摇不摇」无区分力,分层的自然结果)。★ 顺带接上 I.3↔I.4 接缝(掉落道具能否直接喝)+ 兑现「USE_ITEM 从未接入指令表移除」的旧约定(它当初**没变红**是巧合命中)。⚠️ 动 `shared/model/Item.h` + `shared/rules/{Battle.cpp,Combatant.h}` ⇒ 锁定 ref 须前推 **`shared-v0.21.0`**(待确认)。登记残缺:MP/状态/变身/传送等其余 usefunc · 场景内使用 `useRecovery_Field` · 目标已死时原版「改打随机活人」不复刻(不定次 rng + 原版 UB)· `ITEM_TYPE` 穿装备门(装备域)· `power==-1` 全满 · `CanCureFlg` 门(L4)· 效果表真数据(D 线)· 客户端表现。 |
+| 2026-09-11 | ★★ **批次 L4.1 —— 状态异常系统:单槽状态机 + 带毒装备 + 每回合推进**(新增 **§9.0.55**;`11` 新增 **DR-DT24**;`01` §13 欠债 33)。道具域收官后由用户拍板开 L4 域,同批拍板三处(覆盖面取状态 **1..11** / `RegTbl` 缺陷**照抄** / 反击 **L4 后单开一批**)。★★ **开工取证抓到 `05` §4 的六处偏差**(职业路径其实**有**互斥循环、只是 11 种绕过 · 麻痹无装备抗性 · 无 `max(per,0)` · 装备抗性只对虚弱/魔障/沉默三种 · 麻痹不夹 80 上限 · 酒醉解除**有 ridepet 分支**不是无条件 ×2);另一面**四张表长度 §4.5 全对**(`StatusTbl`44 / `RegTbl`**31** / `aszStatus`32 / `aszStatusFull`31)。⚠️★★★ **排期级发现:「反击排在 L4 之后」的前提有一半不成立** —— `GetDamageReact`(`:1819`)读 **5 个独立 work 字段**、`CounterCheckPlayer`(`:3465`)**一个 status 槽都不读** ⇒ 反击可在 `react==NONE` 路径独立落地(同 M.3「四份文档一致地写错」族,但这次错的是**排期依赖图**)。★★ **施加者** = 带毒装备(`_SUIT_ADDPART4`,`:2903`,普攻链路自己的机制,同 A.3/A.4)⇒ 本批不是空地基;`suit_poison` 默认 0 ⇒ 不摇 rng、既有序列逐位不变。交付:新增 `shared/rules/Status.{h,cpp}` · `Combatant.h` 加**原始四维 + 骑宠四维**(⚠️ 状态两条公式直接读四维,不能由 World 预算后投影 —— 那是把一条公式切两半)+ 六类抗性字段 · `Battle.cpp` actor 循环内逐个 `tick_one`(位置即语义)· **IDL 新增 `StatusTick`**(权威态回写,同 A.4 `KnockbackState`)· World 两处投影补四维直拷 + 接三种事件。★★ **最该记的一条:`StatusTick` 是被 `world_tick` 用例逼出来的,缺它时 `rules_battle` 102 例全绿** —— 递减只活在 L3 回合内镜像里,世界态永远停在施加值;⚠️ 也不能让世界侧自己减一(虚弱/魔障会把递减**加回去**,自己算 = DR-BT5 双份实现,而分叉点恰是最要紧的那种状态)。⚠️★★ **两处教训**:① 我先把该 bug 归因成「敌人 AI 未移植」并加了一段预推进,而 `fillEnemyCommands` **一直在** ⇒ 凭空造出的行为偏差,已删(**归因要落到实证**,一次 grep 就能证伪);② **`make` 秒级 mtime 坑第三次发作**,让反向验证 F 跑出「不转红」的假结论 ⇒ ★★ 此后反向验证**一律用全新构建目录**。复验:`ctest` **16/16** · `ci_verify` 六项 · `rules_battle` 84→**102 例/2592 断言** · `world_tick` 95→**98 例/1289 断言** · **GCC 15.2 本地 0 告警 16/16** · **客户端联调态 102 例/2592 断言逐位一致** · ★ 反向验证**九处**逐条转红,还原后残留 0。⚠️ 动 `shared/rules/` + `idl/generated` ⇒ 锁定 ref 须前推 **`shared-v0.22.0`**(待确认,含 `1f9ac54` ahead 1 一起推)。登记残缺:状态 12..43(宠技职技域)· 职业施加路径 · 精灵/魔法两组参数 · 施加当场清指令(本批无输入可执行)· 酒醉解除骑宠分支(骑乘未移植,⚠️ 接上时会静默走错)· `CanCureFlg` · 客户端表现。 |

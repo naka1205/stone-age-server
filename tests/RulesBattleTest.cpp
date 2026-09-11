@@ -27,6 +27,7 @@
 #include <doctest/doctest.h>
 
 #include "rules/Battle.h"
+#include "rules/Status.h"
 #include "support/ScriptedRandom.h"
 
 #include <cmath>
@@ -2278,4 +2279,693 @@ TEST_CASE("DR-BT23★★:退化区间照常消耗一次 —— 返回值相同�
 		//    ⇒ 只有这一条会红:若脚本源没消耗,这里拿到的是 111 而不是 222。
 		CHECK(c.rand(0, 1000) == 222);
 	}
+}
+
+// ── L4.1 状态异常 ──────────────────────────────────────────────────────────
+//
+// ★★ 本系列钉的是 `05` §4 的六条结构事实 + 本批开工取证抓到的**六处文档偏差**
+//    (`00` §9.0.55 / DR-DT24)。⚠️ 多数偏差**返回值断言抓不到**,所以下面
+//    逐条指明"若按文档实现会怎样"——那才是这些用例存在的理由。
+
+TEST_CASE("状态★★★:全局互斥 —— 身上有任意状态时新状态一律施加失败(05 §4.1)")
+{
+	// 这是本模块最重要的单条结构事实:**不是同类互斥,是全类互斥**。
+	auto atk = makeCombatant(CombatantKind::kPlayer, 100, 10);
+	atk.level = 10;
+	atk.luck = 0;
+	auto def = makeCombatant(CombatantKind::kEnemy, 100, 10);
+	def.level = 10;
+	def.vital = 100;
+	def.str = 100;
+	def.tough = 100;
+	def.dex = 100;
+
+	SUBCASE("槽空 ⇒ 摇骰子")
+	{
+		ScriptedRandom rng({1}); // RAND(1,100) = 1 < per ⇒ 命中
+		int per = 0;
+		CHECK(rollStatusAttack(false, atk, def,
+		                       static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON),
+		                       /*per_offset=*/30, 40, 2.0, rng, &per));
+		CHECK(rng.calls() == 1);
+	}
+
+	SUBCASE("★★ 槽被别的状态占住 ⇒ 失败,且**一次 rng 都不摇**")
+	{
+		// ⚠️★ 互斥判定在源码 `:5076-5079`,位于任何 RAND **之前**
+		//    ⇒ 与捕获的道具门 ④ 同族:门不过连骰子都不掷。
+		//    ★ 若把互斥挪到摇骰之后,返回值断言**照样全绿**(都是 false),
+		//      而 rng 序列自此整体平移 ⇒ 只有 calls() 抓得到(DR-BT23 同族)。
+		def.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_SLEEP);
+		def.status_turns = 3;
+		ScriptedRandom rng({1});
+		int per = 0;
+		CHECK_FALSE(rollStatusAttack(false, atk, def,
+		                             static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON),
+		                             30, 40, 2.0, rng, &per));
+		CHECK(rng.calls() == 0); // ★★ 这一条才是互斥位置的判据
+	}
+
+	SUBCASE("★ 互斥是全类的 —— 连「同一种状态再上一次」也失败")
+	{
+		def.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+		def.status_turns = 1;
+		ScriptedRandom rng({1});
+		int per = 0;
+		CHECK_FALSE(rollStatusAttack(false, atk, def,
+		                             static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON),
+		                             30, 40, 2.0, rng, &per));
+		CHECK(rng.calls() == 0);
+	}
+}
+
+TEST_CASE("状态⚠️★★:麻痹走独立分支 —— 固定基数 20,不看等级/幸运/体力/装备抗性")
+{
+	// ⚠️ `05` §4.3 写「per = 20 − 抗性 − **装备抗性**」且有 `max(per, 0)`,
+	//    **源码两者都没有**(`battle_event.c:5080-5084`,2026-09-11 核实)。
+	auto atk = makeCombatant(CombatantKind::kPlayer, 100, 10);
+	atk.level = 99; // 等级差极大
+	atk.luck = 25;  // 幸运拉满
+	auto def = makeCombatant(CombatantKind::kEnemy, 100, 10);
+	def.level = 1;
+	def.vital = 1; // 体力占比极端
+	def.str = 999;
+	def.tough = 999;
+	def.dex = 999;
+
+	const int kParalysis = static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_PARALYSIS);
+
+	SUBCASE("per 恒为 20 —— 等级差与幸运一概不进式子")
+	{
+		ScriptedRandom rng({19}); // 19 < 20 ⇒ 命中
+		int per = 0;
+		CHECK(rollStatusAttack(false, atk, def, kParalysis, /*per_offset=*/30, 40, 2.0, rng, &per));
+		// ★★ per_offset 传了 30 也不生效,等级差 +98 也不生效 ⇒ 恒 20。
+		//    若误走通用分支,per 会是 30+80(夹上限)⇒ 这一条当场红。
+		CHECK(per == 20);
+	}
+
+	SUBCASE("抗性直减,且**没有** max(per,0) 兜底")
+	{
+		def.mods.status_resist[kParalysis] = 50; // 20 - 50 = -30
+		ScriptedRandom rng({1});
+		int per = 0;
+		CHECK_FALSE(rollStatusAttack(false, atk, def, kParalysis, 30, 40, 2.0, rng, &per));
+		CHECK(per == -30);       // ★ 照源码留负值;按文档补 clamp 会变成 0 ⇒ 本行红
+		CHECK(rng.calls() == 1); // ⚠️ 即使必不命中也照常摇(RAND 在判定式里)
+	}
+
+	SUBCASE("⚠️ 装备抗性对麻痹**不生效**(文档记宽了)")
+	{
+		// 给三种装备抗性都填上大值 —— 麻痹分支一个都不读。
+		def.mods.equip_resist_weaken = 99;
+		def.mods.equip_resist_barrier = 99;
+		def.mods.equip_resist_nocast = 99;
+		def.mods.suit_resist_weaken = 99;
+		ScriptedRandom rng({19});
+		int per = 0;
+		CHECK(rollStatusAttack(false, atk, def, kParalysis, 30, 40, 2.0, rng, &per));
+		CHECK(per == 20); // 一分都没被减
+	}
+}
+
+TEST_CASE("状态:通用分支 —— 等级差×Bai 夹 ±Range、PvP 归零、80% 硬上限")
+{
+	auto atk = makeCombatant(CombatantKind::kPlayer, 100, 10);
+	atk.luck = 0;
+	auto def = makeCombatant(CombatantKind::kEnemy, 100, 10);
+	// 体力占比 = 25/100 = 0.25 ⇒ /0.25*10 = 10 ⇒ 截断后减 10。
+	def.vital = 25;
+	def.str = 25;
+	def.tough = 25;
+	def.dex = 25;
+	const int kPoison = static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+
+	SUBCASE("等级差 × Bai 后夹到 +Range")
+	{
+		atk.level = 100;
+		def.level = 1; // 差 99 × 2.0 = 198 ⇒ 夹到 Range=40
+		ScriptedRandom rng({1});
+		int per = 0;
+		rollStatusAttack(false, atk, def, kPoison, /*per_offset=*/30, 40, 2.0, rng, &per);
+		// per = 30 + 40 + 0 - 0 - 10 - 0 = 60
+		CHECK(per == 60);
+	}
+
+	SUBCASE("等级差为负时夹到 −Range")
+	{
+		atk.level = 1;
+		def.level = 100; // −99 × 2.0 = −198 ⇒ 夹到 −40
+		ScriptedRandom rng({1});
+		int per = 0;
+		rollStatusAttack(false, atk, def, kPoison, 30, 40, 2.0, rng, &per);
+		CHECK(per == 30 - 40 - 10); // = -20
+	}
+
+	SUBCASE("★ PvP ⇒ 等级差恒 0(源码 `:5128` 的 type != P_vs_P 门)")
+	{
+		atk.level = 100;
+		def.level = 1;
+		ScriptedRandom rng({1});
+		int per = 0;
+		rollStatusAttack(/*is_pvp=*/true, atk, def, kPoison, 30, 40, 2.0, rng, &per);
+		CHECK(per == 30 - 10); // 等级差那一项没了
+	}
+
+	SUBCASE("★ 80% 硬上限")
+	{
+		atk.level = 100;
+		def.level = 1;
+		ScriptedRandom rng({1});
+		int per = 0;
+		rollStatusAttack(false, atk, def, kPoison, /*per_offset=*/200, 40, 2.0, rng, &per);
+		CHECK(per == 80); // 200+40-10 = 230 ⇒ 夹到 80
+	}
+
+	SUBCASE("★ 判定是**严格小于**(同暴击/逃跑/捕获,与回避的 ≤ 不同)")
+	{
+		atk.level = 1;
+		def.level = 1;
+		// per = 30 + 0 + 0 - 0 - 10 - 0 = 20
+		{
+			ScriptedRandom rng({20}); // 20 < 20 为假 ⇒ 不命中
+			int per = 0;
+			CHECK_FALSE(rollStatusAttack(false, atk, def, kPoison, 30, 40, 2.0, rng, &per));
+			CHECK(per == 20);
+		}
+		{
+			ScriptedRandom rng({19}); // 19 < 20 ⇒ 命中
+			int per = 0;
+			CHECK(rollStatusAttack(false, atk, def, kPoison, 30, 40, 2.0, rng, &per));
+		}
+	}
+}
+
+TEST_CASE("状态⚠️★★:装备抗性只对虚弱/魔障/沉默三种存在(文档记成通用一项)")
+{
+	// ⚠️ `05` §4.3 把「− 装备抗性」写成通用一项 —— 源码 `:5141-5151` 是三个
+	//    互斥的 else-if,其余 39 种状态一分都不减(2026-09-11 核实,纪律 ①)。
+	auto atk = makeCombatant(CombatantKind::kPlayer, 100, 10);
+	atk.level = 1;
+	atk.luck = 0;
+	auto def = makeCombatant(CombatantKind::kEnemy, 100, 10);
+	def.level = 1;
+	def.vital = 25;
+	def.str = 25;
+	def.tough = 25;
+	def.dex = 25; // 体力项恒减 10
+	def.mods.equip_resist_weaken = 5;
+	def.mods.equip_resist_barrier = 7;
+	def.mods.equip_resist_nocast = 11;
+	def.mods.suit_resist_weaken = 3;
+
+	auto perOf = [&](SA::Domain::BattleStatus st)
+	{
+		ScriptedRandom rng({1});
+		int per = 0;
+		rollStatusAttack(false, atk, def, static_cast<int>(st), 30, 40, 2.0, rng, &per);
+		return per;
+	};
+
+	// 基线:毒不吃任何装备抗性 ⇒ 30 − 10 = 20。
+	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_POISON) == 20);
+	// ★★ 虚弱吃**两道**(`_EQUIT_RESIST` 5 + `_SUIT_ADDPART3` 3)⇒ 20 − 8 = 12。
+	//    ⚠️ 后者源码判 `status == WEAKEN` 而字段名叫 `RENOCAST`——「名字在骗人」,
+	//      按判据归虚弱。若误归到沉默,这一条与下面沉默那条会**同时**红。
+	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_WEAKEN) == 12);
+	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_BARRIER) == 20 - 7);
+	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_NOCAST) == 20 - 11);
+	// 睡眠/石化/混乱等一概不吃。
+	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_SLEEP) == 20);
+	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_STONE) == 20);
+}
+
+TEST_CASE("状态★:毒煞的体力占比**反过来**取(_PET_SKILL_SARS,battle_event.c:5096)")
+{
+	auto atk = makeCombatant(CombatantKind::kPlayer, 100, 10);
+	atk.level = 1;
+	atk.luck = 0;
+	auto def = makeCombatant(CombatantKind::kEnemy, 100, 10);
+	def.level = 1;
+	// 体力占比 = 10/100 = 0.1
+	def.vital = 10;
+	def.str = 30;
+	def.tough = 30;
+	def.dex = 30;
+
+	ScriptedRandom r1({1});
+	int per_poison = 0;
+	rollStatusAttack(false, atk, def,
+	                 static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON),
+	                 30, 40, 2.0, r1, &per_poison);
+	// 普通:0.1/0.25*10 = 4 ⇒ 30 − 4 = 26
+	CHECK(per_poison == 26);
+
+	ScriptedRandom r2({1});
+	int per_sars = 0;
+	rollStatusAttack(false, atk, def,
+	                 static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_SARS),
+	                 30, 40, 2.0, r2, &per_sars);
+	// 毒煞:(1−0.1)×0.9 = 0.81 ⇒ /0.25*10 = 32.4 ⇒ 截断 32 ⇒ 30 − 32 = −2
+	// ★★ 体力**越高越容易中毒煞**,与其余 42 种相反 ⇒ 两个 per 必须不同。
+	CHECK(per_sars == -2);
+	CHECK(per_sars != per_poison);
+}
+
+TEST_CASE("状态⚠️★★:RegTbl 只有 31 项 —— 31..43 的抵抗恒 0(用户裁定照抄原版缺陷)")
+{
+	// `05` §4.5 + 2026-09-11 实测:`RegTbl` = 基础 11 + SARS 1 + PROFESSION_SKILL 19
+	// = **31**,没有 `_PROFESSION_ADDSKILL` 那 13 项 ⇒ 三属抗/水附体/附身/恐惧/
+	// 冰爆术 2-10 **无法被抵抗**。源码 `:5119` 有越界防护 ⇒ 是玩法事实不是崩溃。
+	CHECK(kOriginalResistTableLen == 31);
+	// ★ 这条断言挡的是"顺手把它补齐到 44" —— 那会**静默地**改掉 13 种状态的命中率。
+	CHECK(kOriginalResistTableLen != kBattleStatusEnd);
+}
+
+TEST_CASE("状态★★:毒的每回合掉血 = ((Σ四维/100)−20)/4,下限 1,且**留 1 HP**")
+{
+	// `Compute_Down`(battle.c:5242)—— ★ 全程整数除法,两次截断不可合并。
+	SUBCASE("主式:四维和 10000 ⇒ ((100)−20)/4 = 20")
+	{
+		CHECK(computePoisonDown(2500, 2500, 2500, 2500, /*hp=*/1000) == 20);
+	}
+
+	SUBCASE("★ 两次整数除法照抄源码形状 —— ⚠️ 但它与合并式**实测等价**,不声称要紧")
+	{
+		// ⚠️★★ **本条最初的标题是「与 (Σ−2000)/400 不等价」,那是我编的理由**
+		//    (纪律 ⓪ 同族,第 N 次)。实测穷举 Σ ∈ [0, 2,000,000]:
+		//      · 未经 clamp:两式分叉 495 处(首个 Σ=1,源码 −5 / 合并 −4);
+		//      · **经「下限 1」clamp 之后:0 处分叉** ⇒ 在本函数的语义下**完全等价**。
+		//    ⇒ 分叉全部落在结果为负的区间,而那一段被 `if (downs < 1) downs = 1` 吃掉。
+		// ★ 结论:照抄源码的两步除法**没错**,但**不能说"合并会算错"** ——
+		//   它只是与源码逐字一致,不是行为必需。(等价性要验不能推,I.4 的教训。)
+		CHECK(computePoisonDown(2500, 2500, 2500, 2599, 1000) == 20); // 10199/100=101 ⇒ 81/4=20
+		CHECK(computePoisonDown(2500, 2500, 2500, 2999, 1000) == 21); // 10499/100=104 ⇒ 84/4=21
+	}
+
+	SUBCASE("★ 下限 1 —— 四维不足时也掉 1 血")
+	{
+		CHECK(computePoisonDown(1, 1, 1, 1, 1000) == 1);
+		CHECK(computePoisonDown(0, 0, 0, 0, 1000) == 1);
+	}
+
+	SUBCASE("★★ 留 1 HP —— 毒绝不致死")
+	{
+		// 掉血量 20,但 HP 只有 5 ⇒ 夹到 4,打完剩 1。
+		CHECK(computePoisonDown(2500, 2500, 2500, 2500, /*hp=*/5) == 4);
+		// HP == 1 ⇒ 掉 0(仍产事件,见 Status.h)。
+		CHECK(computePoisonDown(2500, 2500, 2500, 2500, /*hp=*/1) == 0);
+	}
+}
+
+TEST_CASE("状态★★:虚弱/魔障使计时冻结 ⇒ 永不自然解除(05 §4.2)")
+{
+	auto c = makeCombatant(CombatantKind::kPlayer, 100, 10);
+	c.vital = 2500;
+	c.str = 2500;
+	c.tough = 2500;
+	c.dex = 2500;
+
+	SUBCASE("普通状态正常递减")
+	{
+		c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+		c.status_turns = 3;
+		const StatusTickResult r = tickStatus(c, 1000, 0, false);
+		CHECK(r.turns == 2);
+		CHECK_FALSE(r.cleared);
+	}
+
+	SUBCASE("★★ 虚弱:递减后又被加回去 ⇒ 回合数不变 ⇒ 永不解除")
+	{
+		c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_WEAKEN);
+		c.status_turns = 1; // ← 正常递减会归零解除
+		const StatusTickResult r = tickStatus(c, 1000, 0, false);
+		CHECK(r.turns == 1);    // ★ 纹丝不动
+		CHECK_FALSE(r.cleared); // ★★ 这才是"持续到战斗结束"的可观察形态
+		CHECK(r.status == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_WEAKEN));
+	}
+
+	SUBCASE("★★ 魔障同理,且它还在 CanMoveCheck 的 8 项里 ⇒ 指令恒被清")
+	{
+		c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_BARRIER);
+		c.status_turns = 1;
+		const StatusTickResult r = tickStatus(c, 1000, 0, false);
+		CHECK(r.turns == 1);
+		CHECK_FALSE(r.cleared);
+		CHECK(r.command_cleared); // 魔障 ⇒ 不能行动
+	}
+}
+
+TEST_CASE("状态⚠️★★:指令清空的判据取**递减之前**的状态 ⇒ 解除当回合仍不能行动")
+{
+	// 源码 `StatusSeq` 开头 `:5443` 先判 CanMoveCheck 再进递减循环 ⇒ 顺序即语义。
+	// ★ 若把清指令挪到递减之后,「最后一回合麻痹」的角色会**多行动一次** ——
+	//   而 turns / status 的断言全绿(解除结果一样)⇒ 只有本条抓得到。
+	auto c = makeCombatant(CombatantKind::kPlayer, 100, 10);
+	c.vital = 2500;
+	c.str = 2500;
+	c.tough = 2500;
+	c.dex = 2500;
+	c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_PARALYSIS);
+	c.status_turns = 1; // ← 本回合到期
+
+	const StatusTickResult r = tickStatus(c, 1000, 0, false);
+	CHECK(r.cleared); // 确实解除了
+	CHECK(r.turns == 0);
+	CHECK(r.status == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_NONE));
+	CHECK(r.command_cleared); // ★★ 但这一回合仍然不能动
+}
+
+TEST_CASE("状态★:解除的当回合不再结算伤害(源码 continue,顺序即语义)")
+{
+	auto c = makeCombatant(CombatantKind::kPlayer, 100, 10);
+	c.vital = 2500;
+	c.str = 2500;
+	c.tough = 2500;
+	c.dex = 2500;
+	c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+
+	SUBCASE("还剩回合 ⇒ 掉血")
+	{
+		c.status_turns = 2;
+		const StatusTickResult r = tickStatus(c, 1000, 0, false);
+		CHECK(r.hp_down == 20);
+		CHECK_FALSE(r.cleared);
+	}
+
+	SUBCASE("★ 最后一回合 ⇒ 解除且**不掉血**")
+	{
+		c.status_turns = 1;
+		const StatusTickResult r = tickStatus(c, 1000, 0, false);
+		CHECK(r.cleared);
+		CHECK(r.hp_down == 0); // ★ 源码在解除分支里 continue,走不到 switch
+	}
+}
+
+TEST_CASE("状态⚠️★★:毒的骑宠那半边 —— 人与骑宠各算一份(漏了不会有任何报错)")
+{
+	// `Compute_Down` 的 `flg != -1` 那半段(battle.c:5264-5281):同一条公式,
+	// 各自的四维、各自的 HP、各自的"留 1 HP"夹取。
+	// ⚠️★ 漏掉骑宠那半边时:骑宠照常在场、照常分摊伤害,只是毒不掉它的血
+	//    ⇒ 与 M.1 断线回收漏了宠物同族,**没有任何一处会报错**。
+	auto c = makeCombatant(CombatantKind::kPlayer, 100, 10);
+	c.vital = 2500;
+	c.str = 2500;
+	c.tough = 2500;
+	c.dex = 2500; // 主人掉 20
+	c.has_ride = true;
+	c.ride_vital = 1000;
+	c.ride_str = 1000;
+	c.ride_tough = 1000;
+	c.ride_dex = 1000; // Σ=4000 ⇒ 40−20=20 ⇒ /4 = 5
+	c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+	c.status_turns = 3;
+
+	const StatusTickResult r = tickStatus(c, /*hp=*/1000, /*pet_hp=*/500, /*has_ride_pet=*/true);
+	CHECK(r.hp_down == 20);
+	CHECK(r.pet_hp_down == 5); // ★★ 两半都要算,且用的是**骑宠自己的**四维
+
+	// 无骑宠 ⇒ 那一半恒 0。
+	const StatusTickResult r2 = tickStatus(c, 1000, 0, /*has_ride_pet=*/false);
+	CHECK(r2.hp_down == 20);
+	CHECK(r2.pet_hp_down == 0);
+}
+
+TEST_CASE("状态★★:剧毒 —— HP≤1 或剩余回合≤1 直接死(与普通毒的「留 1 HP」相反)")
+{
+	auto c = makeCombatant(CombatantKind::kPlayer, 100, 10);
+	c.vital = 2500;
+	c.str = 2500;
+	c.tough = 2500;
+	c.dex = 2500;
+	c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_DEEPPOISON);
+
+	SUBCASE("HP 充足且回合数还多 ⇒ 不死也不掉血")
+	{
+		c.status_turns = 5;
+		const StatusTickResult r = tickStatus(c, 1000, 0, false);
+		CHECK_FALSE(r.deep_poison_kill);
+		CHECK(r.hp_down == 0); // ★ 剧毒不走 Compute_Down
+	}
+
+	SUBCASE("★ HP ≤ 1 ⇒ 直接死")
+	{
+		c.status_turns = 5;
+		const StatusTickResult r = tickStatus(c, /*hp=*/1, 0, false);
+		CHECK(r.deep_poison_kill);
+	}
+
+	SUBCASE("★ 递减后剩余回合 ≤ 1 ⇒ 直接死(「解不掉就毒发身亡」)")
+	{
+		c.status_turns = 3; // 递减后 2 ⇒ 还不死
+		CHECK_FALSE(tickStatus(c, 1000, 0, false).deep_poison_kill);
+		c.status_turns = 2; // 递减后 1 ⇒ 死
+		CHECK(tickStatus(c, 1000, 0, false).deep_poison_kill);
+	}
+}
+
+TEST_CASE("状态⚠️★★:酒醉解除有 ridepet 分支 —— 不是无条件 ×2(05 §4.4 漏了一半)")
+{
+	// `battle.c:5490`:骑宠在场时 `quick += 骑宠 quick`,**不是** `× 2`。
+	// ★ L3 只置标志(骑宠 quick 在 field 的另一个槽),幅度由调用方按标志算。
+	auto c = makeCombatant(CombatantKind::kPlayer, 100, 10);
+	c.vital = 2500;
+	c.str = 2500;
+	c.tough = 2500;
+	c.dex = 2500;
+	c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_DRUNK);
+	c.status_turns = 1; // 本回合解除
+
+	const StatusTickResult r = tickStatus(c, 1000, 0, false);
+	CHECK(r.cleared);
+	CHECK(r.drunk_quick_restore); // ★ 只有酒醉解除会置它
+
+	// 其余状态解除不置。
+	c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+	c.status_turns = 1;
+	CHECK_FALSE(tickStatus(c, 1000, 0, false).drunk_quick_restore);
+}
+
+TEST_CASE("状态⚠️★★:施加成功落地的回合数 = 声明值 + 1(battle_event.c:2918)")
+{
+	// ★ 与 DR-BT15「逃跑首次即 2」同族的 +1 陷阱:照「声明值」实现会让每种状态
+	//   都短一回合,而任何"中了没中"的断言都抓不到。
+	CHECK(statusTurnsOnApply(kSuitPoisonTurns) == 4); // 带毒装备声明 3 ⇒ 落地 4
+	CHECK(statusTurnsOnApply(0) == 1);
+}
+
+TEST_CASE("状态:施加当场清指令的只有麻痹/睡眠/石化/魔障四种(battle_event.c:2932)")
+{
+	// ⚠️ 它比 checkCanAct 的 8 项**窄** —— 晕眩/天罗/雷附体/集气不在此列。
+	//    那不矛盾:那四种由 checkCanAct 在派发时否决,只是不在"施加当场"清指令。
+	CHECK(clearsCommandOnApply(static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_PARALYSIS)));
+	CHECK(clearsCommandOnApply(static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_SLEEP)));
+	CHECK(clearsCommandOnApply(static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_STONE)));
+	CHECK(clearsCommandOnApply(static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_BARRIER)));
+	// 毒不在其中 ⇒ 中毒者本回合照常行动。
+	CHECK_FALSE(clearsCommandOnApply(static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON)));
+	CHECK_FALSE(clearsCommandOnApply(static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_DIZZY)));
+}
+
+TEST_CASE("ResolveTurn★★:带毒装备 —— 普攻命中后附带毒(battle_event.c:2903,_SUIT_ADDPART4)")
+{
+	// ★★ 这是**净核里唯一的普攻附带状态来源**,与 A.3 暴击 / A.4 打飞同族:
+	//    普攻链路自己的机制,不依赖宠技/职技/魔法。
+	SUBCASE("★★ 默认 suit_poison == 0 ⇒ 整段不进 ⇒ **不摇 rng**(既有序列不变)")
+	{
+		Duel d = makeDuel();
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({0, 10000, 10000, 0, 0, 0, 0, 0});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		const int baseline = rng.calls();
+
+		// 同样的输入,只把 suit_poison 打开 ⇒ 必然多摇一次(状态命中判定)。
+		Duel d2 = makeDuel();
+		d2.field.at(0).mods.suit_poison = 30;
+		SA::Domain::BattleEvents ev2{};
+		ScriptedRandom rng2({0, 10000, 10000, 0, 0, 0, 0, 0});
+		REQUIRE(resolveTurn(d2.field, d2.cmds, RulesConfig{}, rng2, ev2));
+		// ★ 判据落在**取数次数**上:这正是 DR-BT23 那族唯一抓得到的形态。
+		CHECK(rng2.calls() == baseline + 1);
+	}
+
+	SUBCASE("命中 ⇒ Damage.status_applied = POISON,且不另发 StatusChange")
+	{
+		Duel d = makeDuel();
+		d.field.at(0).mods.suit_poison = 200; // per 夹到 80 ⇒ 好命中
+		d.field.at(0).level = 1;
+		d.field.at(10).level = 1;
+		d.field.at(10).vital = 25;
+		d.field.at(10).str = 25;
+		d.field.at(10).tough = 25;
+		d.field.at(10).dex = 25;
+		SA::Domain::BattleEvents ev{};
+		// 脚本:dex 抖动 → 回避(取大=不闪) → 暴击(取大=不暴) → 伤害各步 → 状态判定
+		ScriptedRandom rng({0, 10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+		bool found = false;
+		for (std::size_t i = 0; i < ev.events.size(); ++i)
+		{
+			if (ev.events[i].body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE &&
+			    ev.events[i].body.damage.status_applied ==
+			        SA::Domain::BattleStatus::BATTLE_ST_POISON)
+				found = true;
+		}
+		CHECK(found);
+		// ★ 附带状态走 Damage.status_applied(IDL 为此留的字段),
+		//   StatusChange 只在**解除**时发 ⇒ 本回合一条都不该有。
+		CHECK(countKind(ev, SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE) == 0);
+	}
+
+	SUBCASE("⚠️★ 闪避 ⇒ 整段跳过(走 continue,**够不到** damage 门)")
+	{
+		// ⚠️★★ **本条对 `damage > 0` 那道门没有区分力,如实记明**:闪避在
+		//    `rollDodge` 之后直接 `continue`,连伤害都不算 ⇒ 把门改成 `damage >= 0`
+		//    本条**照样 3/3 全绿**(2026-09-11 在**全新构建目录**下单独复核)。
+		//    ⚠️ 第一次得出这个结论时用的是被**陈旧 `.o` 污染**的构建目录(make 秒级
+		//      mtime 坑第三次发作),当时连「整个用例集不红」都是假象 ——
+		//      ★ 结论碰巧对,过程是错的。⇒ 反向验证一律在全新目录下做。
+		//    ⇒ 它验的是"闪避不附带状态 + 不摇那一次",**不是**那道门 ——
+		//      门由下一条 SUBCASE 验。★ 同 I.4「playerItemSlotsUsed 在 world 层无
+		//      区分力」那族:断言的形状与它宣称挡住的缺陷不是一回事。
+		Duel d = makeDuel();
+		d.field.at(0).mods.suit_poison = 200;
+		SA::Domain::BattleEvents ev{};
+		// 第 2 发给 1 ⇒ 回避判定 RAND(1,10000) <= per ⇒ 必闪。
+		ScriptedRandom rng({0, 1});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		CHECK(rng.calls() == 2); // 基线 + 回避;★ 没有第三发 = 状态判定没摇
+		for (std::size_t i = 0; i < ev.events.size(); ++i)
+		{
+			if (ev.events[i].body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+				CHECK(ev.events[i].body.damage.status_applied ==
+				      SA::Domain::BattleStatus::BATTLE_ST_NONE);
+		}
+	}
+
+	SUBCASE("★★ 命中但伤害被算成 0 ⇒ **不进状态判定、不摇**(damage > 0 那道门)")
+	{
+		// 源码判据 `damage > 0 && gBattleStausChange >= 0`(`:2907`)——
+		// ★ 这里才是那道门真正的适用场景:**打中了,但伤害是 0**。
+		//   造法:`damage_calc_percent = 0` ⇒ 第 7 步全局系数把伤害归零。
+		Duel d = makeDuel();
+		d.field.at(0).mods.suit_poison = 200;
+		d.field.at(10).vital = 25;
+		d.field.at(10).str = 25;
+		d.field.at(10).tough = 25;
+		d.field.at(10).dex = 25;
+		RulesConfig cfg{};
+		cfg.damage_calc_percent = 0;
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({0, 10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+		REQUIRE(resolveTurn(d.field, d.cmds, cfg, rng, ev));
+
+		// ★ 确认前提成立:确实命中了(有 Damage 事件)且伤害是 0。
+		bool hit_with_zero = false;
+		for (std::size_t i = 0; i < ev.events.size(); ++i)
+		{
+			const auto &e = ev.events[i];
+			if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE &&
+			    e.body.damage.target == 10u)
+			{
+				CHECK(e.body.damage.hp_delta == 0);
+				CHECK(e.body.damage.status_applied ==
+				      SA::Domain::BattleStatus::BATTLE_ST_NONE);
+				hit_with_zero = true;
+			}
+		}
+		REQUIRE(hit_with_zero); // 前提不成立就别信下面的结论
+	}
+}
+
+TEST_CASE("ResolveTurn★★:中毒后逐回合掉血 ⇒ 4 回合后解除(端到端,含 +1 落地)")
+{
+	// ★ 把「施加 → 每回合结算 → 解除」串起来跑 —— 这是 L4.1 的闭环证据。
+	//   ⚠️ 单看施加或单看结算都可能"绿而不通"(欠债 20 那族)。
+	Duel d = makeDuel();
+	d.field.at(0).status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+	d.field.at(0).status_turns = statusTurnsOnApply(kSuitPoisonTurns); // = 4
+	d.field.at(0).hp = 1000;
+	d.field.at(0).vital = 2500;
+	d.field.at(0).str = 2500;
+	d.field.at(0).tough = 2500;
+	d.field.at(0).dex = 2500; // ⇒ 每回合掉 20
+	setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::WAIT);
+
+	int hp = 1000;
+	int turns = 4;
+	int poison_events = 0;
+	int clear_events = 0;
+	for (int t = 0; t < 5; ++t)
+	{
+		d.field.at(0).hp = hp;
+		d.field.at(0).status_turns = turns;
+		if (turns <= 0)
+			d.field.at(0).status =
+			    static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_NONE);
+
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({0});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+		for (std::size_t i = 0; i < ev.events.size(); ++i)
+		{
+			if (ev.events[i].body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+			{
+				++poison_events;
+				hp += ev.events[i].body.damage.hp_delta;
+			}
+			if (ev.events[i].body_kind == SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE)
+			{
+				++clear_events;
+				CHECK_FALSE(ev.events[i].body.status_change.applied); // 解除
+				CHECK(ev.events[i].body.status_change.status ==
+				      SA::Domain::BattleStatus::BATTLE_ST_POISON);
+			}
+		}
+		// 回合推进:第 4 回合归零解除。
+		turns = (turns > 0) ? turns - 1 : 0;
+	}
+
+	// ★ 落地 4 回合 ⇒ 前 3 回合各掉 20(第 4 回合归零解除,**不掉血**)。
+	CHECK(hp == 1000 - 60);
+	CHECK(poison_events == 3);
+	CHECK(clear_events == 1); // ★ 解除只发一次
+}
+
+TEST_CASE("ResolveTurn⚠️★★:状态推进在**每个角色行动前**逐个跑,不是回合开始统一跑")
+{
+	// 源码 `battle.c:7074` 在指令派发之前、且在 actor 循环**内**。
+	// ★★ 挪到循环外会改变可观察行为:行动顺序靠后的单位若在本回合先被打死,
+	//    就**跑不到**自己那一趟 ⇒ 不掉这一回合的毒血。
+	Duel d = makeDuel(/*atk=*/100000); // 一击必杀
+	d.field.at(10).status =
+	    static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+	d.field.at(10).status_turns = 5;
+	d.field.at(10).hp = 100;
+	d.field.at(10).vital = 2500;
+	d.field.at(10).str = 2500;
+	d.field.at(10).tough = 2500;
+	d.field.at(10).dex = 2500;
+	// 敌人也下指令 ⇒ 它会进 actor 循环(但排在玩家之后就轮不到了)。
+	setAttack(d.cmds, 10, 0);
+	// 玩家 quick 高 ⇒ 先手
+	d.field.at(0).quick = 1000;
+	d.field.at(10).quick = 0;
+
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({0, 0, 10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	// 敌人被秒 ⇒ 它那一趟 `dead[] continue` ⇒ 本回合**没有**它的毒伤害事件。
+	int enemy_poison_dmg = 0;
+	for (std::size_t i = 0; i < ev.events.size(); ++i)
+	{
+		if (ev.events[i].body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE &&
+		    ev.events[i].body.damage.target == 10u &&
+		    ev.events[i].body.damage.hp_delta == -20)
+			++enemy_poison_dmg;
+	}
+	CHECK(enemy_poison_dmg == 0); // ★★ 死者不掉这一回合的毒血
 }
