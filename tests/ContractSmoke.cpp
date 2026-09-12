@@ -255,8 +255,8 @@ static void checkConfigDefaults()
 	assert(cfg.damage_calc_percent == 70);
 	// DR-BT1 裁定照抄,默认 true。
 	assert(cfg.unarmed_multihit_full_damage);
-	// DR-DT1 裁定按设计意图(浮点),不复刻 atoi 截断。
-	assert(!cfg.replicate_atoi_truncation);
+	// DR-DT1：2026-09-12 恢复原版实际 atoi 截断；World 使用同一个默认值。
+	assert(cfg.replicate_atoi_truncation);
 	// DR-WM1 取 23;DR-WM2 取 10。
 	assert(cfg.sight_radius == 23);
 	assert(cfg.enemy_move_num == 10);

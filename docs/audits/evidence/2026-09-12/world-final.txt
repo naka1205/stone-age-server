@@ -1,0 +1,7 @@
+Test project /private/tmp/stoneage-remediation-20260912/server
+    Start 9: world_tick
+1/1 Test #9: world_tick .......................   Passed    0.98 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.99 sec

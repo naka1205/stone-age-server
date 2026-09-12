@@ -1,0 +1,304 @@
+✅ ★★ 入口脚本输出编码 —— 全部入口脚本已显式设 UTF-8
+
+$ cmake -S /Users/naka/Game/Stoneage/stone-age-server -B /private/tmp/stoneage-remediation-20260912/server -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSA_WERROR=ON
+-- Configuring done (0.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /private/tmp/stoneage-remediation-20260912/server
+
+✅ 配置 —— RelWithDebInfo · SA_WERROR=ON
+
+$ ctest --test-dir /private/tmp/stoneage-remediation-20260912/server -C RelWithDebInfo -N
+Test project /private/tmp/stoneage-remediation-20260912/server
+  Test  #1: contract_smoke
+  Test  #2: rules_battle
+  Test  #3: rules_progression
+  Test  #4: model_pool
+  Test  #5: idl_smoke
+  Test  #6: net_framing
+  Test  #7: net_tcp
+  Test  #8: platform_config
+  Test  #9: world_tick
+  Test #10: world_map
+  Test #11: server_self_test
+  Test #12: shared_purity
+  Test #13: module_boundaries
+  Test #14: idl_verify
+  Test #15: dr_table
+  Test #16: docs_index
+  Test #17: code_format
+
+Total Tests: 17
+
+✅ ★★ 测试注册清单 —— 17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+
+$ cmake --build /private/tmp/stoneage-remediation-20260912/server --config RelWithDebInfo --clean-first --parallel
+[1/1] Cleaning all built files...
+Cleaning... 41 files.
+[1/41] Building CXX object shared/CMakeFiles/sa_shared.dir/rules/Progression.cpp.o
+[2/41] Building CXX object shared/CMakeFiles/sa_shared.dir/rules/Status.cpp.o
+[3/41] Building CXX object shared/CMakeFiles/sa_shared.dir/rules/Battle.cpp.o
+[4/41] Linking CXX static library shared/libsa_shared.a
+[5/41] Building CXX object shared/CMakeFiles/sa_wire.dir/wire/Framing.cpp.o
+[6/41] Building CXX object src/platform/CMakeFiles/sa_platform.dir/Log.cpp.o
+[7/41] Building CXX object src/platform/CMakeFiles/sa_platform.dir/Clock.cpp.o
+[8/41] Linking CXX static library shared/libsa_wire.a
+[9/41] Building CXX object src/net/CMakeFiles/sa_net.dir/Session.cpp.o
+[10/41] Building CXX object src/platform/CMakeFiles/sa_platform.dir/Random.cpp.o
+[11/41] Building CXX object tests/CMakeFiles/sa_contract_smoke.dir/ContractSmoke.cpp.o
+[12/41] Building CXX object src/world/CMakeFiles/sa_world.dir/Map.cpp.o
+[13/41] Building CXX object src/net/CMakeFiles/sa_net.dir/LoopbackTransport.cpp.o
+[14/41] Building CXX object src/net/CMakeFiles/sa_net.dir/TcpTransport.cpp.o
+[15/41] Building CXX object src/platform/CMakeFiles/sa_platform.dir/Json.cpp.o
+[16/41] Linking CXX static library src/net/libsa_net.a
+[17/41] Building CXX object tests/CMakeFiles/sa_idl_smoke.dir/__/idl/tests/smoke.cpp.o
+[18/41] Linking CXX executable tests/sa_contract_smoke
+[19/41] Linking CXX executable tests/sa_idl_smoke
+[20/41] Building CXX object src/CMakeFiles/stone_age_server.dir/main.cpp.o
+[21/41] Building CXX object src/platform/CMakeFiles/sa_platform.dir/Config.cpp.o
+[22/41] Linking CXX static library src/platform/libsa_platform.a
+[23/41] Building CXX object src/world/CMakeFiles/sa_world.dir/World.cpp.o
+[24/41] Linking CXX static library src/world/libsa_world.a
+[25/41] Linking CXX executable src/stone_age_server
+[26/41] Building CXX object tests/CMakeFiles/sa_rules_progression_test.dir/RulesProgressionTest.cpp.o
+[27/41] Linking CXX executable tests/sa_rules_progression_test
+[28/41] Building CXX object tests/CMakeFiles/sa_platform_config_test.dir/PlatformConfigTest.cpp.o
+[29/41] Linking CXX executable tests/sa_platform_config_test
+[30/41] Building CXX object tests/CMakeFiles/sa_net_framing_test.dir/NetFramingTest.cpp.o
+[31/41] Linking CXX executable tests/sa_net_framing_test
+[32/41] Building CXX object tests/CMakeFiles/sa_model_pool_test.dir/ModelPoolTest.cpp.o
+[33/41] Building CXX object tests/CMakeFiles/sa_net_tcp_test.dir/NetTcpTest.cpp.o
+[34/41] Linking CXX executable tests/sa_model_pool_test
+[35/41] Linking CXX executable tests/sa_net_tcp_test
+[36/41] Building CXX object tests/CMakeFiles/sa_world_map_test.dir/WorldMapTest.cpp.o
+[37/41] Linking CXX executable tests/sa_world_map_test
+[38/41] Building CXX object tests/CMakeFiles/sa_rules_battle_test.dir/RulesBattleTest.cpp.o
+[39/41] Linking CXX executable tests/sa_rules_battle_test
+[40/41] Building CXX object tests/CMakeFiles/sa_world_tick_test.dir/WorldTickTest.cpp.o
+[41/41] Linking CXX executable tests/sa_world_tick_test
+
+✅ 清洁构建(SA_WERROR ⇒ 告警即失败)
+
+$ ctest --test-dir /private/tmp/stoneage-remediation-20260912/server -C RelWithDebInfo --output-on-failure
+Test project /private/tmp/stoneage-remediation-20260912/server
+      Start  1: contract_smoke
+ 1/17 Test  #1: contract_smoke ...................   Passed    0.98 sec
+      Start  2: rules_battle
+ 2/17 Test  #2: rules_battle .....................   Passed    0.39 sec
+      Start  3: rules_progression
+ 3/17 Test  #3: rules_progression ................   Passed    0.38 sec
+      Start  4: model_pool
+ 4/17 Test  #4: model_pool .......................   Passed    0.38 sec
+      Start  5: idl_smoke
+ 5/17 Test  #5: idl_smoke ........................   Passed    0.37 sec
+      Start  6: net_framing
+ 6/17 Test  #6: net_framing ......................   Passed    0.37 sec
+      Start  7: net_tcp
+ 7/17 Test  #7: net_tcp ..........................***Failed    0.38 sec
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:273:
+TEST CASE:  端口 0 由系统分配,并能回读出来
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:277: FATAL ERROR: REQUIRE( t.listen("127.0.0.1", 0) ) is NOT correct!
+  values: REQUIRE( false )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:283:
+TEST CASE:  重复 Listen 是调用方的逻辑错,不是可恢复状态
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:287: FATAL ERROR: REQUIRE( t.listen("127.0.0.1", 0) ) is NOT correct!
+  values: REQUIRE( false )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:305:
+TEST CASE:  接受连接 ⇒ OnConnected;对端关闭 ⇒ OnDisconnected
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:311: FATAL ERROR: REQUIRE( t.listen("127.0.0.1", 0) ) is NOT correct!
+  values: REQUIRE( false )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:330:
+TEST CASE:  多条连接各自独立编号
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:336: FATAL ERROR: REQUIRE( t.listen("127.0.0.1", 0) ) is NOT correct!
+  values: REQUIRE( false )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:349:
+TEST CASE:  上行字节原样交给上层
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:355: FATAL ERROR: REQUIRE( t.listen("127.0.0.1", 0) ) is NOT correct!
+  values: REQUIRE( false )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:369:
+TEST CASE:  ★ 分片到达:传输层不凑整帧,拼装是上层的事
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:375: FATAL ERROR: REQUIRE( t.listen("127.0.0.1", 0) ) is NOT correct!
+  values: REQUIRE( false )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:400:
+TEST CASE:  下行:Send 的字节客户端收得到
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:406: FATAL ERROR: REQUIRE( t.listen("127.0.0.1", 0) ) is NOT correct!
+  values: REQUIRE( false )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:425:
+TEST CASE:  ★★ 大负载往返 —— 内核缓冲装不下时必须排队续写,不能截断
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:431: FATAL ERROR: REQUIRE( t.listen("127.0.0.1", 0) ) is NOT correct!
+  values: REQUIRE( false )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:515:
+TEST CASE:  ★ Close 是优雅的:排队中的出站先发完再断
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:521: FATAL ERROR: REQUIRE( t.listen("127.0.0.1", 0) ) is NOT correct!
+  values: REQUIRE( false )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:544:
+TEST CASE:  Stop 关闭全部连接并回调
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:550: FATAL ERROR: REQUIRE( t.listen("127.0.0.1", 0) ) is NOT correct!
+  values: REQUIRE( false )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:629:
+TEST CASE:  ★★ 端到端:真 socket 上握手成功并收到 HandshakeAccepted
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:635: FATAL ERROR: REQUIRE( t.listen("127.0.0.1", 0) ) is NOT correct!
+  values: REQUIRE( false )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:686:
+TEST CASE:  ★ 端到端:版本不符 ⇒ 拒绝理由先发出去,再断连
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/NetTcpTest.cpp:692: FATAL ERROR: REQUIRE( t.listen("127.0.0.1", 0) ) is NOT correct!
+  values: REQUIRE( false )
+
+===============================================================================
+[doctest] test cases: 13 | 1 passed | 12 failed | 0 skipped
+[doctest] assertions: 15 | 3 passed | 12 failed |
+[doctest] Status: FAILURE!
+
+      Start  8: platform_config
+ 8/17 Test  #8: platform_config ..................   Passed    0.38 sec
+      Start  9: world_tick
+ 9/17 Test  #9: world_tick .......................   Passed    0.42 sec
+      Start 10: world_map
+10/17 Test #10: world_map ........................   Passed    0.39 sec
+      Start 11: server_self_test
+11/17 Test #11: server_self_test .................***Failed    0.37 sec
+level=info event=server_starting code=1
+level=info event=config_loaded code=4 bind_addr=0.0.0.0 listen_port=8300 protocol_version=1 tick_hz=60 battle_turn_interval_ms=1200
+level=info event=module_loaded code=6 module=world
+level=info event=battle_seed code=204 master_seed=10797074265071484972 from_config=false
+level=error event=listen_failed code=7 bind_addr=0.0.0.0 port=0 reason="bind() 失败 (errno 1: Operation not permitted)"
+
+      Start 12: shared_purity
+12/17 Test #12: shared_purity ....................   Passed    0.05 sec
+      Start 13: module_boundaries
+13/17 Test #13: module_boundaries ................   Passed    0.02 sec
+      Start 14: idl_verify
+14/17 Test #14: idl_verify .......................   Passed    0.09 sec
+      Start 15: dr_table
+15/17 Test #15: dr_table .........................   Passed    0.02 sec
+      Start 16: docs_index
+16/17 Test #16: docs_index .......................   Passed    0.03 sec
+      Start 17: code_format
+17/17 Test #17: code_format ......................   Passed    0.43 sec
+
+88% tests passed, 2 tests failed out of 17
+
+Total Test time (real) =   5.48 sec
+
+The following tests FAILED:
+	  7 - net_tcp (Failed)
+	 11 - server_self_test (Failed)
+Errors while running CTest
+
+❌ ctest —— 有测试未通过
+
+$ cmake --build /private/tmp/stoneage-remediation-20260912/server --config RelWithDebInfo --target sa_contract_smoke
+[1/5] Building CXX object shared/CMakeFiles/sa_shared.dir/rules/Status.cpp.o
+[2/5] Building CXX object tests/CMakeFiles/sa_contract_smoke.dir/ContractSmoke.cpp.o
+[3/5] Building CXX object shared/CMakeFiles/sa_shared.dir/rules/Battle.cpp.o
+[4/5] Linking CXX static library shared/libsa_shared.a
+[5/5] Linking CXX executable tests/sa_contract_smoke
+
+
+$ ctest --test-dir /private/tmp/stoneage-remediation-20260912/server -C RelWithDebInfo -R contract_smoke --output-on-failure --timeout 60
+Test project /private/tmp/stoneage-remediation-20260912/server
+    Start 1: contract_smoke
+1/1 Test #1: contract_smoke ...................Subprocess aborted***Exception:   0.38 sec
+Assertion failed: (false && "相克矩阵与 05-battle.md §3.4 原表不符"), function checkElementMatrix, file ContractSmoke.cpp, line 91.
+★ 相克矩阵重排错误 [攻0][守1]: 得 9.9 应 1.5
+
+
+0% tests passed, 1 tests failed out of 1
+
+Total Test time (real) =   0.39 sec
+
+The following tests FAILED:
+	  1 - contract_smoke (Subprocess aborted)
+Errors while running CTest
+
+
+$ cmake --build /private/tmp/stoneage-remediation-20260912/server --config RelWithDebInfo --parallel
+[1/18] Building CXX object shared/CMakeFiles/sa_shared.dir/rules/Status.cpp.o
+[2/18] Building CXX object tests/CMakeFiles/sa_contract_smoke.dir/ContractSmoke.cpp.o
+[3/18] Building CXX object shared/CMakeFiles/sa_shared.dir/rules/Battle.cpp.o
+[4/18] Linking CXX static library shared/libsa_shared.a
+[5/18] Linking CXX executable tests/sa_rules_progression_test
+[6/18] Linking CXX executable tests/sa_model_pool_test
+[7/18] Linking CXX executable tests/sa_contract_smoke
+[8/18] Building CXX object src/world/CMakeFiles/sa_world.dir/Map.cpp.o
+[9/18] Building CXX object src/CMakeFiles/stone_age_server.dir/main.cpp.o
+[10/18] Building CXX object src/world/CMakeFiles/sa_world.dir/World.cpp.o
+[11/18] Linking CXX static library src/world/libsa_world.a
+[12/18] Linking CXX executable src/stone_age_server
+[13/18] Building CXX object tests/CMakeFiles/sa_world_map_test.dir/WorldMapTest.cpp.o
+[14/18] Linking CXX executable tests/sa_world_map_test
+[15/18] Building CXX object tests/CMakeFiles/sa_rules_battle_test.dir/RulesBattleTest.cpp.o
+[16/18] Linking CXX executable tests/sa_rules_battle_test
+[17/18] Building CXX object tests/CMakeFiles/sa_world_tick_test.dir/WorldTickTest.cpp.o
+[18/18] Linking CXX executable tests/sa_world_tick_test
+
+
+$ ctest --test-dir /private/tmp/stoneage-remediation-20260912/server -C RelWithDebInfo -R contract_smoke|rules_battle --output-on-failure
+Test project /private/tmp/stoneage-remediation-20260912/server
+    Start 1: contract_smoke
+1/2 Test #1: contract_smoke ...................   Passed    0.37 sec
+    Start 2: rules_battle
+2/2 Test #2: rules_battle .....................   Passed    0.38 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.75 sec
+
+✅ ★ 断言防线反向验证 —— 改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+
+══════════════════════════════════════════════════════════════════════
+汇总(按归因顺序,不按执行顺序)
+══════════════════════════════════════════════════════════════════════
+  ✅ ★★ 入口脚本输出编码
+       全部入口脚本已显式设 UTF-8
+  ✅ 配置
+       RelWithDebInfo · SA_WERROR=ON
+  ✅ ★★ 测试注册清单
+       17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+  ✅ 清洁构建(SA_WERROR ⇒ 告警即失败)
+  ❌ ctest
+       有测试未通过
+  ✅ ★ 断言防线反向验证
+       改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+══════════════════════════════════════════════════════════════════════
+❌ 1 项未通过:ctest
+
+⚠️ 读法:先看「测试注册清单」—— 少一条则后面的绿色都不完整;
+        再看「断言防线」—— 它失效则所有『通过』都不算数;
+        才是逐条测试。

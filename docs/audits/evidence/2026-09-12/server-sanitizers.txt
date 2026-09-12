@@ -1,0 +1,15 @@
+Test project /private/tmp/stoneage-remediation-20260912/asan
+    Start  2: rules_battle
+1/5 Test  #2: rules_battle .....................   Passed    0.06 sec
+    Start  3: rules_progression
+2/5 Test  #3: rules_progression ................   Passed    0.04 sec
+    Start  4: model_pool
+3/5 Test  #4: model_pool .......................   Passed    0.04 sec
+    Start  9: world_tick
+4/5 Test  #9: world_tick .......................   Passed    1.22 sec
+    Start 10: world_map
+5/5 Test #10: world_map ........................   Passed    0.07 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Total Test time (real) =   1.43 sec

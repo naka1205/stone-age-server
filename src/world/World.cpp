@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -86,8 +87,11 @@ using ItemPool = SA::Model::EntityPool<SA::Model::Item, kMaxItems>;
 // ⚠️ 全是**指针且允许为空**:`ApplyEvents` 的既有用例(纯 HP / 逃跑 / 打飞)不需要
 //    任何 L2 落脚点,而给它们造一套空池只是为了填参数 ⇒ 空 = "这一批世界写做不了",
 //    分支里显式判、显式记账,不静默跳过。
+struct BattleInstance;
+
 struct WorldWriteContext
 {
+	BattleInstance *battle = nullptr;
 	PlayerPool *players = nullptr;
 	PetPool *pets = nullptr;
 	const std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> *player_of_slot =
@@ -140,7 +144,63 @@ struct BattleInstance
 	// ⚠️ 空句柄 = 该槽没有敌人实体 —— **正常状态**:玩家槽、观战席位、
 	//    以及 demo 里手填的那只 foe(见 `makeDemoField`)都没有。
 	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> enemy_of_slot{};
+	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> pet_of_slot{};
+	std::array<std::optional<int>, SA::Rules::kSlotCount> quick_to_restore{};
+	std::array<bool, SA::Rules::kSlotCount> profit_settled{};
+	std::array<std::int32_t, SA::Rules::kSlotCount> pending_exp{};
+	std::array<std::int32_t, SA::Rules::kSlotCount> gained{};
+	std::array<std::array<std::int32_t, 3>, SA::Rules::kBattlePlayerMax> getitem{};
+	bool aborted = false;
+	bool dp_battle = false;
+	bool demo = false;
+	SA::Platform::Millis started_sec = 0;
+	SA::Platform::Millis command_deadline_sec = 0;
+
+	BattleInstance()
+	{
+		for (auto &items : getitem)
+			items.fill(-1);
+	}
 };
+
+std::uint32_t readyMask(const BattleInstance &battle)
+{
+	std::uint32_t mask = 0;
+	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+		if (battle.commands.present[slot] && battle.field.at(slot).occupied && !battle.field.at(slot).dead)
+			mask |= 1u << slot;
+	return mask;
+}
+
+// 已定义的 BC 快照，HP 来自此提交点的权威战场（F12）。
+SA::Domain::BattleSnapshot makeBattleSnapshot(const SA::Rules::BattleField &field)
+{
+	SA::Domain::BattleSnapshot snapshot{};
+	snapshot.battle_id = field.battle_id;
+	snapshot.field_attribute = static_cast<std::uint32_t>(field.field_attribute);
+	constexpr std::uint32_t status_flags[] = {0, 8, 16, 32, 64, 128, 256, 2048, 4096, 8192, 16384, 32768};
+	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+	{
+		const auto &unit = field.at(slot);
+		if (!unit.occupied)
+			continue;
+		auto *state = snapshot.combatants.push_back();
+		state->slot = static_cast<std::uint32_t>(slot);
+		state->level = static_cast<std::uint32_t>(unit.level);
+		state->hp = std::max(0, unit.hp);
+		state->max_hp = std::max(0, unit.max_hp);
+		state->flags = (unit.isPlayer() ? 4u : 0u) | (unit.dead ? 2u : 0u);
+		if (unit.status < sizeof(status_flags) / sizeof(status_flags[0]) && unit.status_turns > 0)
+			state->flags |= status_flags[unit.status];
+		if (unit.has_ride)
+		{
+			state->ride = SA::Domain::RideState::RIDE_STATE_RIDING;
+			state->pet_hp = std::max(0, unit.ride_hp);
+			state->pet_max_hp = std::max(0, unit.ride_max_hp);
+		}
+	}
+	return snapshot;
+}
 
 // 一侧是否已全灭。★ 这是**战斗结束**的判据,不是 L3 的事 ——
 //   L3 只结算一个回合,"还要不要打下一回合"是世界的生命周期问题。
@@ -170,9 +230,8 @@ bool sideWipedOut(const SA::Rules::BattleField &field, bool enemy_side)
 //    此处**有意不猜** —— 与批次 0.5 对暴击/反击「构成式齐全但判定入口缺失
 //    就停在实现之前」是同一条纪律(00 §9.0.8 ②)。
 //
-// ⚠️ 玩家侧**不**在这里补默认指令:L3 已把「无指令 ⇒ 本回合不行动」写死
-//   (battle.cpp 的 BuildActionOrder)。「玩家没提交该怎么办」是收集期与超时的
-//   问题,属阶段 2,且是玩家可感知的玩法口径 ⇒ 须显式裁定,不由实现者定。
+// 玩家侧不在这里补默认指令。正常战斗由 tick 的指令收集期等待或按原版时限退出；
+// demo 与无会话测试战场仍允许无人输入推进，不能用它们代表正常玩家回合。
 void fillEnemyCommands(const SA::Rules::BattleField &field,
                        SA::Rules::TurnCommands &commands)
 {
@@ -435,6 +494,85 @@ int giveItemIntoPlayer(SA::Model::Player &owner, const SA::Model::Item &item, It
 	return slot;
 }
 
+// F08: 以稳定宠物句柄回写，槽位复用不会改到上一只宠物。
+void syncPetState(BattleInstance &b, PetPool &pets)
+{
+	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+		if (auto *pet = pets.resolve(b.pet_of_slot[static_cast<std::size_t>(slot)]))
+		{
+			pet->hp = std::max(0, b.field.at(slot).hp);
+			pet->mp = std::max(0, b.field.at(slot).mp);
+		}
+}
+
+// 原 BATTLE_GetExpGold: 存活玩家在结束/主动离场时领取暂存收益。
+void deliverPlayerProfit(BattleInstance &b, int slot, PlayerPool &players, ItemPool &items)
+{
+	if (slot < 0 || slot >= SA::Rules::kBattlePlayerMax || b.field.at(slot).dead)
+		return;
+	auto *player = players.resolve(b.player_of_slot[static_cast<std::size_t>(slot)]);
+	if (player == nullptr)
+		return;
+	const auto at = static_cast<std::size_t>(slot);
+	const int exp = std::max(0, b.pending_exp[at]);
+	player->exp += exp;
+	b.gained[at] += exp;
+	b.pending_exp[at] = 0;
+	for (auto &item_id : b.getitem[at])
+	{
+		if (item_id < 0)
+			continue;
+		SA::Model::Item item{};
+		item.item_id = item_id;
+		item.current_pile = 1;
+		(void)giveItemIntoPlayer(*player, item, items);
+		item_id = -1;
+	}
+}
+
+// F18: battle.c:7051/8900 的本次行动者列表；当前没有合击，列表只有 actor。
+// 下一位行动前结算新死亡；单归属也必须消耗 RAND(0,0)。
+void settleDeaths(BattleInstance &b, int actor, const EnemyPool &enemies)
+{
+	const bool eligible = actor >= 0 && actor < SA::Rules::kSideOffset &&
+	                      b.field.at(actor).occupied && !b.field.is_pvp && !b.dp_battle;
+	for (int slot = SA::Rules::kSideOffset; slot < SA::Rules::kSlotCount; ++slot)
+	{
+		const auto at = static_cast<std::size_t>(slot);
+		if (!b.field.at(slot).dead || b.profit_settled[at])
+			continue;
+		b.profit_settled[at] = true;
+		const auto *enemy = enemies.resolve(b.enemy_of_slot[at]);
+		if (!eligible || enemy == nullptr)
+			continue;
+		const int owner = b.field.at(actor).kind == SA::Rules::CombatantKind::kPet
+		                      ? actor - SA::Rules::kBattlePlayerMax
+		                      : actor;
+		if (owner < 0 || owner >= SA::Rules::kBattlePlayerMax)
+			continue;
+		auto &bag = b.getitem[static_cast<std::size_t>(owner)];
+		for (int drop = 0; drop < enemy->drop_count; ++drop)
+		{
+			(void)b.rng.rand(0, 0);
+			const int item_id = enemy->dropped_items[static_cast<std::size_t>(drop)];
+			auto free = std::find(bag.begin(), bag.end(), -1);
+			if (free != bag.end())
+				*free = item_id;
+			else if (b.rng.rand(0, 1))
+				bag[static_cast<std::size_t>(b.rng.rand(0, 2))] = item_id;
+		}
+		// 经验属于实际行动单位；宠物经验未接持久化，不能转赠主人。
+		int delta = b.field.at(actor).level - enemy->level;
+		int exp = enemy->exp;
+		if (delta > 5)
+		{
+			delta = std::min(15, 20 - delta);
+			exp = delta <= 0 ? 1 : std::max(1, exp * delta / 15);
+		}
+		b.pending_exp[static_cast<std::size_t>(actor)] += exp;
+	}
+}
+
 // 攻方背包里是否**齐备**捕获这只怪所需的全部条件道具(捕获前置门 ④)。
 //
 // ★★ 1:1 移植 `BATTLE_CaptureItemCheck`(展开视图 `battle_event.c:3986-4013`,
@@ -497,6 +635,7 @@ void projectCaptureItemGate(BattleInstance &b, PlayerPool &players,
 		SA::Rules::Combatant &atk = b.field.at(slot);
 		if (!atk.occupied)
 			continue;
+		atk.mods.capture_item_ok = true;
 
 		// 被捕目标的 L2 敌人实体 ⇒ 取其 pet_id 作为需求表匹配键。
 		const int tgt_slot = static_cast<int>(cmd.command.capture.target);
@@ -529,13 +668,13 @@ std::int32_t findItemHealPower(const std::vector<ItemEffect> &effects, std::int3
 // 把「本回合 USE_ITEM 指令的 HP 恢复力基数」投影到 L3 输入面(批次 I.4「使用道具」)。
 //
 // ★★ 与 `projectCaptureItemGate`(捕获门 ④)同款分工:基数要读**道具效果表 + 攻方背包**
-//    这两个世界态,L3 纯函数看不到 ⇒ World 在 `resolveTurn` **之前**按每条 USE_ITEM 指令
+//    这两个世界态,L3 纯函数看不到 ⇒ World 在每次 `resolveAction` 之前按 USE_ITEM 指令
 //    查好、写进攻方 `Combatant::mods.item_heal_power`。
 //   ⚠️★★ **只投影基数,不在这里摇 rng** —— 实际恢复量 `RAND(power*0.9, power*1.1)`
 //     (battle_magic.c:419)由 L3 在结算时用**战斗 rng** 摇。若在这里摇,取数就落在
-//     resolveTurn 之外 ⇒ 战斗 rng 序列错位(同 W.4「遇敌 rng 与战斗 rng 分离」的反面教训)。
-//   ⚠️★ **必须在 resolveTurn 前**:同捕获门,值备好 L3 才能纯读。
-//   ★ 每回合按本回合指令重算(先归 0)⇒ 上回合的投影不残留;非 USE_ITEM 指令 / 无 L2 玩家 /
+//     resolveAction 之外 ⇒ 战斗 rng 序列错位。
+//   每次行动前重新投影，前一步删除物品后不能沿用旧基数。
+//   按本回合指令重算(先归 0)⇒ 上次投影不残留;非 USE_ITEM 指令 / 无 L2 玩家 /
 //     空槽 / 非恢复药一律保持 0 ⇒ L3 分支跳过且不摇 rng(现有用例的 rng 序列不受影响)。
 void projectItemUsePower(BattleInstance &b, PlayerPool &players, const ItemPool &items,
                          const std::vector<ItemEffect> &effects)
@@ -571,44 +710,25 @@ void projectItemUsePower(BattleInstance &b, PlayerPool &players, const ItemPool 
 	}
 }
 
-// 使用道具成功后扣掉一个(消耗一个 pile),归零则清槽 + 释放实体。批次 I.4「使用道具」。
-//
-// ★★ 与 `captureItemDelAll`(删道具)同分工:世界写,由调用方在 `applyEvents` 后做。
-//    判据 = `atk.mods.item_heal_power > 0`(`projectItemUsePower` 投影过 ⇒ 本回合确实用了
-//    有效恢复药)—— 与 L3 的 USE_ITEM 分支同一判据,不重复读道具表 / 不重判 target。
-//   ⚠️ 源码 `ITEM_useRecovery_Battle` 末尾 `CHAR_DelItemMess`(battle_item.c:323)删一个;
-//     我们按堆叠语义 `--current_pile`,归零才清槽 + 释放(单格即一个道具,行为一致)。
-//   ⚠️★ 清槽 + 释放**成对**(同 `captureItemDelAll`:漏一半会让池只增不减 / 槽永久占用,
-//     而没有一处报错)。
-void consumeUsedItems(BattleInstance &b, PlayerPool &players, ItemPool &items)
+// F07: 只在 resolveAction 返回 item_used 后提交一次。
+void consumeUsedItem(BattleInstance &b, int slot, PlayerPool &players, ItemPool &items)
 {
-	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+	const auto &cmd = b.commands.commands[slot];
+	SA::Model::Player *owner =
+	    players.resolve(b.player_of_slot[static_cast<std::size_t>(slot)]);
+	if (owner == nullptr)
+		return;
+	const int item_slot = static_cast<int>(cmd.command.use_item.item_slot);
+	if (item_slot < 0 || item_slot >= static_cast<int>(SA::Model::kMaxItemHave))
+		return;
+	const SA::Model::ItemHandle h = owner->items[static_cast<std::size_t>(item_slot)];
+	SA::Model::Item *it = items.resolve(h);
+	if (it == nullptr)
+		return;
+	if (--it->current_pile <= 0)
 	{
-		if (!b.commands.present[slot])
-			continue;
-		const SA::Domain::BattleCommand &cmd = b.commands.commands[slot];
-		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::USE_ITEM)
-			continue;
-		const SA::Rules::Combatant &atk = b.field.at(slot);
-		if (atk.mods.item_heal_power <= 0)
-			continue; // 未投影 ⇒ 非有效使用(空槽 / 非恢复药 / 无 L2 玩家)⇒ 不扣
-
-		SA::Model::Player *owner =
-		    players.resolve(b.player_of_slot[static_cast<std::size_t>(slot)]);
-		if (owner == nullptr)
-			continue;
-		const int item_slot = static_cast<int>(cmd.command.use_item.item_slot);
-		if (item_slot < 0 || item_slot >= static_cast<int>(SA::Model::kMaxItemHave))
-			continue;
-		const SA::Model::ItemHandle h = owner->items[static_cast<std::size_t>(item_slot)];
-		SA::Model::Item *it = items.resolve(h);
-		if (it == nullptr)
-			continue;
-		if (--it->current_pile <= 0)
-		{
-			owner->clearItemSlot(item_slot);
-			(void)items.release(h);
-		}
+		owner->clearItemSlot(item_slot);
+		(void)items.release(h);
 	}
 }
 
@@ -632,13 +752,16 @@ void consumeUsedItems(BattleInstance &b, PlayerPool &players, ItemPool &items)
 // ★ `ctx` 是世界写的落脚点集合(见 WorldWriteContext):**允许全空** ——
 //   HP / 逃跑 / 打飞那几类不需要任何 L2 实体,给它们造一套空池只为填参数是本末倒置。
 //   需要落脚点的分支自己判、判不到就显式记账(捕获那一段是唯一的例子)。
-void applyEvents(const SA::Domain::BattleEvents &events,
+void applyEvents(SA::Domain::BattleEvents &events,
                  SA::Rules::BattleField &field,
                  const WorldWriteContext &ctx)
 {
-	for (std::size_t i = 0; i < events.events.size(); ++i)
+	const SA::Domain::BattleEvents pending = events;
+	events.events.clear();
+	for (std::size_t i = 0; i < pending.events.size(); ++i)
 	{
-		const SA::Domain::BattleEvent &e = events.events[i];
+		SA::Domain::BattleEvent e = pending.events[i];
+		bool publish = true;
 		switch (e.body_kind)
 		{
 		case SA::Domain::BattleEvent::BodyKind::DAMAGE:
@@ -760,6 +883,8 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 				//    这里会**照旧走 ×2** 而不报任何错 ⇒ 敏捷幅度悄悄错掉。
 				//    ⇒ 已在 `01` §13 欠债登记,并由 `Status.h` 的 `drunk_quick_restore`
 				//      注释指回本处(同 A.4 打飞下游「写下就是定时炸弹」的处置取向)。
+				if (ctx.battle != nullptr)
+					ctx.battle->quick_to_restore[sc.target] = c.quick;
 				c.quick *= 2;
 			}
 
@@ -802,6 +927,16 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 				//   把它当作"已不在场"。⚠️ 不置 dead=true —— 逃跑者没被击败,
 				//   把它记成阵亡会污染战果/经验结算(阶段 2)。
 				c.occupied = false;
+				if (ctx.battle != nullptr && ctx.players != nullptr && ctx.items != nullptr)
+					deliverPlayerProfit(*ctx.battle, static_cast<int>(esc.actor), *ctx.players, *ctx.items);
+				if (ctx.battle != nullptr && ctx.pets != nullptr)
+					syncPetState(*ctx.battle, *ctx.pets);
+				if (c.isPlayer() && esc.actor % SA::Rules::kSideOffset < SA::Rules::kBattlePlayerMax)
+				{
+					exitPetFromField(field, static_cast<int>(esc.actor));
+					if (ctx.battle != nullptr)
+						ctx.battle->pet_of_slot[esc.actor + SA::Rules::kBattlePlayerMax] = SA::Model::kNullHandle;
+				}
 			}
 			break;
 		}
@@ -829,7 +964,7 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 			//    其后全是不可失败的写 ⇒ 失败即整笔不做,客户端收到 `BT|…|f0`。
 			//    ★ 这让 00 §6「gmsv 进程内也需要工作单元边界」有了具体形状,
 			//      而且**不需要我们另设一个** —— 回源码核实时它已经在那里了。
-			const SA::Domain::CaptureAct &cap = e.body.capture_act;
+			SA::Domain::CaptureAct &cap = e.body.capture_act;
 			if (cap.target >= static_cast<std::uint32_t>(SA::Rules::kSlotCount))
 				break;
 			SA::Rules::Combatant &tgt = field.at(static_cast<int>(cap.target));
@@ -895,14 +1030,7 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 
 			if (!created)
 			{
-				// ⚠️★★ **一处已知的不对称,显式记账而不是掩盖**:
-				//    源码里"创建失败"会把 `flg` 改回 0 ⇒ 客户端收到 `f0`(抓失败)。
-				//    而我们把判定(L3)与世界写(这里)分成两段,`CaptureAct` 事件
-				//    **已经发出去了**且 `flags` 说的是"判定通过" ⇒ 改不回来。
-				//    ★ 要对齐就得让 L3 在判定时知道宠物池 / 主人槽的状态,那是把 L2
-				//      运行时状态灌进 L3 的纯函数入口 —— 与 D2 冲突,不在本批解。
-				//    ⇒ 本批处置:**不写世界**(目标留场、不加捕获计数)+ 落 error 日志。
-				//      表现上客户端会演"抓到了"而服务端没给宠物,已登记为欠债。
+				cap.flags = 0; // 提交失败尚未下发，对外必须是失败。
 				if (ctx.logger != nullptr)
 				{
 					ctx.logger->log(
@@ -992,7 +1120,8 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 			//   `PetDefaultEntry` 恒返 0、靠「入场后 DEFAULTPET 是否 <0」反推成败,而宠位
 			//   被占时它**不清** DEFAULTPET ⇒ 误判「叫出成功」却没入场。这里用
 			//   `enterPetToField` 的**真实返回值**判成败,失败时 default_pet 保持原值。
-			const SA::Domain::PetSwitch &ps = e.body.pet_switch;
+			const SA::Domain::PetSwitch ps = e.body.pet_switch;
+			publish = false; // 意图不下发；成功后转为已提交的 Enter/Quit。
 			if (ps.actor >= static_cast<std::uint32_t>(SA::Rules::kSlotCount))
 				break;
 
@@ -1018,8 +1147,20 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 			if (!ps.call_out)
 			{
 				// ── 收回(PET_IN):宠物离场 + 清出战宠 ────────────────────
+				const auto pet_slot = ps.actor + SA::Rules::kBattlePlayerMax;
+				if (pet_slot >= SA::Rules::kSlotCount || !field.at(static_cast<int>(pet_slot)).occupied)
+					break;
+				if (ctx.battle != nullptr)
+				{
+					syncPetState(*ctx.battle, *ctx.pets);
+					ctx.battle->pet_of_slot[pet_slot] = SA::Model::kNullHandle;
+				}
 				exitPetFromField(field, static_cast<int>(ps.actor));
 				owner->default_pet = -1;
+				e = SA::Domain::BattleEvent{};
+				e.body_kind = SA::Domain::BattleEvent::BodyKind::QUIT;
+				e.body.quit.actor = pet_slot;
+				publish = true;
 				break;
 			}
 
@@ -1043,6 +1184,16 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 			if (enterPetToField(field, static_cast<int>(ps.actor), *pet))
 			{
 				owner->default_pet = static_cast<int>(ps.pet_slot);
+				const auto pet_slot = ps.actor + SA::Rules::kBattlePlayerMax;
+				if (ctx.battle != nullptr)
+				{
+					ctx.battle->pet_of_slot[pet_slot] = owner->pets[ps.pet_slot];
+					ctx.battle->quick_to_restore[pet_slot].reset();
+				}
+				e = SA::Domain::BattleEvent{};
+				e.body_kind = SA::Domain::BattleEvent::BodyKind::ENTER;
+				e.body.enter.actor = pet_slot;
+				publish = true;
 			}
 			else if (ctx.logger != nullptr)
 			{
@@ -1062,7 +1213,11 @@ void applyEvents(const SA::Domain::BattleEvents &events,
 			// 对世界状态无影响 ⇒ 显式落到这里,不是遗漏。
 			break;
 		}
+		if (publish)
+			(void)events.events.push_back(e);
 	}
+	if (ctx.battle != nullptr && ctx.pets != nullptr)
+		syncPetState(*ctx.battle, *ctx.pets);
 }
 
 // ── 1.4 demo 的战场(脚手架,见 platform/api.h 的 DemoBattleConfig)────
@@ -1104,6 +1259,10 @@ SA::Rules::BattleField makeDemoField()
 	me.luck = 10;
 	const SA::Rules::DerivedStats me_stats =
 	    SA::Rules::deriveBaseStats(8000, 30000, 4000, 20000);
+	me.vital = 8000;
+	me.str = 30000;
+	me.tough = 4000;
+	me.dex = 20000;
 	me.attack = me_stats.attack;   // 322
 	me.defense = me_stats.defense; // 88
 	me.quick = me_stats.quick;     // 200
@@ -1119,6 +1278,10 @@ SA::Rules::BattleField makeDemoField()
 	foe.luck = 5;
 	const SA::Rules::DerivedStats foe_stats =
 	    SA::Rules::deriveBaseStats(4000, 26000, 2000, 15000);
+	foe.vital = 4000;
+	foe.str = 26000;
+	foe.tough = 2000;
+	foe.dex = 15000;
 	foe.attack = foe_stats.attack;   // 273
 	foe.defense = foe_stats.defense; // 57
 	foe.quick = foe_stats.quick;     // 150
@@ -1156,6 +1319,10 @@ SA::Rules::Combatant makePlayerCombatant()
 	c.luck = 10;
 	const SA::Rules::DerivedStats st =
 	    SA::Rules::deriveBaseStats(8000, 30000, 4000, 20000);
+	c.vital = 8000;
+	c.str = 30000;
+	c.tough = 4000;
+	c.dex = 20000;
 	c.attack = st.attack;
 	c.defense = st.defense;
 	c.quick = st.quick;
@@ -1229,6 +1396,50 @@ struct World::Impl
 	std::map<SA::Net::ConnectionId, Conn> conns;
 	// 1.5 里 SessionId == ConnectionId(见上)。
 	std::map<BattleId, BattleInstance> battles;
+	struct FinishedBattle
+	{
+		BattleStats stats;
+		SA::Rules::BattleField field; // 仅供已有观察接口，脱离实体/会话/RNG。
+	};
+	static constexpr std::size_t kFinishedBattleLimit = 128;
+	std::map<BattleId, FinishedBattle> finished_battles;
+
+	bool inBattle(SA::Net::SessionId sid) const
+	{
+		for (const auto &entry : battles)
+		{
+			const auto &battle = entry.second;
+			const auto slot = battle.slot_of.find(sid);
+			if (!battle.stats.finished && slot != battle.slot_of.end() &&
+			    battle.field.at(slot->second).occupied)
+				return true;
+		}
+		return false;
+	}
+
+	void retireBattle(BattleId id)
+	{
+		const auto it = battles.find(id);
+		if (it == battles.end())
+			return;
+		auto &battle = it->second;
+		syncPetState(battle, pets);
+		for (auto handle : battle.enemy_of_slot)
+			(void)enemies.release(handle);
+		battle.stats.finished = true;
+		finished_battles.emplace(id, FinishedBattle{battle.stats, battle.field});
+		while (finished_battles.size() > kFinishedBattleLimit)
+			finished_battles.erase(finished_battles.begin());
+		battles.erase(it);
+	}
+	void pushBattleSnapshot(const BattleInstance &battle)
+	{
+		const auto snapshot = makeBattleSnapshot(battle.field);
+		for (auto sid : battle.members)
+			if (auto conn = conns.find(sid); conn != conns.end() && conn->second.session != nullptr)
+				if (!conn->second.session->push(snapshot, conn->second.outbound))
+					conn->second.session->close();
+	}
 
 	SA::Rules::RulesConfig rules_config{};
 	BattleId next_battle_id = 1;
@@ -1842,39 +2053,61 @@ void World::tick()
 			if (s.now_ms < b.next_turn_at_ms)
 				continue;
 
+			// 已有回合契约：实际玩家还在 C_WAIT 时不能消耗下一回合。
+			// SSRC80 BATTLE_CommandWait (3021–3090)、TimeOutCheck (3881–3919)。
+			// demo 的无人输入演示仍显式隔离；未加入会话的测试战场没有输入收集者。
+			if (!b.demo)
+			{
+				std::vector<SA::Net::SessionId> waiting;
+				for (auto sid : b.members)
+				{
+					const auto slot = b.slot_of.at(sid);
+					const auto &unit = b.field.at(slot);
+					if (unit.occupied && !unit.dead && unit.hp > 0 && !b.commands.present[slot])
+						waiting.push_back(sid);
+				}
+				if (!waiting.empty())
+				{
+					const auto now_sec = s.now_ms / 1000;
+					const bool timeout = now_sec > b.started_sec + 3600 ||
+					                     (b.command_deadline_sec > 0 && now_sec > b.command_deadline_sec);
+					if (!timeout)
+						continue;
+					syncPetState(b, s.pets);
+					for (auto sid : waiting)
+					{
+						const auto slot = b.slot_of.at(sid);
+						deliverPlayerProfit(b, slot, s.players, s.items);
+						b.field.at(slot).occupied = false;
+						if (slot % SA::Rules::kSideOffset < SA::Rules::kBattlePlayerMax)
+						{
+							exitPetFromField(b.field, slot);
+							b.pet_of_slot[slot + SA::Rules::kBattlePlayerMax] = SA::Model::kNullHandle;
+						}
+						b.player_of_slot[slot] = SA::Model::kNullHandle;
+						b.slot_of.erase(sid);
+						b.members.erase(std::remove(b.members.begin(), b.members.end(), sid), b.members.end());
+						SA::Domain::BattleLeave leave{};
+						leave.battle_id = b.id;
+						leave.reason = 1;
+						if (auto conn = s.conns.find(sid); conn != s.conns.end() && conn->second.session)
+							(void)conn->second.session->push(leave, conn->second.outbound);
+					}
+					s.pushBattleSnapshot(b);
+					if (sideWipedOut(b.field, false))
+					{
+						b.stats.finished = true;
+						finished.push_back(b.id);
+						continue;
+					}
+				}
+			}
+
 			// ★ 敌方 AI 先填指令(见 FillEnemyCommands 卷首:这是 battle.h 指定的分工)。
 			fillEnemyCommands(b.field, b.commands);
 
-			// ★★ 捕获前置门 ④:把「攻方条件道具是否齐备」投影进 L3 输入面 —— **必须在
-			//    resolveTurn 之前**(门不过则不摇 rng,与原版一致,见 projectCaptureItemGate)。
-			projectCaptureItemGate(b, s.players, s.enemies, s.items);
-
-			// ★ 使用道具门:把「本回合 USE_ITEM 指令的 HP 恢复力基数」投影进攻方 mods(批次 I.4)
-			//   —— 同捕获门,读道具表 / 背包是世界态,必须在 resolveTurn 前。
-			//   ⚠️★ 只投基数,**恢复量由 L3 用战斗 rng 摇**(在这儿摇会让取数落在 resolveTurn
-			//     之外 ⇒ 战斗 rng 序列错位)。
-			projectItemUsePower(b, s.players, s.items, s.item_effects);
-
-			// 结算一个回合。⚠️ 返回 false = 事件超过 256 条被迫截断。
-			//   05 §10.4 记着原版无上界 strcat 的教训 ⇒ **必须处理**,不可当没看见。
-			const bool ok = SA::Rules::resolveTurn(b.field, b.commands,
-			                                       s.rules_config, b.rng, b.events);
-			if (!ok)
-			{
-				b.stats.truncated_once = true;
-				s.logger.log(SA::Platform::LogLevel::kWarn,
-				             SA::Platform::LogEvent::kBattleEventsTruncated,
-				             {{"battle_id", b.id},
-				              {"turn", static_cast<std::uint64_t>(b.field.turn)}});
-				// ⚠️ 本批次先如实记账并继续 —— 01 §12 的取向是「宁可分包,不可静默截断」,
-				//    而分包要改 BattleEvents 的下发形状(加 seq / more 标志),
-				//    那是 IDL 的改动(0.2),不该被一次 world 的实现顺手带过。
-				//    ⇒ 已登记为欠债,见 docs/01 §13。
-			}
-
-			// ★★ 写回世界状态 —— 见 ApplyEvents 卷首:L3 有意不写,调用方必须写。
-			//   ★ 批次 M.1 起带上 L2 落脚点(池 / 主人槽 / 日志),捕获才有地方落。
 			WorldWriteContext wctx;
+			wctx.battle = &b;
 			wctx.players = &s.players;
 			wctx.pets = &s.pets;
 			wctx.player_of_slot = &b.player_of_slot;
@@ -1882,36 +2115,98 @@ void World::tick()
 			wctx.enemy_of_slot = &b.enemy_of_slot;
 			wctx.items = &s.items;
 			wctx.logger = &s.logger;
-			applyEvents(b.events, b.field, wctx);
-
-			// ★ 使用道具的世界写:扣掉本回合用掉的道具(消耗一个 pile)—— 同捕获删道具的分工,
-			//   在 applyEvents 之后(HP 已由 SET_HP 事件落地)。批次 I.4。
-			consumeUsedItems(b, s.players, s.items);
-
-			b.stats.events_emitted += static_cast<std::uint32_t>(b.events.events.size());
-			++b.stats.turns_resolved;
-
-			// 下发事件流。★ 这就是 1.4 demo 的验收对象:**事件流端到端一致**。
-			for (const SA::Net::SessionId sid : b.members)
+			// 排序一次，按原行动边界提交；下一位只能看见已提交的世界态。
+			std::uint8_t order[SA::Rules::kSlotCount]{};
+			const int count = SA::Rules::buildActionOrder(b.field, b.commands, b.rng, order);
+			b.events.battle_id = b.id;
+			b.events.turn = b.field.turn;
+			b.events.events.clear();
+			const auto flush = [&]()
 			{
-				const auto it = s.conns.find(sid);
-				if (it == s.conns.end())
+				for (auto sid : b.members)
+				{
+					auto conn = s.conns.find(sid);
+					if (conn != s.conns.end() && conn->second.session != nullptr &&
+					    !conn->second.session->push(b.events, conn->second.outbound))
+						conn->second.session->close();
+				}
+				b.events.events.clear();
+			};
+			std::uint32_t turn_events = 0;
+			for (int index = 0; index < count; ++index)
+			{
+				const int actor = order[index];
+				if (!b.field.at(actor).occupied || b.field.at(actor).dead)
 					continue;
-				Impl::Conn &c = it->second;
-				if (c.session == nullptr)
-					continue;
-				(void)c.session->push(b.events, c.outbound);
+				// 前一步可能删掉背包物品，不能复用回合开始时的门投影。
+				projectCaptureItemGate(b, s.players, s.enemies, s.items);
+				projectItemUsePower(b, s.players, s.items, s.item_effects);
+				SA::Domain::BattleEvents action{};
+				SA::Rules::ActionEffects effects;
+				const auto before_rng = b.rng;
+				if (!SA::Rules::resolveAction(b.field, b.commands, s.rules_config,
+				                              b.rng, actor, action, effects))
+				{
+					// 单动作输出超界：不提交其前缀、不重摇重试、不宣布战斗成功。
+					b.rng = before_rng;
+					b.stats.truncated_once = true;
+					b.aborted = true;
+					s.logger.log(SA::Platform::LogLevel::kError,
+					             SA::Platform::LogEvent::kBattleEventsTruncated,
+					             {{"battle_id", b.id}, {"turn", static_cast<std::uint64_t>(b.field.turn)}});
+					break;
+				}
+				applyEvents(action, b.field, wctx);
+				if (effects.item_used)
+					consumeUsedItem(b, actor, s.players, s.items);
+				settleDeaths(b, actor, s.enemies);
+				bool changed_entries = false;
+				for (const auto &event : action.events)
+				{
+					if (b.events.events.size() == b.events.events.capacity())
+						flush();
+					(void)b.events.events.push_back(event);
+					++turn_events;
+					using Kind = SA::Domain::BattleEvent::BodyKind;
+					changed_entries = changed_entries || event.body_kind == Kind::ENTER ||
+					                  event.body_kind == Kind::QUIT ||
+					                  (event.body_kind == Kind::ESCAPE && event.body.escape.succeeded) ||
+					                  (event.body_kind == Kind::CAPTURE_ACT && event.body.capture_act.flags != 0);
+				}
+				if (changed_entries)
+				{
+					flush(); // 快照覆盖此前事件，后续增量在它之后。
+					s.pushBattleSnapshot(b);
+				}
 			}
-
+			flush();
+			s.pushBattleSnapshot(b);
+			b.stats.events_emitted += turn_events;
+			if (b.aborted)
+			{
+				for (auto sid : b.members)
+					if (auto conn = s.conns.find(sid); conn != s.conns.end() && conn->second.session)
+						conn->second.session->close();
+				b.stats.finished = true;
+				finished.push_back(b.id);
+				continue;
+			}
+			++b.stats.turns_resolved;
+			// 原 TurnParam 在下一轮准备重算临时敏捷；此处恢复同一个来源值。
+			for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+				if (auto &base = b.quick_to_restore[static_cast<std::size_t>(slot)]; base)
+				{
+					b.field.at(slot).quick = *base;
+					base.reset();
+				}
 			s.logger.log(SA::Platform::LogLevel::kDebug,
 			             SA::Platform::LogEvent::kBattleTurnResolved,
-			             {{"battle_id", b.id},
-			              {"turn", static_cast<std::uint64_t>(b.field.turn)},
-			              {"events", static_cast<std::uint64_t>(b.events.events.size())}});
+			             {{"battle_id", b.id}, {"turn", static_cast<std::uint64_t>(b.field.turn)}, {"events", static_cast<std::uint64_t>(turn_events)}});
 
 			// 本回合的指令用完即清 —— 指令是**本回合**的输入,
 			// 留着会让下一回合重放上一回合的动作。
 			b.commands = SA::Rules::TurnCommands{};
+			b.command_deadline_sec = 0;
 			++b.field.turn;
 			b.next_turn_at_ms =
 			    s.now_ms + static_cast<SA::Platform::Millis>(
@@ -1924,17 +2219,22 @@ void World::tick()
 			}
 			else
 			{
-				// 下一回合开始 —— ready_mask 留 0:1.5 没有"谁已提交指令"的收集期,
-				// 指令一到就存下。收集期与超时是阶段 2 的事。
-				SA::Domain::BattleTurnBegin begin;
+				// 下一回合开始；先刷新本人行动限制，SelfInfo 不会清除客户端血量。
+				SA::Domain::BattleTurnBegin begin{};
 				begin.battle_id = b.id;
 				begin.turn = b.field.turn;
-				begin.ready_mask = 0;
+				begin.ready_mask = readyMask(b);
 				for (const SA::Net::SessionId sid : b.members)
 				{
 					const auto it = s.conns.find(sid);
 					if (it == s.conns.end() || it->second.session == nullptr)
 						continue;
+					SA::Domain::BattleSelfInfo info{};
+					info.battle_id = b.id;
+					info.slot = b.slot_of.at(sid);
+					info.mp = b.field.at(static_cast<int>(info.slot)).mp;
+					info.cannot_act = SA::Rules::checkCanAct(b.field.at(static_cast<int>(info.slot)));
+					(void)it->second.session->push(info, it->second.outbound);
 					(void)it->second.session->push(begin, it->second.outbound);
 				}
 			}
@@ -1947,163 +2247,13 @@ void World::tick()
 
 			BattleInstance &b = it->second;
 
-			// ── ★★ 战果结算:经验分配(战果结算批次)──────────────────────────
-			//
-			// 源码 `BATTLE_AddExp`(`battle.c:5500-5545`)的等级差衰减段。⚠️★ **时机差异
-			//   登记**:原版每死一个敌人即结算一次(`AddProfit` 在死亡处理里调),我们在
-			//   **战斗结束统一**遍历 `enemy_of_slot` 剩下的敌人 —— 被捕的那只已在
-			//   `applyEvents` 释放并清了句柄,所以这里剩的**就是被打死的**。最终 Player.exp
-			//   总量与逐死亡结算等价,差别只在结算落在回合末(可接受,登记)。
-			// ⚠️ **只结算玩家方胜利**:玩家方全灭(打输)不给经验(源码 proflg 判胜方)。
-			// ⚠️ 骑宠经验(源码 `×0.6`)本批不做 —— `Model::Pet` 无 `exp` 字段,且宠物
-			//    经验 / 升级属宠物成长域(登记残缺)。
+			// F18: 抽签/资格已在逐行动边界处理；这里仅最终交付。
+			syncPetState(b, s.pets);
+			if (!b.aborted)
 			{
-				// 玩家方赢 = 敌方全灭且玩家方未全灭(finished 触发时至少一方全灭)。
-				const bool player_won = sideWipedOut(b.field, /*enemy_side=*/true) && !sideWipedOut(b.field, /*enemy_side=*/false);
-
-				// dpbattle(源码 :2267):本场任一敌人 `duelpoint > 0` ⇒ 决斗点怪 ⇒ 走
-				// 决斗点、不走经验。★ 决斗点分配本批未做(PvP / saac 域)⇒ 这场谁也不拿战果。
-				bool dp_battle = false;
-				for (const SA::Model::EntityHandle &eh : b.enemy_of_slot)
-				{
-					const SA::Model::Enemy *e = s.enemies.resolve(eh);
-					if (e != nullptr && e->duelpoint > 0)
-					{
-						dp_battle = true;
-						break;
-					}
-				}
-
-				// 本场每个玩家槽获得的经验 —— 既累加进 Player.exp,又用于下发 BattleResult。
-				std::array<std::int32_t, SA::Rules::kSideOffset> gained{};
-
-				if (player_won && !dp_battle)
-				{
-					// ── 掉落拾取的暂存与选人范围(源码 `BATTLE_AddExpItem`,批次 I.3)────
-					//
-					// ★ 原版每死一敌即 `BATTLE_AddExpItem`,把敌人预掉落道具逐件随机分给
-					//   一名攻击方 entry(玩家或宠物,宠物折算回主人),暂存到 entry 的
-					//   `getitem[≤3]`,战斗结束再灌背包。⚠️★ 我们在**回合末统一**遍历死敌
-					//   (同经验的时机差异,已登记),`getitem` 用局部数组、per 玩家槽。
-					// ★ **选人范围 `allnum` = 己方在场战斗单位(玩家 + 宠物,源码含宠)**:
-					//   `k = RAND(0,allnum-1)` 选第 k 个在场单位,宠位(≥kBattlePlayerMax)
-					//   折算回主人(`slot-5`,源码 :6462)⇒ 战利品记给玩家。
-					// ⚠️ **rng 用 `b.rng`**:战斗已结束、该 rng 用完即弃 ⇒ 选人的精确分布
-					//   不平移任何后续序列,只定"这场掉落归谁"。
-					// ⚠️★ **组队/死者边角登记**:当前每会话独立一场(§9.0.16)⇒ 己方通常
-					//   单玩家(+宠)⇒ 归属无歧义;精确 `pBidList`(活/全部)与组队掉落分布
-					//   待组队玩法落地复核。
-					std::array<int, SA::Rules::kSideOffset> present_slots{};
-					int allnum = 0;
-					for (int sl = 0; sl < SA::Rules::kSideOffset; ++sl)
-						if (b.field.at(sl).occupied)
-							present_slots[static_cast<std::size_t>(allnum++)] = sl;
-
-					// getitem 暂存:per 玩家槽(0..kBattlePlayerMax-1)3 格,-1 = 空。
-					std::array<std::array<std::int32_t, 3>, SA::Rules::kBattlePlayerMax>
-					    getitem;
-					for (auto &g : getitem)
-						g.fill(-1);
-
-					// 外层:每个还挂在 `enemy_of_slot` 的敌人 = 被打死的(被捕的已清句柄)。
-					for (int es = SA::Rules::kSideOffset; es < SA::Rules::kSlotCount; ++es)
-					{
-						const SA::Model::Enemy *e = s.enemies.resolve(
-						    b.enemy_of_slot[static_cast<std::size_t>(es)]);
-						if (e == nullptr)
-							continue;
-						const std::int32_t enemy_exp = e->exp;
-						const std::int32_t enemy_level = e->level;
-
-						// 内层:每个在场的玩家实体(源码逐个 `charaindex[k]`)。
-						for (int ps = 0; ps < SA::Rules::kSideOffset; ++ps)
-						{
-							SA::Model::Player *p = s.players.resolve(
-							    b.player_of_slot[static_cast<std::size_t>(ps)]);
-							if (p == nullptr)
-								continue;
-
-							// 等级差衰减(源码 `EXPGET_MAXLEVEL=5` / `EXPGET_DIV=15`):
-							//   玩家不比怪高 5 级 ⇒ 全额;高 5 级以上 ⇒ 线性衰减、保底 1。
-							// ★ 整数运算(源码 `exp * b_level / 15`);玩家等级取**战场
-							//   Combatant**(Player 实体不建 level,见 Player.h)。
-							const std::int32_t player_level = b.field.at(ps).level;
-							std::int32_t b_level = player_level - enemy_level;
-							std::int32_t nowexp;
-							if (b_level <= 5)
-							{
-								nowexp = enemy_exp;
-							}
-							else
-							{
-								b_level = 5 + 15 - b_level;
-								if (b_level > 15)
-									b_level = 15;
-								if (b_level <= 0)
-									nowexp = 1;
-								else
-									nowexp = enemy_exp * b_level / 15;
-								if (nowexp < 1)
-									nowexp = 1;
-							}
-							p->exp += nowexp;
-							gained[static_cast<std::size_t>(ps)] += nowexp;
-						}
-
-						// ── 掉落拾取(源码 `battle.c:6486-6516`)★ 逐件随机选人入 getitem ──
-						//   与经验同在这只死敌的处理里(源码同一函数、同一 entry 循环)。
-						for (int d = 0; d < e->drop_count && allnum > 0; ++d)
-						{
-							const std::int32_t item_id =
-							    e->dropped_items[static_cast<std::size_t>(d)];
-							// 逐件 `RAND(0,allnum-1)` 选一名在场单位(源码 :6497)。
-							const int slot_k = present_slots[static_cast<std::size_t>(
-							    b.rng.rand(0, allnum - 1))];
-							// 宠位折算回主人(源码 :6462 `subnum-5`)⇒ 战利品记玩家。
-							const int owner =
-							    slot_k >= SA::Rules::kBattlePlayerMax
-							        ? slot_k - SA::Rules::kBattlePlayerMax
-							        : slot_k;
-							const std::size_t oi = static_cast<std::size_t>(owner);
-							// 入主人 getitem 空位;满(3 格)则 50% 覆盖随机格 / 50% 弃(源码 :6504)。
-							int gl = 0;
-							for (; gl < 3; ++gl)
-								if (getitem[oi][static_cast<std::size_t>(gl)] < 0)
-								{
-									getitem[oi][static_cast<std::size_t>(gl)] = item_id;
-									break;
-								}
-							if (gl >= 3 && b.rng.rand(0, 1)) // 50% 覆盖(源码 :6505 `RAND(0,1)`)
-								getitem[oi][static_cast<std::size_t>(b.rng.rand(0, 2))] = item_id;
-							// else(gl>=3 且 rand==0):丢弃该道具(源码 :6513);未 makeItem 实体
-							//   ⇒ 无需 release,item_id 不记即弃。
-						}
-					}
-
-					// ── 灌背包(源码 `BATTLE_GetExpGold:4471`)★ 每个玩家 getitem → 背包 ──
-					//   有空位进包(`CHAR_addItemSpecificItemIndex`);满则源码销毁 ⇒ 我方丢弃。
-					// ⚠️ Item 仅填 `item_id` —— 其余列(name/type/level/cost)待道具表 D 线导入
-					//   (同敌人模板 fixture,登记残缺)。满包提示(DR-UX1)属客户端展示,与掉落
-					//   下发一并留后续(本批服务端权威,不动 IDL)。
-					for (int ps = 0; ps < SA::Rules::kBattlePlayerMax; ++ps)
-					{
-						SA::Model::Player *p = s.players.resolve(
-						    b.player_of_slot[static_cast<std::size_t>(ps)]);
-						if (p == nullptr)
-							continue;
-						for (int gl = 0; gl < 3; ++gl)
-						{
-							const std::int32_t item_id =
-							    getitem[static_cast<std::size_t>(ps)][static_cast<std::size_t>(gl)];
-							if (item_id < 0)
-								continue;
-							SA::Model::Item item{};
-							item.item_id = item_id;
-							item.current_pile = 1;                       // ★ I.4:掉落回填堆叠数(一件)⇒ 使用侧读得到
-							(void)giveItemIntoPlayer(*p, item, s.items); // -1 = 背包满 ⇒ 丢弃
-						}
-					}
-				}
+				const bool player_won = sideWipedOut(b.field, true) && !sideWipedOut(b.field, false);
+				for (int slot = 0; slot < SA::Rules::kBattlePlayerMax; ++slot)
+					deliverPlayerProfit(b, slot, s.players, s.items);
 
 				// ── 下发 BattleResult(战斗结束都发,告知胜负 + 经验)战果结算批次 ──────
 				//
@@ -2121,7 +2271,7 @@ void World::tick()
 						continue;
 					SA::Domain::ExpGain g{};
 					g.slot = static_cast<std::uint32_t>(ps);
-					g.exp_gained = gained[static_cast<std::size_t>(ps)];
+					g.exp_gained = b.gained[static_cast<std::size_t>(ps)];
 					g.exp_total = p->exp;
 					(void)result.exp_gains.push_back(g);
 				}
@@ -2159,6 +2309,7 @@ void World::tick()
 			             {{"battle_id", id},
 			              {"turns", static_cast<std::uint64_t>(
 			                            it->second.stats.turns_resolved)}});
+			s.retireBattle(id);
 		}
 	}
 
@@ -2170,6 +2321,11 @@ void World::tick()
 	for (auto &kv : s.conns)
 	{
 		Impl::Conn &c = kv.second;
+		if (s.inBattle(kv.first))
+		{
+			c.walk_seq.clear();
+			continue;
+		}
 		if (c.session == nullptr || c.walk_seq.empty())
 			continue;
 		// 间隔门(CHAR_walk_check:4590):到点才走一步,走完把下次时刻推后 kWalkIntervalMs。
@@ -2270,13 +2426,26 @@ void World::tick()
 	// ⚠️ 但**出站字节仍要发出去** —— 上面第 4 步往 outbound 里写了东西。
 	//    这不是 §7 说的那种聚合(那是视野 Appear/Disappear 攒批),
 	//    只是"把已经生成的字节交给传输层"。别把这里读成 §7 已经做了。
-	for (auto &kv : s.conns)
+	// send/close 可能同步触发断线回调，不能持有 conns 迭代器或其缓冲再继续使用。
+	std::vector<SA::Net::ConnectionId> flushing;
+	for (const auto &entry : s.conns)
+		flushing.push_back(entry.first);
+	for (auto id : flushing)
 	{
-		Impl::Conn &c = kv.second;
-		if (c.outbound.empty())
+		auto entry = s.conns.find(id);
+		if (entry == s.conns.end())
 			continue;
-		(void)s.transport.send(c.conn_id, c.outbound.data(), c.outbound.size());
-		c.outbound.clear();
+		bool closing = entry->second.session != nullptr && entry->second.session->closed();
+		std::vector<std::uint8_t> bytes;
+		bytes.swap(entry->second.outbound);
+		if (!bytes.empty() && !s.transport.send(id, bytes.data(), bytes.size()))
+			closing = true;
+		bytes.clear();
+		entry = s.conns.find(id);
+		if (entry != s.conns.end() && entry->second.outbound.empty())
+			bytes.swap(entry->second.outbound);
+		if (closing)
+			s.transport.close(id);
 	}
 
 	// ── 8. 关闭检查 ──
@@ -2320,6 +2489,7 @@ BattleId World::startBattle(const SA::Rules::BattleField &field)
 	b.id = id;
 	b.field = field;
 	b.field.battle_id = id;
+	b.started_sec = s.now_ms / 1000;
 	b.seed = s.random.nextSeed();
 	b.rng = SA::Rules::SeededRandom(b.seed);
 	b.next_turn_at_ms =
@@ -2345,6 +2515,8 @@ bool World::joinBattle(BattleId battle, SA::Net::SessionId session,
                        std::uint8_t slot)
 {
 	Impl &s = *_impl;
+	if (s.inBattle(session))
+		return false;
 	const auto bit = s.battles.find(battle);
 	if (bit == s.battles.end())
 		return false;
@@ -2369,6 +2541,7 @@ bool World::joinBattle(BattleId battle, SA::Net::SessionId session,
 	}
 	b.members.push_back(session);
 	b.slot_of[session] = slot;
+	cit->second.walk_seq.clear();
 	// ★ 槽号 → L2 `Player` 实体(批次 M.1)。捕获要把新宠物挂进**攻方主人**的宠物槽,
 	//   而事件里只有槽号 ⇒ 入场时就把这条映射建起来,不到用时再去反查 `slot_of`
 	//   (反查是 O(n) 且要在 applyEvents 里拿到 Impl,那会把 L2 落脚点越铺越宽)。
@@ -2386,7 +2559,9 @@ bool World::joinBattle(BattleId battle, SA::Net::SessionId session,
 	{
 		if (SA::Model::Pet *pet =
 		        s.pets.resolve(p->pets[static_cast<std::size_t>(p->default_pet)]))
-			enterPetToField(b.field, slot, *pet);
+			if (enterPetToField(b.field, slot, *pet))
+				b.pet_of_slot[slot + SA::Rules::kBattlePlayerMax] =
+				    p->pets[static_cast<std::size_t>(p->default_pet)];
 	}
 
 	cit->second.session->markOnline();
@@ -2397,7 +2572,7 @@ bool World::joinBattle(BattleId battle, SA::Net::SessionId session,
 	//
 	// ⚠️ 这不是 demo 专用的东西,所以放在 JoinBattle 而不是 OnSessionReady:
 	//    任何入场路径(阶段 2 的选角、观战加入)都需要它。
-	SA::Domain::BattleSelfInfo self;
+	SA::Domain::BattleSelfInfo self{};
 	self.battle_id = b.id;
 	self.slot = slot;
 	self.mp = b.field.at(slot).mp;
@@ -2408,11 +2583,12 @@ bool World::joinBattle(BattleId battle, SA::Net::SessionId session,
 	//   这一个真源,而它已经在 L3 里 ⇒ 照真源填,不是硬编码一个"可以行动"。
 	self.cannot_act = SA::Rules::checkCanAct(b.field.at(slot));
 	(void)cit->second.session->push(self, cit->second.outbound);
+	s.pushBattleSnapshot(b);
 
-	SA::Domain::BattleTurnBegin begin;
+	SA::Domain::BattleTurnBegin begin{};
 	begin.battle_id = b.id;
 	begin.turn = b.field.turn;
-	begin.ready_mask = 0; // 1.5 没有收集期,理由见 Tick 第 4 步
+	begin.ready_mask = readyMask(b);
 	(void)cit->second.session->push(begin, cit->second.outbound);
 
 	// ⚠️ 入场日志放在这里而不是调用方:任何入场路径都该留痕,
@@ -2486,6 +2662,8 @@ bool World::spawnEnemyToField(BattleId battle, std::uint8_t slot,
 	// ── 提交:记下「槽 → 敌人实体」的映射 ────────────────────────────
 	// ★ 到这里没有可失败的动作了。捕获要靠这条映射找到四维的源头。
 	b.enemy_of_slot[slot] = eh;
+	b.dp_battle = b.dp_battle || enemy->duelpoint > 0;
+	s.pushBattleSnapshot(b);
 
 	// ⚠️★ 记的是 `enemy->level`(**实际生效**的等级)而不是入参 `baselevel` ——
 	//    摇号分支下入参是 0,记它等于什么都没记。★ 同时记 `enemy_id`,
@@ -2566,17 +2744,21 @@ std::vector<WorldEnemyPos> World::worldEnemies() const
 bool World::triggerEncounter(SA::Net::SessionId session, std::int32_t area_row)
 {
 	Impl &s = *_impl;
+	if (s.inBattle(session))
+		return false;
 	if (area_row < 0 ||
 	    static_cast<std::size_t>(area_row) >= s.encount_areas.size())
 		return false;
 	const EncountArea &area = s.encount_areas[static_cast<std::size_t>(area_row)];
 
-	// ── 选编组(区域 → 编组行下标)──────────────────────────────────────
-	//   ⚠️ 道具门用**空背包**快照(道具系统未移植,见 `EnemyGroup::appear_by_item_id`:
-	//      对空背包玩家与原版 100% 一致)。-1 ⇒ 无可用编组 ⇒ 本次不遇敌(原版等价)。
-	const std::vector<std::int32_t> empty_bag{};
+	// SSRC80 enemy.c:1421–1445 扫全部持有槽，包含装备位（不是仅背包段）。
+	std::vector<std::int32_t> inventory;
+	if (const auto *player = s.players.resolve(s.player_of_session.find(session)))
+		for (auto handle : player->items)
+			if (const auto *item = s.items.resolve(handle))
+				inventory.push_back(item->item_id);
 	const std::int32_t grow =
-	    pickEnemyGroup(area, s.enemy_groups, empty_bag, s.world_rng);
+	    pickEnemyGroup(area, s.enemy_groups, inventory, s.world_rng);
 	if (grow < 0)
 		return false;
 
@@ -2604,11 +2786,10 @@ bool World::triggerEncounter(SA::Net::SessionId session, std::int32_t area_row)
 
 	// ── 逐只敌人入场(Side[1] 起,baselevel=-1 野外摇号)──────────────────
 	//   ★ `rollEnemyList` 已含大怪布阵顺序 ⇒ 第 i 只落敌方槽 `kSideOffset + i`。
-	//   ⚠️ 战场每侧的实体位是 `kBattlePlayerMax`(=5,宠位在其后)⇒ 取前 5 只
-	//     (`rollEnemyList` 上界是区域 `enemy_max_num ∈ [1,10]`,可能多于战场敌方位)。
+	//   敌人按类型可用完整 10 格；玩家的 5 格上限不适用于敌人（F14）。
 	int placed = 0;
 	for (std::size_t i = 0;
-	     i < rows.size() && placed < SA::Rules::kBattlePlayerMax; ++i)
+	     i < rows.size() && placed < SA::Rules::kSideOffset; ++i)
 	{
 		const std::int32_t erow = rows[i];
 		if (erow < 0 || static_cast<std::size_t>(erow) >= s.encounters.size())
@@ -2647,6 +2828,8 @@ bool World::triggerEncounter(SA::Net::SessionId session, std::int32_t area_row)
 bool World::triggerNpcEnemyBattle(SA::Net::SessionId session, std::size_t world_enemy_idx)
 {
 	Impl &s = *_impl;
+	if (s.inBattle(session))
+		return false;
 	if (world_enemy_idx >= s.world_enemies.size())
 		return false;
 	// ★ 拷一份 WorldEnemy:下面要 erase(world_enemies),持有引用会失效。
@@ -2685,6 +2868,8 @@ bool World::triggerNpcEnemyBattle(SA::Net::SessionId session, std::size_t world_
 	// ★★ 所有权转移:同一 EntityHandle 从世界态挪到战斗态(enemy_of_slot),不 allocate/不 release
 	//    ⇒ 战斗结束按暗雷同一路径回池;enemyCount() 守恒(不是新建一只)。
 	b.enemy_of_slot[slot] = we.handle;
+	b.dp_battle = b.dp_battle || enemy->duelpoint > 0;
+	s.pushBattleSnapshot(b);
 
 	// ── 从世界态移除 + 广播消失(原版明雷进战斗态即从地图消失)───────────────────
 	//   ⚠️ 先广播(用移除前的世界坐标)再 erase;broadcastEnemyDespawn 单向发给视野内玩家。
@@ -2763,8 +2948,10 @@ void World::onBytes(SA::Net::ConnectionId id, const std::uint8_t *data,
 			// ★ 先把已生成的出站字节发出去(可能含 HandshakeRejected),再关。
 			if (!c.outbound.empty())
 			{
-				(void)s.transport.send(id, c.outbound.data(), c.outbound.size());
-				c.outbound.clear();
+				std::vector<std::uint8_t> bytes;
+				bytes.swap(c.outbound);
+				// send 失败可能同步释放 c；缓冲须由本次调用持有。
+				(void)s.transport.send(id, bytes.data(), bytes.size());
 			}
 			s.transport.close(id);
 			return;
@@ -2789,6 +2976,34 @@ void World::onDisconnected(SA::Net::ConnectionId id)
 	//    ⇒ 与 Player.h 里 `pets` 的注释是同一条的两半:那边说"释放 Pet 时要清槽",
 	//      这边是唯一真正执行它的地方。
 	const SA::Model::EntityHandle ph = s.player_of_session.find(id);
+	std::vector<BattleId> abandoned;
+	for (auto &entry : s.battles)
+	{
+		auto &battle = entry.second;
+		const bool member = battle.slot_of.erase(id) != 0;
+		if (member)
+			syncPetState(battle, s.pets);
+		for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+			if (ph.valid() && battle.player_of_slot[static_cast<std::size_t>(slot)] == ph)
+			{
+				battle.field.at(slot).occupied = false;
+				battle.commands.present[slot] = false;
+				battle.player_of_slot[static_cast<std::size_t>(slot)] = SA::Model::kNullHandle;
+				if (slot % SA::Rules::kSideOffset < SA::Rules::kBattlePlayerMax)
+				{
+					exitPetFromField(battle.field, slot);
+					battle.pet_of_slot[static_cast<std::size_t>(slot + SA::Rules::kBattlePlayerMax)] = SA::Model::kNullHandle;
+				}
+			}
+		battle.members.erase(std::remove(battle.members.begin(), battle.members.end(), id), battle.members.end());
+		if (member && battle.members.empty())
+			abandoned.push_back(battle.id);
+		else if (member)
+			s.pushBattleSnapshot(battle);
+	}
+	for (auto battle : abandoned)
+		s.retireBattle(battle);
+
 	if (SA::Model::Player *p = s.players.resolve(ph); p != nullptr)
 	{
 		// 里程碑②:先给视野内玩家发 CharDisappear + 从 olink 摘除(都要 p 的位置,须在释放前)。
@@ -2806,23 +3021,15 @@ void World::onDisconnected(SA::Net::ConnectionId id)
 			(void)s.pets.release(p->pets[i]);
 			(void)p->clearPetSlot(static_cast<int>(i));
 		}
+		for (std::size_t slot = 0; slot < p->items.size(); ++slot)
+		{
+			(void)s.items.release(p->items[slot]);
+			(void)p->clearItemSlot(static_cast<int>(slot));
+		}
 		(void)s.players.release(ph);
 	}
 	s.player_of_session.erase(id);
 
-	for (auto &kv : s.battles)
-	{
-		std::vector<SA::Net::SessionId> &m = kv.second.members;
-		m.erase(std::remove(m.begin(), m.end(), id), m.end());
-		kv.second.slot_of.erase(id);
-		// ★ 槽 → Player 的映射一并清:句柄已作废,留着虽不会脏读(resolve 返 nullptr,
-		//   M10)但会误导 —— 读代码的人会以为那个槽还有主人。
-		for (SA::Model::EntityHandle &h : kv.second.player_of_slot)
-		{
-			if (h == ph)
-				h = SA::Model::kNullHandle;
-		}
-	}
 	s.conns.erase(it);
 
 	s.logger.log(SA::Platform::LogLevel::kDebug,
@@ -2895,6 +3102,7 @@ void World::onSessionReady(SA::Net::SessionId id)
 	//   "第二个人落在哪个槽""先来的打到一半后来的怎么进",那是组队/观战的玩法口径
 	//   (阶段 2),不该由一段 demo 脚手架顺手定下来。
 	const BattleId battle = startBattle(makeDemoField());
+	s.battles.at(battle).demo = true;
 	const std::uint8_t slot = s.config.demo_battle.slot;
 	if (!joinBattle(battle, id, slot))
 	{
@@ -2933,11 +3141,20 @@ void World::onBattleCommand(SA::Net::SessionId id,
 	if (sit == b.slot_of.end())
 		return;
 	const std::uint8_t slot = sit->second;
-	if (slot >= SA::Rules::kSlotCount)
+	if (slot >= SA::Rules::kSlotCount || b.stats.finished || !b.field.at(slot).occupied || b.field.at(slot).dead)
 		return;
 
 	b.commands.commands[slot] = cmd;
 	b.commands.present[slot] = true;
+	if (b.command_deadline_sec == 0)
+		b.command_deadline_sec = s.now_ms / 1000 + 120; // 首个 C_OK 后才启动，严格超时退出而非自动防御。
+	SA::Domain::BattleTurnBegin ready{};
+	ready.battle_id = b.id;
+	ready.turn = b.field.turn;
+	ready.ready_mask = readyMask(b);
+	for (auto member : b.members)
+		if (auto conn = s.conns.find(member); conn != s.conns.end() && conn->second.session)
+			(void)conn->second.session->push(ready, conn->second.outbound);
 }
 
 void World::onWalk(SA::Net::SessionId id, const SA::Domain::WalkRequest &req)
@@ -2949,6 +3166,11 @@ void World::onWalk(SA::Net::SessionId id, const SA::Domain::WalkRequest &req)
 	const auto it = s.conns.find(id); // 1.5:SessionId == ConnectionId
 	if (it == s.conns.end())
 		return;
+	if (s.inBattle(id))
+	{
+		it->second.walk_seq.clear();
+		return;
+	}
 	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(id));
 	if (p == nullptr)
 		return;
@@ -3039,7 +3261,10 @@ std::size_t World::sessionCount() const noexcept
 const BattleStats *World::stats(BattleId id) const
 {
 	const auto it = _impl->battles.find(id);
-	return it == _impl->battles.end() ? nullptr : &it->second.stats;
+	if (it != _impl->battles.end())
+		return &it->second.stats;
+	const auto done = _impl->finished_battles.find(id);
+	return done == _impl->finished_battles.end() ? nullptr : &done->second.stats;
 }
 
 SA::Net::SessionState World::sessionState(SA::Net::SessionId id) const
@@ -3178,7 +3403,10 @@ std::int32_t World::playerItemPile(SA::Net::SessionId session, int slot) const
 const SA::Rules::BattleField *World::battleField(BattleId id) const
 {
 	const auto it = _impl->battles.find(id);
-	return it == _impl->battles.end() ? nullptr : &it->second.field;
+	if (it != _impl->battles.end())
+		return &it->second.field;
+	const auto done = _impl->finished_battles.find(id);
+	return done == _impl->finished_battles.end() ? nullptr : &done->second.field;
 }
 
 // ── 战场态宠物入场 / 离场(批次 M.2)──────────────────────────────
@@ -3349,8 +3577,7 @@ std::int32_t pickEnemyGroup(const EncountArea &area, const std::vector<EnemyGrou
 
 		const EnemyGroup &grp = groups[static_cast<std::size_t>(g)];
 
-		// 两道道具门(源码 :1307-1332)。⚠️ 道具系统未移植 ⇒ 调用方传空背包,
-		//    对空背包玩家与原版 100% 一致;后果规模见 `EnemyGroup` 那两条注释。
+		// 两道道具门，调用方从全部有效持有槽（含装备）提供实际 ID。
 		if (grp.appear_by_item_id != -1 && !holds(grp.appear_by_item_id))
 			continue;
 		if (grp.not_appear_by_item_id != -1 && holds(grp.not_appear_by_item_id))
@@ -3981,10 +4208,8 @@ SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, const EnemyEncounter &enc
 bool enterEnemyToField(SA::Rules::BattleField &field, int field_slot,
                        const SA::Model::Enemy &enemy)
 {
-	// ── 门 ①:必须落在某一 side 的玩家段(宠位留给 enterPetToField)────────
+	// ── 门 ①:敌人可使用任一侧完整的 10 格；只拒绝越界 ────────────
 	if (field_slot < 0 || field_slot >= SA::Rules::kSlotCount)
-		return false;
-	if (field_slot % SA::Rules::kSideOffset >= SA::Rules::kBattlePlayerMax)
 		return false;
 
 	// ── 门 ②:目标槽未被占(源码 `NewEntry:975` ⇒ ENTRYMAX)────────────

@@ -202,18 +202,13 @@ struct CombatModifiers
 	//   ⚠️ 与 `status_resist[]` 是两件事:前者对**所有**状态生效,后者逐状态。
 	std::int32_t general_resist = 0;
 
-	// ★ 守方「装备抗性」—— ⚠️★★ **只对虚弱 / 魔障 / 沉默三种状态存在**
-	//   (原 `CHAR_WORKEQUITWEAKEN` / `EQUITBARRIER` / `EQUITNOCAST`,
-	//    `_EQUIT_RESIST` 8.0 开,`:5141-5147`)。
-	//   ⚠️ `05` §4.3 把「− 装备抗性」写成通用一项,**与源码不符**:麻痹分支根本没有它,
-	//     通用分支也只有这三种减。⇒ 按源码分三个字段,不做成数组(避免暗示它有 44 项)。
+	// 输入字段保留原数据含义。F02：原 status 比较 WORK 枚举 51/53/54，
+	// 合法状态号小于 44，因此装备三分支和下方 suit 分支均不生效。
 	std::int32_t equip_resist_weaken = 0;
 	std::int32_t equip_resist_barrier = 0;
 	std::int32_t equip_resist_nocast = 0;
 
-	// ★ 守方虚弱的**第二道**装备抗性(原 `CHAR_WORKRENOCAST`,`_SUIT_ADDPART3` 8.0 开,`:5150`)。
-	//   ⚠️★ 源码这里判的是 `status == CHAR_WORKWEAKEN` 而减的字段名却是 `RENOCAST`
-	//     ——「名字在骗人」的又一例(同 M.5 那族)⇒ 按**判据**命名,不按原字段名。
+	// 原 CHAR_WORKRENOCAST；同样受不可达的 CHAR_WORKWEAKEN 比较控制。
 	std::int32_t suit_resist_weaken = 0;
 };
 
@@ -310,18 +305,8 @@ struct Combatant
 	//   攻方带此标志时,守方**一律不可回避**(§3.2 六道否决第一道)。
 	bool charge_ready = false;
 
-	// ★ 醉(原 `CHAR_WORKDRUNK > 0`)—— §3.2 「酒醉真正生效处」:
-	//   **攻方**酒醉时守方回避率 += RAND(20,30)。
-	// ⚠️ 与 `BATTLE_ST_DRUNK` 状态槽是两个来源,原版分别读 ⇒ 此处独立成字段。
-	bool drunk = false;
-
-	// ★ 混乱值(原 `CHAR_WORKCONFUSION`)—— §3.5 防御减伤的**第二个条件**:
-	//   触发要求「守方指令 = 防御 **且 混乱值 ≤ 0**」。
-	// ⚠️ 与 `BATTLE_ST_CONFUSION` 状态槽同样是两个来源 ⇒ 独立成字段,理由同 `drunk`。
-	//    用 `status == CONFUSION` 代替会漏掉「混乱值 > 0 但状态槽已被别的状态占住」的情形
-	//    —— 而 §4.1 的全局互斥恰恰让这种情形成为常态。
-	std::int32_t confusion = 0;
-
+	// 原 StatusTbl 把酒醉/混乱直接映射到各自的 WORK 计数（battle_event.c:90）。
+	// 当前单槽覆盖内只由 status/status_turns 表达，不维护第二份无人同步的值。
 	// ★ 反应类状态计数(原 `BATTLE_GetDamageReact`)> 0 ⇒ 守方不可回避(§3.2 第三道),
 	//   且伤害走 §3.7 的六种反应类型分支。
 	int damage_react = 0;
@@ -360,9 +345,7 @@ struct Combatant
 	//
 	// 有骑宠时攻击力按 kRideMelee* / kRideThrow* 合成(§3.1 第 1 步),
 	// 且伤害在人宠之间分摊。
-	// ★ DR-BT2 已裁定**修正**分摊式:分子改 myDef(防御高者多扛),并改无损分摊
-	//   —— 原式 `damage · petDef / (myDef + petDef) + 1` 让**宠物防御越高、主人吃得越多**,
-	//   反向惩罚「培养骑宠」这一核心养成路径。
+	// DR-BT2 已恢复原普通伤害分摊，公式及边界见 splitRideDamage。
 	bool has_ride = false;
 	std::int32_t ride_attack = 0;
 	std::int32_t ride_defense = 0;
@@ -373,7 +356,7 @@ struct Combatant
 	//   (`Compute_Down` 的 `flg != -1` 那半段,`battle.c:5264-5281`:同一条公式,
 	//    各自的四维与各自的 HP)。
 	// ⚠️★ **不补这四个字段就只能让骑宠不吃毒伤害** —— 那是"漏掉半边"式的缺陷
-	//    (同 M.1 断线回收漏了宠物那半、DR-BT2 分摊漏了无损性),而且**没有任何
+	//    (同 M.1 断线回收漏了宠物那半、骑宠分摊未回写),而且**没有任何
 	//    一处会报错**:骑宠照常在场、照常分摊伤害,只是毒不掉它的血。
 	//    ⇒ 宁可撑大快照面也要让公式完整,投影由 World 从 `Model::Pet` 直接拷。
 	std::int32_t ride_vital = 0;

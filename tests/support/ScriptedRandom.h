@@ -35,7 +35,22 @@ class ScriptedRandom final : public SA::Rules::Random
 	{
 		++_calls;
 		const int v = next();
-		return v < lo ? lo : (v > hi ? hi : v);
+		const int lower = hi < lo - static_cast<std::int64_t>(1) ? hi + 2 : lo;
+		const int upper = hi < lo ? lo : hi;
+		return v < lower ? lower : (v > upper ? upper : v);
+	}
+
+	// 浮点 RAND 的结果是 lo + 整数偏移；脚本仍指定截断后的期望结果。
+	double randReal(double lo, double hi) override
+	{
+		++_calls;
+		const double span = hi - (lo - 1.0);
+		const double end = std::trunc(span * 2147483647.0 / 2147483648.0);
+		const double lower = end < 0 ? end : 0;
+		const double upper = end > 0 ? end : 0;
+		const double offset = static_cast<double>(next()) - std::trunc(lo);
+		return (lo - 1.0) + 1.0 +
+		       (offset < lower ? lower : (offset > upper ? upper : offset));
 	}
 
 	// ★ `n <= 0` 同样**先取数再返回 0** —— 原版 `rand() % n` 的 `rand()` 在取模前已求值。

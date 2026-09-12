@@ -1,0 +1,6 @@
+2026-09-12 08:26:36.085 stone_age_client[76021:879445] BattleScene: conn: 127.0.0.1:64225
+2026-09-12 08:26:36.085 stone_age_client[76021:879445] BattleScene: dialing…
+2026-09-12 08:26:36.102 stone_age_client[76021:879445] BattleScene: connected
+2026-09-12 08:26:36.102 stone_age_client[76021:879445] BattleScene: handshake sent
+2026-09-12 08:26:36.143 stone_age_client[76021:879445] BattleScene: 握手被拒 reason=1 required=1
+2026-09-12 08:26:36.160 stone_age_client[76021:879445] main: battle-autotest steps=27 joined=false turns=0 event_msgs=0 events=0 outcome=4 ⇒ FAILED

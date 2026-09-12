@@ -1,0 +1,15 @@
+Test project /private/tmp/stoneage-remediation-20260912/client
+    Start 1: d2_rules_battle
+1/5 Test #1: d2_rules_battle ..................   Passed    0.01 sec
+    Start 2: d2_rules_progression
+2/5 Test #2: d2_rules_progression .............   Passed    0.00 sec
+    Start 3: client_net
+3/5 Test #3: client_net .......................   Passed    0.00 sec
+    Start 4: engine_isolation
+4/5 Test #4: engine_isolation .................   Passed    0.05 sec
+    Start 5: code_format
+5/5 Test #5: code_format ......................   Passed    0.16 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Total Test time (real) =   0.23 sec

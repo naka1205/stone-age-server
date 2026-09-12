@@ -53,8 +53,8 @@ struct DerivedStats
 // ★ DR-DT9:截断语义 = **复刻原版整数截断**(用户 2026-09-08 拍板)。原版每个
 //   `CHAR_setWorkInt` 第三参是 `int`,浮点表达式传入即截断一次 ⇒ 本函数每个输出
 //   都是「double(或 float)公式算完 `static_cast<std::int32_t>` 截断一次」。
-//   ⚠️ 与 DR-DT1(成长率 `E_T_LVUPPOINT` 默认**不**截断、保留浮点设计意图)方向相反,
-//     不矛盾:那是连续的成长系数(atoi 截断是解析损失),这是本就为整数的战斗三围。
+//   DR-DT1 的成长系数同样恢复了原版实际 atoi 截断（2026-09-12）；
+//   这里另外保留每个战斗属性赋给整数时的截断位置。
 DerivedStats deriveBaseStats(std::int32_t vital, std::int32_t str,
                              std::int32_t tough, std::int32_t dex) noexcept;
 
@@ -81,7 +81,7 @@ struct SpawnTemplate
 	//
 	// ★★ **是浮点,不是 int**(DR-DT1)。原版载入器 `ENEMYTEMP_initEnemy`
 	//   (`char/enemy.c:305`)用 `atoi` 读 ⇒ `4.50` 截断成 `4`;
-	//   DR-DT1 裁定**浮点建模 + 配置开关**,默认按设计意图不截断
+	//   DR-DT1 裁定**浮点建模 + 配置开关**,默认复刻 atoi 截断（2026-09-12）
 	//   (`RulesConfig::replicate_atoi_truncation`)。
 	// ⚠️ 实测(2026-09-08,csa8.0 数据包 1,053 行):**569 行(54.0%)** 受影响 ——
 	//    `4.50` 538 行(截断损失 −11.1%)· `5.50` 31 行(−9.1%);其余 484 行本就是

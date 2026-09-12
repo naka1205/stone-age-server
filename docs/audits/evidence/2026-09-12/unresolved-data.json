@@ -1,0 +1,85 @@
+{
+  "binary": "csa8.0/gmsv/gmsv.exe",
+  "binary_sha256": "6dc67e6f38cc9781cae071a8088fe313b383c1aeb5a2b770afdf2dd3a1aec85a",
+  "scope": "Initialized data of the supplied B80 private-server rebuild; not an official runtime claim.",
+  "method": "COFF symbol + data section offset; int32 type/count from source; no instruction decoding.",
+  "family_exp": {
+    "location": {
+      "节": ".data",
+      "节内偏移": 133056,
+      "文件偏移": 1813952,
+      "span上界": 64,
+      "链接类别": "external",
+      "有初值": true
+    },
+    "values": [
+      0,
+      10000,
+      30000,
+      100000,
+      500000,
+      1500000,
+      5000000,
+      15000000,
+      50000000,
+      200000000,
+      500000000
+    ]
+  },
+  "family_matches_SSRC80_else": true,
+  "controls": {
+    "AC_WBSIZE": {
+      "location": {
+        "节": ".data",
+        "节内偏移": 10000,
+        "文件偏移": 1690896,
+        "span上界": 4,
+        "链接类别": "external",
+        "有初值": true
+      },
+      "values": [
+        1048576
+      ]
+    },
+    "EnemyMoveNum": {
+      "location": {
+        "节": ".data",
+        "节内偏移": 64208,
+        "文件偏移": 1745104,
+        "span上界": 32,
+        "链接类别": "external",
+        "有初值": true
+      },
+      "values": [
+        10
+      ]
+    },
+    "ConnectLen": {
+      "location": {
+        "节": ".bss",
+        "节内偏移": 1142832,
+        "文件偏移": null,
+        "span上界": 16,
+        "链接类别": "external",
+        "有初值": false
+      },
+      "values": null
+    }
+  },
+  "LevelUpTbl_141_values_match": true,
+  "skillcode_literal_in_data_sections": [],
+  "literal_limit": "A missing or present literal does not establish the loader's behavior.",
+  "sha256": {
+    "stoneage-plan/tools/probe_data_values.py": "9de3268d9aba50a5c5f8c607e31e68782a5ec79ab8dd8571c93b532d214d39e7",
+    "csa8.0/gmsv/setup.cf": "9e6e33d1ba53401decd6cba90bc8f2e65eb1b7739678ee0069020c6285f6cca2",
+    "csa8.0/gmsv/data/skillcode.txt": "bfbe60ffc9b446616142b3bd6357aceaab1856b3a334fb5beedc5c07000eff37",
+    "StoneAge/gmsv/src/char/family.c": "5a981523af96a9b77762a4e70b0e9d7f5b7d49b48560f573cb3d4b5fb4b40fbf",
+    "StoneAge/gmsv/src/battle/battle.c": "a10380b862aee077a798fab359ea89445b98aac4fc809b51a2bc7c682c7eb602",
+    "StoneAge/gmsv/src/configfile.c": "b6e43d3f857ab639184d1d9c5eabb823e1344c85ed9d3a59e1af27fa03e6010f",
+    "StoneAge/gmsv/src/include/char_base.h": "2959c40645149277878661dd49ccffd1653f11fcb55c93f03efe306e6d578d45",
+    "StoneAge/gmsv2.28_code.rar": "b25dede9790ce316a9a1b5490cbb3d8ef56dca667eafcc7af33d97f73bda78be",
+    "stoneage85/石器时代服务器端最新完整源代码/Serv.zip": "3d2f809b025259ee5da4cc419245f2c11cf27300b2940f3666b16c4b1c195e50",
+    "stoneage85/石器时代服务器端最新完整源代码/Serv/gmsv/battle/battle.c": "ce7eb0d8bf5d22903e874927307486648b74aece7f13c2f576b5943a3bc030e5",
+    "stoneage85/石器时代服务器端最新完整源代码/Serv/gmsv/configfile.c": "932d267c98d6fe875620ec712ce8880247310d70b308bdee37d42ab48869a566"
+  }
+}

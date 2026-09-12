@@ -260,6 +260,11 @@ TEST_CASE("入场后能收到事件流")
 	REQUIRE(f.world.joinBattle(battle, id, 0));
 	CHECK(f.world.sessionState(id) == SA::Net::SessionState::kOnline);
 
+	SA::Domain::BattleCommand wait{};
+	wait.battle_id = battle;
+	wait.turn = f.world.battleField(battle)->turn;
+	wait.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+	f.world.onBattleCommand(id, wait);
 	f.clock.advance(2000);
 	f.world.tick();
 	CHECK(f.world.stats(battle)->turns_resolved == 1);
@@ -302,10 +307,12 @@ TEST_CASE("断线会把会话从战斗里摘掉")
 
 	f.transport.close(id);
 	CHECK(f.world.sessionCount() == 0);
-	// 战斗本身照常推进(1.5 没有"人走了就散场"的规则,那属玩法)
+	// F19: 没有任何会话的遗留战斗已回收，不能再让幽灵玩家继续打。
 	f.clock.advance(2000);
 	f.world.tick();
-	CHECK(f.world.stats(battle)->turns_resolved == 1);
+	CHECK(f.world.stats(battle)->turns_resolved == 0);
+	CHECK(f.world.stats(battle)->finished);
+	CHECK(f.world.battleCount() == 0);
 }
 
 // ⚠️ 01 §11.2 的完整停服流程在 1.5 做不了(没有 storage、没有跨模块请求)。
@@ -365,6 +372,9 @@ struct ClientMirror
 	std::map<std::uint32_t, std::int64_t> damage_taken;
 	int battle_events_msgs = 0;
 	int damage_events = 0;
+	std::vector<SA::Domain::BattleEvents> event_batches;
+	std::vector<SA::Domain::BattleSnapshot> snapshots;
+	int results = 0;
 
 	// 喂一段服务端出站字节,把里面所有完整帧消费掉。
 	void feed(const std::vector<std::uint8_t> &bytes)
@@ -421,6 +431,7 @@ struct ClientMirror
 			decode(rd, ev);
 			REQUIRE(rd.ok());
 			++battle_events_msgs;
+			event_batches.push_back(ev);
 			for (std::size_t i = 0; i < ev.events.size(); ++i)
 			{
 				const SA::Domain::BattleEvent &e = ev.events[i];
@@ -430,6 +441,23 @@ struct ClientMirror
 					damage_taken[e.body.damage.target] += -e.body.damage.hp_delta;
 				}
 			}
+			break;
+		}
+		case SA::IDL::MsgId::BattleSnapshot:
+		{
+			SA::Domain::BattleSnapshot snapshot{};
+			decode(rd, snapshot);
+			REQUIRE(rd.ok());
+			snapshots.push_back(snapshot);
+			break;
+		}
+		case SA::IDL::MsgId::BattleResult:
+		{
+			SA::Domain::BattleResult result{};
+			decode(rd, result);
+			REQUIRE(rd.ok());
+			CHECK(result.battle_id == battle_id);
+			++results;
 			break;
 		}
 		default:
@@ -539,8 +567,10 @@ TEST_CASE("demo 装配:握手即入场,且入场信息先于事件流到达")
 	const DemoRun run = runDemo(false, 0x2026'09'06ull);
 
 	CHECK(run.mirror.count(SA::IDL::MsgId::HandshakeAccepted) == 1);
-	CHECK(run.mirror.count(SA::IDL::MsgId::BattleSelfInfo) == 1);
+	CHECK(run.mirror.count(SA::IDL::MsgId::BattleSelfInfo) >= 1);
 	CHECK(run.mirror.has_self);
+	REQUIRE_FALSE(run.mirror.snapshots.empty());
+	CHECK(run.mirror.snapshots.front().combatants[0].hp == 860);
 	CHECK(run.mirror.self.slot == 0);
 	CHECK(run.mirror.self.battle_id != 0);
 	// ★ DR-BT5:cannot_act 取自 Rules::CheckCanAct 这个唯一真源,
@@ -869,6 +899,7 @@ TEST_CASE("L2:宠物槽满是捕获的门 —— 第 6 只抓不进来,且世界
 	REQUIRE(f.world.playerCaptureCount(id) == 5);
 
 	// ★★ 第 6 次:判定照样通过(L3 不知道槽满),但世界写在**门**上失败。
+	f.transport.clearSent(id);
 	captureTurn(f, id, battle, SA::Rules::kSideOffset + 5);
 
 	CHECK(f.world.petCount() == 5);             // 没有第 6 只宠物
@@ -877,6 +908,17 @@ TEST_CASE("L2:宠物槽满是捕获的门 —— 第 6 只抓不进来,且世界
 	const SA::Rules::BattleField *fld = f.world.battleField(battle);
 	REQUIRE(fld != nullptr);
 	CHECK(fld->at(SA::Rules::kSideOffset + 5).occupied);
+	ClientMirror mirror;
+	mirror.feed(f.transport.sent(id));
+	int capture_events = 0;
+	for (const auto &batch : mirror.event_batches)
+		for (const auto &event : batch.events)
+			if (event.body_kind == SA::Domain::BattleEvent::BodyKind::CAPTURE_ACT)
+			{
+				++capture_events;
+				CHECK(event.body.capture_act.flags == 0); // 失败必须在发包前纠正。
+			}
+	CHECK(capture_events == 1);
 }
 
 TEST_CASE("L2:断线释放主人时,它的宠物一并回池")
@@ -931,7 +973,7 @@ TEST_CASE("骑宠 HP:pet_hp_delta 落到 ride_hp,并夹在 0 以上")
 	f.transport.deliver(id, hs.data(), hs.size());
 	f.world.tick();
 
-	// 己方带骑宠且防御低 ⇒ 敌方每回合都能打出分摊伤害(§3.6,DR-BT2 修正式)。
+	// 己方带骑宠且防御低 ⇒ 敌方每回合都能打出分摊伤害(§3.6,DR-BT2 原式)。
 	SA::Rules::BattleField field{};
 	SA::Rules::Combatant &me = field.at(0);
 	me.occupied = true;
@@ -973,6 +1015,11 @@ TEST_CASE("骑宠 HP:pet_hp_delta 落到 ride_hp,并夹在 0 以上")
 	bool dropped = false;
 	for (int i = 0; i < 12; ++i)
 	{
+		SA::Domain::BattleCommand wait{};
+		wait.battle_id = battle;
+		wait.turn = f.world.battleField(battle)->turn;
+		wait.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+		f.world.onBattleCommand(id, wait);
 		f.clock.advance(2000);
 		f.world.tick();
 		const SA::Rules::BattleField *fld = f.world.battleField(battle);
@@ -1272,12 +1319,21 @@ TEST_CASE("DR-BT21:叫出空槽 ⇒ 叫不出,宠位空、default_pet 不变")
 	const BattleId battle = joinCapturable(f, id, 2);
 	captureTurn(f, id, battle, SA::Rules::kSideOffset); // 只有 pets[0]
 
+	f.transport.clearSent(id);
 	petOutTurn(f, id, battle, 4); // pets[4] 空 ⇒ no_pet,不入场
 
 	const SA::Rules::BattleField *fld = f.world.battleField(battle);
 	REQUIRE(fld != nullptr);
 	CHECK_FALSE(fld->at(SA::Rules::kBattlePlayerMax).occupied);
 	CHECK(f.world.playerDefaultPet(id) == -1);
+	ClientMirror mirror;
+	mirror.feed(f.transport.sent(id));
+	for (const auto &batch : mirror.event_batches)
+		for (const auto &event : batch.events)
+		{
+			CHECK(event.body_kind != SA::Domain::BattleEvent::BodyKind::PET_SWITCH);
+			CHECK(event.body_kind != SA::Domain::BattleEvent::BodyKind::ENTER);
+		}
 }
 
 TEST_CASE("DR-BT21:joinBattle 自动带出出战宠(default_pet 跨战斗)")
@@ -1288,6 +1344,20 @@ TEST_CASE("DR-BT21:joinBattle 自动带出出战宠(default_pet 跨战斗)")
 	captureTurn(f, id, battle1, SA::Rules::kSideOffset);
 	petOutTurn(f, id, battle1, 0);
 	REQUIRE(f.world.playerDefaultPet(id) == 0); // 出战宠已定
+
+	// 先实际结束上一场，不能用一人同时加入两场的旧缺陷充当跨战斗测试。
+	auto *old_field = const_cast<SA::Rules::BattleField *>(f.world.battleField(battle1));
+	old_field->at(0).attack = 10000;
+	old_field->at(11).mods.no_duck = true;
+	SA::Domain::BattleCommand finish{};
+	finish.battle_id = battle1;
+	finish.turn = old_field->turn;
+	finish.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+	finish.command.attack.target = 11;
+	f.world.onBattleCommand(id, finish);
+	f.clock.advance(2000);
+	f.world.tick();
+	REQUIRE(f.world.stats(battle1)->finished);
 
 	// ★ 同一会话进入新战斗:joinBattle 读 default_pet 自动带宠(本批激活的链路)。
 	//   ⚠️ demo 玩家 default_pet 恒 -1 ⇒ demo 不触发;这里靠先 PET_OUT 设好它来验证。
@@ -1461,10 +1531,10 @@ TEST_CASE("M.4b:spawnEnemy 逐值 —— 四维 / 满血 / 评级 / 两张表的
 	               SA::Rules::RulesConfig{});
 
 	// ★★ 四维非 0 且逐值 —— 这就是欠债 23 找的那个"来源"(源码 :1067-1070)。
-	CHECK(e.vital == 2595);
-	CHECK(e.str == 1038);
-	CHECK(e.tough == 1297);
-	CHECK(e.dex == 2162);
+	CHECK(e.vital == 2340);
+	CHECK(e.str == 936);
+	CHECK(e.tough == 1170);
+	CHECK(e.dex == 1950);
 
 	// 成长率取「+10 之前」的基数(源码 :1052-1056 在撒点循环之前)。
 	CHECK(e.growth_vital == 20);
@@ -1475,7 +1545,7 @@ TEST_CASE("M.4b:spawnEnemy 逐值 —— 四维 / 满血 / 评级 / 两张表的
 	// ★ 满血入场 = 推导出的 max_hp(源码 :1153 推导 → :1159 `HP = WORKMAXHP`)。
 	const SA::Rules::DerivedStats d =
 	    SA::Rules::deriveBaseStats(e.vital, e.str, e.tough, e.dex);
-	CHECK(d.max_hp == 148);
+	CHECK(d.max_hp == 134);
 	CHECK(e.hp == d.max_hp);
 
 	// ⚠️ MP 恒 0 —— 源码从不写它,默认模板 `player` 里也是 0(Enemy.h 记明)。
@@ -1532,7 +1602,7 @@ TEST_CASE("M.4b:等级是入参 —— 同模板不同等级 ⇒ 四维按 coef 
 
 	// level 1 ⇒ coef = init_num = 10;level 18 ⇒ 86.5 ⇒ 基数 30 各乘之。
 	CHECK(lo.vital == 300);
-	CHECK(hi.vital == 2595);
+	CHECK(hi.vital == 2340);
 	CHECK(lo.level == 1);
 	CHECK(hi.level == 18);
 	// ★ 成长率与等级无关(它在 PARAM_CAL 之前就定了)。
@@ -1617,10 +1687,10 @@ TEST_CASE("M.5★★:摇出的等级真的喂进四维生成 —— 逐值,不�
 	               SA::Rules::RulesConfig{});
 
 	CHECK(e.level == 5);
-	CHECK(e.vital == 840); // 30 × 28 ⇒ 若误用 baselevel(0) 会是 165
-	CHECK(e.str == 336);   // 12 × 28
-	CHECK(e.tough == 420); // 15 × 28
-	CHECK(e.dex == 700);   // 25 × 28
+	CHECK(e.vital == 780); // 30 × 28 ⇒ 若误用 baselevel(0) 会是 165
+	CHECK(e.str == 312);   // 12 × 28
+	CHECK(e.tough == 390); // 15 × 28
+	CHECK(e.dex == 650);   // 25 × 28
 }
 
 TEST_CASE("M.5★★:capturable 来自敌人表,不是模板表 —— 同模板两行,一可捕一不可捕")
@@ -1732,11 +1802,11 @@ TEST_CASE("M.4b:enterEnemyToField 投影 —— 三围由四维推出,捕获两�
 	CHECK(c.kind == SA::Rules::CombatantKind::kEnemy);
 	CHECK(c.slot == SA::Rules::kSideOffset);
 	CHECK(c.level == 18);
-	CHECK(c.attack == 15);
-	CHECK(c.defense == 17);
-	CHECK(c.quick == 21);
-	CHECK(c.max_hp == 148);
-	CHECK(c.hp == 148); // 满血
+	CHECK(c.attack == 13);
+	CHECK(c.defense == 15);
+	CHECK(c.quick == 19);
+	CHECK(c.max_hp == 134);
+	CHECK(c.hp == 134); // 满血
 
 	// ⚠️★★ 四属**按具名下标**核 —— 模板是 地 80 / 水 20 / 火 0 / 风 0。
 	//    按位置拷会把 80 写进 `elements[0]` 恰好也对(kEarth==0),但水火会互换 ⇒
@@ -1758,7 +1828,7 @@ TEST_CASE("M.4b:enterEnemyToField 投影 —— 三围由四维推出,捕获两�
 	CHECK_FALSE(c.mods.immune_knockback);
 }
 
-TEST_CASE("M.4b:enterEnemyToField 两道门 —— 宠位 / 越界 / 已占槽都不入场")
+TEST_CASE("M.4b:enterEnemyToField 敌方十格；越界 / 已占槽不入场")
 {
 	ScriptedRandom rng({2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
 	const SA::Model::Enemy e =
@@ -1767,8 +1837,8 @@ TEST_CASE("M.4b:enterEnemyToField 两道门 —— 宠位 / 越界 / 已占槽�
 	SA::Rules::BattleField f{};
 
 	// 门 ①:宠位(每 side 的后 5 槽)与越界。
-	CHECK_FALSE(enterEnemyToField(f, SA::Rules::kBattlePlayerMax, e));
-	CHECK_FALSE(enterEnemyToField(f, SA::Rules::kSideOffset + SA::Rules::kBattlePlayerMax, e));
+	CHECK(enterEnemyToField(f, SA::Rules::kBattlePlayerMax, e));
+	CHECK(enterEnemyToField(f, SA::Rules::kSideOffset + SA::Rules::kBattlePlayerMax, e));
 	CHECK_FALSE(enterEnemyToField(f, SA::Rules::kSlotCount, e));
 	CHECK_FALSE(enterEnemyToField(f, -1, e));
 
@@ -1845,7 +1915,9 @@ TEST_CASE("M.4b:入场失败要把实体还回池 —— 预留可回滚,不留�
 	//    ⚠️ 漏了它,每次"槽被占"都泄漏一个槽,而入场失败是完全正常的事件。
 	CHECK(f.world.enemyCount() == 0);
 
-	// 宠位同理(门 ①)。
+	// 后五格允许敌人使用；用已占槽验证预留回滚（F14）。
+	auto *occupied = const_cast<SA::Rules::BattleField *>(f.world.battleField(battle));
+	occupied->at(15).occupied = true;
 	CHECK_FALSE(f.world.spawnEnemyToField(
 	    battle, static_cast<std::uint8_t>(SA::Rules::kSideOffset + SA::Rules::kBattlePlayerMax),
 	    makeWuliTemplate(), makeWuliEncounterFixedLv1(), 18));
@@ -3439,4 +3511,399 @@ TEST_CASE("状态★★:投影拷的是**原始四维**而不是推导三围(拿
 	CHECK(e.dex > 0);
 	// ★★ 判据:四维之和与三围之和不相等 —— 若投影误把三围拷进四维,这条红。
 	CHECK((e.vital + e.str + e.tough + e.dex) != (e.attack + e.defense + e.quick));
+}
+
+TEST_CASE("F07:麻痹或先手死亡导致未执行用药，不扣背包")
+{
+	for (bool killed : {false, true})
+	{
+		Fixture f;
+		const auto id = f.transport.connect();
+		const auto hs = handshakeBytes(f.config.protocol_version);
+		f.transport.deliver(id, hs.data(), hs.size());
+		f.world.tick();
+		f.world.loadItemEffects({{1001, 100}});
+		auto field = makeFieldEnemyStrong();
+		field.at(0).hp = 10;
+		field.at(0).status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_PARALYSIS);
+		field.at(0).status_turns = 3;
+		field.at(10).quick = 10000;
+		field.at(10).attack = killed ? 1000 : 0;
+		field.at(0).mods.immune_critical = true;
+		field.at(0).mods.no_duck = true;
+		const auto battle = f.world.startBattle(field);
+		REQUIRE(f.world.joinBattle(battle, id, 0));
+		const int slot = f.world.giveItemToPlayer(id, makeItem(1001, 2));
+		REQUIRE(slot >= 0);
+		useItemTurn(f, id, battle, slot, 0);
+		CHECK(f.world.playerItemPile(id, slot) == 2);
+		CHECK(f.world.battleField(battle)->at(0).dead == killed);
+	}
+}
+
+TEST_CASE("F04/F08:捕获目标不再行动，宠物受伤收回再入场保持 HP")
+{
+	Fixture f;
+	const auto id = f.transport.connect();
+	const auto battle = joinWithSpawnedEnemies(f, id, 2, 1);
+	auto *field = const_cast<SA::Rules::BattleField *>(f.world.battleField(battle));
+	field->at(0).mods.capture_bonus = 10000;
+	field->at(10).attack = 10000;
+	f.transport.clearSent(id);
+	captureTurn(f, id, battle, 10);
+	REQUIRE(f.world.petCount() == 1);
+	ClientMirror mirror;
+	mirror.feed(f.transport.sent(id));
+	for (const auto &batch : mirror.event_batches)
+		for (const auto &event : batch.events)
+			if (event.body_kind == SA::Domain::BattleEvent::BodyKind::HIT)
+				CHECK(event.body.hit.attacker != 10);
+	petOutTurn(f, id, battle, 0);
+	field = const_cast<SA::Rules::BattleField *>(f.world.battleField(battle));
+	REQUIRE(field->at(5).occupied);
+	const int before = field->at(5).hp;
+	// 用完整伤害提交链打到持有宠物，而不是直接修改其 HP 来代替回写验收。
+	field->at(0).attack = 5;
+	field->at(5).defense = 1;
+	field->at(5).mods.no_duck = true;
+	field->at(5).mods.immune_critical = true;
+	attackTurn(f, id, battle, 5);
+	const int injury = f.world.battleField(battle)->at(5).hp;
+	REQUIRE(injury > 0);
+	REQUIRE(injury < before);
+	CHECK(f.world.playerPetAt(id, 0)->hp == injury);
+	petInTurn(f, id, battle);
+	CHECK(f.world.playerPetAt(id, 0)->hp == injury);
+	petOutTurn(f, id, battle, 0);
+	CHECK(f.world.battleField(battle)->at(5).hp == injury);
+}
+
+TEST_CASE("F09/F19:断线道具回收，历史观察有界且活跃战斗归零")
+{
+	Fixture f;
+	const auto id = f.transport.connect();
+	const auto hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.giveItemToPlayer(id, makeItem(1234)) >= 0);
+	f.transport.close(id);
+	CHECK(f.world.playerCount() == 0);
+	CHECK(f.world.itemCount() == 0);
+	BattleId first = 0, last = 0;
+	for (int i = 0; i < 140; ++i)
+	{
+		auto field = makeFieldEnemyStrong();
+		field.at(0).hp = 1;
+		field.at(0).mods.no_duck = true;
+		last = f.world.startBattle(field);
+		if (i == 0)
+			first = last;
+		f.clock.advance(2000);
+		f.world.tick();
+		REQUIRE(f.world.stats(last)->finished);
+		CHECK(f.world.battleCount() == 0);
+	}
+	CHECK(f.world.stats(first) == nullptr);
+	CHECK(f.world.battleField(first) == nullptr);
+	CHECK(f.world.stats(last) != nullptr);
+	CHECK(f.world.enemyCount() == 0);
+}
+
+TEST_CASE("F10:入战清除排队走路，战斗内走路请求不移动")
+{
+	Fixture f;
+	const auto id = f.transport.connect();
+	const auto hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	const auto before = f.world.playerPos(id);
+	SA::Domain::WalkRequest walk{};
+	walk.x = before.x;
+	walk.y = before.y;
+	walk.direction.assign("ccc");
+	f.world.onWalk(id, walk);
+	const auto battle = f.world.startBattle(makeField());
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	f.world.tick();
+	CHECK(f.world.playerPos(id).x == before.x);
+	f.world.onWalk(id, walk);
+	f.clock.advance(100);
+	f.world.tick();
+	CHECK(f.world.playerPos(id).x == before.x);
+	CHECK(f.world.playerPos(id).y == before.y);
+}
+
+TEST_CASE("F14/F15:敌方十格可入场，真实背包控制两道遇敌门")
+{
+	SA::Rules::BattleField slots{};
+	SA::Model::Enemy enemy{};
+	enemy.hp = 20;
+	enemy.level = 1;
+	enemy.vital = enemy.str = enemy.tough = enemy.dex = 500;
+	for (int slot = 10; slot < 20; ++slot)
+		REQUIRE(enterEnemyToField(slots, slot, enemy));
+	CHECK_FALSE(enterEnemyToField(slots, 20, enemy));
+	for (bool has_item : {false, true})
+		for (bool exclude : {false, true})
+		{
+			Fixture f;
+			const auto id = f.transport.connect();
+			const auto hs = handshakeBytes(f.config.protocol_version);
+			f.transport.deliver(id, hs.data(), hs.size());
+			f.world.tick();
+			if (has_item)
+				REQUIRE(f.world.giveItemToPlayer(id, makeItem(999)) >= 0);
+			EncountArea area{};
+			area.enemy_max_num = 1;
+			area.floor = f.world.playerPos(id).floor;
+			area.width = area.height = 63;
+			area.zorder = 1;
+			area.prob_min = area.prob_max = 120;
+			area.group_id.fill(-1);
+			area.group_id[0] = 1;
+			area.group_prob[0] = 1;
+			EnemyGroup group{};
+			group.group_id = 1;
+			group.appear_by_item_id = exclude ? -1 : 999;
+			group.not_appear_by_item_id = exclude ? 999 : -1;
+			group.enemy_id.fill(-1);
+			group.enemy_id[0] = 9;
+			group.create_prob[0] = 1;
+			auto encounter = makeWuliEncounterFixedLv1();
+			encounter.enemy_id = 9;
+			encounter.temp_no = 1;
+			auto tmpl = makeWuliTemplate();
+			tmpl.temp_no = 1;
+			f.world.loadEncounterTables({area}, {group}, {encounter}, {tmpl});
+			const auto position = f.world.playerPos(id);
+			SA::Domain::WalkRequest walk{};
+			walk.x = position.x;
+			walk.y = position.y;
+			walk.direction.assign("c");
+			f.world.onWalk(id, walk);
+			f.world.tick();
+			CHECK(f.world.enemyCount() == static_cast<std::size_t>(has_item != exclude));
+		}
+}
+
+TEST_CASE("F18:死亡掉落抽签必须先于下一位攻击的随机数")
+{
+	Fixture f;
+	const auto id = f.transport.connect();
+	const auto hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	auto initial = makePlayerOnlyField();
+	const auto battle = f.world.startBattle(initial);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	auto encounter = makeWuliEncounterFixedLv1();
+	for (auto &probability : encounter.item_prob)
+		probability = 0;
+	for (int slot : {10, 11})
+		REQUIRE(f.world.spawnEnemyToField(battle, static_cast<std::uint8_t>(slot), makeWuliTemplate(), encounter, 1));
+	auto *field = const_cast<SA::Rules::BattleField *>(f.world.battleField(battle));
+	for (int slot : {0, 10, 11})
+	{
+		auto &unit = field->at(slot);
+		unit.level = 1;
+		unit.hp = unit.max_hp = 100000;
+		unit.attack = 100;
+		unit.defense = 0;
+		unit.quick = slot == 0 ? 1000 : 0;
+		unit.mods = SA::Rules::CombatModifiers{};
+		unit.mods.unarmed = true;
+		unit.mods.no_duck = true;
+		unit.mods.immune_critical = true;
+		for (auto &element : unit.elements)
+			element = 0;
+	}
+	field->at(10).hp = field->at(10).max_hp = 1;
+	auto *drop = const_cast<SA::Model::Enemy *>(f.world.battleEnemyAt(battle, 10));
+	drop->drop_count = 1;
+	drop->dropped_items[0] = 777;
+	const auto reference = *field;
+	const auto expectedDamage = [&](int prefix)
+	{
+		SA::Platform::RandomSource seeds{0xABCDEF};
+		SA::Rules::SeededRandom rng{seeds.nextSeed()};
+		// 28 次生成 + 3 次排序 + 首次攻击的暴击/防御扰动/伤害 + 掉落 + 次次暴击。
+		for (int i = 0; i < prefix; ++i)
+			(void)rng.rand(0, 0);
+		return SA::Rules::computeDamage(reference, reference.at(11), reference.at(0), SA::Rules::RulesConfig{}, rng);
+	};
+	const int expected = expectedDamage(36);
+	REQUIRE(expected != expectedDamage(35)); // 控制：本夹具能区分延后掉落的旧路径。
+	attackTurn(f, id, battle, 10);
+	CHECK(f.world.battleField(battle)->at(0).hp == 100000 - expected);
+	CHECK(f.world.playerItemSlotsUsed(id) == 0); // 抽签已发生，结束前仍是暂存。
+}
+
+TEST_CASE("回合契约:未提交时不空转，状态只在已就绪的回合推进")
+{
+	Fixture f;
+	const auto id = f.transport.connect();
+	const auto hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	auto field = makeField();
+	field.at(0).status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+	field.at(0).status_turns = 4;
+	const auto battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	for (int i = 0; i < 3; ++i)
+	{
+		f.clock.advance(1000);
+		f.world.tick();
+	}
+	CHECK(f.world.stats(battle)->turns_resolved == 0);
+	CHECK(f.world.battleField(battle)->at(0).status_turns == 4);
+	SA::Domain::BattleCommand wait{};
+	wait.battle_id = battle;
+	wait.turn = f.world.battleField(battle)->turn;
+	wait.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+	f.world.onBattleCommand(id, wait);
+	f.world.tick();
+	CHECK(f.world.stats(battle)->turns_resolved == 1);
+	CHECK(f.world.battleField(battle)->at(0).status_turns == 3);
+	f.clock.advance(3601000);
+	f.world.tick();
+	ClientMirror mirror;
+	mirror.feed(f.transport.sent(id));
+	CHECK(mirror.count(SA::IDL::MsgId::BattleLeave) == 1);
+	CHECK(f.world.battleCount() == 0);
+}
+
+TEST_CASE("回合契约:首个玩家指令启动 120 秒等待，超时者离场而非自动防御")
+{
+	Fixture f;
+	const auto first = f.transport.connect();
+	const auto second = f.transport.connect();
+	const auto hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(first, hs.data(), hs.size());
+	f.transport.deliver(second, hs.data(), hs.size());
+	f.world.tick();
+	auto field = makeField();
+	field.at(1) = field.at(0);
+	field.at(1).slot = 1;
+	const auto battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, first, 0));
+	REQUIRE(f.world.joinBattle(battle, second, 1));
+	SA::Domain::BattleCommand wait{};
+	wait.battle_id = battle;
+	wait.turn = field.turn;
+	wait.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+	f.world.onBattleCommand(first, wait);
+	f.clock.advance(120000);
+	f.world.tick();
+	CHECK(f.world.stats(battle)->turns_resolved == 0);
+	f.clock.advance(1000);
+	f.world.tick();
+	CHECK(f.world.stats(battle)->turns_resolved == 1);
+	CHECK_FALSE(f.world.battleField(battle)->at(1).occupied);
+	ClientMirror mirror;
+	mirror.feed(f.transport.sent(second));
+	CHECK(mirror.count(SA::IDL::MsgId::BattleLeave) == 1);
+	CHECK(f.world.playerCount() == 2); // 离开战斗不等于断线/删角色。
+}
+
+TEST_CASE("回合输出超过 256 条时分包，动作和状态不截断")
+{
+	Fixture f;
+	const auto id = f.transport.connect();
+	const auto hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	auto field = makeField();
+	field.at(0).hp = field.at(0).max_hp = 1000000;
+	field.at(0).defense = 1000;
+	field.at(0).mods.no_duck = true;
+	field.at(0).mods.immune_critical = true;
+	for (int slot = 10; slot < 20; ++slot)
+	{
+		field.at(slot) = field.at(10);
+		field.at(slot).slot = static_cast<std::uint8_t>(slot);
+		field.at(slot).attack = 0;
+		field.at(slot).mods.unarmed = false;
+		field.at(slot).mods.attack_num_min = field.at(slot).mods.attack_num_max = 30;
+	}
+	const auto battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	SA::Domain::BattleCommand wait{};
+	wait.battle_id = battle;
+	wait.turn = field.turn;
+	wait.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+	f.world.onBattleCommand(id, wait);
+	f.clock.advance(1000);
+	f.world.tick();
+	CHECK_FALSE(f.world.stats(battle)->truncated_once);
+	CHECK(f.world.stats(battle)->turns_resolved == 1);
+	CHECK(f.world.stats(battle)->events_emitted == 310);
+	ClientMirror mirror;
+	mirror.feed(f.transport.sent(id));
+	CHECK(mirror.battle_events_msgs == 2);
+	CHECK(mirror.damage_events == 300);
+}
+
+TEST_CASE("单动作溢出时不提交伤害前缀、不推进回合，并真实关闭会话")
+{
+	Fixture f;
+	const auto id = f.transport.connect();
+	const auto hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	auto field = makeField();
+	field.at(0).hp = field.at(0).max_hp = 1000000;
+	field.at(0).defense = 0;
+	field.at(0).mods.no_duck = true;
+	field.at(0).mods.immune_critical = true;
+	field.at(10).attack = 100;
+	field.at(10).mods.unarmed = false;
+	field.at(10).mods.attack_num_min = field.at(10).mods.attack_num_max = 10000;
+	const auto battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	SA::Domain::BattleCommand wait{};
+	wait.battle_id = battle;
+	wait.turn = field.turn;
+	wait.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+	f.world.onBattleCommand(id, wait);
+	f.clock.advance(1000);
+	f.world.tick();
+	CHECK(f.world.stats(battle)->truncated_once);
+	CHECK(f.world.stats(battle)->turns_resolved == 0);
+	CHECK(f.world.battleField(battle)->at(0).hp == 1000000);
+	CHECK(f.world.battleCount() == 0);
+	CHECK(f.world.sessionCount() == 0);
+}
+
+TEST_CASE("发送失败同步触发断线时，握手拒绝和 tick 出站都不再访问已释放会话")
+{
+	struct DisconnectOnSend final : SA::Net::Transport
+	{
+		SA::Net::TransportEvents *events = nullptr;
+		int sends = 0;
+		void setEvents(SA::Net::TransportEvents *value) override { events = value; }
+		bool send(SA::Net::ConnectionId id, const std::uint8_t *, std::size_t) override
+		{
+			++sends;
+			events->onDisconnected(id);
+			return false;
+		}
+		void close(SA::Net::ConnectionId id) override { events->onDisconnected(id); }
+		void poll() override {}
+	} transport;
+	auto config = makeConfig();
+	SA::Platform::ManualClock clock{0};
+	SA::Platform::Logger logger{SA::Platform::LogLevel::kError};
+	SA::Platform::RandomSource random{0xABCDEF};
+	World world{config, clock, logger, random, transport};
+	world.onConnected(1);
+	std::uint32_t version = config.protocol_version;
+	SUBCASE("握手拒绝的即时回复") { ++version; }
+	SUBCASE("握手成功后的聚合出站") {}
+	const auto hs = handshakeBytes(version);
+	world.onBytes(1, hs.data(), hs.size());
+	world.tick();
+	CHECK(transport.sends == 1);
+	CHECK(world.sessionCount() == 0);
+	CHECK(world.playerCount() == 0);
 }

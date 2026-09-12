@@ -1,0 +1,45 @@
+Test project /private/tmp/stoneage-remediation-20260912/server
+      Start  1: contract_smoke
+ 1/17 Test  #1: contract_smoke ...................Subprocess aborted***Exception:   0.90 sec
+Assertion failed: (!cfg.replicate_atoi_truncation), function checkConfigDefaults, file ContractSmoke.cpp, line 259.
+
+      Start  2: rules_battle
+ 2/17 Test  #2: rules_battle .....................   Passed    0.00 sec
+      Start  3: rules_progression
+ 3/17 Test  #3: rules_progression ................   Passed    0.00 sec
+      Start  4: model_pool
+ 4/17 Test  #4: model_pool .......................   Passed    0.36 sec
+      Start  5: idl_smoke
+ 5/17 Test  #5: idl_smoke ........................   Passed    0.36 sec
+      Start  6: net_framing
+ 6/17 Test  #6: net_framing ......................   Passed    0.36 sec
+      Start  7: net_tcp
+ 7/17 Test  #7: net_tcp ..........................   Passed    0.45 sec
+      Start  8: platform_config
+ 8/17 Test  #8: platform_config ..................   Passed    0.36 sec
+      Start  9: world_tick
+ 9/17 Test  #9: world_tick .......................   Passed    0.01 sec
+      Start 10: world_map
+10/17 Test #10: world_map ........................   Passed    0.37 sec
+      Start 11: server_self_test
+11/17 Test #11: server_self_test .................   Passed    2.38 sec
+      Start 12: shared_purity
+12/17 Test #12: shared_purity ....................   Passed    0.02 sec
+      Start 13: module_boundaries
+13/17 Test #13: module_boundaries ................   Passed    0.02 sec
+      Start 14: idl_verify
+14/17 Test #14: idl_verify .......................   Passed    0.10 sec
+      Start 15: dr_table
+15/17 Test #15: dr_table .........................   Passed    0.02 sec
+      Start 16: docs_index
+16/17 Test #16: docs_index .......................   Passed    0.04 sec
+      Start 17: code_format
+17/17 Test #17: code_format ......................   Passed    0.66 sec
+
+94% tests passed, 1 tests failed out of 17
+
+Total Test time (real) =   6.41 sec
+
+The following tests FAILED:
+	  1 - contract_smoke (Subprocess aborted)
+Errors while running CTest

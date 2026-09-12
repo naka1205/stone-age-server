@@ -165,13 +165,9 @@ inline constexpr int kKnockbackHpBonus = 20;          // + 20
 // [8.0] 05-battle.md §2.5:`排序键 = dex + sequence`,
 //       `dex = BATTLE_DexCalc(...)` 基数 = `WORKQUICK + 20`,再按指令种类分 9 档修正。
 //
-// ⚠️★ **`if (dex <= 1) dex = 1;` 在原版是被注释掉的** ⇒ **dex 可为 0 甚至负**。
-//    新实现不得"顺手加个下限" —— 那会改变慢速单位之间的相对顺序。
+// F03/U01：SSRC80 为 0.3 且 dex<=0 置 1，SSRC85 为 0.1 且无下限。
+// 现保留 0.1/无下限作为待核选择；双方共同基数为 quick+20，道具再加 15%。
 inline constexpr int kDexBase = 20;
-
-// 默认档(普攻 / 防御)的修正:`dex −= RAND(0, 0.1·WORKQUICK)`。
-// ⚠️ 其余 8 档(变身 ×0.8 / 附体 −RAND(0.3w,0.5w) / 疾速 +30% / 暗月 +20% /
-//    道具 −RAND(0,0.1w)+15% …)绑在尚未接入的指令上 ⇒ 批次 0.5 不实现,见 battle.cpp。
 inline constexpr double kDexJitterRatio = 0.1;
 
 // ── 空手连击的段数分档(DR-BT1)──────────────────────────────────

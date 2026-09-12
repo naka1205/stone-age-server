@@ -334,7 +334,7 @@ std::int32_t computeDamage(const BattleField &field,
 	std::int32_t damage = 0;
 	if (defense <= attack && attack < (defense * 8.0 / 7.0))
 	{
-		damage = rng.rand(0, static_cast<int>(attack * kD16));
+		damage = static_cast<int>(rng.randReal(0, attack * kD16));
 	}
 	else if (defense > attack)
 	{
@@ -342,7 +342,7 @@ std::int32_t computeDamage(const BattleField &field,
 	}
 	else if (attack >= (defense * 8 / 7))
 	{
-		const f32 k0 = static_cast<f32>(rng.rand(0, static_cast<int>(attack * kD8)) -
+		const f32 k0 = static_cast<f32>(rng.randReal(0, attack * kD8) -
 		                                attack * kD16);
 		damage = static_cast<std::int32_t>((attack - defense) * kDamageRate + k0);
 	}
@@ -471,7 +471,7 @@ bool rollDodge(const Combatant &attacker,
 	per += df_luck;
 	per += config.dodge_modifier; // 原 gBattleDuckModyfy(① g* 参数化)
 
-	if (attacker.drunk)
+	if (attacker.status == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_DRUNK) && attacker.status_turns > 0)
 		per += rng.rand(20, 30); // ★ 酒醉真正生效处
 	if (attacker.mods.wielding_bow)
 		per += kDodgeBonusBow;
@@ -489,7 +489,7 @@ bool rollDodge(const Combatant &attacker,
 	if (attacker.isPlayer() && attacker.mods.hit_right != 0)
 	{
 		const int hit = attacker.mods.hit_right;
-		per -= rng.rand(static_cast<int>(hit * 0.8), static_cast<int>(hit * 1.2));
+		per -= rng.randReal(hit * 0.8, hit * 1.2);
 		if (per < 0)
 			per = 0;
 	}
@@ -706,16 +706,15 @@ std::int32_t computeActionDex(const Combatant &c,
                               const SA::Domain::BattleCommand &command,
                               Random &rng) noexcept
 {
-	// 基数(`BATTLE_DexCalc`):WORKQUICK + 20。
-	std::int32_t dex = c.quick + kDexBase;
-
-	// ⚠️ 批次 0.5 只有默认档。★ 但**必须把 command 收进入参**:其余 8 档全部
-	//    按指令种类分,签名现在不收、将来就得改所有调用点与全部用例。
-	(void)command;
-	dex -= rng.rand(0, static_cast<int>(c.quick * kDexJitterRatio));
-
-	// ⚠️★ **不夹下限。** 原版 `if (dex <= 1) dex = 1;` 是被注释掉的 ⇒ dex 可为 0 或负。
-	return dex + c.mods.sequence;
+	// SSRC80 battle.c:4297–4312 / SSRC85:5409–5423 的共同部分。
+	// 系数 0.1 / 不夹下限暂保留为 U01 待核选择，不能称 B80 已证实。
+	const int work = c.quick + kDexBase;
+	const double jitter = rng.randReal(0, work * kDexJitterRatio);
+	const double priority = command.command_kind ==
+	                                SA::Domain::BattleCommand::CommandKind::USE_ITEM
+	                            ? work * 0.15
+	                            : 0.0;
+	return static_cast<std::int32_t>(work - jitter + priority) + c.mods.sequence;
 }
 
 int buildActionOrder(const BattleField &field,
@@ -731,11 +730,13 @@ int buildActionOrder(const BattleField &field,
 	for (int i = 0; i < kSlotCount; ++i)
 	{
 		const Combatant &c = field.at(i);
-		if (!c.occupied || c.dead)
+		if (!c.occupied)
 			continue;
-		if (!commands.present[i])
-			continue; // 无指令 ⇒ 本回合不行动(敌方由 AI 填齐)
-		keys[count] = computeActionDex(c, commands.commands[i], rng);
+		// SSRC80 battle.c:6994–7005 先为所有占位抽速度；死亡/未就绪在 7053 后跳过。
+		const auto key = computeActionDex(c, commands.commands[i], rng);
+		if (c.dead || c.hp <= 0 || !commands.present[i])
+			continue;
+		keys[count] = key;
 		order[count] = static_cast<std::uint8_t>(i);
 		++count;
 	}
@@ -819,21 +820,15 @@ RideSplit splitRideDamage(std::int32_t damage,
                           std::int32_t my_defense,
                           std::int32_t pet_defense) noexcept
 {
+	// SSRC80 battle_event.c:2105–2116，普通伤害分支先把两防御夹到 1。
+	// 两条 +1 的合计效果是总伤 +1（第二条用的是已增加后的 playerdamage）。
+	if (damage <= 0)
+		return RideSplit{damage, 0};
+	const std::int64_t mine = my_defense > 0 ? my_defense : 1;
+	const std::int64_t pet = pet_defense > 0 ? pet_defense : 1;
 	RideSplit split;
-	const std::int64_t total_def =
-	    static_cast<std::int64_t>(my_defense) + pet_defense;
-	if (total_def <= 0)
-	{
-		// 双方防御都是 0 ⇒ 比例无定义。★ 全部记在主人身上,不是各半 ——
-		//   原式在这种情形下会除零,新实现必须显式选一个,且不能让宠物凭空扛伤。
-		split.player = damage;
-		split.pet = 0;
-		return split;
-	}
-	// ★ DR-BT2 修正:分子是 **myDef**(防御高者多扛),且**无 +1** ⇒ 无损分摊。
-	split.player = static_cast<std::int32_t>(
-	    static_cast<std::int64_t>(damage) * my_defense / total_def);
-	split.pet = damage - split.player;
+	split.player = static_cast<std::int32_t>(damage * pet / (mine + pet)) + 1;
+	split.pet = damage - split.player + 1;
 	return split;
 }
 
@@ -1018,14 +1013,12 @@ bool isGuarding(const SA::Domain::BattleCommand &cmd) noexcept
 	return cmd.command_kind == SA::Domain::BattleCommand::CommandKind::GUARD;
 }
 
-// 守方睡眠(捕获 +15,§6.2 `:3859`)。★ 原版读的是 `CHAR_WORKSLEEP > 0`,
-//   与状态槽 `BATTLE_ST_SLEEP` 是两个来源(同 drunk/confusion 那族),但 1.5 尚无
-//   独立 sleep work 字段 ⇒ 暂以状态槽近似。⚠️ 实现处记明:睡眠 work 独立字段
-//   属状态系统细化(§4),届时改读它,不要长期用状态槽代替。
+// 捕获的睡眠加成读取同一个状态计数（StatusTbl → CHAR_WORKSLEEP）。
 bool isAsleep(const Combatant &c) noexcept
 {
 	return static_cast<SA::Domain::BattleStatus>(c.status) ==
-	       SA::Domain::BattleStatus::BATTLE_ST_SLEEP;
+	           SA::Domain::BattleStatus::BATTLE_ST_SLEEP &&
+	       c.status_turns > 0;
 }
 
 // 守方本回合是否在施咒(§3.2:咒术时 kawashi_para 取 0.027,更易被闪)。
@@ -1090,12 +1083,15 @@ EnemyLevelStat collectEnemyLevels(const BattleField &field,
 
 } // namespace
 
-bool resolveTurn(const BattleField &field,
-                 const TurnCommands &commands,
-                 const RulesConfig &config,
-                 Random &rng,
-                 SA::Domain::BattleEvents &out) noexcept
+static bool resolveOrdered(BattleField field,
+                           const TurnCommands &commands,
+                           const RulesConfig &config,
+                           Random &rng,
+                           SA::Domain::BattleEvents &out,
+                           const std::uint8_t *order, int actor_count, ActionEffects *effects) noexcept
 {
+	if (effects != nullptr)
+		*effects = ActionEffects{};
 	out.battle_id = field.battle_id;
 	out.turn = field.turn;
 	out.events.clear();
@@ -1126,9 +1122,6 @@ bool resolveTurn(const BattleField &field,
 		status[i] = field.at(i).status;
 		status_turns[i] = field.at(i).status_turns;
 	}
-
-	std::uint8_t order[kSlotCount] = {};
-	const int actor_count = buildActionOrder(field, commands, rng, order);
 
 	// ── 状态推进(`BATTLE_StatusSeq`,`battle.c:5423`,批次 L4.1)──────────────
 	//
@@ -1242,6 +1235,13 @@ bool resolveTurn(const BattleField &field,
 			    static_cast<SA::Domain::BattleStatus>(tick_in.status);
 			sev->body.status_change.applied = false;
 		}
+		field.at(i).status = status[i];
+		field.at(i).status_turns = status_turns[i];
+		field.at(i).hp = hp[i];
+		field.at(i).ride_hp = pet_hp[i];
+		field.at(i).dead = dead[i];
+		if (tick.drunk_quick_restore && !c.has_ride)
+			field.at(i).quick *= 2;
 		return !sink.overflowed();
 	};
 
@@ -1254,7 +1254,7 @@ bool resolveTurn(const BattleField &field,
 		// ⚠️★ 这一道**在状态推进之前** ⇒ 被先手打死的单位跑不到自己那一趟,
 		//    因而**不掉这一回合的毒血** —— 顺序即语义,照原版(`battle.c:7051`
 		//    的 `CHAR_getInt(HP) <= 0 continue` 在 `:7074` 的 StatusSeq 之前)。
-		if (dead[actor_slot])
+		if (!actor.occupied || !commands.present[actor_slot] || dead[actor_slot])
 			continue;
 
 		// ★ 本单位的状态推进(原版 `battle.c:7074`,在指令派发之前)。
@@ -1309,6 +1309,12 @@ bool resolveTurn(const BattleField &field,
 				break;
 			ev->body.escape.actor = static_cast<std::uint32_t>(actor_slot);
 			ev->body.escape.succeeded = ok;
+			if (ok)
+			{
+				field.at(actor_slot).occupied = false;
+				if (actor.isPlayer() && actor_slot % kSideOffset < kBattlePlayerMax)
+					field.at(actor_slot + kBattlePlayerMax).occupied = false;
+			}
 			// vanish:成功逃跑者本回合从战场消失(客户端演淡出)。失败则留场。
 			ev->body.escape.vanish = ok;
 			// ★ 计数器的递增(无论成败)与移出战场由调用方按事件执行 ——
@@ -1359,7 +1365,10 @@ bool resolveTurn(const BattleField &field,
 				break;
 			ev->body.capture_act.actor = static_cast<std::uint32_t>(actor_slot);
 			ev->body.capture_act.target = static_cast<std::uint32_t>(cap_target);
-			ev->body.capture_act.flags = ok ? 1u : 0u; // 原 `f%X`:成功=1
+			ev->body.capture_act.flags = ok ? 1u : 0u;
+			if (ok)
+				field.at(cap_target).occupied = false;
+			field.at(actor_slot).mods.capture_bonus = 0; // 纯计算意图，World 在下发前确认资源提交。
 			// ★ 成功后的世界写(生成宠物 / 目标离场 / 删条件道具 DR-BT10 /
 			//   capture_bonus 清零)由调用方按事件执行 —— L3 不写世界态。
 			if (sink.overflowed())
@@ -1402,6 +1411,8 @@ bool resolveTurn(const BattleField &field,
 			ev->body.pet_switch.pet_slot =
 			    call_out ? cmd.command.pet_out.pet_slot : 0u;
 			ev->body.pet_switch.call_out = call_out;
+			if (!call_out && actor_slot % kSideOffset < kBattlePlayerMax)
+				field.at(actor_slot + kBattlePlayerMax).occupied = false;
 			// ★ 真实入 / 离场(读 L2、判宠位空 / 宠物存活、写 default_pet)由调用方按事件执行。
 			if (sink.overflowed())
 				break;
@@ -1414,10 +1425,10 @@ bool resolveTurn(const BattleField &field,
 		//    分支,battle_item.c:237)—— 唯一无未移植前置、且战斗中可观察(会掉血)的 usefunc。
 		//    MP 恢复 / 状态药 / 变身 / 传送 及场景内使用(useRecovery_Field)全划出,理由见
 		//    00 §9.0.53 / DR-DT23。
-		// ★ 基数 `actor.mods.item_heal_power` 由 World 在 resolveTurn **之前**查道具效果表
+		// ★ 基数 `actor.mods.item_heal_power` 由 World 在每次 resolveAction 前查道具效果表
 		//    投影(`projectItemUsePower`,与捕获门 ④ `capture_item_ok` 同款:读道具表 + 背包
 		//    是世界态,L3 看不到)⇒ L3 拿基数摇恢复量 + 产 SetHp,**不读背包**。
-		// ★ 扣道具(消耗一个 pile)是世界写,由调用方 `consumeUsedItems` 在 ApplyEvents 后做
+		// ★ 扣道具(消耗一个 pile)是世界写,由调用方 `consumeUsedItem` 按 ActionEffects.item_used 在提交后做
 		//    —— 同捕获删道具 / 逃跑计数 ++ 的分工(L3 不写世界态)。
 		if (cmd.command_kind == SA::Domain::BattleCommand::CommandKind::USE_ITEM)
 		{
@@ -1427,30 +1438,39 @@ bool resolveTurn(const BattleField &field,
 			if (power <= 0)
 				continue;
 
-			const int use_target = static_cast<int>(cmd.command.use_item.target);
+			int use_target = static_cast<int>(cmd.command.use_item.target);
 			if (use_target < 0 || use_target >= kSlotCount)
 				continue;
+			if (!field.at(use_target).occupied || dead[use_target] || hp[use_target] <= 0)
+			{
+				// SSRC80 battle.c:241–269 (__ATTACK_MAGIC 开)：同侧活目标压紧，
+				// rand()%10 拒绝空项；不能改成 rand()%活人数（消耗次数不同）。
+				int living[kSideOffset]{};
+				int count = 0;
+				const int base = use_target < kSideOffset ? 0 : kSideOffset;
+				for (int slot = base; slot < base + kSideOffset; ++slot)
+					if (field.at(slot).occupied && !dead[slot] && hp[slot] > 0)
+						living[count++] = slot;
+				if (count == 0)
+					continue; // 原调用方读未初始化 ToList；保留安全跳过并显式登记。
+				int choice;
+				do
+				{
+					choice = rng.randMod(kSideOffset);
+				} while (choice >= count || choice < 0);
+				use_target = living[choice];
+			}
 			const Combatant &utgt = field.at(use_target);
-			if (!utgt.occupied || dead[use_target])
-				continue; // ⚠️ 原版此处改打随机活人,见下「登记划出」
 
 			// ★★ **恢复量要摇**:`UpPoint = RAND(power*0.9, power*1.1)`(battle_magic.c:419)
 			//    ⇒ ±10% 区间随机、**消耗一次 rng**。⚠️ 别把它当确定值 —— 那会让用道具之后
 			//    的所有 rng 消耗整体平移,而「恢复了多少」的断言抓不到(同 DR-BT23 那族)。
 			//   ★ 8.0 的 `_MAGIC_REHPAI` **开** ⇒ `#else` 段不编译 ⇒ **无** `per` 百分比缩放、
 			//     **无** `GetRecoveryRate(vital)` 修正(两者都在 `#else` 里,battle_magic.c:421-425)
-			//     ⇒ 净核就是这一摇 + clamp,不引入体力系数,也不引入浮点。
-			//   ★★ 区间**照原版 double 表达式的取值集合**,但用整数算(避开浮点/FMA):
-			//     原版 `RAND(x,y)` 展开 = `x + (int)((y-x+1)*u)`,x=0.9p、y=1.1p 均为 double
-			//     ⇒ 取值集合 = { floor(0.9p)+k : k=0..ceil(0.2p+1)-1 }
-			//     ⇒ `lo = 9p/10`、`hi = lo + (p+9)/5 - 1`(整数除法)。
-			//     ⓘ 已穷举 p=0..100000 验证两式取值集合逐个相等(§9.0.53 附验证程序)。
-			//     ⚠️ 遗留偏差(登记在 DR-DT23 ②,不修):原版 `(int)(N*u)` 在 N 非整数时**尾值
-			//       概率偏低**,本实现 `r % span` 是均匀的 —— 与「xorshift64* ≠ glibc rand()」
-			//       同层次的不可比项(`00` §0 第③层),取值集合一致即止。
-			const int heal_lo = 9 * static_cast<int>(power) / 10;
-			const int heal_hi = heal_lo + (static_cast<int>(power) + 9) / 5 - 1;
-			const std::int32_t heal = static_cast<std::int32_t>(rng.rand(heal_lo, heal_hi));
+			//     ⇒ 净核就是这一摇 + clamp，不引入额外体力系数。
+			// 保留原浮点端点及尾值概率，最后赋给整型恢复量才截断（F16）。
+			const std::int32_t heal = static_cast<std::int32_t>(
+			    rng.randReal(power * 0.9, power * 1.1));
 
 			// clamp maxhp(源码 `BATTLE_MultiRecovery` BD_KIND_HP:workhp = oldhp + UpPoint,
 			//   > maxhp 取 maxhp,battle_magic.c:427-431)。★ 用**回合内镜像** `hp[]` 而非
@@ -1465,6 +1485,9 @@ bool resolveTurn(const BattleField &field,
 				break;
 			ev->body.set_hp.target = static_cast<std::uint32_t>(use_target);
 			ev->body.set_hp.hp = new_hp;
+			if (effects != nullptr)
+				effects->item_used = true;
+			field.at(use_target).hp = new_hp;
 			hp[use_target] = new_hp; // 回合内镜像同步(同攻击链),后续行动看到新值
 			if (sink.overflowed())
 				break;
@@ -1475,8 +1498,7 @@ bool resolveTurn(const BattleField &field,
 		{
 			// GUARD 与 WAIT 本身不产事件:防御的效果体现在**被攻击时**的减伤(§3.5),
 			// 由下方攻击链路读 `IsGuarding` 得到。
-			// ⚠️ USE_ITEM / 宠技 / 职技 / 咒术仍落这里被跳过 —— 绑在批次 B / C 的链路上
-			//    (见 battle.h 的表);换宠已在上方 PET_SWITCH case 接入。
+			// 宠技 / 职技 / 咒术仍落这里被跳过；用药及换宠已在上方接入。
 			continue;
 		}
 
@@ -1502,7 +1524,7 @@ bool resolveTurn(const BattleField &field,
 
 		const bool guarding = commands.present[target_slot] &&
 		                      isGuarding(commands.commands[target_slot]) &&
-		                      target.confusion <= 0;
+		                      (target.status != static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION) || target.status_turns <= 0);
 		const bool casting = isCastingSpell(commands, target_slot);
 
 		std::uint32_t emitted = 0;
@@ -1576,7 +1598,7 @@ bool resolveTurn(const BattleField &field,
 			if (damage < 0)
 				damage = 0;
 
-			// ── 骑宠分摊(§3.6,DR-BT2 修正式)──────────────────────
+			// ── 骑宠分摊(§3.6,DR-BT2 原式)──────────────────────
 			std::int32_t to_player = damage;
 			std::int32_t to_pet = 0;
 			if (target.has_ride && pet_hp[target_slot] > 0)
@@ -1639,6 +1661,24 @@ bool resolveTurn(const BattleField &field,
 				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DEATH);
 			}
 
+			// F05: 原 battle_event.c:2764–2765，在伤害之后、附加状态之前唤醒。
+			if (to_player > 0 && status[target_slot] ==
+			                         static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_SLEEP))
+			{
+				auto *wake = sink.push(SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE);
+				if (wake == nullptr)
+					break;
+				wake->body.status_change.target = static_cast<std::uint32_t>(target_slot);
+				wake->body.status_change.status = SA::Domain::BattleStatus::BATTLE_ST_SLEEP;
+				wake->body.status_change.applied = false;
+				status[target_slot] = 0;
+				status_turns[target_slot] = 0;
+			}
+			field.at(target_slot).status = status[target_slot];
+			field.at(target_slot).status_turns = status_turns[target_slot];
+			field.at(target_slot).hp = hp[target_slot] > 0 ? hp[target_slot] : 0;
+			field.at(target_slot).dead = dead[target_slot];
+
 			// ── 普攻附带状态:带毒装备(`battle_event.c:2903`,批次 L4.1)────
 			//
 			// ★★ 这是**净核里唯一的普攻附带状态来源**(`_SUIT_ADDPART4`,8.0 开):
@@ -1671,6 +1711,8 @@ bool resolveTurn(const BattleField &field,
 					//    带毒装备声明 3 ⇒ 实际 **4**。同 DR-BT15「逃跑首次即 2」那族。
 					status[target_slot] = static_cast<std::uint8_t>(st);
 					status_turns[target_slot] = statusTurnsOnApply(kSuitPoisonTurns);
+					field.at(target_slot).status = status[target_slot];
+					field.at(target_slot).status_turns = status_turns[target_slot];
 
 					// ★ 附带状态走 `Damage.status_applied`(IDL 为此留的字段),
 					//   不另发 StatusChange —— 后者对应原版的 `BM`,本批只在**解除**时用。
@@ -1698,6 +1740,26 @@ bool resolveTurn(const BattleField &field,
 
 	// ★ 返回 false = 被迫截断。调用方**必须**处理(分包),不得当成"成功"。
 	return !sink.overflowed();
+}
+
+// 宿主在每个动作后提交资源/离场/收益，再用已提交的 field 计算下一位。
+bool resolveAction(const BattleField &field, const TurnCommands &commands,
+                   const RulesConfig &config, Random &rng, int slot,
+                   SA::Domain::BattleEvents &out, ActionEffects &effects) noexcept
+{
+	if (slot < 0 || slot >= kSlotCount)
+		return false;
+	const auto actor = static_cast<std::uint8_t>(slot);
+	return resolveOrdered(field, commands, config, rng, out, &actor, 1, &effects);
+}
+
+bool resolveTurn(const BattleField &field, const TurnCommands &commands,
+                 const RulesConfig &config, Random &rng,
+                 SA::Domain::BattleEvents &out) noexcept
+{
+	std::uint8_t order[kSlotCount]{};
+	const int count = buildActionOrder(field, commands, rng, order);
+	return resolveOrdered(field, commands, config, rng, out, order, count, nullptr);
 }
 
 } // namespace SA::Rules

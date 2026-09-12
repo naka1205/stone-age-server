@@ -81,33 +81,17 @@ SpawnStats rollSpawnStats(const SpawnTemplate &tmpl, std::int32_t level,
 
 	// ── 第 ② 步:成长率打包(:1052-1056)★ 必须在第 ③ 步之前 ────────────
 	//
-	// 原版:`ALLOCPOINT = (vital<<24) + (str<<16) + (tgh<<8) + dex`,消费侧
-	// 一律 `(p >> shift) & 0xFF` 取回 ⇒ 语义是**四个独立的 8 bit 槽**。
-	//
-	// ⚠️★★ **一处有意的偏离(用户 2026-09-08 裁定,判据同 DR-DT7)**:
-	//    原版用的是 `+` 而不是 `|` ⇒ 基数为负时,**低位会向高位借位、污染相邻字段**。
-	//    实测 `[vital=0, str=−1, tgh=−2, dex=−2]`:
-	//        原版解回 [255, 254, 253, 254]   ← 矿石类宠物的 vital 成长率 0 变成 255
-	//        本实现   [  0, 255, 254, 254]   ← 保住「0 基数 ⇒ 0 成长」
-	//    ⇒ 裁定 **各字段独立截断**:跨字段借位是 `+` 写成 `|` 的纯算术 bug,
-	//      没有任何设计意图会让一块矿石的 vital 成长率是 255(判据同 DR-DT7
-	//      「它没有任何玩法语义,是纯内存 bug ⇒ 修正」)。
-	//    ⚠️ 偏离面已量化:1,053 行模板中**低三位**含 ≤1 基数的 **39 行(3.7%)是上界**,
-	//      且需该字段实际被摇成负(基数 0 时约 40%)。
-	//    ★ 保留的是**字段内**回绕:基数 300 ⇒ 44、−2 ⇒ 254,与原版逐位一致
-	//      (实测 10 组边界,只有跨字段借位那两组分歧)。
-	//
-	// ⚠️ 转换写法:`static_cast<std::uint32_t>` 再窄化,**不写 `v & 0xFF`** ——
-	//    后者对负数依赖二进制补码表示,而 `shared/` 锁 C++17(补码到 C++20 才强制)。
-	//    负 → unsigned 的模 2^32 转换在所有版本都有定义。
-	const auto pack = [](std::int32_t v) noexcept -> std::uint8_t
-	{
-		return static_cast<std::uint8_t>(static_cast<std::uint32_t>(v) & 0xFFu);
-	};
-	out.growth_vital = pack(base_vital);
-	out.growth_str = pack(base_str);
-	out.growth_tough = pack(base_tough);
-	out.growth_dex = pack(base_dex);
+	// SSRC80 char/enemy.c:1165–1169：四个移位值相加，低位负数会跨字节借位。
+	// 用无符号模 2^32 算术保留实际位模式，避免 C++ 的负数左移未定义行为。
+	const std::uint32_t packed =
+	    (static_cast<std::uint32_t>(base_vital) << 24) +
+	    (static_cast<std::uint32_t>(base_str) << 16) +
+	    (static_cast<std::uint32_t>(base_tough) << 8) +
+	    static_cast<std::uint32_t>(base_dex);
+	out.growth_vital = static_cast<std::uint8_t>(packed >> 24);
+	out.growth_str = static_cast<std::uint8_t>(packed >> 16);
+	out.growth_tough = static_cast<std::uint8_t>(packed >> 8);
+	out.growth_dex = static_cast<std::uint8_t>(packed);
 
 	// ── 第 ③ 步:再撒 10 点(:1058-1064)──────────────────────────────
 	//
@@ -137,7 +121,7 @@ SpawnStats rollSpawnStats(const SpawnTemplate &tmpl, std::int32_t level,
 	//
 	//   PARAM_CAL(base) = ((level − 1) × lvup_point + init_num) × base
 	//
-	// ★ DR-DT1:`lvup_point` 是**浮点**,默认不截断;开关打开则先截断成整数
+	// ★ DR-DT1:`lvup_point` 是**浮点**,默认复刻截断;开关打开则先截断成整数
 	//   再算(那才是原版 `atoi` 的行为)。
 	// ⚠️★ 截断**只发生在最后一次**(赋给 int32 时),与原版一致 ——
 	//    原版整条表达式是 int 运算,而本实现是 double 运算后截断一次。

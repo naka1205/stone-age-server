@@ -1,0 +1,37 @@
+[
+  {
+    "case": "completed",
+    "exit_code": 0,
+    "expected_outcome": 1,
+    "passed": true,
+    "summary": "main: battle-autotest steps=66 joined=true turns=5 event_msgs=5 events=19 outcome=1 ⇒ PASSED"
+  },
+  {
+    "case": "version_rejected",
+    "exit_code": 1,
+    "expected_outcome": 4,
+    "passed": true,
+    "summary": "main: battle-autotest steps=27 joined=false turns=0 event_msgs=0 events=0 outcome=4 ⇒ FAILED"
+  },
+  {
+    "case": "early_disconnect",
+    "exit_code": 1,
+    "expected_outcome": 5,
+    "passed": true,
+    "summary": "main: battle-autotest steps=3 joined=false turns=0 event_msgs=0 events=0 outcome=5 ⇒ FAILED"
+  },
+  {
+    "case": "malformed_frame",
+    "exit_code": 1,
+    "expected_outcome": 6,
+    "passed": true,
+    "summary": "main: battle-autotest steps=3 joined=false turns=0 event_msgs=0 events=0 outcome=6 ⇒ FAILED"
+  },
+  {
+    "case": "timeout",
+    "exit_code": 1,
+    "expected_outcome": 7,
+    "passed": true,
+    "summary": "main: battle-autotest steps=180 joined=false turns=0 event_msgs=0 events=0 outcome=7 ⇒ FAILED"
+  }
+]

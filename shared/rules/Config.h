@@ -55,10 +55,10 @@ struct RulesConfig
 
 	// ── 数值截断(DR-DT1)────────────────────────────────────────
 	//
-	// ✅ 裁定 = **浮点建模**,默认 false(按设计意图,不复刻 atoi 截断)。
+	// 当前默认复刻 atoi 截断；原始小数可保留在数据模型中供追溯。
 	// 依据:1,053 行宠物模板中 **569 行(54.0%)** 受影响,且系数被乘以 (level−1)
 	//      ⇒ **截断按等级累积**。11 张主表全扫只有这一列有小数。
-	bool replicate_atoi_truncation = false;
+	bool replicate_atoi_truncation = true; // 2026-09-12：按原版实际 atoi 行为恢复默认。
 };
 
 } // namespace SA::Rules

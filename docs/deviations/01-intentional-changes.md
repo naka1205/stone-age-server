@@ -37,7 +37,7 @@
 
 | 项 | 原版 | 我方 | 依据 |
 |---|---|---|---|
-| **捕获所需道具检查** | `CaptureItemCheck` 直接读攻方背包 | World 在 `resolveTurn` 前算好,投影到 `Combatant::mods.capture_item_ok`,L3 只做 `&&` 门 | [§9.0.50](../journal/14-item.md) |
+| **捕获所需道具检查** | `CaptureItemCheck` 直接读攻方背包 | World 在每个 `resolveAction` 前重取现态,投影到 `Combatant::mods.capture_item_ok`,L3 只做 `&&` 门 | [§9.0.50](../journal/14-item.md) |
 | **装备暴击 / 免疫打飞 / 带毒装备** | 规则里读装备 | 同上,投影为 `mods.equip_critical` / `immune_knockback` / `suit_poison` | [§9.0.21](../journal/10-battle-core.md) · [§9.0.22](../journal/10-battle-core.md) · [§9.0.55](../journal/15-status.md) |
 | **状态原始四维** | 规则直接读 `Char` | ⚠️ **例外:四维直拷进 `Combatant`,不投影推导值** —— 状态两条公式**直接读四维**,由 World 预算后投影等于**把一条公式切成两半** | [§9.0.55](../journal/15-status.md) |
 | **经验公式 `enemyExp`** | 服务端算 | ★ **全放 world**(用户裁定,客户端不算经验)⇒ world 首个本地浮点公式 ⇒ `-ffp-contract=off` 要落到 `sa_world` 自己 | [§9.0.40](../journal/12-encounter.md) · `11` DR-DT15 |
@@ -47,7 +47,7 @@
 | 项 | 原版位置 | 我方位置 | 等价性判据 |
 |---|---|---|---|
 | **敌人表两条归一** | 载入期(`enemy.c:479-486`) | 摇号前 | ★ 三条:**幂等 · 不消耗 rng · 只碰这两列**;⚠️ 实测原版**一次都不触发**,仍然移植 —— 判据不是"照抄源码"而是上述三条 | [§9.0.35](../journal/12-encounter.md) |
-| **战斗结束经验分配** | 逐次累加 | **战斗结束统一结算** | `11` DR-DT15 |
+| **收益暂存与交付** | 每次行动结算新死亡，结束/离场交付 | 已恢复对应时点；旧的统一延后已撤销 | [修复记录](../audits/2026-09-12-remediation-results.md) · DR-DT15/DT22 |
 
 ## 4. 数据结构的改变
 

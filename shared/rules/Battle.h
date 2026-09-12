@@ -46,6 +46,17 @@ struct TurnCommands
 	bool present[kSlotCount]{}; // 该槽本回合是否有指令(敌方由 AI 填,视为齐备)
 };
 
+struct ActionEffects
+{
+	bool item_used = false; // 实际执行的资源消耗，不是指令投影。
+};
+
+// order 由宿主每回合只生成一次。本接口不再摇行动速度。
+// 成功后宿主提交世界资源并确认事件，之后才能计算下一位的动作。
+bool resolveAction(const BattleField &field, const TurnCommands &commands,
+                   const RulesConfig &config, Random &rng, int slot,
+                   SA::Domain::BattleEvents &out, ActionEffects &effects) noexcept;
+
 // ── DR-BT5:唯一的「能否行动」判定 ─────────────────────────────
 //
 // ★★ 原版有**两套判据**:
@@ -83,7 +94,7 @@ SA::Domain::CannotActReason checkCanAct(const Combatant &c) noexcept;
 //
 //   ✅ 已覆盖:行动顺序(§2.5,含 DR-BT8 同速裁决)· 指令分发 · CanAct 否决 ·
 //              攻击次数(§3.9,DR-BT1)· 回避(§3.2)· 伤害(§3.1/§3.4)·
-//              防御减伤六档(§3.5)· 骑宠分摊(§3.6,DR-BT2 修正式)·
+//              防御减伤六档(§3.5)· 骑宠分摊(§3.6,DR-BT2 原式)·
 //              死亡标记 · 事件产出与截断保护
 //
 //   ⬜ 未覆盖,**且每条都注明了为什么**:
@@ -114,11 +125,7 @@ bool resolveTurn(const BattleField &field,
 
 // 行动顺序排序键(§2.5)。`排序键 = dex + sequence`。
 //
-// ⚠️★ **`if (dex <= 1) dex = 1;` 在原版是被注释掉的** ⇒ **返回值可以是 0 或负数**。
-//    不要"顺手加个下限":那会改变慢速单位之间的相对顺序。
-//
-// ⚠️ 批次 0.5 只实现**默认档**(`dex −= RAND(0, 0.1·quick)`)。其余 8 档绑在
-//    尚未接入的指令上,接入时在本函数内按 `kind` 分档,不要散到调用方。
+// 基数 quick+20；已实现普通与用药分支。系数/下限的版本冲突见审计 U01。
 std::int32_t computeActionDex(const Combatant &c,
                               const SA::Domain::BattleCommand &command,
                               Random &rng) noexcept;
@@ -143,19 +150,14 @@ int rollAttackCount(const Combatant &attacker,
                     Random &rng) noexcept;
 
 // 防御减伤系数(§3.5)。★ **不是固定系数,是 RAND(1,100) 分六档**,
-// 期望 ≈ 0.155 且 **25% 概率完全免伤**。
+// 期望 ≈ 0.175 且 **25% 概率完全免伤**。
 //
 // ⚠️ 调用方须自行确认触发条件(守方指令 = 防御 **且** 混乱值 ≤ 0);
 //    本函数只负责抽档,不判条件 —— 判条件要读指令,会把它的入参撑大。
 double rollGuardFactor(Random &rng) noexcept;
 
-// 骑宠伤害分摊(§3.6)。★ **DR-BT2 = 修正**,不是照抄。
-//
-// 原式:`playerdamage = damage·petDef/(myDef+petDef) + 1`,`petdamage = damage − playerdamage + 1`
-//   ⇒ 两处 `+1` 让总伤比原值多 2;且 **petDef 在分子 ⇒ 宠物防御越高、主人吃得越多**,
-//     反向惩罚「培养骑宠」这一核心养成路径。
-// ✅ 修正后:分子改 `myDef`(防御高者多扛)、去掉两处 `+1`(无损分摊)
-//   ⇒ `player + pet` 恒等于 `damage`(IDL `Damage` 注释已按此写)。
+// 骑宠普通伤害：两防御先夹至 1，player=damage*petDef/(myDef+petDef)+1，
+// pet=damage-player+1。正伤害总量为 damage+1，保留源码行为（2026-09-12）。
 struct RideSplit
 {
 	std::int32_t player = 0;

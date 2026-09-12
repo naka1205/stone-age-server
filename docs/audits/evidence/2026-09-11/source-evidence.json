@@ -1,0 +1,67 @@
+{
+  "ssrc80_enum_values": {
+    "CHAR_WORKWEAKEN": 51,
+    "CHAR_WORKBARRIER": 53,
+    "CHAR_WORKNOCAST": 54,
+    "BATTLE_ST_WEAKEN": 7,
+    "BATTLE_ST_BARRIER": 9,
+    "BATTLE_ST_NOCAST": 10,
+    "BATTLE_ST_END": 44
+  },
+  "unknown_if": [],
+  "encount": {
+    "rows": 1051,
+    "max_enemy_count": {
+      "1": 13,
+      "2": 9,
+      "3": 31,
+      "4": 51,
+      "5": 438,
+      "6": 37,
+      "7": 9,
+      "8": 53,
+      "9": 4,
+      "10": 406
+    },
+    "rows_with_max_over_five": 509
+  },
+  "growth": {
+    "rows": 1053,
+    "fractional_rows": 569
+  },
+  "hp_recovery": {
+    "rows": 457,
+    "powers_not_multiple_of_five": 0
+  },
+  "legacy_inverted_range_example": {
+    "lo": 10,
+    "hi": 5,
+    "values_for_u_0_05_099": [
+      10,
+      8,
+      7
+    ]
+  },
+  "sha256": {
+    "StoneAge/gmsv/src/battle/battle.c": "a10380b862aee077a798fab359ea89445b98aac4fc809b51a2bc7c682c7eb602",
+    "StoneAge/gmsv/src/battle/battle_event.c": "9a4607566b7cf6f6a94f2019c5d1dfc7088f7805421037b0a5f0095054b9db1d",
+    "StoneAge/gmsv/src/include/char_base.h": "2959c40645149277878661dd49ccffd1653f11fcb55c93f03efe306e6d578d45",
+    "StoneAge/gmsv/src/include/battle_event.h": "ac9cc3ddd5aa0bbc1a44616303cbe3d9ceae2689513ac9ea514cd7fd7235cc91",
+    "StoneAge/gmsv/src/include/util.h": "fc5f0a7343df926b4e5f06c941b4612091822dd4479f982c67510dd2fec54d06",
+    "StoneAge/gmsv/src/char/char_walk.c": "33ad84f9f8c531a082e2444cf23bccb22b14ee9a70097561528d47c011568c21",
+    "stoneage85/石器时代服务器端最新完整源代码/Serv/gmsv/battle/battle.c": "ce7eb0d8bf5d22903e874927307486648b74aece7f13c2f576b5943a3bc030e5",
+    "stoneage85/石器时代服务器端最新完整源代码/Serv/gmsv/battle/battle_event.c": "c15f46840c689dc186cdeb2831b4b6a56d1679df7bf920b88eb000d0e2f521c2",
+    "stone-age-server/shared/rules/Battle.cpp": "03bade18d1016cfde0127598a853ead4bad8958e908d0b8764dc7822484947e2",
+    "stone-age-server/shared/rules/Status.cpp": "14128ccbc4f9eb0238b2d804dce48212f21e873bd399a4e837e7a9abaf9c7ea1",
+    "stone-age-server/shared/rules/Combatant.h": "f1a76b8588d6c0106cf2e456a46f0f6770798b38333d032c2953ae8368e7ef21",
+    "stone-age-server/shared/rules/Progression.cpp": "0737b17a61fb7cd70f58d94030877034efd59666483fd4961e066f71a8b00788",
+    "stone-age-server/src/world/World.cpp": "fa18b3460b3197ccbd0ba9dfe64774480698f435eb20657b7d163a45fb951dc0",
+    "stone-age-client/src/net/ClientSession.cpp": "396377f80ded132bb34a25fa8d7c8d3a17ffa7232082d49b29b4d7576de20c5a",
+    "stone-age-client/src/battle/BattlePresenter.cpp": "895c7a0b2beb9e443c86495f62a52f4e6d8ee71b787a127733f104e2d5323d33",
+    "stone-age-client/src/scenes/BattleScene.cpp": "2cc725206d081f2f6430ee4c9ddf6278cdf2bbeca99b9b0dc795079721b90297",
+    "stone-age-client/src/app/main.cpp": "23f383971f5d99eac41c872cf74484d06bfab8e577d17eb55fffd3883023b3b7",
+    "csa8.0/gmsv/data/encount.txt": "e2a9845beddfea914c2b3339c2316d2c4dce517c183df593fdacd2de91c167c7",
+    "csa8.0/gmsv/data/enemybase1.txt": "4c7a27cf6699220bf4026461084c71e71c1f2174e3aca25f210b6add23c94bb2",
+    "csa8.0/gmsv/data/itemset6.txt": "42ef363698abdb000ba049ff66f140b9197cc9402fc827e1c20af8da1aa9eb71"
+  }
+}

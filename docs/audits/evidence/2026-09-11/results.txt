@@ -1,0 +1,66 @@
+2026-09-11 audit results
+server HEAD: c222202d5f362e636f1f9ef17c5a1cd6291cfb59
+client HEAD: d89f675f493ac8481bef4d678873e11ebcb4364d
+Environment: macOS arm64 / AppleClang 21 / C++20 server + C++17 shared/client
+Baseline: fresh builds with warnings treated as errors.
+The first sandboxed attempt could not bind local TCP sockets (Operation not permitted).
+The following baseline was rerun with permission outside that sandbox.
+
+server: 100% tests passed, 0 tests failed out of 17
+server: Total Test time (real) =  10.99 sec
+client: 100% tests passed, 0 tests failed out of 5
+client: Total Test time (real) =   1.37 sec
+
+RulesProbe exit=1
+FAIL F01.status_integer_conversion observed=17 expected=16
+FAIL F01.status_boundary_roll_16 observed=1 expected=0
+FAIL F02.unreachable_equipment_resistance observed=13 expected=20
+INFO F03.dex current=110; SSRC80_high_endpoint=84; SSRC85_high_endpoint=108
+FAIL F03.jitter_base_current_coefficient observed=10 expected=12
+FAIL F03.item_priority_zero_roll observed=120 expected=138
+FAIL F04.attack_after_target_escaped observed=1 expected=0
+PASS CONTROL.capture_succeeded observed=1 expected=1
+FAIL F04.captured_enemy_still_attacks observed=1 expected=0
+FAIL F04.recalled_pet_still_attacks observed=1 expected=0
+PASS CONTROL.sleep_target_was_damaged observed=1 expected=1
+FAIL F05.damage_wakes_sleep observed=0 expected=1
+FAIL F06.drunk_status_rng_draws observed=1 expected=2
+FAIL F16.damage_float_random_endpoint observed=205 expected=206
+INFO F16.new_random_upper=12 original_support_upper=13
+rules_source_expectations_failed=11
+
+WorldProbe exit=1
+FAIL F07.paralyzed_actor_item_retained observed=0 expected=1
+PASS CONTROL.paralysis_ticks observed=2 expected=2
+PASS CONTROL.item_allocated observed=1 expected=1
+PASS CONTROL.player_released observed=0 expected=0
+FAIL F09.disconnected_owner_item_released observed=1 expected=0
+FAIL F10.movement_during_battle observed=1 expected=0
+OBSERVATION walk_packets_50ms steps=5 (legacy comparison recorded separately)
+PASS CONTROL.captured_pet_exists observed=1 expected=1
+FAIL F08.pet_hp_written_back_on_recall observed=16 expected=15
+FAIL F08.pet_reentry_preserves_injury observed=16 expected=15
+OBSERVATION no_player_command turns_resolved=3 poison_turns=4
+FAIL F14.ten_enemy_slots_available observed=5 expected=10
+FAIL F15.owned_item_unlocks_encounter observed=0 expected=1
+OBSERVATION F19.finished_battle_objects_retained=10 after_10_finished
+world_expectations_failed=7
+
+ClientProbe exit=1
+PASS CONTROL.handshake observed=1 expected=1
+PASS CONTROL.battle_events observed=1 expected=1
+FAIL F11.accept_battle_result observed=0 expected=1
+INFO rejected_msg_id=0x0206
+PASS CONTROL.target_has_view observed=1 expected=1
+FAIL F12.display_hp_matches_authority observed=-10 expected=90
+FAIL F12.nonlethal_hit_keeps_unit_alive observed=0 expected=1
+client_expectations_failed=3
+
+ClientBoundsProbe exit=-6
+SUMMARY: AddressSanitizer: heap-buffer-overflow BattlePresenter.cpp:74 in SA::Client::BattlePresenter::applyEvent(SA::Domain::BattleEvent const&)
+
+21 failed behavioral expectations (11 rules + 7 world + 3 client).
+ASan independently reports one heap-buffer-overflow.
+These failures reproduce findings; they are not passing gameplay acceptance tests.
+F13 and F18 are static-control-flow findings, not legacy-runtime comparisons.
+Full logs for this execution: /private/tmp/stoneage-audit-verified.0H6yZC

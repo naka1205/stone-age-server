@@ -1,0 +1,56 @@
+2026-09-12 08:26:34.767 stone_age_client[76020:879302] BattleScene: conn: 127.0.0.1:64225
+2026-09-12 08:26:34.768 stone_age_client[76020:879302] BattleScene: dialing…
+2026-09-12 08:26:34.828 stone_age_client[76020:879302] BattleScene: connected
+2026-09-12 08:26:34.828 stone_age_client[76020:879302] BattleScene: handshake sent
+2026-09-12 08:26:34.845 stone_age_client[76020:879302] BattleScene: 进场:我的槽位=0 battle_id=1
+2026-09-12 08:26:34.845 stone_age_client[76020:879302] BattleScene: snapshot battle=1 units=2
+2026-09-12 08:26:34.845 stone_age_client[76020:879302] BattleScene: —— 第 0 回合 ——
+2026-09-12 08:26:34.845 stone_age_client[76020:879302] BattleScene: (自动) 我方出招 → 敌方 slot=10
+2026-09-12 08:26:34.845 stone_age_client[76020:879302] BattleScene: command=ATTACK turn=0
+2026-09-12 08:26:34.876 stone_age_client[76020:879302] BattleScene: —— 第 0 回合 ——
+2026-09-12 08:26:35.059 stone_age_client[76020:879302] BattleScene: 攻击者 slot=0 kind=1 技能=0 目标数=1
+2026-09-12 08:26:35.060 stone_age_client[76020:879302] BattleScene: 敌 slot=10 HP+0 骑宠+0 MP+0 flags=0x20
+2026-09-12 08:26:35.060 stone_age_client[76020:879302] BattleScene: 攻击者 slot=10 kind=1 技能=0 目标数=1
+2026-09-12 08:26:35.060 stone_age_client[76020:879302] BattleScene: 我 slot=0 HP+0 骑宠+0 MP+0 flags=0x20
+2026-09-12 08:26:35.060 stone_age_client[76020:879302] BattleScene: snapshot battle=1 units=2
+2026-09-12 08:26:35.060 stone_age_client[76020:879302] BattleScene: 进场:我的槽位=0 battle_id=1
+2026-09-12 08:26:35.060 stone_age_client[76020:879302] BattleScene: —— 第 1 回合 ——
+2026-09-12 08:26:35.060 stone_age_client[76020:879302] BattleScene: (自动) 我方出招 → 敌方 slot=10
+2026-09-12 08:26:35.060 stone_age_client[76020:879302] BattleScene: command=ATTACK turn=1
+2026-09-12 08:26:35.093 stone_age_client[76020:879302] BattleScene: —— 第 1 回合 ——
+2026-09-12 08:26:35.260 stone_age_client[76020:879302] BattleScene: 攻击者 slot=0 kind=1 技能=0 目标数=1
+2026-09-12 08:26:35.261 stone_age_client[76020:879302] BattleScene: 敌 slot=10 HP-413 骑宠+0 MP+0 flags=0x4
+2026-09-12 08:26:35.261 stone_age_client[76020:879302] BattleScene: 攻击者 slot=10 kind=1 技能=0 目标数=1
+2026-09-12 08:26:35.261 stone_age_client[76020:879302] BattleScene: 我 slot=0 HP+0 骑宠+0 MP+0 flags=0x20
+2026-09-12 08:26:35.262 stone_age_client[76020:879302] BattleScene: snapshot battle=1 units=2
+2026-09-12 08:26:35.262 stone_age_client[76020:879302] BattleScene: 进场:我的槽位=0 battle_id=1
+2026-09-12 08:26:35.262 stone_age_client[76020:879302] BattleScene: —— 第 2 回合 ——
+2026-09-12 08:26:35.262 stone_age_client[76020:879302] BattleScene: (自动) 我方出招 → 敌方 slot=10
+2026-09-12 08:26:35.262 stone_age_client[76020:879302] BattleScene: command=ATTACK turn=2
+2026-09-12 08:26:35.295 stone_age_client[76020:879302] BattleScene: —— 第 2 回合 ——
+2026-09-12 08:26:35.460 stone_age_client[76020:879302] BattleScene: 攻击者 slot=0 kind=1 技能=0 目标数=1
+2026-09-12 08:26:35.461 stone_age_client[76020:879302] BattleScene: 敌 slot=10 HP+0 骑宠+0 MP+0 flags=0x20
+2026-09-12 08:26:35.461 stone_age_client[76020:879302] BattleScene: 攻击者 slot=10 kind=1 技能=0 目标数=1
+2026-09-12 08:26:35.461 stone_age_client[76020:879302] BattleScene: 我 slot=0 HP+0 骑宠+0 MP+0 flags=0x20
+2026-09-12 08:26:35.462 stone_age_client[76020:879302] BattleScene: snapshot battle=1 units=2
+2026-09-12 08:26:35.462 stone_age_client[76020:879302] BattleScene: 进场:我的槽位=0 battle_id=1
+2026-09-12 08:26:35.462 stone_age_client[76020:879302] BattleScene: —— 第 3 回合 ——
+2026-09-12 08:26:35.462 stone_age_client[76020:879302] BattleScene: (自动) 我方出招 → 敌方 slot=10
+2026-09-12 08:26:35.462 stone_age_client[76020:879302] BattleScene: command=ATTACK turn=3
+2026-09-12 08:26:35.494 stone_age_client[76020:879302] BattleScene: —— 第 3 回合 ——
+2026-09-12 08:26:35.661 stone_age_client[76020:879302] BattleScene: 攻击者 slot=0 kind=1 技能=0 目标数=1
+2026-09-12 08:26:35.661 stone_age_client[76020:879302] BattleScene: 敌 slot=10 HP+0 骑宠+0 MP+0 flags=0x20
+2026-09-12 08:26:35.662 stone_age_client[76020:879302] BattleScene: 攻击者 slot=10 kind=1 技能=0 目标数=1
+2026-09-12 08:26:35.662 stone_age_client[76020:879302] BattleScene: 我 slot=0 HP+0 骑宠+0 MP+0 flags=0x20
+2026-09-12 08:26:35.663 stone_age_client[76020:879302] BattleScene: snapshot battle=1 units=2
+2026-09-12 08:26:35.663 stone_age_client[76020:879302] BattleScene: 进场:我的槽位=0 battle_id=1
+2026-09-12 08:26:35.663 stone_age_client[76020:879302] BattleScene: —— 第 4 回合 ——
+2026-09-12 08:26:35.663 stone_age_client[76020:879302] BattleScene: (自动) 我方出招 → 敌方 slot=10
+2026-09-12 08:26:35.663 stone_age_client[76020:879302] BattleScene: command=ATTACK turn=4
+2026-09-12 08:26:35.694 stone_age_client[76020:879302] BattleScene: —— 第 4 回合 ——
+2026-09-12 08:26:35.861 stone_age_client[76020:879302] BattleScene: 攻击者 slot=0 kind=1 技能=0 目标数=1
+2026-09-12 08:26:35.862 stone_age_client[76020:879302] BattleScene: 敌 slot=10 HP-380 骑宠+0 MP+0 flags=0x3
+2026-09-12 08:26:35.862 stone_age_client[76020:879302] BattleScene: 事件 kind=24
+2026-09-12 08:26:35.862 stone_age_client[76020:879302] BattleScene: snapshot battle=1 units=2
+2026-09-12 08:26:35.863 stone_age_client[76020:879302] BattleScene: 战斗结算:胜利
+2026-09-12 08:26:35.877 stone_age_client[76020:879302] main: battle-autotest steps=66 joined=true turns=5 event_msgs=5 events=19 outcome=1 ⇒ PASSED

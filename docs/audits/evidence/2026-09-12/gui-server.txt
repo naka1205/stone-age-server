@@ -1,0 +1,28 @@
+level=info event=server_starting code=1
+level=info event=config_loaded code=4 bind_addr=127.0.0.1 listen_port=64225 protocol_version=1 tick_hz=100 battle_turn_interval_ms=200
+level=info event=module_loaded code=6 module=world
+level=info event=battle_seed code=204 master_seed=18235865458714619535 from_config=false
+level=info event=server_ready code=2 bind_addr=127.0.0.1 listen_port=64225 self_test=false
+level=debug event=connection_accepted code=100 conn_id=1
+level=debug event=session_state_changed code=105 session_id=1 state=closed
+level=debug event=connection_closed code=101 conn_id=1
+level=debug event=connection_accepted code=100 conn_id=2
+level=info event=handshake_accepted code=102 session_id=2
+level=info event=battle_started code=201 battle_id=1
+level=info event=battle_seed code=204 battle_id=1 seed=8621840983174943463 master_seed=18235865458714619535
+level=info event=battle_joined code=207 battle_id=1 session_id=2 slot=0
+level=debug event=session_state_changed code=105 session_id=2 state=online demo=true
+level=debug event=battle_turn_resolved code=202 battle_id=1 turn=0 events=4
+level=debug event=battle_turn_resolved code=202 battle_id=1 turn=1 events=4
+level=debug event=battle_turn_resolved code=202 battle_id=1 turn=2 events=4
+level=debug event=battle_turn_resolved code=202 battle_id=1 turn=3 events=4
+level=debug event=battle_turn_resolved code=202 battle_id=1 turn=4 events=3
+level=info event=battle_finished code=203 battle_id=1 turns=5
+level=debug event=session_state_changed code=105 session_id=2 state=closed
+level=debug event=connection_closed code=101 conn_id=2
+level=debug event=connection_accepted code=100 conn_id=3
+level=debug event=session_state_changed code=105 session_id=3 state=closed
+level=warn event=handshake_rejected code=103 conn_id=3 msg_id=0 state=closed
+level=debug event=connection_closed code=101 conn_id=3
+level=info event=shutdown_signal code=8 signal=15
+level=info event=server_stopping code=3 connections=0 battles=0

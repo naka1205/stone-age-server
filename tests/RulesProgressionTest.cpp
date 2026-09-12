@@ -179,7 +179,8 @@ TEST_CASE("四维生成:DR-DT1 浮点系数 vs 复刻 atoi 截断(enemy.c:1040)"
 {
 	const std::vector<int> script{2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-	RulesConfig as_designed{}; // replicate_atoi_truncation = false(默认)
+	RulesConfig as_designed{};
+	as_designed.replicate_atoi_truncation = false; // 仅用于对照历史选择
 	REQUIRE(as_designed.replicate_atoi_truncation == false);
 	ScriptedRandom rng_f(script);
 	const SpawnStats f = rollSpawnStats(kWuli, 21, rng_f, as_designed);
@@ -189,7 +190,7 @@ TEST_CASE("四维生成:DR-DT1 浮点系数 vs 复刻 atoi 截断(enemy.c:1040)"
 	CHECK(f.dex == 2500);
 
 	RulesConfig replicate{};
-	replicate.replicate_atoi_truncation = true;
+	REQUIRE(replicate.replicate_atoi_truncation); // 运行默认必须复刻原 atoi
 	ScriptedRandom rng_t(script);
 	const SpawnStats t = rollSpawnStats(kWuli, 21, rng_t, replicate);
 	CHECK(t.vital == 2700); // 90 × 30
@@ -223,14 +224,14 @@ TEST_CASE("四维生成:DR-DT1 浮点系数 vs 复刻 atoi 截断(enemy.c:1040)"
 //
 // ⚠️ 负四维**照抄不修**:`PARAM_CAL(−2) = 10 × (−2) = −20`。
 //    原版就是这样,且它有下游(`deriveBaseStats` 对负输入照算)⇒ 不在这里替它兜。
-TEST_CASE("四维生成:负基数 ⇒ 成长率独立截断、四维照抄为负(用户裁定 / enemy.c:1052)")
+TEST_CASE("四维生成:负基数 ⇒ 原式跨字节借位、四维照抄为负(enemy.c:1165)")
 {
 	ScriptedRandom rng({2, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
 	const SpawnStats s = rollSpawnStats(kHolyStone, 1, rng, RulesConfig{});
 
 	// ★ 修正生效点:这两维**不被相邻的负字段借位**(原版会是 149 / 49)。
-	CHECK(s.growth_vital == 150);
-	CHECK(s.growth_tough == 50);
+	CHECK(s.growth_vital == 149);
+	CHECK(s.growth_tough == 49);
 	// 字段内回绕保留,与原版一致。
 	CHECK(s.growth_str == 254);
 	CHECK(s.growth_dex == 254);
@@ -295,16 +296,16 @@ TEST_CASE("四维生成:真实模板 18 级的战力量级(与 demo 手填值的
 	// 撒点脚本 0,1,2,3 循环 ⇒ vital+3 str+3 tough+2 dex+2(前 8 轮各 2 次,后 2 轮给 0/1)
 	ScriptedRandom rng({2, 2, 2, 2, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1});
 	const SpawnStats s = rollSpawnStats(kWuli, 18, rng, RulesConfig{});
-	CHECK(s.vital == 1989);
-	CHECK(s.str == 1297);
-	CHECK(s.tough == 1470);
-	CHECK(s.dex == 2335);
+	CHECK(s.vital == 1794);
+	CHECK(s.str == 1170);
+	CHECK(s.tough == 1326);
+	CHECK(s.dex == 2106);
 
 	const DerivedStats d = deriveBaseStats(s.vital, s.str, s.tough, s.dex);
-	CHECK(d.attack == 17);
-	CHECK(d.defense == 19);
-	CHECK(d.quick == 23);
-	CHECK(d.max_hp == 130);
+	CHECK(d.attack == 15);
+	CHECK(d.defense == 17);
+	CHECK(d.quick == 21);
+	CHECK(d.max_hp == 117);
 
 	// ★ 与 demo 手填的 foe 对照 —— 差一个数量级这件事本身被断言,不只写在注释里。
 	const DerivedStats demo_foe = deriveBaseStats(4000, 26000, 2000, 15000);

@@ -1,0 +1,7 @@
+2026-09-12 08:26:36.316 stone_age_client[76022:879469] BattleScene: conn: 127.0.0.1:64237
+2026-09-12 08:26:36.316 stone_age_client[76022:879469] BattleScene: dialing…
+2026-09-12 08:26:36.333 stone_age_client[76022:879469] BattleScene: connected
+2026-09-12 08:26:36.333 stone_age_client[76022:879469] BattleScene: handshake sent
+2026-09-12 08:26:36.337 stone_age_client[76022:879469] BattleScene: 会话已关闭
+2026-09-12 08:26:36.337 stone_age_client[76022:879469] BattleScene: disconnected
+2026-09-12 08:26:36.337 stone_age_client[76022:879469] main: battle-autotest steps=3 joined=false turns=0 event_msgs=0 events=0 outcome=5 ⇒ FAILED

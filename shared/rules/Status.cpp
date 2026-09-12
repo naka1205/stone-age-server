@@ -39,23 +39,8 @@ std::int32_t resistOf(const Combatant &defender, int status) noexcept
 	return defender.mods.status_resist[status];
 }
 
-// 装备抗性:⚠️★★ **只有虚弱 / 魔障 / 沉默三种存在**(`_EQUIT_RESIST`,`:5141-5147`)。
-//    `05` §4.3 把它写成通用一项是错的(纪律 ①)。
-std::int32_t equipResistOf(const Combatant &defender, int status) noexcept
-{
-	if (status == static_cast<int>(BattleStatus::BATTLE_ST_WEAKEN))
-	{
-		// ★ 虚弱吃**两道**:`_EQUIT_RESIST` 的 + `_SUIT_ADDPART3` 的(`:5150`)。
-		//   ⚠️ 后者源码判 `status == CHAR_WORKWEAKEN` 而字段名叫 `RENOCAST`
-		//     ——「名字在骗人」⇒ 按判据归到虚弱,不按字段名归到沉默。
-		return defender.mods.equip_resist_weaken + defender.mods.suit_resist_weaken;
-	}
-	if (status == static_cast<int>(BattleStatus::BATTLE_ST_BARRIER))
-		return defender.mods.equip_resist_barrier;
-	if (status == static_cast<int>(BattleStatus::BATTLE_ST_NOCAST))
-		return defender.mods.equip_resist_nocast;
-	return 0;
-}
+// F02: SSRC80 battle_event.c:5142–5151 比较 WORK 枚举 51/53/54，
+// 而合法 status < 44。这些分支原本不可达，不能按同名状态重新激活。
 
 } // namespace
 
@@ -149,12 +134,10 @@ bool rollStatusAttack(bool is_pvp,
 		// ★ 主式(`_SUIT_ADDENDUM` 开 ⇒ 减通用抗性,`:5136`)。
 		// ⚠️★ `vital_p` 是 float 而 `per` 是 int ⇒ **这一行有隐式截断**,
 		//    是逐位一致的关键点之一 ⇒ 保留源码的运算顺序与类型,别先聚合再转换。
-		per = per_offset + level + attacker.luck -
-		      resistOf(defender, status) - static_cast<int>(vital_p) -
-		      defender.mods.general_resist;
-
-		// ★ 装备抗性:只对虚弱 / 魔障 / 沉默(`:5141-5151`)。
-		per -= equipResistOf(defender, status);
+		per = static_cast<int>(static_cast<float>(per_offset + level + attacker.luck -
+		                                          resistOf(defender, status)) -
+		                       vital_p -
+		                       static_cast<float>(defender.mods.general_resist));
 
 		// ★ 命中率硬上限 80%(`:5153`)—— 在 else 内 ⇒ 麻痹不吃(见 Status.h)。
 		if (per > kStatusHitCap)

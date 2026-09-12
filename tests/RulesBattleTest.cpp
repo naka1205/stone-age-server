@@ -39,6 +39,39 @@ using namespace SA::Rules;
 using SA::Domain::BattleStatus;
 using SA::Domain::CannotActReason;
 
+TEST_CASE("F01/F03/F16:原表达式的截断边界与道具优先级")
+{
+	Combatant attacker{}, defender{};
+	attacker.occupied = defender.occupied = true;
+	attacker.kind = defender.kind = CombatantKind::kPlayer;
+	attacker.level = defender.level = 1;
+	defender.vital = defender.str = defender.tough = 1000;
+	defender.dex = 0;
+	ScriptedRandom status_rng({16});
+	int per = 0;
+	CHECK_FALSE(rollStatusAttack(false, attacker, defender, 1, 30, 30, 1.0, status_rng, &per));
+	CHECK(per == 16);
+	attacker.quick = 100;
+	SA::Domain::BattleCommand command{};
+	command.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+	ScriptedRandom high({9999});
+	CHECK(computeActionDex(attacker, command, high) == 108); // U01 暂留 0.1，基数是 120。
+	command.command_kind = SA::Domain::BattleCommand::CommandKind::USE_ITEM;
+	ScriptedRandom zero({0});
+	CHECK(computeActionDex(attacker, command, zero) == 138);
+	attacker.attack = 100;
+	defender.defense = 0;
+	RulesConfig cfg{};
+	cfg.damage_calc_percent = 100;
+	ScriptedRandom damage_rng({13});
+	CHECK(computeDamage(BattleField{}, attacker, defender, cfg, damage_rng) == 206);
+	// 原宏 13.5 的跨度：u=.96 仍为 12，.99 可取到 13；不能改成均匀的 14 格。
+	CHECK(scaleOriginalRand(0, 12.5, .96) == 12);
+	CHECK(scaleOriginalRand(0, 12.5, .99) == 13);
+	CHECK(scaleOriginalRand(10, 5, .99) == 7);
+	CHECK(scaleOriginalRand(7, 6, .99) == 7);
+}
+
 namespace
 {
 
@@ -648,6 +681,10 @@ class MaxRandom final : public Random
 {
   public:
 	int rand(int lo, int hi) override { return hi > lo ? hi : lo; }
+	double randReal(double lo, double hi) override
+	{
+		return scaleOriginalRand(lo, hi, (2147483647.0 / 2147483648.0));
+	}
 	int randMod(int n) override { return n > 0 ? n - 1 : 0; }
 };
 
@@ -691,7 +728,7 @@ TEST_CASE("行动顺序:排序键 = quick + 20 + sequence,且不夹下限")
 	SA::Domain::BattleCommand cmd{};
 	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
 
-	SeededRandom rng(1);
+	ScriptedRandom rng({0});
 	CHECK(computeActionDex(c, cmd, rng) == kDexBase);
 
 	// 装备「先攻」直接加在排序键上。
@@ -720,7 +757,7 @@ TEST_CASE("行动顺序:同速按入场位次(DR-BT8)")
 	}
 
 	std::uint8_t order[kSlotCount] = {};
-	SeededRandom rng(12345);
+	ScriptedRandom rng({0}); // 固定扰动才构成同速输入。
 	const int n = buildActionOrder(f, tc, rng, order);
 	REQUIRE(n == kSlotCount);
 	for (int i = 0; i < kSlotCount; ++i)
@@ -860,25 +897,20 @@ TEST_CASE("防御减伤:六档逐个边界,期望系数 0.175(★ 文档的 0.15
 
 // ── 骑宠分摊(§3.6 / DR-BT2)─────────────────────────────────────────────
 
-TEST_CASE("骑宠分摊:DR-BT2 修正 —— 无损,且防御高者多扛")
+TEST_CASE("骑宠分摊:原普通伤害的分子、两次加一和防御下限")
 {
-	// ⚠️ 原式 `player = damage·petDef/(myDef+petDef) + 1` 有两处 `+1`(总伤多 2),
-	//    且 petDef 在分子 ⇒ **宠物防御越高、主人吃得越多**,反向惩罚养骑宠。
-	//    DR-BT2 裁定 = 修正:分子改 myDef、去掉 +1。
-	const RideSplit s = splitRideDamage(100, /*myDef=*/300, /*petDef=*/100);
-	CHECK(s.player + s.pet == 100); // ① 无损(IDL Damage 的注释按此写)
-	CHECK(s.player == 75);          // ② 主人防御 3 倍于宠物 ⇒ 主人扛 75%
-	CHECK(s.pet == 25);
-
-	// 反向确认:宠物防御高时宠物多扛 —— 这正是原式做不到的。
-	const RideSplit s2 = splitRideDamage(100, /*myDef=*/100, /*petDef=*/300);
-	CHECK(s2.player == 25);
-	CHECK(s2.pet == 75);
-
-	// 双方防御都是 0 ⇒ 原式除零。新实现全部记在主人身上,且仍然无损。
+	// SSRC80 battle_event.c:2105–2116；第二式使用已加一的 playerdamage。
+	const RideSplit s = splitRideDamage(100, 300, 100);
+	CHECK(s.player == 26);
+	CHECK(s.pet == 75);
+	CHECK(s.player + s.pet == 101);
+	const RideSplit s2 = splitRideDamage(100, 100, 300);
+	CHECK(s2.player == 76);
+	CHECK(s2.pet == 25);
 	const RideSplit s3 = splitRideDamage(37, 0, 0);
-	CHECK(s3.player == 37);
-	CHECK(s3.pet == 0);
+	CHECK(s3.player == 19);
+	CHECK(s3.pet == 19);
+	CHECK(splitRideDamage(0, 100, 100).player == 0);
 }
 
 // ── ResolveTurn ───────────────────────────────────────────────────────────
@@ -1062,7 +1094,7 @@ TEST_CASE("ResolveTurn:批次 0.5 未接入的指令一律跳过,不产事件")
 //   「摇了一次」= 2。★ 下一条用例把这个基线**显式钉住**,免得基线变了却被读成
 //   「USE_ITEM 的消耗变了」。
 
-TEST_CASE("ResolveTurn:rng 基线 —— 单指令 Duel 的行动顺序抖动恒摇一次")
+TEST_CASE("ResolveTurn:rng 基线 —— 两占位均先抽速度，未就绪者仍不行动")
 {
 	// ★ 本条不测道具,只把上面那个基线固定下来:同一个 Duel 下 WAIT 摇 1 次。
 	//   ⇒ 使用道具系列里的 `calls() == 1 / == 2` 才有意义(1 = 只有基线,2 = 基线 + 恢复量)。
@@ -1072,7 +1104,7 @@ TEST_CASE("ResolveTurn:rng 基线 —— 单指令 Duel 的行动顺序抖动恒
 	ScriptedRandom rng({50});
 	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 	CHECK(ev.events.size() == 0);
-	CHECK(rng.calls() == 1); // ← 基线
+	CHECK(rng.calls() == 2); // ← 基线
 }
 
 TEST_CASE("ResolveTurn:使用有效恢复药 ⇒ 摇一次 rng、产 SetHp、按 RAND(0.9p,1.1p) 恢复")
@@ -1089,7 +1121,7 @@ TEST_CASE("ResolveTurn:使用有效恢复药 ⇒ 摇一次 rng、产 SetHp、按
 		d.cmds.commands[0].command.use_item.target = 0; // 给自己用
 		SA::Domain::BattleEvents ev{};
 		// ★ 脚本第一个值被基线(dex 抖动)吃掉,第二个才是恢复量那一摇。
-		ScriptedRandom rng({0, script_value});
+		ScriptedRandom rng({0, 0, script_value});
 		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 		*calls_out = rng.calls();
 		REQUIRE(ev.events.size() == 1);
@@ -1101,11 +1133,11 @@ TEST_CASE("ResolveTurn:使用有效恢复药 ⇒ 摇一次 rng、产 SetHp、按
 	int calls = 0;
 	// ★ ScriptedRandom::rand 把脚本值**钳制**到 [lo,hi] ⇒ 用越界值直接读出区间两端。
 	CHECK(run(-999999, &calls) == 500 + 90); // 下界 = 9p/10 = 90
-	CHECK(calls == 2);                       // ★★ 基线 1 + 恢复量 1
+	CHECK(calls == 3);                       // ★★ 基线 1 + 恢复量 1
 	CHECK(run(999999, &calls) == 500 + 110); // 上界 = 90 + (100+9)/5 - 1 = 110
-	CHECK(calls == 2);
+	CHECK(calls == 3);
 	CHECK(run(97, &calls) == 500 + 97); // 区间内原值透传
-	CHECK(calls == 2);
+	CHECK(calls == 3);
 }
 
 TEST_CASE("ResolveTurn:恢复量区间 = 原版 RAND(power*0.9,power*1.1) 的取值集合")
@@ -1120,16 +1152,16 @@ TEST_CASE("ResolveTurn:恢复量区间 = 原版 RAND(power*0.9,power*1.1) 的取
 		auto one = [power](int script_value)
 		{
 			Duel d = makeDuel();
-			d.field.at(0).hp = 0;
+			d.field.at(0).hp = 1;
 			d.field.at(0).max_hp = 100000;
 			d.field.at(0).mods.item_heal_power = power;
 			setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::USE_ITEM);
 			d.cmds.commands[0].command.use_item.target = 0;
 			SA::Domain::BattleEvents ev{};
-			ScriptedRandom rng({0, script_value}); // 首值给基线
+			ScriptedRandom rng({0, 0, script_value}); // 首值给基线
 			resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev);
 			REQUIRE(ev.events.size() == 1);
-			return static_cast<int>(ev.events[0].body.set_hp.hp); // hp 起点 0 ⇒ 即恢复量
+			return static_cast<int>(ev.events[0].body.set_hp.hp) - 1; // 活目标 HP=1
 		};
 		return std::make_pair(one(-999999), one(999999));
 	};
@@ -1151,11 +1183,11 @@ TEST_CASE("ResolveTurn:使用恢复药 clamp 到 max_hp(battle_magic.c:427-431)"
 	setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::USE_ITEM);
 	d.cmds.commands[0].command.use_item.target = 0;
 	SA::Domain::BattleEvents ev{};
-	ScriptedRandom rng({0, 999999});
+	ScriptedRandom rng({0, 0, 999999});
 	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 	REQUIRE(ev.events.size() == 1);
 	CHECK(ev.events[0].body.set_hp.hp == 1000u); // min(workhp, maxhp)
-	CHECK(rng.calls() == 2);                     // ★ clamp 不影响「摇过一次」
+	CHECK(rng.calls() == 3);                     // ★ clamp 不影响「摇过一次」
 }
 
 TEST_CASE("ResolveTurn:非恢复药(power <= 0)⇒ 不产事件**且不额外消耗 rng**")
@@ -1173,31 +1205,36 @@ TEST_CASE("ResolveTurn:非恢复药(power <= 0)⇒ 不产事件**且不额外消
 		ScriptedRandom rng({50});
 		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 		CHECK(ev.events.size() == 0);
-		CHECK(rng.calls() == 1); // ★★ 只有基线 ⇒ USE_ITEM 一次都没摇
+		CHECK(rng.calls() == 2); // ★★ 只有基线 ⇒ USE_ITEM 一次都没摇
 	}
 }
 
-TEST_CASE("ResolveTurn:恢复药目标空槽 / 越界 ⇒ 不产事件且不额外摇 rng")
+TEST_CASE("恢复药:无效槽拒绝，合法但空或已死的目标按原方法改选")
 {
-	// ⚠️★ **登记划出的原版分叉**:原版 `BATTLE_MultiList`(battle.c:236)在目标
-	//    `BATTLE_TargetCheck == FALSE`(已死/不在场)时会
-	//    `while((toNo = nLifeArea[rand()%10]) == -1);` —— **随机改打一个活人**,
-	//    且那个 while 消耗**不定次数** rng;全死时 `return -1` 而 `BATTLE_MultiRecovery`
-	//    **不检查返回值**、直接遍历未初始化的 ToList(原版 UB)。
-	//    ⇒ 本批不复刻「改打随机活人」(见 DR-DT23 ③):目标不可用即**什么都不发生**,
-	//      且**不额外摇 rng**。⚠️ 这是与原版的**已知行为差**,不是遗漏。
-	for (const int target : {5, 1, -1, kSlotCount})
+	for (int target : {-1, kSlotCount})
 	{
-		Duel d = makeDuel(); // 只有 slot 0 与 slot 10 被占用
+		Duel d = makeDuel();
 		d.field.at(0).mods.item_heal_power = 100;
 		setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::USE_ITEM);
 		d.cmds.commands[0].command.use_item.target = static_cast<std::uint32_t>(target);
-		SA::Domain::BattleEvents ev{};
-		ScriptedRandom rng({50});
-		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
-		CHECK(ev.events.size() == 0);
-		CHECK(rng.calls() == 1); // 只有基线
+		SA::Domain::BattleEvents events;
+		ScriptedRandom rng({0});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, events));
+		CHECK(events.events.empty());
+		CHECK(rng.calls() == 2);
 	}
+	Duel d = makeDuel();
+	d.field.at(0).hp = 500;
+	d.field.at(0).mods.item_heal_power = 100;
+	setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::USE_ITEM);
+	d.cmds.commands[0].command.use_item.target = 5;
+	SA::Domain::BattleEvents events;
+	ScriptedRandom rng({0, 0, 9, 0, 100}); // 排序、拒绝空项、选中唯一活人、回血。
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, events));
+	REQUIRE(events.events.size() == 1);
+	CHECK(events.events[0].body.set_hp.target == 0);
+	CHECK(events.events[0].body.set_hp.hp == 600);
+	CHECK(rng.calls() == 5);
 }
 
 TEST_CASE("ResolveTurn:恢复药读的是**回合内 hp 镜像**,不是回合开始时的 hp")
@@ -1244,7 +1281,8 @@ TEST_CASE("ResolveTurn:守方防御 ⇒ 减伤且置 GUARD;混乱值 > 0 时不�
 	auto run = [](int confusion, std::uint32_t *flags_out)
 	{
 		Duel d = makeDuel(/*atk=*/100000, /*def=*/1);
-		d.field.at(10).confusion = confusion;
+		d.field.at(10).status = confusion > 0 ? static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_CONFUSION) : 0;
+		d.field.at(10).status_turns = confusion;
 		d.field.at(10).hp = d.field.at(10).max_hp = 100000000;
 		setKind(d.cmds, 10, SA::Domain::BattleCommand::CommandKind::GUARD);
 		SA::Domain::BattleEvents ev{};
@@ -1284,8 +1322,8 @@ TEST_CASE("ResolveTurn:骑宠分摊写进 hp_delta / pet_hp_delta")
 
 	CHECK(dmg.hp_delta < 0);
 	CHECK(dmg.pet_hp_delta < 0);
-	// ★ DR-BT2 修正后的方向:主人防御 300 > 宠物 100 ⇒ 主人扛得更多。
-	CHECK(-dmg.hp_delta > -dmg.pet_hp_delta);
+	// 原分子为宠物防御：主人防御 300 > 宠物 100 ⇒ 主人承伤较少。
+	CHECK(-dmg.hp_delta < -dmg.pet_hp_delta);
 }
 
 TEST_CASE("ResolveTurn:事件溢出返回 false,不静默截断")
@@ -1448,6 +1486,74 @@ TEST_CASE("逃跑:敌方无存活 ⇒ Esc=100;Esc<1 钳到 1")
 	rollEscape(false, /*luck=*/1, /*escape_cnt=*/1, /*my_level=*/1,
 	           /*enemy_level_sum=*/1000, /*enemy_alive_count=*/1, rng, &pct);
 	CHECK(pct == 1);
+}
+
+TEST_CASE("F04:逃跑和收宠立即影响同回合后续行动")
+{
+	Duel d = makeDuel(100, 0);
+	d.field.is_pvp = true;
+	d.field.at(0).quick = 1000;
+	d.cmds.present[0] = true;
+	d.cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::ESCAPE;
+	setAttack(d.cmds, 10, 0);
+	MaxRandom rng;
+	SA::Domain::BattleEvents events{};
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, events));
+	int escaped = 0, damage = 0;
+	for (const auto &e : events.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::ESCAPE && e.body.escape.succeeded)
+			++escaped;
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+			++damage;
+	}
+	CHECK(escaped == 1);
+	CHECK(damage == 0);
+	d.cmds = noCommands();
+	d.cmds.present[0] = true;
+	d.cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::PET_IN;
+	d.field.at(5) = makeCombatant(CombatantKind::kPet, 100, 0);
+	setAttack(d.cmds, 5, 10);
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, events));
+	for (const auto &e : events.events)
+		CHECK(e.body_kind != SA::Domain::BattleEvent::BodyKind::DAMAGE);
+}
+
+TEST_CASE("F05/F06:伤害唤醒影响后续行动，酒醉行为读同一个计数")
+{
+	Duel d = makeDuel(100, 0);
+	d.field.at(0).quick = 1000;
+	d.field.at(0).attack = 100;
+	d.field.at(10).defense = 0;
+	d.field.at(10).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_SLEEP);
+	d.field.at(10).status_turns = 3;
+	setAttack(d.cmds, 0, 10);
+	setAttack(d.cmds, 10, 0);
+	MaxRandom rng;
+	SA::Domain::BattleEvents events{};
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, events));
+	int wake = 0, awakened_attacks = 0;
+	for (const auto &e : events.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE &&
+		    e.body.status_change.status == BattleStatus::BATTLE_ST_SLEEP && !e.body.status_change.applied)
+			++wake;
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::HIT && e.body.hit.attacker == 10)
+			++awakened_attacks;
+	}
+	CHECK(wake == 1);
+	CHECK(awakened_attacks == 1);
+	auto attacker = makeCombatant(CombatantKind::kPlayer, 100, 10);
+	auto defender = attacker;
+	attacker.status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_DRUNK);
+	attacker.status_turns = 3;
+	ScriptedRandom drunk({20, 10000});
+	(void)rollDodge(attacker, defender, false, false, RulesConfig{}, drunk);
+	CHECK(drunk.calls() == 2);
+	attacker.status_turns = 0;
+	ScriptedRandom sober({10000});
+	(void)rollDodge(attacker, defender, false, false, RulesConfig{}, sober);
+	CHECK(sober.calls() == 1);
 }
 
 TEST_CASE("逃跑:PvP 直接成功(battle_event.c:4252)")
@@ -1945,7 +2051,7 @@ TEST_CASE("ResolveTurn:暴击命中 ⇒ Damage 带 CRITICAL 标志,且**不**带
 	d.field.at(10).quick = 0;
 
 	SA::Domain::BattleEvents ev{};
-	ScriptedRandom srng({/*dex抖动*/ 0, /*回避*/ 9999, /*暴击*/ 1, /*伤害*/ 500, 500, 500, 500});
+	ScriptedRandom srng({/*两槽 dex*/ 0, 0, /*回避*/ 9999, /*暴击*/ 1, /*伤害*/ 500, 500, 500, 500});
 	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, srng, ev));
 
 	const SA::Domain::Damage *dmg = nullptr;
@@ -1970,7 +2076,7 @@ TEST_CASE("ResolveTurn:未暴击命中 ⇒ NORMAL 标志、无 CRITICAL")
 	d.field.at(0).quick = 0; // per=0 ⇒ 不可能暴击
 	d.field.at(10).quick = 0;
 	SA::Domain::BattleEvents ev{};
-	ScriptedRandom srng({0, 9999, 5000, 500}); // 暴击抽 5000 也无所谓,per=0
+	ScriptedRandom srng({0, 0, 9999, 5000, 500}); // 暴击抽 5000 也无所谓,per=0
 	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, srng, ev));
 	const SA::Domain::Damage *dmg = nullptr;
 	for (const auto &e : ev.events)
@@ -2002,7 +2108,7 @@ TEST_CASE("ResolveTurn:持弓暴击 ⇒ 置 CRITICAL 标志但伤害不吃加成
 		d.field.at(10).quick = 0;
 		d.field.at(10).level = 10; // 附加项 = 200 × 5/10 × 0.5 = 50,持弓省掉
 		SA::Domain::BattleEvents ev{};
-		ScriptedRandom srng({0, 9999, 1, 500, 500, 500, 500});
+		ScriptedRandom srng({0, 0, 9999, 1, 500, 500, 500, 500});
 		resolveTurn(d.field, d.cmds, RulesConfig{}, srng, ev);
 		for (const auto &e : ev.events)
 			if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
@@ -2103,14 +2209,14 @@ TEST_CASE("打飞:门槛是 float 运算而非整数(battle_event.c:2062)")
 TEST_CASE("ResolveTurn:一击打飞 ⇒ Damage 置 ULTIMATE_2,KnockbackState 回填清零")
 {
 	// 高攻低防、目标低血 ⇒ 一段就打穿且过门槛。
-	Duel d = makeDuel(/*atk=*/100000, /*def=*/1);
+	Duel d = makeDuel(/*atk=*/10000, /*def=*/1);
 	d.field.at(0).level = 5; // lv<10 ⇒ 空手恒 1 段
 	d.field.at(0).mods.unarmed = true;
 	d.field.at(10).max_hp = 100; // 门槛 = 140
 	d.field.at(10).hp = 100;
 	d.field.at(10).ultimate_accumulator = 99; // 命中后应被清零
 	SA::Domain::BattleEvents ev{};
-	ScriptedRandom rng({1, 10, 1}); // dex 抖动 / 段数 / per(不暴击)
+	ScriptedRandom rng({0, 0, 10000, 10000, 0, 0}); // dex 抖动 / 段数 / per(不暴击)
 	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
 	const SA::Domain::Damage *dmg = nullptr;
@@ -2136,14 +2242,14 @@ TEST_CASE("ResolveTurn:一击打飞 ⇒ Damage 置 ULTIMATE_2,KnockbackState 回
 
 TEST_CASE("ResolveTurn:免疫单位不置打飞标志(DR-BT11 数据驱动,不比对图号)")
 {
-	Duel d = makeDuel(/*atk=*/100000, /*def=*/1);
+	Duel d = makeDuel(/*atk=*/10000, /*def=*/1);
 	d.field.at(0).level = 5;
 	d.field.at(0).mods.unarmed = true;
 	d.field.at(10).max_hp = 100;
 	d.field.at(10).hp = 100;
 	d.field.at(10).mods.immune_knockback = true; // ★ 标志位,非图号
 	SA::Domain::BattleEvents ev{};
-	ScriptedRandom rng({1, 10, 1});
+	ScriptedRandom rng({0, 0, 10000, 10000, 0, 0});
 	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
 	const SA::Domain::Damage *dmg = nullptr;
@@ -2169,7 +2275,7 @@ TEST_CASE("ResolveTurn:打穿未过门槛 ⇒ 不打飞但 KnockbackState 记录
 	d.field.at(10).hp = 1; // 打穿(damage-1)的溢出,远小于 120020
 	d.field.at(10).ultimate_accumulator = 0;
 	SA::Domain::BattleEvents ev{};
-	ScriptedRandom rng({1, 10, 1});
+	ScriptedRandom rng({0, 0, 10000, 10000, 0, 0});
 	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
 	const SA::Domain::Damage *dmg = nullptr;
@@ -2200,7 +2306,7 @@ TEST_CASE("ResolveTurn:不打穿(有剩血)⇒ 累加器不变,不产 KnockbackS
 	d.field.at(10).hp = 100000; // 血远高于单段伤害 ⇒ 不打穿
 	d.field.at(10).ultimate_accumulator = 0;
 	SA::Domain::BattleEvents ev{};
-	ScriptedRandom rng({1, 10, 1});
+	ScriptedRandom rng({0, 0, 10000, 10000, 0, 0});
 	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
 
 	CHECK(countKind(ev, SA::Domain::BattleEvent::BodyKind::KNOCKBACK_STATE) == 0u);
@@ -2461,10 +2567,9 @@ TEST_CASE("状态:通用分支 —— 等级差×Bai 夹 ±Range、PvP 归零、
 	}
 }
 
-TEST_CASE("状态⚠️★★:装备抗性只对虚弱/魔障/沉默三种存在(文档记成通用一项)")
+TEST_CASE("状态⚠️★★:F02:不同枚举导致三种装备抗性原分支不生效")
 {
-	// ⚠️ `05` §4.3 把「− 装备抗性」写成通用一项 —— 源码 `:5141-5151` 是三个
-	//    互斥的 else-if,其余 39 种状态一分都不减(2026-09-11 核实,纪律 ①)。
+	// F02: SSRC80 WORK 枚举 51/53/54 均超过 BATTLE_ST_END=44，原分支不可达。
 	auto atk = makeCombatant(CombatantKind::kPlayer, 100, 10);
 	atk.level = 1;
 	atk.luck = 0;
@@ -2489,12 +2594,9 @@ TEST_CASE("状态⚠️★★:装备抗性只对虚弱/魔障/沉默三种存在
 
 	// 基线:毒不吃任何装备抗性 ⇒ 30 − 10 = 20。
 	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_POISON) == 20);
-	// ★★ 虚弱吃**两道**(`_EQUIT_RESIST` 5 + `_SUIT_ADDPART3` 3)⇒ 20 − 8 = 12。
-	//    ⚠️ 后者源码判 `status == WEAKEN` 而字段名叫 `RENOCAST`——「名字在骗人」,
-	//      按判据归虚弱。若误归到沉默,这一条与下面沉默那条会**同时**红。
-	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_WEAKEN) == 12);
-	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_BARRIER) == 20 - 7);
-	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_NOCAST) == 20 - 11);
+	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_WEAKEN) == 20);
+	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_BARRIER) == 20);
+	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_NOCAST) == 20);
 	// 睡眠/石化/混乱等一概不吃。
 	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_SLEEP) == 20);
 	CHECK(perOf(SA::Domain::BattleStatus::BATTLE_ST_STONE) == 20);
@@ -2835,7 +2937,7 @@ TEST_CASE("ResolveTurn★★:带毒装备 —— 普攻命中后附带毒(battle
 		// 第 2 发给 1 ⇒ 回避判定 RAND(1,10000) <= per ⇒ 必闪。
 		ScriptedRandom rng({0, 1});
 		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
-		CHECK(rng.calls() == 2); // 基线 + 回避;★ 没有第三发 = 状态判定没摇
+		CHECK(rng.calls() == 3); // 基线 + 回避;★ 没有第三发 = 状态判定没摇
 		for (std::size_t i = 0; i < ev.events.size(); ++i)
 		{
 			if (ev.events[i].body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)

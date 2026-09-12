@@ -1,0 +1,7 @@
+Test project /private/tmp/stoneage-remediation-20260912/client-asan
+    Start 3: client_net
+1/1 Test #3: client_net .......................   Passed    1.05 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   1.05 sec
