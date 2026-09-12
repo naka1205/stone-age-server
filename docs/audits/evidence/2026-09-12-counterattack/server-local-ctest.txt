@@ -1,0 +1,328 @@
+Start testing: Sep 12 11:05 CST
+----------------------------------------------------------
+1/17 Testing: contract_smoke
+1/17 Test: contract_smoke
+Command: "/private/tmp/stoneage-speed-20260912/server/tests/sa_contract_smoke"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"contract_smoke" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+OK  contract smoke: 相克矩阵/句柄/可回放/战场/IDL互操作/配置默认值
+<end of output>
+Test time =   1.49 sec
+----------------------------------------------------------
+Test Passed.
+"contract_smoke" end time: Sep 12 11:05 CST
+"contract_smoke" time elapsed: 00:00:01
+----------------------------------------------------------
+
+2/17 Testing: rules_battle
+2/17 Test: rules_battle
+Command: "/private/tmp/stoneage-speed-20260912/server/tests/sa_rules_battle_test"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"rules_battle" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  115 |  115 passed | 0 failed | 0 skipped
+[doctest] assertions: 2763 | 2763 passed | 0 failed |
+[doctest] Status: SUCCESS!
+<end of output>
+Test time =   0.36 sec
+----------------------------------------------------------
+Test Passed.
+"rules_battle" end time: Sep 12 11:05 CST
+"rules_battle" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/17 Testing: rules_progression
+3/17 Test: rules_progression
+Command: "/private/tmp/stoneage-speed-20260912/server/tests/sa_rules_progression_test"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"rules_progression" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases: 13 | 13 passed | 0 failed | 0 skipped
+[doctest] assertions: 85 | 85 passed | 0 failed |
+[doctest] Status: SUCCESS!
+<end of output>
+Test time =   0.37 sec
+----------------------------------------------------------
+Test Passed.
+"rules_progression" end time: Sep 12 11:05 CST
+"rules_progression" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/17 Testing: model_pool
+4/17 Test: model_pool
+Command: "/private/tmp/stoneage-speed-20260912/server/tests/sa_model_pool_test"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"model_pool" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  35 |  35 passed | 0 failed | 0 skipped
+[doctest] assertions: 238 | 238 passed | 0 failed |
+[doctest] Status: SUCCESS!
+<end of output>
+Test time =   0.37 sec
+----------------------------------------------------------
+Test Passed.
+"model_pool" end time: Sep 12 11:05 CST
+"model_pool" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/17 Testing: idl_smoke
+5/17 Test: idl_smoke
+Command: "/private/tmp/stoneage-speed-20260912/server/tests/sa_idl_smoke"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"idl_smoke" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+OK  BattleEvent=28  BattleEvents=7184  BattleSnapshot=2816  WindowOpen=12608
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"idl_smoke" end time: Sep 12 11:05 CST
+"idl_smoke" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/17 Testing: net_framing
+6/17 Test: net_framing
+Command: "/private/tmp/stoneage-speed-20260912/server/tests/sa_net_framing_test"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"net_framing" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  19 |  19 passed | 0 failed | 0 skipped
+[doctest] assertions: 146 | 146 passed | 0 failed |
+[doctest] Status: SUCCESS!
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"net_framing" end time: Sep 12 11:05 CST
+"net_framing" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/17 Testing: net_tcp
+7/17 Test: net_tcp
+Command: "/private/tmp/stoneage-speed-20260912/server/tests/sa_net_tcp_test"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"net_tcp" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases: 13 | 13 passed | 0 failed | 0 skipped
+[doctest] assertions: 93 | 93 passed | 0 failed |
+[doctest] Status: SUCCESS!
+<end of output>
+Test time =   0.08 sec
+----------------------------------------------------------
+Test Passed.
+"net_tcp" end time: Sep 12 11:05 CST
+"net_tcp" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/17 Testing: platform_config
+8/17 Test: platform_config
+Command: "/private/tmp/stoneage-speed-20260912/server/tests/sa_platform_config_test"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"platform_config" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+level=error event=config_rejected code=5 path=x
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:   23 |   23 passed | 0 failed | 0 skipped
+[doctest] assertions: 4242 | 4242 passed | 0 failed |
+[doctest] Status: SUCCESS!
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"platform_config" end time: Sep 12 11:05 CST
+"platform_config" time elapsed: 00:00:00
+----------------------------------------------------------
+
+9/17 Testing: world_tick
+9/17 Test: world_tick
+Command: "/private/tmp/stoneage-speed-20260912/server/tests/sa_world_tick_test"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"world_tick" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+level=error event=capture_commit_failed code=208 battle_id=1 actor=0 target=15 reason=pet_create_failed
+level=error event=pet_switch_failed code=210 battle_id=1 actor=0 pet_slot=1 reason=enter_failed
+level=error event=pet_switch_failed code=210 battle_id=1 actor=0 pet_slot=4 reason=no_pet
+level=error event=battle_events_truncated code=205 battle_id=1 turn=0
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  111 |  111 passed | 0 failed | 0 skipped
+[doctest] assertions: 2131 | 2131 passed | 0 failed |
+[doctest] Status: SUCCESS!
+<end of output>
+Test time =   0.38 sec
+----------------------------------------------------------
+Test Passed.
+"world_tick" end time: Sep 12 11:05 CST
+"world_tick" time elapsed: 00:00:00
+----------------------------------------------------------
+
+10/17 Testing: world_map
+10/17 Test: world_map
+Command: "/private/tmp/stoneage-speed-20260912/server/tests/sa_world_map_test"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"world_map" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  30 |  30 passed | 0 failed | 0 skipped
+[doctest] assertions: 274 | 274 passed | 0 failed |
+[doctest] Status: SUCCESS!
+<end of output>
+Test time =   0.36 sec
+----------------------------------------------------------
+Test Passed.
+"world_map" end time: Sep 12 11:05 CST
+"world_map" time elapsed: 00:00:00
+----------------------------------------------------------
+
+11/17 Testing: server_self_test
+11/17 Test: server_self_test
+Command: "/private/tmp/stoneage-speed-20260912/server/src/stone_age_server" "--self-test"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"server_self_test" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+level=info event=server_starting code=1
+level=info event=config_loaded code=4 bind_addr=0.0.0.0 listen_port=8300 protocol_version=1 tick_hz=60 battle_turn_interval_ms=1200
+level=info event=module_loaded code=6 module=world
+level=info event=battle_seed code=204 master_seed=14515744924652869669 from_config=false
+level=info event=server_ready code=2 bind_addr=0.0.0.0 listen_port=50509 self_test=true
+level=info event=server_stopping code=3 connections=0 battles=0
+<end of output>
+Test time =   2.37 sec
+----------------------------------------------------------
+Test Passed.
+"server_self_test" end time: Sep 12 11:05 CST
+"server_self_test" time elapsed: 00:00:02
+----------------------------------------------------------
+
+12/17 Testing: shared_purity
+12/17 Test: shared_purity
+Command: "/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14" "/Users/naka/Game/Stoneage/stone-age-server/tools/check_shared_purity.py"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"shared_purity" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+✅ shared/ 依赖纯度检查通过（扫描 21 个文件）
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"shared_purity" end time: Sep 12 11:05 CST
+"shared_purity" time elapsed: 00:00:00
+----------------------------------------------------------
+
+13/17 Testing: module_boundaries
+13/17 Test: module_boundaries
+Command: "/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14" "/Users/naka/Game/Stoneage/stone-age-server/tools/check_module_boundaries.py"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"module_boundaries" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+✅ 模块边界检查通过 —— 3 个模块 (net, platform, world)、15 个源文件
+   net        → (无)
+   platform   → (无)
+   world      → net, platform
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Passed.
+"module_boundaries" end time: Sep 12 11:05 CST
+"module_boundaries" time elapsed: 00:00:00
+----------------------------------------------------------
+
+14/17 Testing: idl_verify
+14/17 Test: idl_verify
+Command: "/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14" "/Users/naka/Game/Stoneage/stone-age-server/idl/codegen/saidl_gen.py" "--verify"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"idl_verify" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+✅ 生成物与 schema 同步
+<end of output>
+Test time =   0.09 sec
+----------------------------------------------------------
+Test Passed.
+"idl_verify" end time: Sep 12 11:05 CST
+"idl_verify" time elapsed: 00:00:00
+----------------------------------------------------------
+
+15/17 Testing: dr_table
+15/17 Test: dr_table
+Command: "/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14" "/Users/naka/Game/Stoneage/stone-age-server/tools/check_dr_table.py"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"dr_table" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+✅ DR 登记表可数性:§1–§12 主表 137 行(编号唯一)· 19 个展开小节全部在表内
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"dr_table" end time: Sep 12 11:05 CST
+"dr_table" time elapsed: 00:00:00
+----------------------------------------------------------
+
+16/17 Testing: docs_index
+16/17 Test: docs_index
+Command: "/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14" "/Users/naka/Game/Stoneage/stone-age-server/tools/check_docs_index.py"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"docs_index" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+✅ docs 可追溯性:journal/ 57 个编号(§9.0.1–9.0.56,12 个文件)编号唯一且连续 · 映射表全覆盖 · 目录指针全部有效
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"docs_index" end time: Sep 12 11:05 CST
+"docs_index" time elapsed: 00:00:00
+----------------------------------------------------------
+
+17/17 Testing: code_format
+17/17 Test: code_format
+Command: "/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14" "/Users/naka/Game/Stoneage/stone-age-server/tools/check_format.py"
+Directory: /private/tmp/stoneage-speed-20260912/server/tests
+"code_format" start time: Sep 12 11:05 CST
+Output:
+----------------------------------------------------------
+✅ .clang-format 检查通过(扫描 51 个文件,Apple clang-format version 21.0.0 (clang-2100.1.1.101))
+<end of output>
+Test time =   0.45 sec
+----------------------------------------------------------
+Test Passed.
+"code_format" end time: Sep 12 11:05 CST
+"code_format" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Sep 12 11:05 CST

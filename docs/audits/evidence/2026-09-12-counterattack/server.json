@@ -1,0 +1,1 @@
+{"bind_addr": "127.0.0.1", "listen_port": 50644, "protocol_version": 1, "log_level": "debug", "tempo": {"tick_hz": 100, "battle_turn_interval_ms": 200}, "demo_battle": {"enabled": true, "slot": 0}}

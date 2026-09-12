@@ -1,0 +1,79 @@
+0_macOS · Apple clang.txt
+2026-09-12T03:15:53.1577160Z ✅ ★★ 测试注册清单 —— 17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+2026-09-12T03:16:38.4877180Z 100% tests passed out of 17
+2026-09-12T03:16:38.4887790Z ✅ ctest —— 100% tests passed out of 17
+2026-09-12T03:16:39.9367210Z 0% tests passed, 1 tests failed out of 1
+2026-09-12T03:16:39.9368370Z The following tests FAILED:
+2026-09-12T03:16:59.1969850Z 100% tests passed out of 2
+2026-09-12T03:16:59.1978570Z ✅ ★ 断言防线反向验证 —— 改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T03:16:59.1986570Z        17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+2026-09-12T03:16:59.1990930Z        100% tests passed out of 17
+2026-09-12T03:16:59.1993480Z        改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T03:16:59.1995500Z ✅ 全部 6 项通过
+
+macOS · Apple clang/11_验证(配置 · 注册清单 · 清洁构建 · ctest · 断言防线).txt
+2026-09-12T03:15:53.1577150Z ✅ ★★ 测试注册清单 —— 17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+2026-09-12T03:16:38.4877180Z 100% tests passed out of 17
+2026-09-12T03:16:38.4884720Z ✅ ctest —— 100% tests passed out of 17
+2026-09-12T03:16:39.9367200Z 0% tests passed, 1 tests failed out of 1
+2026-09-12T03:16:39.9368370Z The following tests FAILED:
+2026-09-12T03:16:59.1969850Z 100% tests passed out of 2
+2026-09-12T03:16:59.1978570Z ✅ ★ 断言防线反向验证 —— 改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T03:16:59.1986570Z        17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+2026-09-12T03:16:59.1990920Z        100% tests passed out of 17
+2026-09-12T03:16:59.1993480Z        改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T03:16:59.1995490Z ✅ 全部 6 项通过
+
+1_Windows · MSVC.txt
+2026-09-12T03:16:05.7312188Z -- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
+2026-09-12T03:16:06.2945806Z ✅ ★★ 测试注册清单 —— 17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+2026-09-12T03:16:56.0767850Z 100% tests passed out of 17
+2026-09-12T03:16:56.0768911Z ✅ ctest —— 100% tests passed out of 17
+2026-09-12T03:16:59.3843042Z 0% tests passed, 1 tests failed out of 1
+2026-09-12T03:16:59.3843588Z The following tests FAILED:
+2026-09-12T03:17:21.9022347Z 100% tests passed out of 2
+2026-09-12T03:17:21.9023634Z ✅ ★ 断言防线反向验证 —— 改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T03:17:21.9028974Z        17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+2026-09-12T03:17:21.9031528Z        100% tests passed out of 17
+2026-09-12T03:17:21.9032494Z        改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T03:17:21.9034050Z ✅ 全部 6 项通过
+
+Windows · MSVC/11_验证(配置 · 注册清单 · 清洁构建 · ctest · 断言防线).txt
+2026-09-12T03:16:05.7312186Z -- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
+2026-09-12T03:16:06.2945800Z ✅ ★★ 测试注册清单 —— 17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+2026-09-12T03:16:56.0767846Z 100% tests passed out of 17
+2026-09-12T03:16:56.0768905Z ✅ ctest —— 100% tests passed out of 17
+2026-09-12T03:16:59.3843040Z 0% tests passed, 1 tests failed out of 1
+2026-09-12T03:16:59.3843586Z The following tests FAILED:
+2026-09-12T03:17:21.9022318Z 100% tests passed out of 2
+2026-09-12T03:17:21.9023628Z ✅ ★ 断言防线反向验证 —— 改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T03:17:21.9028934Z        17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+2026-09-12T03:17:21.9031524Z        100% tests passed out of 17
+2026-09-12T03:17:21.9032487Z        改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T03:17:21.9034044Z ✅ 全部 6 项通过
+
+2_Linux · GCC.txt
+2026-09-12T03:15:41.2788795Z ✅ ★★ 测试注册清单 —— 17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+2026-09-12T03:16:29.0448623Z 100% tests passed, 0 tests failed out of 17
+2026-09-12T03:16:29.0449474Z ✅ ctest —— 100% tests passed, 0 tests failed out of 17
+2026-09-12T03:16:31.0784819Z 0% tests passed, 1 tests failed out of 1
+2026-09-12T03:16:31.0785438Z The following tests FAILED:
+2026-09-12T03:16:57.4024720Z 100% tests passed, 0 tests failed out of 2
+2026-09-12T03:16:57.4026083Z ✅ ★ 断言防线反向验证 —— 改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T03:16:57.4031488Z        17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+2026-09-12T03:16:57.4034466Z        100% tests passed, 0 tests failed out of 17
+2026-09-12T03:16:57.4035567Z        改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T03:16:57.4036882Z ✅ 全部 6 项通过
+
+Linux · GCC/11_验证(配置 · 注册清单 · 清洁构建 · ctest · 断言防线).txt
+2026-09-12T03:15:41.2788781Z ✅ ★★ 测试注册清单 —— 17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+2026-09-12T03:16:29.0448620Z 100% tests passed, 0 tests failed out of 17
+2026-09-12T03:16:29.0449471Z ✅ ctest —— 100% tests passed, 0 tests failed out of 17
+2026-09-12T03:16:31.0784816Z 0% tests passed, 1 tests failed out of 1
+2026-09-12T03:16:31.0785435Z The following tests FAILED:
+2026-09-12T03:16:57.4024716Z 100% tests passed, 0 tests failed out of 2
+2026-09-12T03:16:57.4026077Z ✅ ★ 断言防线反向验证 —— 改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T03:16:57.4031474Z        17 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, model_pool, module_boundaries, net_framing, net_tcp, platform_config, rules_battle, rules_progression, server_self_test, shared_purity, world_map, world_tick
+2026-09-12T03:16:57.4034200Z        100% tests passed, 0 tests failed out of 17
+2026-09-12T03:16:57.4035562Z        改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T03:16:57.4036877Z ✅ 全部 6 项通过
