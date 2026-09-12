@@ -49,6 +49,7 @@ F_ONEOF_NAME = 1
 OPT_MSG_ID = 50001
 OPT_TRANSPORT_ONLY = 50002
 OPT_DEPRECATED_ID = 50003
+OPT_PERSISTED = 50004
 OPT_MAX_LEN = 50011
 OPT_MAX_COUNT = 50012
 OPT_ENUM_WIDTH = 50021
@@ -107,6 +108,7 @@ class Message:
     msg_id: int | None
     transport_only: bool
     deprecated_id: bool
+    persisted: bool
     file: str
     package: str
 
@@ -254,6 +256,7 @@ def _parse_message(md, package: str, prefix: str, filename: str,
         msg_id=_opt_uint(options, OPT_MSG_ID),
         transport_only=_opt_bool(options, OPT_TRANSPORT_ONLY),
         deprecated_id=_opt_bool(options, OPT_DEPRECATED_ID),
+        persisted=_opt_bool(options, OPT_PERSISTED),
         file=filename, package=package,
     )
 

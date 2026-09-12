@@ -43,6 +43,7 @@ using NameStr = SA::IDL::FixedStr<kNameMaxBytes>;
 //   任何自管内存的成员(NameStr 是定长内联串)。
 struct Pet
 {
+	std::uint64_t uid = 0; // Durable identity, never an EntityHandle.
 	// ★ 类型与族的对应在编译期可查 —— 和类型的分派不靠运行期 tag 字段(M2)。
 	static constexpr EntityKind kKind = EntityKind::kPet;
 

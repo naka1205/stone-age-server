@@ -53,6 +53,7 @@ using ItemHandle = EntityHandle;
 //   任何自管内存的成员(ItemNameStr 是定长内联串)。
 struct Item
 {
+	std::uint64_t uid = 0;
 	// ── 身份(源码 `ITEM_DATAINT`:ITEM_ID / ITEM_NAME / ITEM_UNIQUECODE)──────
 	//
 	// `item_id` = `ITEM_ID`(展开视图 item.h:110,`data[]` 首项)—— 道具表主键,

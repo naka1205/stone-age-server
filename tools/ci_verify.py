@@ -65,6 +65,10 @@ REPO = Path(__file__).resolve().parent.parent
 #   将来新增测试时必须同步改这里 —— 那正是想要的:让测试集合的变化
 #   经过一次人的确认,而不是被环境悄悄决定。
 EXPECTED_TESTS = {
+    "json",             # 存档与内容的 Unicode / 数值 / 标识符往返
+    "tls",              # 证书身份校验、分片传输、篡改拒绝
+    "world_persistence", # 认证/保存/断线/停服的异步生命周期
+    "playable_content", # 原始图元扫描线方向与 PNG 图集边界
     "contract_smoke",   # 契约层冒烟(含相克矩阵重排保护,§5 的探针也打在它身上)
     "rules_battle",     # ★ L3 黄金用例集 —— ③ 层不可自证的唯一补偿手段
     "rules_progression",  # ★ 成长养成:属性推导(四维 → 三围)逐位钉死,DR-DT9

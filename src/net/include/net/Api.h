@@ -191,6 +191,8 @@ class TcpTransport final : public Transport
 	// ★ port = 0 表示由系统分配,之后用 listen_port() 取回实际端口。
 	//   这不是测试专用后门:它是让用例能在 CI 上并行跑而不撞端口的唯一干净办法。
 	bool listen(const char *bind_addr, std::uint16_t port);
+	// Configure before listen. Plaintext remains available for isolated demo/tests.
+	bool enableTls(const char *certificate, const char *key);
 
 	// 实际监听的端口。未监听时为 0。
 	std::uint16_t listenPort() const noexcept;
@@ -270,6 +272,10 @@ class SessionHost
 	// 客户端上行的事件触发(0x0305,批次 W.5)。★ 明雷开战:面前格有明雷则开战 —— 世界态判定,归宿主。
 	virtual void onEvent(SessionId id, const SA::Domain::EventRequest &req) = 0;
 	virtual void onSessionClosed(SessionId id) = 0;
+	virtual void onLogin(SessionId, const SA::Transport::LoginRequest &, std::uint64_t) {}
+	virtual void onCreateCharacter(SessionId, const SA::Transport::CreateCharacterRequest &, std::uint64_t) {}
+	virtual void onSelectCharacter(SessionId, const SA::Transport::SelectCharacterRequest &, std::uint64_t) {}
+	virtual void onSave(SessionId, const SA::Transport::SaveRequest &, std::uint64_t) {}
 
   protected:
 	SessionHost() = default;
@@ -305,6 +311,21 @@ class Session
 	}
 
 	void markOnline() noexcept;
+	void awaitLogin() noexcept
+	{
+		if (!closed())
+			_state = SessionState::kAuthenticated;
+	}
+	void selectCharacter() noexcept
+	{
+		if (!closed())
+			_state = SessionState::kSelectingChar;
+	}
+	void saving() noexcept
+	{
+		if (!closed())
+			_state = SessionState::kLoggingOut;
+	}
 	void close() noexcept;
 
 	// ── 供测试与运维观察 ──
@@ -317,6 +338,7 @@ class Session
 	bool handleBattleCommand(const EnvelopeView &env);
 	bool handleWalkRequest(const EnvelopeView &env);
 	bool handleEventRequest(const EnvelopeView &env);
+	bool handleLifecycle(const EnvelopeView &env);
 
 	SessionId _id;
 	std::uint32_t _protocolVersion;

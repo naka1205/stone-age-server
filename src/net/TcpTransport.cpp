@@ -26,7 +26,9 @@
 //   POSIX  用 close / fcntl(O_NONBLOCK) / poll / EWOULDBLOCK,且要挡 SIGPIPE。
 
 #include "net/Api.h"
+#include "tls/Channel.h"
 
+#include <chrono>
 #include <cstring>
 #include <deque>
 #include <string>
@@ -159,6 +161,9 @@ struct TcpTransport::Impl
 		std::size_t out_sent = 0;           // outbound 里已写出的前缀长度
 		bool want_close = false;            // 已请求关闭,等出站排空
 		bool dead = false;                  // 本轮末尾清理
+		std::unique_ptr<SA::TLS::Channel> tls;
+		bool announced = false;
+		std::chrono::steady_clock::time_point accepted = std::chrono::steady_clock::now();
 	};
 
 	TransportEvents *events = nullptr;
@@ -166,6 +171,7 @@ struct TcpTransport::Impl
 	std::uint16_t port = 0;
 	std::string error;
 	bool lib_ready = false;
+	std::unique_ptr<SA::TLS::Context> tls_context;
 
 	// ★ deque 而不是 vector:回调里宿主可能 Send/Close,进而增删连接。
 	//   deque 的**引用在两端插入时保持有效**,而 vector 会整体搬家 ——
@@ -174,6 +180,36 @@ struct TcpTransport::Impl
 	ConnectionId next_id = 1;
 	std::vector<PollFd> pollfds;
 	std::vector<ConnectionId> poll_ids;
+
+	bool pumpTls(Conn &c, const std::uint8_t *data = nullptr, std::size_t size = 0)
+	{
+		if (!c.tls)
+			return true;
+		bool ok = size ? c.tls->feed(data, size) : c.tls->advance();
+		c.tls->takeEncrypted(c.outbound);
+		if (!c.announced && c.tls->ready())
+		{
+			c.announced = true;
+			if (events)
+				events->onConnected(c.id);
+		}
+		std::vector<std::uint8_t> plain;
+		c.tls->takePlain(plain);
+		if (!plain.empty() && events && c.announced)
+			events->onBytes(c.id, plain.data(), plain.size());
+		if (!c.announced && std::chrono::steady_clock::now() - c.accepted > std::chrono::seconds(10))
+			ok = false;
+		if (c.outbound.size() - c.out_sent > kMaxOutboundBytes)
+			ok = false;
+		if (!ok)
+		{
+			error = c.tls->error().empty() ? "TLS handshake timeout/output limit" : c.tls->error();
+			c.want_close = true;
+			c.outbound.clear();
+			c.out_sent = 0;
+		}
+		return ok;
+	}
 
 	Conn *get(ConnectionId id) noexcept
 	{
@@ -264,6 +300,14 @@ struct TcpTransport::Impl
 };
 
 TcpTransport::TcpTransport() : _impl(new Impl) {}
+
+bool TcpTransport::enableTls(const char *certificate, const char *key)
+{
+	if (_impl->listener != kInvalidSocket || !certificate || !key)
+		return false;
+	_impl->tls_context = SA::TLS::Context::server(certificate, key, _impl->error);
+	return _impl->tls_context != nullptr;
+}
 
 TcpTransport::~TcpTransport()
 {
@@ -421,14 +465,21 @@ bool TcpTransport::send(ConnectionId id, const std::uint8_t *data,
 		return false;
 
 	// ★ 熔断先判:队列已经超限说明对端不读,再排进去只是把内存耗尽推后一点。
-	if (c->outbound.size() - c->out_sent + n > kMaxOutboundBytes)
+	if (c->outbound.size() - c->out_sent + n + (c->tls ? c->tls->pending() : 0) > kMaxOutboundBytes)
 	{
 		d.error = "出站队列超过上限 —— 对端连上却不读,连接已断开";
 		c->want_close = true;
 		return false;
 	}
 
-	c->outbound.insert(c->outbound.end(), data, data + n);
+	if (c->tls)
+	{
+		if (!c->tls->send(data, n))
+			return false;
+		c->tls->takeEncrypted(c->outbound);
+	}
+	else
+		c->outbound.insert(c->outbound.end(), data, data + n);
 	// ⚠️★ **不在这里直接 send()**,哪怕队列原本是空的。
 	//    理由是顺序:世界侧一个 tick 里可能对同一条连接 Push 多条消息,
 	//    立即写会让"先排队的后发"成为可能(前一条 would-block 排着队,
@@ -475,8 +526,11 @@ void TcpTransport::poll()
 			Impl::Conn c;
 			c.id = d.next_id++;
 			c.fd = fd;
+			if (d.tls_context)
+				c.tls = std::make_unique<SA::TLS::Channel>(*d.tls_context);
+			c.announced = !c.tls;
 			d.conns.push_back(std::move(c));
-			if (d.events != nullptr)
+			if (d.events != nullptr && !d.tls_context)
 				d.events->onConnected(d.conns.back().id);
 		}
 	}
@@ -491,6 +545,7 @@ void TcpTransport::poll()
 	{
 		if (c.dead)
 			continue;
+		(void)d.pumpTls(c);
 		PollFd p{};
 		p.fd = c.fd;
 		p.events = POLLIN;
@@ -543,7 +598,12 @@ void TcpTransport::poll()
 #endif
 						if (n > 0)
 						{
-							if (d.events != nullptr)
+							if (c->tls)
+							{
+								if (!d.pumpTls(*c, buf, static_cast<std::size_t>(n)))
+									break;
+							}
+							else if (d.events != nullptr)
 							{
 								d.events->onBytes(c->id, buf, static_cast<std::size_t>(n));
 							}
@@ -587,6 +647,8 @@ void TcpTransport::poll()
 	for (Impl::Conn &c : d.conns)
 	{
 		if (c.dead || !c.want_close)
+			continue;
+		if (c.tls && c.tls->error().empty() && c.tls->pending() > 0 && d.pumpTls(c))
 			continue;
 		// 还有没写完的出站且连接仍活着 ⇒ 再试一次,写完了才关。
 		if (c.out_sent < c.outbound.size() && d.flushOutbound(c) &&

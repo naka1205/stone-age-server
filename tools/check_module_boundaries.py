@@ -47,8 +47,9 @@ ALLOWED_DEPS = {
     # net 是 L1。★ 它是**唯一**该看见 transport/ 组 IDL 的模块(02 §9)。
     #   ⚠️ 不依赖 platform:见 session.cpp 里 Pong.server_time_ms 那处注释。
     "net": set(),
+    "session_storage": set(),  # immutable IDL requests/completions; owns MySQL and Redis
     # world 把三层缝在一起。
-    "world": {"platform", "net"},
+    "world": {"platform", "net", "session_storage"},
 }
 
 # 每个模块允许对外暴露的头。★ 恰好一个 —— 见 00 §3.1「只暴露接口头」。

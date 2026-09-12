@@ -18,13 +18,17 @@
 //      ⇒ Stop 传输层 ⇒ 退出码 0。01 §11.2 的完整流程(广播倒计时 / 逐会话保存 /
 //      等在途请求收敛)要等 storage 与跨模块请求存在,1.5 只做能做的那一段。
 
+#include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
+#include "content/Bundle.h"
 #include "net/Api.h"
 #include "platform/Api.h"
 #include "world/Api.h"
@@ -51,11 +55,140 @@ void printUsage()
 	    stdout);
 }
 
+void configureContent(SA::World::World &world, const SA::Content::Bundle &bundle)
+{
+	using namespace SA::Content;
+	const auto rowInt = [](const SA::Data::Json::Value &row, std::size_t column)
+	{
+		const auto &values = row.asArray();
+		if (column >= values.size())
+			return 0;
+		const auto value = text(values[column]);
+		if (value.empty())
+			return 0;
+		int out = 0;
+		const auto parsed = std::from_chars(value.data(), value.data() + value.size(), out);
+		if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
+			throw std::invalid_argument("invalid numeric content column");
+		return out;
+	};
+	SA::World::GridMap map;
+	map.width = bundle.width;
+	map.height = bundle.height;
+	map.tile.assign(bundle.walkable.size(), 1);
+	map.obj.assign(bundle.walkable.begin(), bundle.walkable.end());
+	SA::World::TileAttrTable attributes;
+	attributes.walkable = {SA::World::WalkKind::kBlocked, SA::World::WalkKind::kFree};
+	SA::Domain::CharacterRecord defaults{};
+	defaults.schema_ver = 1;
+	defaults.player.level = 1;
+	defaults.player.charm = 60;
+	defaults.player.mp = defaults.player.max_mp = 100;
+	defaults.player.default_pet = -1;
+	defaults.player.floor = bundle.floor;
+	const auto &spawn = field(bundle.world, "spawn").asArray();
+	defaults.player.x = integer(spawn.at(0));
+	defaults.player.y = integer(spawn.at(1));
+	defaults.player.dir = 5;
+	defaults.player.image = integer(field(bundle.world, "player_image"));
+	defaults.player.face_image = 30000; // CHAR_checkFaceImageNumber: SPR_001em / CG_CHR_MAKE_FACE.
+	world.configurePlayable(std::move(map), std::move(attributes), bundle.version, defaults);
+	std::vector<SA::World::EncountArea> areas;
+	for (const auto &row : field(bundle.world, "areas").asArray())
+	{
+		SA::World::EncountArea area;
+		area.index = rowInt(row, 0);
+		area.floor = rowInt(row, 1);
+		area.x = std::min(rowInt(row, 2), rowInt(row, 4));
+		area.y = std::min(rowInt(row, 3), rowInt(row, 5));
+		area.width = std::max(rowInt(row, 2), rowInt(row, 4)) - area.x;
+		area.height = std::max(rowInt(row, 3), rowInt(row, 5)) - area.y;
+		area.prob_min = rowInt(row, 6);
+		area.prob_max = rowInt(row, 7);
+		area.enemy_max_num = rowInt(row, 8);
+		area.zorder = rowInt(row, 9);
+		for (std::size_t i = 0; i < 10; ++i)
+		{
+			area.group_id[i] = rowInt(row, 10 + i);
+			area.group_prob[i] = rowInt(row, 20 + i);
+		}
+		areas.push_back(area);
+	}
+	std::vector<SA::World::EnemyGroup> groups;
+	for (const auto &row : field(bundle.world, "groups").asArray())
+	{
+		SA::World::EnemyGroup group;
+		group.group_id = rowInt(row, 1);
+		group.appear_by_item_id = rowInt(row, 2);
+		group.not_appear_by_item_id = rowInt(row, 3);
+		for (std::size_t i = 0; i < 10; ++i)
+		{
+			group.enemy_id[i] = rowInt(row, 4 + i);
+			group.create_prob[i] = rowInt(row, 14 + i);
+		}
+		groups.push_back(group);
+	}
+	std::vector<SA::World::EnemyEncounter> encounters;
+	for (const auto &row : field(bundle.world, "encounters").asArray())
+	{
+		SA::World::EnemyEncounter enemy;
+		enemy.enemy_id = rowInt(row, 3);
+		enemy.temp_no = rowInt(row, 4);
+		enemy.lv_min = rowInt(row, 5);
+		enemy.lv_max = rowInt(row, 6);
+		enemy.create_max_num = rowInt(row, 7);
+		enemy.exp = rowInt(row, 10);
+		enemy.duelpoint = rowInt(row, 11);
+		enemy.capturable = rowInt(row, 13) != 0;
+		for (std::size_t i = 0; i < 10; ++i)
+		{
+			enemy.item[i] = rowInt(row, 14 + i);
+			enemy.item_prob[i] = rowInt(row, 24 + i);
+		}
+		encounters.push_back(enemy);
+	}
+	std::vector<SA::World::EnemyTemplate> templates;
+	for (const auto &row : field(bundle.world, "templates").asArray())
+	{
+		SA::World::EnemyTemplate enemy;
+		const auto name = text(row.asArray().at(0));
+		if (!enemy.name.assign(name.data(), name.size()))
+			throw std::invalid_argument("enemy name exceeds UTF-8 byte limit");
+		enemy.temp_no = rowInt(row, 6);
+		enemy.stats.init_num = rowInt(row, 7);
+		enemy.stats.lvup_point = std::stod(text(row.asArray().at(8)));
+		enemy.stats.base_vital = rowInt(row, 9);
+		enemy.stats.base_str = rowInt(row, 10);
+		enemy.stats.base_tough = rowInt(row, 11);
+		enemy.stats.base_dex = rowInt(row, 12);
+		enemy.mod_ai = rowInt(row, 13);
+		enemy.capture_difficulty = rowInt(row, 14);
+		enemy.earth = rowInt(row, 15);
+		enemy.water = rowInt(row, 16);
+		enemy.fire = rowInt(row, 17);
+		enemy.wind = rowInt(row, 18);
+		enemy.poison = rowInt(row, 19);
+		enemy.paralysis = rowInt(row, 20);
+		enemy.sleep = rowInt(row, 21);
+		enemy.stone = rowInt(row, 22);
+		enemy.drunk = rowInt(row, 23);
+		enemy.confusion = rowInt(row, 24);
+		enemy.rare = rowInt(row, 32);
+		enemy.critical = rowInt(row, 33);
+		enemy.counter = rowInt(row, 34);
+		enemy.image = rowInt(row, 36);
+		enemy.size = rowInt(row, 38);
+		templates.push_back(enemy);
+	}
+	world.loadEncounterTables(std::move(areas), std::move(groups), std::move(encounters), std::move(templates));
+}
+
 } // namespace
 
 int main(int argc, char **argv)
 {
 	std::string config_path;
+	std::string playable_path;
 	bool self_test = false;
 
 	for (int i = 1; i < argc; ++i)
@@ -79,6 +212,11 @@ int main(int argc, char **argv)
 				return 2;
 			}
 			config_path = argv[++i];
+			continue;
+		}
+		if (std::strcmp(a, "--playable") == 0 && i + 1 < argc)
+		{
+			playable_path = argv[++i];
 			continue;
 		}
 		std::fprintf(stderr, "错误: 无法识别的参数 %s\n", a);
@@ -149,6 +287,33 @@ int main(int argc, char **argv)
 	//   World 的 Tick 第 8 步与析构都会经 transport 关连接,它那时必须还活着;
 	//   反向没有悬垂问题 —— TcpTransport 的析构**不回调**(tcp_transport.cpp)。
 	SA::Net::TcpTransport transport;
+	std::unique_ptr<SA::SessionStorage::Service> storage;
+	std::unique_ptr<SA::Content::Bundle> content;
+	if (!playable_path.empty())
+	{
+		try
+		{
+			SA::SessionStorage::Settings settings;
+			std::string error;
+			if (!SA::SessionStorage::loadSettingsFile(playable_path, settings, error))
+				throw std::runtime_error(error);
+			const auto runtime = SA::Content::readJson(playable_path);
+			const auto certificate = SA::Content::text(SA::Content::field(runtime, "tls_certificate"));
+			const auto key = SA::Content::text(SA::Content::field(runtime, "tls_key"));
+			if (!transport.enableTls(certificate.c_str(), key.c_str()))
+				throw std::runtime_error(transport.lastError());
+			content = std::make_unique<SA::Content::Bundle>(SA::Content::load(SA::Content::text(SA::Content::field(runtime, "content")), false));
+			storage = SA::SessionStorage::open(settings, error);
+			if (!storage)
+				throw std::runtime_error(error);
+			cfg.config.demo_battle.enabled = false;
+		}
+		catch (const std::exception &error)
+		{
+			std::fprintf(stderr, "Playable startup failed: %s\n", error.what());
+			return 1;
+		}
+	}
 	const std::uint16_t port =
 	    self_test ? std::uint16_t{0} : cfg.config.listen_port;
 	if (!transport.listen(cfg.config.bind_addr.c_str(), port))
@@ -161,7 +326,20 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	SA::World::World world(cfg.config, clock, logger, random, transport);
+	SA::World::World world(cfg.config, clock, logger, random, transport, storage.get());
+	if (content)
+	{
+		try
+		{
+			configureContent(world, *content);
+		}
+		catch (const std::exception &error)
+		{
+			std::fprintf(stderr, "Content rejected: %s\n", error.what());
+			return 1;
+		}
+		std::fprintf(stdout, "Playable content ready: %s\n", content->version.c_str());
+	}
 
 	// 信号在 World 就位之后才挂:此前收到信号直接被默认动作杀掉即可,没有东西需要收尾。
 	std::signal(SIGINT, onStopSignal);

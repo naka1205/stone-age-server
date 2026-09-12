@@ -35,6 +35,7 @@ endif()
 #    类型引进 `sa::net`,消费者(world / tests)写的是 `sa::net::FrameReader`
 #    ⇒ 它们需要看得见 `wire/framing.h`。写成 PRIVATE 会在消费者侧编译失败。
 target_link_libraries(sa_net PUBLIC sa_idl sa_wire)
+target_link_libraries(sa_net PRIVATE sa_tls)
 
 # ⚠️ 不链 sa_platform:见 session.cpp 里 Pong.server_time_ms 那处注释 ——
 #    为了一个时间戳把 L1 绑到 L0 上不划算,时钟由宿主注入或上移到 world。

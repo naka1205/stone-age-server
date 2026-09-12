@@ -1,0 +1,107 @@
+// Version 1 persistence records. Runtime handles are deliberately excluded.
+syntax = "proto3";
+package sa.domain;
+import "sa_options.proto";
+
+message PlayerData {
+  option (sa.persisted) = true;
+  string name = 1 [(sa.max_len) = 31];
+  sint32 default_pet = 2;
+  sint32 capture_count = 3;
+  sint32 exp = 4;
+  sint32 level = 5;
+  sint32 hp = 6;
+  sint32 mp = 7;
+  sint32 max_mp = 8;
+  sint32 vital = 9;
+  sint32 str = 10;
+  sint32 tough = 11;
+  sint32 dex = 12;
+  sint32 luck = 13;
+  sint32 charm = 14;
+  sint32 earth = 15;
+  sint32 water = 16;
+  sint32 fire = 17;
+  sint32 wind = 18;
+  sint32 floor = 19;
+  sint32 x = 20;
+  sint32 y = 21;
+  sint32 image = 22;
+  sint32 face_image = 23;
+  sint32 gold = 24;
+  uint32 dir = 25;
+}
+
+message PetData {
+  option (sa.persisted) = true;
+  string owner_char_name = 1 [(sa.max_len) = 31];
+  string name = 2 [(sa.max_len) = 31];
+  sint32 hp = 3;
+  sint32 mp = 4;
+  sint32 max_mp = 5;
+  sint32 vital = 6;
+  sint32 str = 7;
+  sint32 tough = 8;
+  sint32 dex = 9;
+  sint32 luck = 10;
+  sint32 fire = 11;
+  sint32 water = 12;
+  sint32 earth = 13;
+  sint32 wind = 14;
+  sint32 level = 15;
+  sint32 growth_vital = 16;
+  sint32 growth_str = 17;
+  sint32 growth_tough = 18;
+  sint32 growth_dex = 19;
+  sint32 capture_level = 20;
+  sint32 origin_image = 21;
+  sint32 base_image = 22;
+  sint32 pet_rank = 23;
+  sint32 mod_ai = 24;
+  sint32 variable_ai = 25;
+  sint32 y_hp = 26;
+  sint32 y_atk = 27;
+  sint32 y_def = 28;
+  sint32 y_quick = 29;
+  sint32 y_lv = 30;
+}
+
+message ItemData {
+  option (sa.persisted) = true;
+  string name = 1 [(sa.max_len) = 63];
+  string unique_code = 2 [(sa.max_len) = 63];
+  sint32 item_id = 3;
+  sint32 type = 4;
+  sint32 level = 5;
+  sint32 cost = 6;
+  sint32 can_be_pile = 7;
+  sint32 use_pile_nums = 8;
+  sint32 current_pile = 9;
+  sint32 vanish_at_drop = 10;
+  sint32 drop_at_logout = 11;
+}
+
+message PetSlot {
+  option (sa.persisted) = true;
+  uint64 uid = 1;
+  uint32 slot = 2;
+  PetData value = 3;
+}
+
+message ItemSlot {
+  option (sa.persisted) = true;
+  uint64 uid = 1;
+  uint32 slot = 2;
+  ItemData value = 3;
+}
+
+message CharacterRecord {
+  option (sa.persisted) = true;
+  uint32 schema_ver = 1;
+  uint64 char_id = 2;
+  uint64 revision = 3;
+  PlayerData player = 4;
+  repeated PetSlot pets = 5 [(sa.max_count) = 5];
+  repeated ItemSlot items = 6 [(sa.max_count) = 54];
+}
+

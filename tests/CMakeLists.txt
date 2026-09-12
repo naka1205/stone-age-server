@@ -35,6 +35,32 @@ FetchContent_MakeAvailable(doctest)
 
 add_library(sa_doctest INTERFACE)
 target_include_directories(sa_doctest SYSTEM INTERFACE "${doctest_SOURCE_DIR}")
+
+add_executable(sa_json_test JsonTest.cpp)
+target_link_libraries(sa_json_test PRIVATE sa_data sa_doctest)
+set_target_properties(sa_json_test PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+sa_apply_warnings(sa_json_test)
+sa_enable_assertions(sa_json_test)
+add_test(NAME json COMMAND sa_json_test)
+find_package(OpenSSL 1.1.1 REQUIRED)
+add_executable(sa_tls_test TlsTest.cpp)
+target_link_libraries(sa_tls_test PRIVATE sa_tls sa_doctest OpenSSL::SSL OpenSSL::Crypto)
+sa_apply_warnings(sa_tls_test)
+sa_enable_assertions(sa_tls_test)
+add_test(NAME tls COMMAND sa_tls_test)
+add_executable(sa_world_persistence_test WorldPersistenceTest.cpp)
+target_link_libraries(sa_world_persistence_test PRIVATE sa_world sa_doctest)
+sa_apply_warnings(sa_world_persistence_test)
+sa_enable_assertions(sa_world_persistence_test)
+add_test(NAME world_persistence COMMAND sa_world_persistence_test)
+
+if(SA_ENABLE_MYSQL_STORAGE)
+    add_executable(sa_mysql_storage_test MySqlStorageTest.cpp)
+    target_link_libraries(sa_mysql_storage_test PRIVATE sa_session_storage_backend sa_storage_drivers sa_doctest)
+    sa_apply_warnings(sa_mysql_storage_test)
+    sa_enable_assertions(sa_mysql_storage_test)
+    # Explicit integration command; requires the isolated environment's SA_STORAGE_CONFIG.
+endif()
 # ★ SYSTEM:第三方头不参与本项目的告警口径(cmake/SaWarnings.cmake 开了
 #   -Wconversion / -Wold-style-cast 等,doctest 自己并不按这套写)。
 
@@ -169,6 +195,9 @@ add_test(NAME server_self_test COMMAND stone_age_server --self-test)
 # 它挡的是 D2 失效,不是代码风格 —— 见 tools/check_shared_purity.py 卷首。
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
+  add_test(NAME playable_content
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_SOURCE_DIR}/tools/test_playable_content.py)
   add_test(NAME shared_purity
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_SOURCE_DIR}/tools/check_shared_purity.py)

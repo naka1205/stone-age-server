@@ -1,0 +1,79 @@
+// Account lifecycle over TLS; replies retain corr_id. Gameplay state is authoritative.
+syntax = "proto3";
+package sa.transport;
+import "sa_options.proto";
+import "domain/character_data.proto";
+
+message LoginRequest {
+  option (sa.msg_id) = 0x0010;
+  option (sa.transport_only) = true;
+  string login = 1 [(sa.max_len) = 63];
+  string password = 2 [(sa.max_len) = 127];
+  bool register_account = 3;
+}
+enum AccountCode {
+  ACCOUNT_OK = 0;
+  ACCOUNT_INVALID = 1;
+  ACCOUNT_CREDENTIALS = 2;
+  ACCOUNT_BUSY = 3;
+  ACCOUNT_UNAVAILABLE = 4;
+  ACCOUNT_CONFLICT = 5;
+  ACCOUNT_NOT_FOUND = 6;
+  ACCOUNT_IN_BATTLE = 7;
+  ACCOUNT_LEASE_LOST = 8;
+}
+message CharacterSummary {
+  uint64 char_id = 1;
+  string name = 2 [(sa.max_len) = 31];
+  sint32 level = 3;
+  sint32 image = 4;
+}
+message LoginResult {
+  option (sa.msg_id) = 0x0011;
+  option (sa.transport_only) = true;
+  AccountCode code = 1;
+  repeated CharacterSummary characters = 2 [(sa.max_count) = 2];
+}
+message CreateCharacterRequest {
+  option (sa.msg_id) = 0x0012;
+  option (sa.transport_only) = true;
+  string name = 1 [(sa.max_len) = 31];
+  sint32 image = 2;
+  sint32 vital = 3;
+  sint32 str = 4;
+  sint32 tough = 5;
+  sint32 dex = 6;
+  sint32 earth = 7;
+  sint32 water = 8;
+  sint32 fire = 9;
+  sint32 wind = 10;
+}
+message SelectCharacterRequest {
+  option (sa.msg_id) = 0x0013;
+  option (sa.transport_only) = true;
+  uint64 char_id = 1;
+}
+message CharacterResult {
+  option (sa.msg_id) = 0x0014;
+  option (sa.transport_only) = true;
+  AccountCode code = 1;
+  sa.domain.CharacterRecord character = 2;
+  string content_version = 3 [(sa.max_len) = 63];
+}
+message SaveRequest {
+  option (sa.msg_id) = 0x0015;
+  option (sa.transport_only) = true;
+  bool logout = 1;
+}
+message SaveResult {
+  option (sa.msg_id) = 0x0016;
+  option (sa.transport_only) = true;
+  AccountCode code = 1;
+  uint64 revision = 2;
+  bool logout = 3;
+}
+message CharacterState {
+  option (sa.msg_id) = 0x0017;
+  option (sa.transport_only) = true;
+  sa.domain.CharacterRecord character = 1;
+}

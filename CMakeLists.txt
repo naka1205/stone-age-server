@@ -55,6 +55,8 @@ target_include_directories(sa_idl INTERFACE
 #      不由 CMake 强制。该脚本是 CI 必跑项,不是可选的风格检查。
 
 add_subdirectory(shared)
+add_subdirectory(runtime/tls)
+add_subdirectory(runtime/content)
 add_subdirectory(src)
 
 if(SA_BUILD_TESTS)

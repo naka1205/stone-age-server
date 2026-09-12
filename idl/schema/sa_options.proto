@@ -24,6 +24,8 @@ extend google.protobuf.MessageOptions {
   // 已废弃的编号占位:标注后仍占用 msg_id,但不生成编解码
   // (02 §1.1 落地规则 3:编号一经发布不得复用)。
   bool deprecated_id = 50003;
+  // Generate field visitors for versioned persistence records (no unions).
+  bool persisted = 50004;
 }
 
 extend google.protobuf.FieldOptions {

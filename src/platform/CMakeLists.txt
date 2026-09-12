@@ -8,7 +8,6 @@
 add_library(sa_platform STATIC
     Clock.cpp
     Config.cpp
-    Json.cpp
     Log.cpp
     Random.cpp
 )
@@ -19,6 +18,8 @@ target_include_directories(sa_platform
 
 # ⚠️ 这里**没有** target_link_libraries(sa_platform ... sa_shared):
 #    platform 是 L0,不该认识 L3 的规则类型。种子交给谁用是 world 的事。
-#    ⇒ 保持 platform 的依赖面为空,它才可能在阶段 2 被 storage / lock 复用。
+#    JSON 内存编解码由独立 sa_data 提供，不引入 L3 或 I/O。
+
+target_link_libraries(sa_platform PUBLIC sa_data)
 
 sa_apply_warnings(sa_platform)

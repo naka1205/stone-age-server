@@ -67,6 +67,12 @@ target_link_libraries(sa_wire PUBLIC sa_idl)
 
 target_compile_features(sa_wire PUBLIC cxx_std_17)
 
+# 版本化内容与存档的内存编解码，与 L3 和传输隔离。
+add_library(sa_data STATIC data/Json.cpp)
+target_include_directories(sa_data PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
+target_link_libraries(sa_data PUBLIC sa_idl)
+target_compile_features(sa_data PUBLIC cxx_std_17)
+
 # ── ★★ 浮点语义:禁止 FMA 合并(2026-09-02,跨编译器验证时固化)────────
 #
 # `00` §0 已认下第 ③ 层「规则与公式不可自证」,而 **L3 黄金用例集是唯一补偿手段**
@@ -114,12 +120,13 @@ endif()
 if(MSVC)
     target_compile_options(sa_shared PUBLIC /utf-8)
     target_compile_options(sa_wire PUBLIC /utf-8)
+    target_compile_options(sa_data PUBLIC /utf-8)
 endif()
 
 # ★ 阶段 0.1/1.1 起 sa_shared 是 STATIC(此前是 INTERFACE 的纯头契约层)。
 #   ⚠️ 标准仍锁 17 —— 见上方 SA_SHARED_CXX_STANDARD。它要被 GameStudio(C++17)编译。
 #   ⚠️ sa_wire 同锁 17 —— 它和 sa_shared 一样要被客户端(C++17)编译。
-set_target_properties(sa_shared sa_wire PROPERTIES
+set_target_properties(sa_shared sa_wire sa_data PROPERTIES
     CXX_STANDARD ${SA_SHARED_CXX_STANDARD}
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF)
@@ -130,6 +137,7 @@ set_target_properties(sa_shared sa_wire PROPERTIES
 if(COMMAND sa_apply_warnings)
     sa_apply_warnings(sa_shared)
     sa_apply_warnings(sa_wire)
+    sa_apply_warnings(sa_data)
 endif()
 
 # ⚠️ 这里**不**给 sa_shared / sa_wire 加任何其它 target_link_libraries(除 sa_idl):

@@ -1,0 +1,12 @@
+# Native host TLS. Kept outside shared/: OpenSSL is not an L3 dependency.
+find_package(OpenSSL 1.1.1 REQUIRED)
+add_library(sa_tls STATIC Channel.cpp)
+target_include_directories(sa_tls PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+target_link_libraries(sa_tls PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+target_compile_features(sa_tls PUBLIC cxx_std_17)
+if(MSVC)
+    target_compile_options(sa_tls PUBLIC /utf-8)
+endif()
+if(COMMAND sa_apply_warnings)
+    sa_apply_warnings(sa_tls)
+endif()

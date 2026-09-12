@@ -205,6 +205,17 @@
       "WINDOW_KIND_SELECT": 3,
       "WINDOW_KIND_SHOP_MENU": 10
     },
+    "sa.transport.AccountCode": {
+      "ACCOUNT_BUSY": 3,
+      "ACCOUNT_CONFLICT": 5,
+      "ACCOUNT_CREDENTIALS": 2,
+      "ACCOUNT_INVALID": 1,
+      "ACCOUNT_IN_BATTLE": 7,
+      "ACCOUNT_LEASE_LOST": 8,
+      "ACCOUNT_NOT_FOUND": 6,
+      "ACCOUNT_OK": 0,
+      "ACCOUNT_UNAVAILABLE": 4
+    },
     "sa.transport.Disposition": {
       "DISPOSITION_ABORT": 3,
       "DISPOSITION_COMPENSATE": 2,
@@ -248,10 +259,18 @@
     "sa.domain.WalkRequest": 769,
     "sa.domain.WindowOpen": 1537,
     "sa.domain.WindowReply": 1538,
+    "sa.transport.CharacterResult": 20,
+    "sa.transport.CharacterState": 23,
+    "sa.transport.CreateCharacterRequest": 18,
     "sa.transport.HandshakeAccepted": 2,
     "sa.transport.HandshakeRejected": 3,
     "sa.transport.HandshakeRequest": 1,
+    "sa.transport.LoginRequest": 16,
+    "sa.transport.LoginResult": 17,
     "sa.transport.Ping": 4,
-    "sa.transport.Pong": 5
+    "sa.transport.Pong": 5,
+    "sa.transport.SaveRequest": 21,
+    "sa.transport.SaveResult": 22,
+    "sa.transport.SelectCharacterRequest": 19
   }
 }

@@ -17,6 +17,14 @@ enum class MsgId : std::uint32_t {
   HandshakeRejected = 0x0003,
   Ping = 0x0004,
   Pong = 0x0005,
+  LoginRequest = 0x0010,
+  LoginResult = 0x0011,
+  CreateCharacterRequest = 0x0012,
+  SelectCharacterRequest = 0x0013,
+  CharacterResult = 0x0014,
+  SaveRequest = 0x0015,
+  SaveResult = 0x0016,
+  CharacterState = 0x0017,
   BattleSnapshot = 0x0201,
   BattleTurnBegin = 0x0202,
   BattleSelfInfo = 0x0203,
@@ -47,6 +55,7 @@ constexpr std::uint32_t msg_id_of() {
 }  // namespace SA
 
 #include "transport/handshake.sa.h"
+#include "transport/login.sa.h"
 #include "domain/battle_events.sa.h"
 #include "domain/world_map.sa.h"
 #include "domain/window.sa.h"
@@ -82,6 +91,54 @@ template <>
 struct MsgTraits<SA::Transport::Pong> {
   static constexpr MsgId kId = MsgId::Pong;
   static constexpr const char* kName = "sa.transport.Pong";
+};
+
+template <>
+struct MsgTraits<SA::Transport::LoginRequest> {
+  static constexpr MsgId kId = MsgId::LoginRequest;
+  static constexpr const char* kName = "sa.transport.LoginRequest";
+};
+
+template <>
+struct MsgTraits<SA::Transport::LoginResult> {
+  static constexpr MsgId kId = MsgId::LoginResult;
+  static constexpr const char* kName = "sa.transport.LoginResult";
+};
+
+template <>
+struct MsgTraits<SA::Transport::CreateCharacterRequest> {
+  static constexpr MsgId kId = MsgId::CreateCharacterRequest;
+  static constexpr const char* kName = "sa.transport.CreateCharacterRequest";
+};
+
+template <>
+struct MsgTraits<SA::Transport::SelectCharacterRequest> {
+  static constexpr MsgId kId = MsgId::SelectCharacterRequest;
+  static constexpr const char* kName = "sa.transport.SelectCharacterRequest";
+};
+
+template <>
+struct MsgTraits<SA::Transport::CharacterResult> {
+  static constexpr MsgId kId = MsgId::CharacterResult;
+  static constexpr const char* kName = "sa.transport.CharacterResult";
+};
+
+template <>
+struct MsgTraits<SA::Transport::SaveRequest> {
+  static constexpr MsgId kId = MsgId::SaveRequest;
+  static constexpr const char* kName = "sa.transport.SaveRequest";
+};
+
+template <>
+struct MsgTraits<SA::Transport::SaveResult> {
+  static constexpr MsgId kId = MsgId::SaveResult;
+  static constexpr const char* kName = "sa.transport.SaveResult";
+};
+
+template <>
+struct MsgTraits<SA::Transport::CharacterState> {
+  static constexpr MsgId kId = MsgId::CharacterState;
+  static constexpr const char* kName = "sa.transport.CharacterState";
 };
 
 template <>

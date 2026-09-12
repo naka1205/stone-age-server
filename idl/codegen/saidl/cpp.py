@@ -216,6 +216,21 @@ class CppGen:
         L.append("};")
         L.append("")
 
+        if msg.persisted:
+            if msg.oneofs:
+                raise D.SchemaError(f"persisted record cannot contain oneof: {msg.fqname}")
+            for const in ("", "const "):
+                L.append("template <typename F>")
+                L.append(f"inline void visitFields({const}{name}& m, F&& visit) {{")
+                for f in sorted(msg.fields, key=lambda x: x.number):
+                    L.append(f'  visit("{f.name}", m.{f.name});')
+                L += ["}", ""]
+            L.append("template <typename Source, typename Target>")
+            L.append(f"inline void copy{name}(const Source& source, Target& target) {{")
+            for f in sorted(msg.fields, key=lambda x: x.number):
+                L.append(f"  target.{f.name} = static_cast<decltype(target.{f.name})>(source.{f.name});")
+            L += ["}", ""]
+
         # ── encode ──
         L.append(f"inline void encode(SA::IDL::Writer& w, const {name}& m) {{")
         if not items:

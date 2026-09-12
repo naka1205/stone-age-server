@@ -8,12 +8,14 @@
 //      00 §0 又已认下 ④ 层「表现与手感永远无法验证」
 //      ⇒ 节拍是**玩法参数**,必须可配、只能靠人试。
 
+#include "data/Json.h"
 #include "world/Api.h"
 
 #include <algorithm>
 #include <array>
 #include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -1309,12 +1311,37 @@ int clampEnemyAction(std::uint32_t enemy_action)
 //    `makeDemoField` 手填)⇒ 用占位四维,**登记为无选角来源那族残缺**,阶段 2 接选角后由存档取代。
 // ★ 占位量级照 `makeDemoField` 的 me(力量为主):让占位玩家能打动遇敌链产出的真实弱怪,
 //   使「打赢拿经验」闭环有意义 —— 与欠债 25「真实模板 18 级弱 demo 约 16 倍」同一量级考量。
-SA::Rules::Combatant makePlayerCombatant()
+SA::Rules::Combatant makePlayerCombatant(const SA::Model::Player *player = nullptr)
 {
 	SA::Rules::Combatant c{};
 	c.occupied = true;
 	c.kind = SA::Rules::CombatantKind::kPlayer;
 	c.slot = 0;
+	if (player)
+	{
+		c.level = player->level;
+		c.hp = player->hp;
+		c.mp = player->mp;
+		c.max_mp = player->max_mp;
+		c.charm = player->charm;
+		c.luck = player->luck;
+		c.vital = player->vital;
+		c.str = player->str;
+		c.tough = player->tough;
+		c.dex = player->dex;
+		const auto stats = SA::Rules::deriveBaseStats(c.vital, c.str, c.tough, c.dex);
+		c.max_hp = stats.max_hp;
+		c.attack = stats.attack;
+		c.defense = stats.defense;
+		c.quick = stats.quick;
+		c.fix_dex = stats.quick;
+		c.dead = c.hp <= 0;
+		c.elements[0] = player->earth;
+		c.elements[1] = player->water;
+		c.elements[2] = player->fire;
+		c.elements[3] = player->wind;
+		return c;
+	}
 	c.level = 20;
 	c.mp = 100;
 	c.max_mp = 100;
@@ -1371,6 +1398,16 @@ struct World::Impl
 		//     走路时恒**非战斗态**(战斗中 walk_seq 已被清、且不 tick 走路)⇒ 那条累积路径
 		//     在本实现走不到 ⇒ 照抄源码结构但不硬接一个到不了的分支(同 M.6/M.7 的等价/冗余处置)。
 		std::int32_t cep = 0;
+		bool logged_in = false;
+		bool pending = false;
+		bool detached = false;
+		bool save_failed = false;
+		bool deferred_logout = false;
+		std::uint64_t deferred_correlation = 0;
+		std::uint64_t char_id = 0;
+		std::uint64_t revision = 0;
+		SA::Platform::Millis retry_at = 0;
+		SA::Platform::Millis login_after = 0;
 	};
 
 	Impl(const SA::Platform::ServerConfig &cfg, SA::Platform::Clock &clk,
@@ -1389,6 +1426,11 @@ struct World::Impl
 	SA::Platform::Logger &logger;
 	SA::Platform::RandomSource &random;
 	SA::Net::Transport &transport;
+	SA::SessionStorage::Service *storage = nullptr;
+	std::string content_version;
+	SA::Domain::CharacterRecord character_defaults{};
+	SA::Domain::CharacterRecord snapshot(SA::Net::SessionId id) const;
+	bool install(SA::Net::SessionId id, const SA::Domain::CharacterRecord &record);
 
 	// 世界级遇敌 rng(批次 W.4):遇敌骰子(randMod)+ 遇敌链选怪(pickEnemyGroup/rollEnemyList)用它。
 	// ⚠️★ 种子从 `masterSeed` **派生但不调 `nextSeed`** —— `nextSeed` 会消耗战斗种子序列、
@@ -1437,7 +1479,25 @@ struct World::Impl
 	}
 	void pushBattleSnapshot(const BattleInstance &battle)
 	{
-		const auto snapshot = makeBattleSnapshot(battle.field);
+		auto snapshot = makeBattleSnapshot(battle.field);
+		for (auto &unit : snapshot.combatants)
+		{
+			if (const auto *player = players.resolve(battle.player_of_slot[unit.slot]); player && storage)
+			{
+				unit.name = player->name;
+				unit.image_id = static_cast<std::uint32_t>(player->image);
+			}
+			else if (const auto *pet = pets.resolve(battle.pet_of_slot[unit.slot]))
+			{
+				unit.name = pet->name;
+				unit.image_id = static_cast<std::uint32_t>(pet->base_image);
+			}
+			else if (const auto *enemy = enemies.resolve(battle.enemy_of_slot[unit.slot]))
+			{
+				unit.name = enemy->name;
+				unit.image_id = static_cast<std::uint32_t>(enemy->base_image);
+			}
+		}
 		for (auto sid : battle.members)
 			if (auto conn = conns.find(sid); conn != conns.end() && conn->second.session != nullptr)
 				if (!conn->second.session->push(snapshot, conn->second.outbound))
@@ -1569,9 +1629,10 @@ struct World::Impl
 World::World(const SA::Platform::ServerConfig &config,
              SA::Platform::Clock &clock, SA::Platform::Logger &logger,
              SA::Platform::RandomSource &random,
-             SA::Net::Transport &transport)
+             SA::Net::Transport &transport, SA::SessionStorage::Service *storage)
     : _impl(std::make_unique<Impl>(config, clock, logger, random, transport))
 {
+	_impl->storage = storage;
 	transport.setEvents(this);
 }
 
@@ -1677,6 +1738,7 @@ SA::Domain::CharAppear makeAppear(SA::Net::ConnectionId who, const SA::Model::Pl
 	a.x = p.x;
 	a.y = p.y;
 	a.dir = static_cast<std::uint32_t>(p.dir);
+	a.image = p.image;
 	return a;
 }
 
@@ -2039,6 +2101,7 @@ void World::tick()
 	// ── 2. 网络入站 ──
 	// 从传输层取已到达的字节,派发到会话。★ 不阻塞(01 §2)。
 	s.transport.poll();
+	processStorage();
 
 	// ── 3. NPC 生成(批次 W.2)──
 	//   据刷怪点把世界态敌人补齐到各点 count(默认无刷怪点 ⇒ 空操作,现有用例不受影响)。
@@ -2202,6 +2265,13 @@ void World::tick()
 				finished.push_back(b.id);
 				continue;
 			}
+			if (s.storage)
+				for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+					if (auto *player = s.players.resolve(b.player_of_slot[static_cast<std::size_t>(slot)]))
+					{
+						player->hp = std::max(0, b.field.at(slot).hp);
+						player->mp = std::max(0, b.field.at(slot).mp);
+					}
 			++b.stats.turns_resolved;
 			// 原 TurnParam 在下一轮准备重算临时敏捷；此处恢复同一个来源值。
 			for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
@@ -2320,7 +2390,11 @@ void World::tick()
 			             {{"battle_id", id},
 			              {"turns", static_cast<std::uint64_t>(
 			                            it->second.stats.turns_resolved)}});
+			const auto members = b.members;
 			s.retireBattle(id);
+			if (s.storage)
+				for (auto sid : members)
+					saveCharacter(sid, false, 0);
 		}
 	}
 
@@ -2337,7 +2411,7 @@ void World::tick()
 			c.walk_seq.clear();
 			continue;
 		}
-		if (c.session == nullptr || c.walk_seq.empty())
+		if (c.session == nullptr || c.walk_seq.empty() || (s.storage && (c.pending || c.detached || c.save_failed)))
 			continue;
 		// 间隔门(CHAR_walk_check:4590):到点才走一步,走完把下次时刻推后 kWalkIntervalMs。
 		if (s.now_ms < c.next_walk_at_ms)
@@ -2424,6 +2498,8 @@ void World::tick()
 				}
 			}
 		}
+		if (s.storage && !s.inBattle(kv.first))
+			saveCharacter(kv.first, false, 0);
 	}
 
 	// ── 5b. 角色循环 —— 非玩家段:世界敌人 AI(批次 W.3)──────────────────────
@@ -2460,6 +2536,20 @@ void World::tick()
 	}
 
 	// ── 8. 关闭检查 ──
+	if (s.shutdown_requested && s.storage)
+	{
+		std::vector<SA::Net::SessionId> sessions;
+		for (const auto &entry : s.conns)
+			if (!entry.second.detached)
+				sessions.push_back(entry.first);
+		for (auto id : sessions)
+		{
+			onDisconnected(id);
+			s.transport.close(id);
+		}
+		s.stopped = s.conns.empty() && s.storage->idle();
+		return;
+	}
 	if (s.shutdown_requested)
 	{
 		// ⚠️ 01 §11.2 的完整停服流程(拒绝新连接 → 广播倒计时 → 逐会话保存
@@ -2782,7 +2872,7 @@ bool World::triggerEncounter(SA::Net::SessionId session, std::int32_t area_row)
 
 	// ── 建场 + 玩家入场(Side[0] 首位)─────────────────────────────────
 	SA::Rules::BattleField field{};
-	field.at(0) = makePlayerCombatant();
+	field.at(0) = makePlayerCombatant(s.storage ? s.players.resolve(s.player_of_session.find(session)) : nullptr);
 	const BattleId battle = startBattle(field);
 	if (!joinBattle(battle, session, 0))
 	{
@@ -2854,7 +2944,7 @@ bool World::triggerNpcEnemyBattle(SA::Net::SessionId session, std::size_t world_
 
 	// ── 建场 + 玩家入场(Side[0] 首位,同 triggerEncounter)──────────────────
 	SA::Rules::BattleField field{};
-	field.at(0) = makePlayerCombatant();
+	field.at(0) = makePlayerCombatant(s.storage ? s.players.resolve(s.player_of_session.find(session)) : nullptr);
 	const BattleId battle = startBattle(field);
 	if (!joinBattle(battle, session, 0))
 	{
@@ -2970,23 +3060,10 @@ void World::onBytes(SA::Net::ConnectionId id, const std::uint8_t *data,
 	}
 }
 
-void World::onDisconnected(SA::Net::ConnectionId id)
+void World::detachBattles(SA::Net::SessionId id)
 {
 	Impl &s = *_impl;
-	const auto it = s.conns.find(id);
-	if (it == s.conns.end())
-		return;
-	if (it->second.session != nullptr)
-		it->second.session->close();
-
-	// ── L2:释放该会话的 Player 实体及其宠物(批次 M.1)────────────────────
-	//
-	// ⚠️★★ **宠物必须一起释放**,否则 Pet 池只增不减:主人走了,它的宠物槽再没人看,
-	//    而那些槽在池里仍然占用。★ 这不会有任何一处报错 —— 只会在跑够久之后表现为
-	//    「捕获突然开始失败」(池满),而那时离真正的原因(这里没释放)已经很远。
-	//    ⇒ 与 Player.h 里 `pets` 的注释是同一条的两半:那边说"释放 Pet 时要清槽",
-	//      这边是唯一真正执行它的地方。
-	const SA::Model::EntityHandle ph = s.player_of_session.find(id);
+	const auto ph = s.player_of_session.find(id);
 	std::vector<BattleId> abandoned;
 	for (auto &entry : s.battles)
 	{
@@ -3014,6 +3091,26 @@ void World::onDisconnected(SA::Net::ConnectionId id)
 	}
 	for (auto battle : abandoned)
 		s.retireBattle(battle);
+}
+
+void World::removeSession(SA::Net::ConnectionId id)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(id);
+	if (it == s.conns.end())
+		return;
+	if (it->second.session != nullptr)
+		it->second.session->close();
+
+	// ── L2:释放该会话的 Player 实体及其宠物(批次 M.1)────────────────────
+	//
+	// ⚠️★★ **宠物必须一起释放**,否则 Pet 池只增不减:主人走了,它的宠物槽再没人看,
+	//    而那些槽在池里仍然占用。★ 这不会有任何一处报错 —— 只会在跑够久之后表现为
+	//    「捕获突然开始失败」(池满),而那时离真正的原因(这里没释放)已经很远。
+	//    ⇒ 与 Player.h 里 `pets` 的注释是同一条的两半:那边说"释放 Pet 时要清槽",
+	//      这边是唯一真正执行它的地方。
+	const SA::Model::EntityHandle ph = s.player_of_session.find(id);
+	detachBattles(id);
 
 	if (SA::Model::Player *p = s.players.resolve(ph); p != nullptr)
 	{
@@ -3054,6 +3151,9 @@ void World::onSessionReady(SA::Net::SessionId id)
 	s.logger.log(SA::Platform::LogLevel::kInfo,
 	             SA::Platform::LogEvent::kHandshakeAccepted,
 	             {{"session_id", id}});
+
+	if (s.storage)
+		return;
 
 	// ── L2:会话就绪 ⇒ 该会话有了一个 Player 实体(批次 M.1)───────────────
 	//
@@ -3212,7 +3312,8 @@ void World::onWalk(SA::Net::SessionId id, const SA::Domain::WalkRequest &req)
 	//   ⚠️ FixedStr<32> 已保证 ≤32(原版 walk_init:939 的长度门);实际逐步移动由
 	//      kCharLoop 玩家段按 walksendinterval 消费(CHAR_walkcall)。
 	it->second.walk_seq = std::string(req.direction.c_str());
-	it->second.next_walk_at_ms = 0; // 立即可走第一步(now_ms >= 0)
+	// Preserve the last step's deadline across requests; one-character packets
+	// must obey the same walk interval as a multi-character route.
 }
 
 void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
@@ -4282,6 +4383,422 @@ bool enterEnemyToField(SA::Rules::BattleField &field, int field_slot,
 	//    (`ENEMY_PETFLG` / `E_T_GET`),前者在原版**根本没有列**(原版硬编码图号)
 	//    ⇒ 那一列是 DR-BT11 要求**新造**的,得等内容表定型,不是从模板里读出来的。
 	return true;
+}
+
+SA::Domain::CharacterRecord World::Impl::snapshot(SA::Net::SessionId id) const
+{
+	SA::Domain::CharacterRecord record{};
+	const auto found = conns.find(id);
+	const auto *player = players.resolve(player_of_session.find(id));
+	if (found == conns.end() || !player)
+		return record;
+	record.schema_ver = 1;
+	record.char_id = found->second.char_id;
+	record.revision = found->second.revision;
+	SA::Domain::copyPlayerData(*player, record.player);
+	for (std::size_t slot = 0; slot < player->pets.size(); ++slot)
+		if (const auto *pet = pets.resolve(player->pets[slot]))
+		{
+			SA::Domain::PetSlot value{};
+			value.uid = pet->uid;
+			value.slot = static_cast<std::uint32_t>(slot);
+			SA::Domain::copyPetData(*pet, value.value);
+			(void)record.pets.push_back(value);
+		}
+	for (std::size_t slot = 0; slot < player->items.size(); ++slot)
+		if (const auto *item = items.resolve(player->items[slot]))
+		{
+			SA::Domain::ItemSlot value{};
+			value.uid = item->uid;
+			value.slot = static_cast<std::uint32_t>(slot);
+			SA::Domain::copyItemData(*item, value.value);
+			(void)record.items.push_back(value);
+		}
+	return record;
+}
+
+bool World::Impl::install(SA::Net::SessionId id, const SA::Domain::CharacterRecord &record)
+{
+	if (!SA::SessionStorage::validRecord(record) || record.player.floor != character_defaults.player.floor ||
+	    !mapWalkable(map, map_attr, record.player.x, record.player.y) || player_of_session.find(id).valid())
+		return false;
+	const auto handle = players.allocate();
+	auto *player = players.resolve(handle);
+	if (!player)
+		return false;
+	SA::Domain::copyPlayerData(record.player, *player);
+	const auto rollback = [&]
+	{
+		for (auto value : player->pets)
+			(void)pets.release(value);
+		for (auto value : player->items)
+			(void)items.release(value);
+		(void)players.release(handle);
+	};
+	for (const auto &value : record.pets)
+	{
+		const auto allocated = pets.allocate();
+		auto *pet = pets.resolve(allocated);
+		if (!pet)
+		{
+			rollback();
+			return false;
+		}
+		SA::Domain::copyPetData(value.value, *pet);
+		pet->uid = value.uid;
+		pet->owner = handle;
+		player->pets[value.slot] = allocated;
+	}
+	for (const auto &value : record.items)
+	{
+		const auto allocated = items.allocate();
+		auto *item = items.resolve(allocated);
+		if (!item)
+		{
+			rollback();
+			return false;
+		}
+		SA::Domain::copyItemData(value.value, *item);
+		item->uid = value.uid;
+		item->owner = handle;
+		player->items[value.slot] = allocated;
+	}
+	player_of_session.insert(id, handle);
+	auto &conn = conns.at(id);
+	conn.char_id = record.char_id;
+	conn.revision = record.revision;
+	conn.session->markOnline();
+	olink[map.index(player->x, player->y)].push_back(id);
+	broadcastSpawn(id, *player);
+	refreshEnemyView(id, *player, -1000, -1000);
+	return true;
+}
+
+void World::configurePlayable(GridMap map, TileAttrTable attributes, std::string version,
+                              SA::Domain::CharacterRecord defaults)
+{
+	auto &s = *_impl;
+	if (!s.storage || !s.conns.empty() || !s.world_enemies.empty() || map.width <= 0 || map.height <= 0 ||
+	    map.width > 2048 || map.height > 2048 ||
+	    map.tile.size() != static_cast<std::size_t>(map.width) * static_cast<std::size_t>(map.height) ||
+	    map.obj.size() != map.tile.size() || !mapWalkable(map, attributes, defaults.player.x, defaults.player.y) ||
+	    version.empty() || version.size() > 63)
+		throw std::invalid_argument("invalid playable content");
+	s.map = std::move(map);
+	s.map_attr = std::move(attributes);
+	s.olink.assign(s.map.tile.size(), {});
+	s.content_version = std::move(version);
+	s.character_defaults = defaults;
+}
+
+void World::onLogin(SA::Net::SessionId id, const SA::Transport::LoginRequest &login, std::uint64_t corr)
+{
+	auto &s = *_impl;
+	auto &conn = s.conns.at(id);
+	SA::SessionStorage::Request request{};
+	request.operation = SA::SessionStorage::Operation::kLogin;
+	request.session = id;
+	request.correlation = corr;
+	request.login = login;
+	if (s.storage && !s.shutdown_requested && s.now_ms >= conn.login_after && !conn.pending && s.storage->submit(std::move(request)))
+	{
+		conn.pending = true;
+		conn.login_after = s.now_ms + 1000;
+		return;
+	}
+	SA::Transport::LoginResult result{};
+	result.code = SA::Transport::AccountCode::ACCOUNT_UNAVAILABLE;
+	(void)SA::Net::encodeFramed(corr, result, conn.outbound);
+	conn.session->awaitLogin();
+}
+
+void World::onCreateCharacter(SA::Net::SessionId id, const SA::Transport::CreateCharacterRequest &req, std::uint64_t corr)
+{
+	auto &s = *_impl;
+	auto &conn = s.conns.at(id);
+	const std::int64_t points = static_cast<std::int64_t>(req.vital) + req.str + req.tough + req.dex;
+	const std::int64_t elements = static_cast<std::int64_t>(req.earth) + req.water + req.fire + req.wind;
+	bool valid = !req.name.empty() && req.name.size() <= 31 && req.image == s.character_defaults.player.image &&
+	             SA::Data::Json::validUtf8(std::string_view(req.name.data, req.name.size()));
+	for (std::size_t i = 0; i < req.name.size(); ++i)
+		if (static_cast<unsigned char>(req.name.data[i]) < 0x20 || req.name.data[i] == 0x7f)
+			valid = false;
+	for (auto point : {req.vital, req.str, req.tough, req.dex})
+		if (point < 0 || point > 20)
+			valid = false;
+	for (auto element : {req.earth, req.water, req.fire, req.wind})
+		if (element < 0 || element > 10)
+			valid = false;
+	valid = valid && points == 20 && elements == 10 && !(req.earth && req.fire) && !(req.water && req.wind);
+	SA::SessionStorage::Request request{};
+	request.operation = SA::SessionStorage::Operation::kCreate;
+	request.session = id;
+	request.correlation = corr;
+	request.character = s.character_defaults;
+	auto &player = request.character.player;
+	player.name = req.name;
+	if (valid)
+	{
+		player.vital = req.vital * 100;
+		player.str = req.str * 100;
+		player.tough = req.tough * 100;
+		player.dex = req.dex * 100;
+		player.earth = req.earth * 10;
+		player.water = req.water * 10;
+		player.fire = req.fire * 10;
+		player.wind = req.wind * 10;
+		player.hp = SA::Rules::deriveBaseStats(player.vital, player.str, player.tough, player.dex).max_hp;
+		for (auto &pet : request.character.pets)
+			pet.value.owner_char_name = player.name;
+	}
+	if (s.storage && conn.logged_in && !conn.pending && valid && s.storage->submit(std::move(request)))
+	{
+		conn.pending = true;
+		return;
+	}
+	SA::Transport::CharacterResult result{};
+	result.code = valid ? SA::Transport::AccountCode::ACCOUNT_UNAVAILABLE : SA::Transport::AccountCode::ACCOUNT_INVALID;
+	(void)SA::Net::encodeFramed(corr, result, conn.outbound);
+	conn.session->selectCharacter();
+}
+
+void World::onSelectCharacter(SA::Net::SessionId id, const SA::Transport::SelectCharacterRequest &req, std::uint64_t corr)
+{
+	auto &s = *_impl;
+	auto &conn = s.conns.at(id);
+	SA::SessionStorage::Request request{};
+	request.operation = SA::SessionStorage::Operation::kSelect;
+	request.session = id;
+	request.correlation = corr;
+	request.character.char_id = req.char_id;
+	if (s.storage && conn.logged_in && !conn.pending && req.char_id && s.storage->submit(std::move(request)))
+	{
+		conn.pending = true;
+		return;
+	}
+	SA::Transport::CharacterResult result{};
+	result.code = SA::Transport::AccountCode::ACCOUNT_UNAVAILABLE;
+	(void)SA::Net::encodeFramed(corr, result, conn.outbound);
+	conn.session->selectCharacter();
+}
+
+void World::onSave(SA::Net::SessionId id, const SA::Transport::SaveRequest &req, std::uint64_t corr)
+{
+	auto &s = *_impl;
+	auto &conn = s.conns.at(id);
+	if (s.inBattle(id))
+	{
+		SA::Transport::SaveResult result{};
+		result.code = SA::Transport::AccountCode::ACCOUNT_IN_BATTLE;
+		result.logout = req.logout;
+		(void)SA::Net::encodeFramed(corr, result, conn.outbound);
+		return;
+	}
+	saveCharacter(id, req.logout, corr);
+}
+
+void World::saveCharacter(SA::Net::SessionId id, bool logout, std::uint64_t correlation)
+{
+	auto &s = *_impl;
+	auto found = s.conns.find(id);
+	if (!s.storage || found == s.conns.end() || !found->second.logged_in)
+		return;
+	auto &conn = found->second;
+	if (conn.pending)
+	{
+		if (correlation || logout)
+		{
+			conn.deferred_correlation = correlation;
+			conn.deferred_logout = logout;
+		}
+		return;
+	}
+	SA::SessionStorage::Request request{};
+	request.operation = conn.char_id ? SA::SessionStorage::Operation::kSave : SA::SessionStorage::Operation::kRelease;
+	request.session = id;
+	request.correlation = correlation;
+	request.logout = logout;
+	if (conn.char_id)
+		request.character = s.snapshot(id);
+	conn.retry_at = s.now_ms + 1000;
+	if (s.storage->submit(std::move(request)))
+	{
+		conn.pending = true;
+		conn.save_failed = false;
+		if (correlation || logout)
+			conn.session->saving();
+	}
+	else
+	{
+		conn.save_failed = true;
+		conn.session->saving();
+		SA::Transport::SaveResult result{};
+		result.code = SA::Transport::AccountCode::ACCOUNT_UNAVAILABLE;
+		result.logout = logout;
+		(void)SA::Net::encodeFramed(correlation, result, conn.outbound);
+	}
+}
+
+void World::onDisconnected(SA::Net::ConnectionId id)
+{
+	auto &s = *_impl;
+	auto found = s.conns.find(id);
+	if (found == s.conns.end())
+		return;
+	if (!s.storage)
+	{
+		removeSession(id);
+		return;
+	}
+	auto &conn = found->second;
+	if (conn.detached)
+		return;
+	conn.detached = true;
+	conn.walk_seq.clear();
+	conn.session->close();
+	detachBattles(id);
+	if (conn.pending)
+	{
+		conn.deferred_logout = true;
+		return;
+	}
+	if (conn.logged_in)
+		saveCharacter(id, true, 0);
+	else
+		removeSession(id);
+}
+
+void World::processStorage()
+{
+	auto &s = *_impl;
+	if (!s.storage)
+		return;
+	using Op = SA::SessionStorage::Operation;
+	using Code = SA::Transport::AccountCode;
+	for (auto &completion : s.storage->poll())
+	{
+		auto found = s.conns.find(completion.session);
+		if (found == s.conns.end())
+			continue;
+		auto &conn = found->second;
+		conn.pending = false;
+		if (completion.operation == Op::kLeaseLost || completion.code == Code::ACCOUNT_LEASE_LOST)
+		{
+			SA::Transport::SaveResult result{};
+			result.code = Code::ACCOUNT_LEASE_LOST;
+			(void)SA::Net::encodeFramed(completion.correlation, result, conn.outbound);
+			conn.logged_in = false;
+			conn.session->close();
+			if (conn.detached)
+				removeSession(completion.session);
+			continue;
+		}
+		if (completion.operation == Op::kLogin)
+		{
+			conn.logged_in = completion.code == Code::ACCOUNT_OK;
+			if (conn.detached)
+			{
+				if (conn.logged_in)
+					saveCharacter(completion.session, true, 0);
+				else
+					removeSession(completion.session);
+				continue;
+			}
+			SA::Transport::LoginResult result{};
+			result.code = completion.code;
+			result.characters = completion.characters;
+			(void)SA::Net::encodeFramed(completion.correlation, result, conn.outbound);
+			if (conn.logged_in)
+				conn.session->selectCharacter();
+			else
+				conn.session->awaitLogin();
+		}
+		else if (completion.operation == Op::kCreate || completion.operation == Op::kSelect)
+		{
+			if (conn.detached)
+			{
+				saveCharacter(completion.session, true, 0);
+				continue;
+			}
+			SA::Transport::CharacterResult result{};
+			result.code = completion.code;
+			if (result.code == Code::ACCOUNT_OK)
+			{
+				if (s.install(completion.session, completion.character))
+					result.character = completion.character;
+				else
+					result.code = Code::ACCOUNT_INVALID;
+			}
+			(void)result.content_version.assign(s.content_version.c_str());
+			(void)SA::Net::encodeFramed(completion.correlation, result, conn.outbound);
+			if (result.code != Code::ACCOUNT_OK)
+			{
+				conn.session->selectCharacter();
+				if (completion.code == Code::ACCOUNT_OK)
+					saveCharacter(completion.session, true, 0);
+			}
+		}
+		else if (completion.operation == Op::kSave || completion.operation == Op::kRelease)
+		{
+			SA::Transport::SaveResult result{};
+			result.code = completion.code;
+			result.revision = completion.character.revision;
+			result.logout = completion.logout;
+			if (completion.code == Code::ACCOUNT_OK)
+			{
+				conn.revision = completion.character.revision;
+				if (auto *player = s.players.resolve(s.player_of_session.find(completion.session)))
+				{
+					for (const auto &value : completion.character.pets)
+						if (auto *pet = s.pets.resolve(player->pets[value.slot]))
+							pet->uid = value.uid;
+					for (const auto &value : completion.character.items)
+						if (auto *item = s.items.resolve(player->items[value.slot]))
+							item->uid = value.uid;
+				}
+				if (completion.logout || completion.operation == Op::kRelease)
+				{
+					conn.logged_in = false;
+					if (conn.detached)
+					{
+						removeSession(completion.session);
+						continue;
+					}
+					(void)SA::Net::encodeFramed(completion.correlation, result, conn.outbound);
+					conn.session->close();
+				}
+				else
+				{
+					conn.session->markOnline();
+					SA::Transport::CharacterState state{};
+					state.character = s.snapshot(completion.session);
+					(void)conn.session->push(state, conn.outbound);
+					if (completion.correlation)
+						(void)SA::Net::encodeFramed(completion.correlation, result, conn.outbound);
+				}
+			}
+			else
+			{
+				conn.save_failed = true;
+				conn.session->saving();
+				(void)SA::Net::encodeFramed(completion.correlation, result, conn.outbound);
+			}
+			if (completion.code == Code::ACCOUNT_OK && conn.logged_in && (conn.detached || conn.deferred_logout || conn.deferred_correlation))
+			{
+				const auto corr = conn.deferred_correlation;
+				const bool logout = conn.detached || conn.deferred_logout;
+				conn.deferred_correlation = 0;
+				conn.deferred_logout = false;
+				saveCharacter(completion.session, logout, corr);
+			}
+		}
+	}
+	std::vector<SA::Net::SessionId> retry;
+	for (const auto &entry : s.conns)
+		if (entry.second.detached && entry.second.logged_in && !entry.second.pending && s.now_ms >= entry.second.retry_at)
+			retry.push_back(entry.first);
+	for (auto id : retry)
+		saveCharacter(id, true, 0);
 }
 
 } // namespace SA::World

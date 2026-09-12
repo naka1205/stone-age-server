@@ -79,11 +79,11 @@ jobs:
       #   下面这三步只是让它能通过。
       - name: 安装 protoc(Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libssl-dev
 
       - name: 安装 protoc(macOS)
         if: runner.os == 'macOS'
-        run: brew install protobuf
+        run: brew install protobuf openssl@3
 
       - name: 安装 protoc(Windows)
         if: runner.os == 'Windows'
@@ -91,6 +91,16 @@ jobs:
 
       - name: protoc 版本
         run: protoc --version
+
+      - name: 安装 OpenSSL(Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install openssl -y --no-progress
+          $sslRoot = @('C:\Program Files\OpenSSL-Win64', 'C:\Program Files\OpenSSL') | Where-Object { Test-Path "$_\include\openssl\ssl.h" } | Select-Object -First 1
+          if (-not $sslRoot) { throw 'OpenSSL development files not found' }
+          "OPENSSL_ROOT_DIR=$sslRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$sslRoot\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       # ── ★★ clang-format:三平台钉同一个版本 ─────────────────────
       #
@@ -132,3 +142,16 @@ jobs:
           else
             python tools/ci_verify.py --config RelWithDebInfo --generator Ninja
           fi
+
+  storage:
+    name: MySQL 8.4.8 + Redis 8.6.2 integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libssl-dev libhiredis-dev protobuf-compiler
+      - name: Verify real persistence and leases
+        run: python tools/ci_storage.py --build build/storage-ci

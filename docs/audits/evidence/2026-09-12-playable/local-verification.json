@@ -1,0 +1,35 @@
+{
+  "server_ctest": {
+    "passed": 21,
+    "total": 21
+  },
+  "server_ci_verify": {
+    "passed": 6,
+    "total": 6
+  },
+  "client_gui_ctest": {
+    "passed": 8,
+    "total": 8
+  },
+  "real_storage": {
+    "cases": 2,
+    "assertions": 70,
+    "passed": true
+  },
+  "shared_battle": {
+    "cases": 115,
+    "assertions": 2763
+  },
+  "native_input": {
+    "keys": 174,
+    "clicks": 3
+  },
+  "screenshot_size": [
+    960,
+    640
+  ],
+  "screenshot_source_size": [
+    1920,
+    1280
+  ]
+}

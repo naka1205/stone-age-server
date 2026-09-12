@@ -16,6 +16,7 @@ target_include_directories(sa_world
 #   sa_net       L1 会话与成帧
 #   sa_shared    ★ L3 规则 —— D2 的落点,与客户端编译的是同一份源码
 target_link_libraries(sa_world PUBLIC sa_platform sa_net sa_shared)
+target_link_libraries(sa_world PUBLIC sa_session_storage)
 
 sa_apply_warnings(sa_world)
 

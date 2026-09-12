@@ -1,0 +1,52 @@
+option(SA_ENABLE_MYSQL_STORAGE "Build MySQL 8.4 JDBC + Redis persistence" OFF)
+add_library(sa_session_storage STATIC Validation.cpp)
+target_include_directories(sa_session_storage PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+target_link_libraries(sa_session_storage PUBLIC sa_data)
+if(SA_ENABLE_MYSQL_STORAGE)
+    find_package(OpenSSL 1.1.1 REQUIRED)
+    find_package(mysql-concpp 8.4 CONFIG REQUIRED COMPONENTS jdbc)
+    find_path(SA_HIREDIS_INCLUDE hiredis.h PATH_SUFFIXES hiredis REQUIRED)
+    find_library(SA_HIREDIS_LIBRARY NAMES hiredis REQUIRED)
+    find_package(Threads REQUIRED)
+    set(_sa_mysql_target mysql::concpp-jdbc)
+    if(APPLE)
+        # The official 8.4 archive records bare libssl.3/libcrypto.3 names.
+        # Fix a build-owned copy; never modify the downloaded distribution.
+        get_target_property(_sa_mysql_path mysql::concpp-jdbc IMPORTED_LOCATION)
+        if(NOT _sa_mysql_path)
+            get_target_property(_sa_mysql_path mysql::concpp-jdbc IMPORTED_LOCATION_RELEASE)
+        endif()
+        get_filename_component(_sa_mysql_path "${_sa_mysql_path}" REALPATH)
+        get_filename_component(_sa_mysql_name "${_sa_mysql_path}" NAME)
+        file(SHA256 "${_sa_mysql_path}" _sa_mysql_hash)
+        string(SHA256 _sa_runtime_hash "${_sa_mysql_hash};${OPENSSL_SSL_LIBRARY};${OPENSSL_CRYPTO_LIBRARY}")
+        set(_sa_mysql_copy "${CMAKE_BINARY_DIR}/runtime-deps/${_sa_runtime_hash}/${_sa_mysql_name}")
+        if(NOT EXISTS "${_sa_mysql_copy}")
+            get_filename_component(_sa_copy_dir "${_sa_mysql_copy}" DIRECTORY)
+            file(MAKE_DIRECTORY "${_sa_copy_dir}")
+            configure_file("${_sa_mysql_path}" "${_sa_mysql_copy}" COPYONLY)
+            execute_process(COMMAND install_name_tool
+                -id "@rpath/${_sa_mysql_name}"
+                -change libssl.3.dylib "${OPENSSL_SSL_LIBRARY}"
+                -change libcrypto.3.dylib "${OPENSSL_CRYPTO_LIBRARY}"
+                "${_sa_mysql_copy}" COMMAND_ERROR_IS_FATAL ANY)
+            execute_process(COMMAND codesign --force --sign - "${_sa_mysql_copy}"
+                COMMAND_ERROR_IS_FATAL ANY OUTPUT_QUIET ERROR_QUIET)
+        endif()
+        add_library(sa_mysql_connector SHARED IMPORTED)
+        set_target_properties(sa_mysql_connector PROPERTIES
+            IMPORTED_LOCATION "${_sa_mysql_copy}"
+            INTERFACE_INCLUDE_DIRECTORIES "${MYSQL_CONCPP_INCLUDE_DIR}")
+        set(_sa_mysql_target sa_mysql_connector)
+    endif()
+    add_library(sa_storage_drivers INTERFACE)
+    target_include_directories(sa_storage_drivers SYSTEM INTERFACE "${SA_HIREDIS_INCLUDE}")
+    target_link_libraries(sa_storage_drivers INTERFACE ${_sa_mysql_target} "${SA_HIREDIS_LIBRARY}" OpenSSL::Crypto Threads::Threads)
+    add_library(sa_session_storage_backend STATIC MySqlService.cpp)
+    target_link_libraries(sa_session_storage_backend PRIVATE sa_storage_drivers)
+else()
+    add_library(sa_session_storage_backend STATIC Unavailable.cpp)
+endif()
+target_link_libraries(sa_session_storage_backend PUBLIC sa_session_storage)
+sa_apply_warnings(sa_session_storage)
+sa_apply_warnings(sa_session_storage_backend)

@@ -1,20 +1,21 @@
-// src/platform/json.cpp —— 最小 JSON 子集解析器
-//
-// 递归下降。★ 深度有硬上限:JSON 是递归结构,不设限就是一条
-//   「构造一个两万层嵌套的配置文件把服务端栈爆掉」的路径。
-//   配置文件的真实深度是 2(顶层对象 + tempo 子对象)。
+// JSON 内存编解码；Unicode 转义、有限数值与重复键校验。
+// 深度上限同时约束读取和写出，供配置、内容与版本化存档使用。
 
-#include "internal/Json.h"
+#include "data/Json.h"
 
-#include <cstdlib>
+#include <cmath>
+#include <iomanip>
+#include <limits>
+#include <locale>
+#include <sstream>
+#include <stdexcept>
 #include <utility>
 
-namespace SA::Platform::json
+namespace SA::Data::Json
 {
 namespace
 {
 
-// 真实需求是 2 层。给到 32 是留余量,不是留给"以后可能很深"。
 constexpr int kMaxDepth = 32;
 
 class Parser
@@ -287,6 +288,11 @@ class Parser
 			const char c = _text[_pos++];
 			if (c == '"')
 			{
+				if (!validUtf8(s))
+				{
+					_error = "字符串不是有效 UTF-8";
+					return false;
+				}
 				out = std::move(s);
 				return true;
 			}
@@ -335,14 +341,84 @@ class Parser
 				s.push_back('\t');
 				break;
 			case 'u':
-				// 见头文件:有意不支持。报错优于解错。
-				_error = "不支持 \\u 转义";
-				return false;
+			{
+				std::uint32_t code = 0;
+				if (!hex4(code))
+					return false;
+				if (code >= 0xd800 && code <= 0xdbff)
+				{
+					if (_text.size() - _pos < 2 || _text[_pos] != '\\' || _text[_pos + 1] != 'u')
+					{
+						_error = "UTF-16 高代理项缺少低代理项";
+						return false;
+					}
+					_pos += 2;
+					std::uint32_t low = 0;
+					if (!hex4(low))
+						return false;
+					if (low < 0xdc00 || low > 0xdfff)
+					{
+						_error = "非法 UTF-16 低代理项";
+						return false;
+					}
+					code = 0x10000u + ((code - 0xd800u) << 10u) + low - 0xdc00u;
+				}
+				else if (code >= 0xdc00 && code <= 0xdfff)
+				{
+					_error = "孤立 UTF-16 低代理项";
+					return false;
+				}
+				if (code < 0x80)
+					s.push_back(static_cast<char>(code));
+				else if (code < 0x800)
+				{
+					s.push_back(static_cast<char>(0xc0u | (code >> 6u)));
+					s.push_back(static_cast<char>(0x80u | (code & 0x3fu)));
+				}
+				else if (code < 0x10000)
+				{
+					s.push_back(static_cast<char>(0xe0u | (code >> 12u)));
+					s.push_back(static_cast<char>(0x80u | ((code >> 6u) & 0x3fu)));
+					s.push_back(static_cast<char>(0x80u | (code & 0x3fu)));
+				}
+				else
+				{
+					s.push_back(static_cast<char>(0xf0u | (code >> 18u)));
+					s.push_back(static_cast<char>(0x80u | ((code >> 12u) & 0x3fu)));
+					s.push_back(static_cast<char>(0x80u | ((code >> 6u) & 0x3fu)));
+					s.push_back(static_cast<char>(0x80u | (code & 0x3fu)));
+				}
+				break;
+			}
 			default:
 				_error = "无法识别的转义";
 				return false;
 			}
 		}
+	}
+
+	bool hex4(std::uint32_t &out)
+	{
+		out = 0;
+		for (int i = 0; i < 4; ++i)
+		{
+			if (eof())
+			{
+				_error = "Unicode 转义不完整";
+				return false;
+			}
+			const char c = _text[_pos++];
+			const int digit = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10
+			                                               : c >= 'A' && c <= 'F'   ? c - 'A' + 10
+			                                                                        : -1;
+			if (digit < 0)
+			{
+				_error = "Unicode 转义含非十六进制字符";
+				return false;
+			}
+			out = (out << 4u) | static_cast<std::uint32_t>(digit);
+		}
+		return true;
 	}
 
 	bool parseNumber(Value &out)
@@ -361,10 +437,13 @@ class Parser
 			_error = "不是合法的值";
 			return false;
 		}
-		bool fractional = false;
+		if (digits > 1 && _text[start + (_text[start] == '-' ? 1u : 0u)] == '0')
+		{
+			_error = "数字不能有前导零";
+			return false;
+		}
 		if (!eof() && peek() == '.')
 		{
-			fractional = true;
 			++_pos;
 			std::size_t frac = 0;
 			while (!eof() && peek() >= '0' && peek() <= '9')
@@ -380,13 +459,29 @@ class Parser
 		}
 		if (!eof() && (peek() == 'e' || peek() == 'E'))
 		{
-			// 见头文件:有意不支持。
-			_error = "不支持指数写法";
+			++_pos;
+			if (!eof() && (peek() == '+' || peek() == '-'))
+				++_pos;
+			const std::size_t exponent = _pos;
+			while (!eof() && peek() >= '0' && peek() <= '9')
+				++_pos;
+			if (_pos == exponent)
+			{
+				_error = "指数部分缺少数字";
+				return false;
+			}
+		}
+		const std::string token(_text.substr(start, _pos - start));
+		std::istringstream stream(token);
+		stream.imbue(std::locale::classic());
+		double number = 0;
+		stream >> number;
+		if (stream.fail() || !std::isfinite(number))
+		{
+			_error = "数字超出有限值范围";
 			return false;
 		}
-		(void)fractional;
-		const std::string token(_text.substr(start, _pos - start));
-		out = Value::number(std::strtod(token.c_str(), nullptr));
+		out = Value::number(number);
 		return true;
 	}
 
@@ -451,4 +546,126 @@ ParseOutcome parse(std::string_view text)
 	return p.run();
 }
 
-} // namespace SA::Platform::json
+bool validUtf8(std::string_view text) noexcept
+{
+	for (std::size_t offset = 0; offset < text.size();)
+	{
+		const auto first = static_cast<unsigned char>(text[offset++]);
+		if (first < 0x80)
+			continue;
+		const int length = first >= 0xc2 && first <= 0xdf ? 2 : first >= 0xe0 && first <= 0xef ? 3
+		                                                    : first >= 0xf0 && first <= 0xf4   ? 4
+		                                                                                       : 0;
+		if (!length || text.size() - offset < static_cast<std::size_t>(length - 1))
+			return false;
+		std::uint32_t point = first & (length == 2 ? 0x1fu : length == 3 ? 0x0fu
+		                                                                 : 0x07u);
+		for (int i = 1; i < length; ++i)
+		{
+			const auto next = static_cast<unsigned char>(text[offset++]);
+			if ((next & 0xc0u) != 0x80u)
+				return false;
+			point = (point << 6u) | (next & 0x3fu);
+		}
+		if ((length == 3 && point < 0x800) || (length == 4 && point < 0x10000) ||
+		    (point >= 0xd800 && point <= 0xdfff) || point > 0x10ffff)
+			return false;
+	}
+	return true;
+}
+
+namespace
+{
+void quote(std::string &out, std::string_view text)
+{
+	if (!validUtf8(text))
+		throw std::invalid_argument("JSON invalid UTF-8");
+	constexpr char hex[] = "0123456789abcdef";
+	out.push_back('"');
+	for (char raw : text)
+	{
+		const auto c = static_cast<unsigned char>(raw);
+		if (c == '"' || c == '\\')
+		{
+			out.push_back('\\');
+			out.push_back(raw);
+		}
+		else if (c < 0x20)
+		{
+			out += "\\u00";
+			out.push_back(hex[c >> 4u]);
+			out.push_back(hex[c & 15u]);
+		}
+		else
+			out.push_back(raw);
+	}
+	out.push_back('"');
+}
+
+void encode(const Value &value, std::string &out, int depth)
+{
+	if (depth > kMaxDepth)
+		throw std::invalid_argument("JSON nesting limit");
+	switch (value.type())
+	{
+	case Type::kNull:
+		out += "null";
+		break;
+	case Type::kBool:
+		out += value.asBool() ? "true" : "false";
+		break;
+	case Type::kString:
+		quote(out, value.asString());
+		break;
+	case Type::kNumber:
+	{
+		if (!std::isfinite(value.asNumber()))
+			throw std::invalid_argument("JSON non-finite number");
+		std::ostringstream stream;
+		stream.imbue(std::locale::classic());
+		stream << std::setprecision(std::numeric_limits<double>::max_digits10) << value.asNumber();
+		out += stream.str();
+		break;
+	}
+	case Type::kArray:
+	{
+		out.push_back('[');
+		bool first = true;
+		for (const auto &item : value.asArray())
+		{
+			if (!first)
+				out.push_back(',');
+			first = false;
+			encode(item, out, depth + 1);
+		}
+		out.push_back(']');
+		break;
+	}
+	case Type::kObject:
+	{
+		out.push_back('{');
+		bool first = true;
+		for (const auto &item : value.asObject())
+		{
+			if (!first)
+				out.push_back(',');
+			first = false;
+			quote(out, item.first);
+			out.push_back(':');
+			encode(item.second, out, depth + 1);
+		}
+		out.push_back('}');
+		break;
+	}
+	}
+}
+} // namespace
+
+std::string stringify(const Value &value)
+{
+	std::string out;
+	encode(value, out, 0);
+	return out;
+}
+
+} // namespace SA::Data::Json

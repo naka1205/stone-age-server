@@ -40,7 +40,8 @@ Session::Session(SessionId id, std::uint32_t protocol_version,
 
 void Session::markOnline() noexcept
 {
-	if (_state == SessionState::kAuthenticated)
+	if (_state == SessionState::kAuthenticated || _state == SessionState::kAuthenticating ||
+	    _state == SessionState::kSelectingChar || _state == SessionState::kLoggingOut)
 		_state = SessionState::kOnline;
 }
 
@@ -83,6 +84,11 @@ bool Session::handleFrame(const std::uint8_t *frame, std::uint32_t len,
 
 	switch (id)
 	{
+	case SA::IDL::MsgId::LoginRequest:
+	case SA::IDL::MsgId::CreateCharacterRequest:
+	case SA::IDL::MsgId::SelectCharacterRequest:
+	case SA::IDL::MsgId::SaveRequest:
+		return handleLifecycle(env);
 	case SA::IDL::MsgId::HandshakeRequest:
 		return handleHandshake(env, out);
 	case SA::IDL::MsgId::Ping:
@@ -100,6 +106,56 @@ bool Session::handleFrame(const std::uint8_t *frame, std::uint32_t len,
 		_lastRejectMsgId = env.msg_id;
 		return false;
 	}
+}
+
+bool Session::handleLifecycle(const EnvelopeView &env)
+{
+	if (!env.corr_id || !_host)
+		return false;
+	SA::IDL::Reader reader(env.body, env.body_len);
+	const auto id = static_cast<SA::IDL::MsgId>(env.msg_id);
+	if (id == SA::IDL::MsgId::LoginRequest && _state == SessionState::kAuthenticated)
+	{
+		SA::Transport::LoginRequest req{};
+		decode(reader, req);
+		if (!reader.ok() || reader.remaining() != 0)
+			return false;
+		_state = SessionState::kAuthenticating;
+		_host->onLogin(_id, req, env.corr_id);
+		return true;
+	}
+	if (id == SA::IDL::MsgId::CreateCharacterRequest && _state == SessionState::kSelectingChar)
+	{
+		SA::Transport::CreateCharacterRequest req{};
+		decode(reader, req);
+		if (!reader.ok() || reader.remaining() != 0)
+			return false;
+		_state = SessionState::kAuthenticating;
+		_host->onCreateCharacter(_id, req, env.corr_id);
+		return true;
+	}
+	if (id == SA::IDL::MsgId::SelectCharacterRequest && _state == SessionState::kSelectingChar)
+	{
+		SA::Transport::SelectCharacterRequest req{};
+		decode(reader, req);
+		if (!reader.ok() || reader.remaining() != 0)
+			return false;
+		_state = SessionState::kAuthenticating;
+		_host->onSelectCharacter(_id, req, env.corr_id);
+		return true;
+	}
+	if (id == SA::IDL::MsgId::SaveRequest &&
+	    (_state == SessionState::kOnline || _state == SessionState::kSelectingChar || _state == SessionState::kLoggingOut))
+	{
+		SA::Transport::SaveRequest req{};
+		decode(reader, req);
+		if (!reader.ok() || reader.remaining() != 0)
+			return false;
+		_host->onSave(_id, req, env.corr_id);
+		return true;
+	}
+	_lastRejectMsgId = env.msg_id;
+	return false;
 }
 
 bool Session::handleHandshake(const EnvelopeView &env,

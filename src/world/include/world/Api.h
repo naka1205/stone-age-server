@@ -32,6 +32,7 @@
 #include "rules/Config.h"
 #include "rules/Progression.h"
 #include "rules/RandomSource.h"
+#include "session_storage/Api.h"
 
 namespace SA::World
 {
@@ -620,7 +621,8 @@ class World final : public SA::Net::TransportEvents,
 	      SA::Platform::Clock &clock,
 	      SA::Platform::Logger &logger,
 	      SA::Platform::RandomSource &random,
-	      SA::Net::Transport &transport);
+	      SA::Net::Transport &transport,
+	      SA::SessionStorage::Service *storage = nullptr);
 	~World() override;
 
 	World(const World &) = delete;
@@ -628,6 +630,9 @@ class World final : public SA::Net::TransportEvents,
 
 	// 推进一个 tick。⚠️ 01 §2:主线程绝不允许阻塞 ⇒ 本函数不等待任何 I/O。
 	void tick();
+	// Startup-only, validated content. No file or database I/O occurs in World.
+	void configurePlayable(GridMap map, TileAttrTable attributes, std::string content_version,
+	                       SA::Domain::CharacterRecord character_defaults);
 
 	// 开一场战斗。★ 种子由 Platform::RandomSource 派发**并落日志** ——
 	//   01 §10「战斗事件流 + 注入式随机源 = 可回放」,而可回放的前提是种子留得下来。
@@ -725,6 +730,10 @@ class World final : public SA::Net::TransportEvents,
 	void onBattleCommand(SA::Net::SessionId id,
 	                     const SA::Domain::BattleCommand &cmd) override;
 	void onSessionClosed(SA::Net::SessionId id) override;
+	void onLogin(SA::Net::SessionId, const SA::Transport::LoginRequest &, std::uint64_t) override;
+	void onCreateCharacter(SA::Net::SessionId, const SA::Transport::CreateCharacterRequest &, std::uint64_t) override;
+	void onSelectCharacter(SA::Net::SessionId, const SA::Transport::SelectCharacterRequest &, std::uint64_t) override;
+	void onSave(SA::Net::SessionId, const SA::Transport::SaveRequest &, std::uint64_t) override;
 
 	// ── 观察面(测试与运维)──
 	std::uint64_t ticks() const noexcept;
@@ -845,6 +854,10 @@ class World final : public SA::Net::TransportEvents,
 	const SA::Rules::BattleField *battleField(BattleId id) const;
 
   private:
+	void processStorage();
+	void saveCharacter(SA::Net::SessionId, bool logout, std::uint64_t correlation);
+	void removeSession(SA::Net::SessionId);
+	void detachBattles(SA::Net::SessionId);
 	// 遇敌命中后的开战组装(批次 W.4,内部)——移植 `EN_recv`(`callfromcli.c:1249`)+
 	//   `BATTLE_CreateVsEnemy(charaindex,0,-1)` 净核(`battle.c:2528`):遇敌链选怪
 	//   (`pickEnemyGroup` → `rollEnemyList`)→ 建场 → 玩家入场(Side[0])→ 逐只敌人入场

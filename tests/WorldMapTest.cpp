@@ -157,6 +157,26 @@ TEST_CASE("玩家移动:走路串按 walksendinterval 逐字符消费")
 	CHECK(f.world.playerPos(id).x == p0.x + 2);
 }
 
+TEST_CASE("Repeated walk requests cannot reset the movement interval")
+{
+	MoveFixture f;
+	const auto id = f.spawn();
+	const auto start = f.world.playerPos(id);
+	f.sendWalk(id, "c");
+	f.world.tick();
+	REQUIRE(f.world.playerPos(id).x == start.x + 1);
+	for (int i = 0; i < 24; ++i)
+	{
+		f.clock.advance(10);
+		f.sendWalk(id, "c");
+		f.world.tick();
+	}
+	CHECK(f.world.playerPos(id).x == start.x + 1);
+	f.clock.advance(10);
+	f.world.tick();
+	CHECK(f.world.playerPos(id).x == start.x + 2);
+}
+
 TEST_CASE("玩家移动:大写方向只转身,不移动")
 {
 	MoveFixture f;

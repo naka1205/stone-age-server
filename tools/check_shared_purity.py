@@ -112,6 +112,7 @@ SUBTREE_ALLOWED = {
     # ★ 注意它只放开 transport/ 这一组:socket / 日志 / 时钟 那些 BANNED 条目
     #   对 wire/ 一样禁止 —— 它处理的是**字节与结构**,不是**连接**。
     "wire/": ("transport/",),
+    "data/": ("data/", "sstream", "locale", "iomanip"),  # 仅内存流，不开放文件 I/O。
 }
 
 

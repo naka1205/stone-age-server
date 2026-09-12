@@ -99,6 +99,24 @@ struct Player
 	//   ⇒ 玩家等级不因经验变化;不在此建 `level`(等级差衰减读**战场 Combatant** 的等级,
 	//   见 `World.cpp` finished 段;M.1 起「不建没人用的字段」,真做升级那批再建)。
 	std::int32_t exp = 0;
+	// Persistent character attributes (char.c creation; derived stats remain transient).
+	std::int32_t level = 1;
+	std::int32_t hp = 0;
+	std::int32_t mp = 100;
+	std::int32_t max_mp = 100;
+	std::int32_t vital = 0;
+	std::int32_t str = 0;
+	std::int32_t tough = 0;
+	std::int32_t dex = 0;
+	std::int32_t luck = 0;
+	std::int32_t charm = 60;
+	std::int32_t earth = 0;
+	std::int32_t water = 0;
+	std::int32_t fire = 0;
+	std::int32_t wind = 0;
+	std::int32_t image = 0;
+	std::int32_t face_image = 0;
+	std::int32_t gold = 0;
 
 	// ── 位置(批次 W.1。原 CHAR_FLOOR / CHAR_X / CHAR_Y / CHAR_DIR)──────────
 	//

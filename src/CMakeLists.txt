@@ -18,6 +18,7 @@
 
 add_subdirectory(platform)
 add_subdirectory(net)
+add_subdirectory(session_storage)
 add_subdirectory(world)
 
 add_executable(stone_age_server main.cpp)
@@ -29,6 +30,7 @@ add_executable(stone_age_server main.cpp)
 #    「在一套工具链上验过 ≠ 三套都成立」(00 §9.0.6)。
 find_package(Threads REQUIRED)
 target_link_libraries(stone_age_server PRIVATE sa_world Threads::Threads)
+target_link_libraries(stone_age_server PRIVATE sa_content sa_session_storage_backend)
 sa_apply_warnings(stone_age_server)
 
 # ⚠️ 不给 stone_age_server 开 sa_enable_assertions:它是**产物**,不是测试。

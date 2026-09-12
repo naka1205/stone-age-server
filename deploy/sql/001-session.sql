@@ -1,0 +1,62 @@
+CREATE DATABASE IF NOT EXISTS sa_session CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS sa_social CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+USE sa_session;
+CREATE TABLE IF NOT EXISTS schema_migration (version INT UNSIGNED PRIMARY KEY) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS account (
+ account_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ login VARCHAR(63) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL UNIQUE,
+ password_salt CHAR(32) CHARACTER SET ascii NOT NULL,
+ password_hash CHAR(64) CHARACTER SET ascii NOT NULL,
+ password_iterations INT UNSIGNED NOT NULL,
+ status TINYINT UNSIGNED NOT NULL DEFAULT 1,
+ created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS account_session (
+ account_id BIGINT UNSIGNED PRIMARY KEY,
+ generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
+ token CHAR(32) CHARACTER SET ascii NOT NULL DEFAULT '',
+ char_id BIGINT UNSIGNED NULL,
+ lease_until TIMESTAMP(6) NULL,
+ FOREIGN KEY (account_id) REFERENCES account(account_id)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character` (
+ char_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ account_id BIGINT UNSIGNED NOT NULL,
+ slot TINYINT UNSIGNED NOT NULL,
+ name VARCHAR(31) NOT NULL UNIQUE,
+ created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+ UNIQUE KEY account_slot (account_id,slot),
+ FOREIGN KEY (account_id) REFERENCES account(account_id),
+ CHECK (slot < 2)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS character_data (
+ char_id BIGINT UNSIGNED PRIMARY KEY,
+ schema_ver INT UNSIGNED NOT NULL,
+ revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+ payload JSON NOT NULL,
+ level INT AS (JSON_UNQUOTE(JSON_EXTRACT(payload,'$.level'))) STORED,
+ floor INT AS (JSON_UNQUOTE(JSON_EXTRACT(payload,'$.floor'))) STORED,
+ KEY idx_level (level), KEY idx_floor (floor),
+ FOREIGN KEY (char_id) REFERENCES `character`(char_id)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS character_pet (
+ uid BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ char_id BIGINT UNSIGNED NOT NULL,
+ slot TINYINT UNSIGNED NOT NULL,
+ schema_ver INT UNSIGNED NOT NULL,
+ payload JSON NOT NULL,
+ UNIQUE KEY owner_slot (char_id,slot),
+ FOREIGN KEY (char_id) REFERENCES `character`(char_id),
+ CHECK (slot < 5)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS character_item (
+ uid BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ char_id BIGINT UNSIGNED NOT NULL,
+ slot TINYINT UNSIGNED NOT NULL,
+ schema_ver INT UNSIGNED NOT NULL,
+ payload JSON NOT NULL,
+ UNIQUE KEY owner_slot (char_id,slot),
+ FOREIGN KEY (char_id) REFERENCES `character`(char_id),
+ CHECK (slot < 54)
+) ENGINE=InnoDB;
+INSERT IGNORE INTO schema_migration(version) VALUES (1);
