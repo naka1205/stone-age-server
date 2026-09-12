@@ -165,10 +165,10 @@ inline constexpr int kKnockbackHpBonus = 20;          // + 20
 // [8.0] 05-battle.md §2.5:`排序键 = dex + sequence`,
 //       `dex = BATTLE_DexCalc(...)` 基数 = `WORKQUICK + 20`,再按指令种类分 9 档修正。
 //
-// F03/U01：SSRC80 为 0.3 且 dex<=0 置 1，SSRC85 为 0.1 且无下限。
-// 现保留 0.1/无下限作为待核选择；双方共同基数为 quick+20，道具再加 15%。
+// F03/U01（2026-09-12 用户采纳）：采用 SSRC80 的 0.3，整数 dex<=0 时置 1。
+// 基数为 quick+20，道具再加 15%；下限在叠加 sequence 之前，B80 函数体仍未确证。
 inline constexpr int kDexBase = 20;
-inline constexpr double kDexJitterRatio = 0.1;
+inline constexpr double kDexJitterRatio = 0.3;
 
 // ── 空手连击的段数分档(DR-BT1)──────────────────────────────────
 //

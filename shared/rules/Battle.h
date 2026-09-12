@@ -125,7 +125,8 @@ bool resolveTurn(const BattleField &field,
 
 // 行动顺序排序键(§2.5)。`排序键 = dex + sequence`。
 //
-// 基数 quick+20；已实现普通与用药分支。系数/下限的版本冲突见审计 U01。
+// 基数 quick+20；普通/用药采用 SSRC80 的 0.3 扰动，用药加 15%。
+// 转成整数的 dex 先夹到至少 1，再加 sequence（用户裁定 U01）。
 std::int32_t computeActionDex(const Combatant &c,
                               const SA::Domain::BattleCommand &command,
                               Random &rng) noexcept;

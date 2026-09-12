@@ -55,7 +55,7 @@ TEST_CASE("F01/F03/F16:原表达式的截断边界与道具优先级")
 	SA::Domain::BattleCommand command{};
 	command.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
 	ScriptedRandom high({9999});
-	CHECK(computeActionDex(attacker, command, high) == 108); // U01 暂留 0.1，基数是 120。
+	CHECK(computeActionDex(attacker, command, high) == 84); // U01 采用 SSRC80：120 - RAND(0, 36)。
 	command.command_kind = SA::Domain::BattleCommand::CommandKind::USE_ITEM;
 	ScriptedRandom zero({0});
 	CHECK(computeActionDex(attacker, command, zero) == 138);
@@ -720,10 +720,10 @@ std::size_t countKind(const SA::Domain::BattleEvents &ev,
 
 // ── 行动顺序 ───────────────────────────────────────────────────────────────
 
-TEST_CASE("行动顺序:排序键 = quick + 20 + sequence,且不夹下限")
+TEST_CASE("行动顺序:零扰动时 dex = quick + 20,先攻在 dex 下限之后相加")
 {
 	// `BATTLE_DexCalc` 基数 = WORKQUICK + 20(05 §2.5)。
-	// quick == 0 ⇒ 抖动项 RAND(0, 0) == 0 ⇒ dex 恒等于基数,可以精确断言。
+	// 固定随机值 0，排除扰动；quick == 0 时随机区间仍是 RAND(0, 6)。
 	auto c = makeCombatant(CombatantKind::kPlayer, 100, 100, /*quick=*/0);
 	SA::Domain::BattleCommand cmd{};
 	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
@@ -735,10 +735,80 @@ TEST_CASE("行动顺序:排序键 = quick + 20 + sequence,且不夹下限")
 	c.mods.sequence = 7;
 	CHECK(computeActionDex(c, cmd, rng) == kDexBase + 7);
 
-	// ⚠️★ 原版 `if (dex <= 1) dex = 1;` **是被注释掉的** ⇒ 结果可以 ≤ 1 甚至为负。
-	//    这里用负 sequence 逼出该情形:若有人"顺手加个下限",这条会失败。
+	// SSRC80 battle.c:4312 夹的是 dex；4144 的排序比较之后才加 sequence。
+	// 负的合成测试修正不应把下限擅自挪到最终排序键上。
 	c.mods.sequence = -100;
-	CHECK(computeActionDex(c, cmd, rng) < 0);
+	CHECK(computeActionDex(c, cmd, rng) == -80);
+}
+
+TEST_CASE("F03/U01:SSRC80 的 0.3 扰动、用药优先级与浮点尾值")
+{
+	// SSRC80 battle.c:4297–4307。quick=100 时 w=120，RAND(0,36) 后普攻 84..120、用药 102..138。
+	for (bool item : {false, true})
+	{
+		auto c = makeCombatant(CombatantKind::kPlayer, 100, 100, 100);
+		SA::Domain::BattleCommand cmd{};
+		cmd.command_kind = item ? SA::Domain::BattleCommand::CommandKind::USE_ITEM
+		                        : SA::Domain::BattleCommand::CommandKind::ATTACK;
+		for (int jitter : {0, 12, 36})
+		{
+			ScriptedRandom rng({jitter});
+			CHECK(computeActionDex(c, cmd, rng) == 120 - jitter + (item ? 18 : 0));
+			CHECK(rng.calls() == 1);
+		}
+		// w=21：原 RAND 的浮点上端 6.3 可产 7，不能提前转成 int(6.3)。
+		c.quick = 1;
+		ScriptedRandom upper({9999});
+		CHECK(computeActionDex(c, cmd, upper) == (item ? 17 : 14));
+		CHECK(upper.calls() == 1);
+	}
+}
+
+TEST_CASE("F03/U01:先完成整数转换再夹 dex 下限，仍消耗一次随机数")
+{
+	// SSRC80 battle.c:4215 的 int dex，以及 4299/4307 赋值后 4312 的 <=0 门。
+	for (bool item : {false, true})
+	{
+		auto c = makeCombatant(CombatantKind::kPlayer, 100, 100);
+		SA::Domain::BattleCommand cmd{};
+		cmd.command_kind = item ? SA::Domain::BattleCommand::CommandKind::USE_ITEM
+		                        : SA::Domain::BattleCommand::CommandKind::ATTACK;
+		for (int quick : {-21, -20, -19})
+		{
+			c.quick = quick;
+			// w=1、jitter=1 时，用药表达式为 0.15，赋给 int 为 0，随后夹到 1。
+			ScriptedRandom rng({9999});
+			CHECK(computeActionDex(c, cmd, rng) == 1);
+			CHECK(rng.calls() == 1);
+		}
+		c.quick = -20;
+		c.mods.sequence = 7;
+		ScriptedRandom rng({0});
+		CHECK(computeActionDex(c, cmd, rng) == 8); // clamp(0)=1，再加先攻 7。
+		CHECK(rng.calls() == 1);
+	}
+}
+
+TEST_CASE("F03/U01:0.3 扰动改变实际先后手，用药优先级参与同一排序")
+{
+	BattleField f = makeField();
+	TurnCommands tc = noCommands();
+	f.at(0) = makeCombatant(CombatantKind::kPlayer, 100, 100, 100);
+	f.at(1) = makeCombatant(CombatantKind::kPlayer, 100, 100, 80);
+	setKind(tc, 0, SA::Domain::BattleCommand::CommandKind::ATTACK);
+	setKind(tc, 1, SA::Domain::BattleCommand::CommandKind::ATTACK);
+	std::uint8_t order[kSlotCount]{};
+	ScriptedRandom attack_rng({36, 0});
+	REQUIRE(buildActionOrder(f, tc, attack_rng, order) == 2);
+	CHECK(order[0] == 1); // 100 > 84；旧 0.1 把 36 夹为 12，错误地让 108 先动。
+	CHECK(order[1] == 0);
+	CHECK(attack_rng.calls() == 2);
+	setKind(tc, 0, SA::Domain::BattleCommand::CommandKind::USE_ITEM);
+	ScriptedRandom item_rng({36, 0});
+	REQUIRE(buildActionOrder(f, tc, item_rng, order) == 2);
+	CHECK(order[0] == 0); // 加用药优先级后 102 > 100。
+	CHECK(order[1] == 1);
+	CHECK(item_rng.calls() == 2);
 }
 
 TEST_CASE("行动顺序:同速按入场位次(DR-BT8)")
@@ -774,7 +844,7 @@ TEST_CASE("行动顺序:快的先动;无指令 / 已死 / 空槽不入列")
 		f.at(i) = makeCombatant(CombatantKind::kPlayer, 100, 100, /*quick=*/0);
 		f.at(i).slot = static_cast<std::uint8_t>(i);
 	}
-	f.at(1).mods.sequence = 50; // 用 sequence 制造确定的速度差(quick=0 ⇒ 无抖动)
+	f.at(1).mods.sequence = 50; // 先攻差 50 大于本夹具最大扰动 6，保证先动。
 	f.at(2).dead = true;        // 已死不入列
 	// slot 3 有单位但**不给指令** ⇒ 不入列(05 §2.2 第 1 步:敌方由 AI 填齐)
 	setKind(tc, 0, SA::Domain::BattleCommand::CommandKind::WAIT);

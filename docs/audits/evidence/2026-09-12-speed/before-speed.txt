@@ -1,0 +1,67 @@
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:42:
+TEST CASE:  F01/F03/F16:原表达式的截断边界与道具优先级
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:58: ERROR: CHECK( computeActionDex(attacker, command, high) == 84 ) is NOT correct!
+  values: CHECK( 108 == 84 )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:744:
+TEST CASE:  F03/U01:SSRC80 的 0.3 扰动、用药优先级与浮点尾值
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:756: ERROR: CHECK( computeActionDex(c, cmd, rng) == 120 - jitter + (item ? 18 : 0) ) is NOT correct!
+  values: CHECK( 108 == 84 )
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:762: ERROR: CHECK( computeActionDex(c, cmd, upper) == (item ? 17 : 14) ) is NOT correct!
+  values: CHECK( 18 == 14 )
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:756: ERROR: CHECK( computeActionDex(c, cmd, rng) == 120 - jitter + (item ? 18 : 0) ) is NOT correct!
+  values: CHECK( 126 == 102 )
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:762: ERROR: CHECK( computeActionDex(c, cmd, upper) == (item ? 17 : 14) ) is NOT correct!
+  values: CHECK( 21 == 17 )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:767:
+TEST CASE:  F03/U01:先完成整数转换再夹 dex 下限，仍消耗一次随机数
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:781: ERROR: CHECK( computeActionDex(c, cmd, rng) == 1 ) is NOT correct!
+  values: CHECK( -1 == 1 )
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:781: ERROR: CHECK( computeActionDex(c, cmd, rng) == 1 ) is NOT correct!
+  values: CHECK( 0 == 1 )
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:781: ERROR: CHECK( computeActionDex(c, cmd, rng) == 1 ) is NOT correct!
+  values: CHECK( 0 == 1 )
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:787: ERROR: CHECK( computeActionDex(c, cmd, rng) == 8 ) is NOT correct!
+  values: CHECK( 7 == 8 )
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:781: ERROR: CHECK( computeActionDex(c, cmd, rng) == 1 ) is NOT correct!
+  values: CHECK( -1 == 1 )
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:781: ERROR: CHECK( computeActionDex(c, cmd, rng) == 1 ) is NOT correct!
+  values: CHECK( 0 == 1 )
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:781: ERROR: CHECK( computeActionDex(c, cmd, rng) == 1 ) is NOT correct!
+  values: CHECK( 0 == 1 )
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:787: ERROR: CHECK( computeActionDex(c, cmd, rng) == 8 ) is NOT correct!
+  values: CHECK( 7 == 8 )
+
+===============================================================================
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:792:
+TEST CASE:  F03/U01:0.3 扰动改变实际先后手，用药优先级参与同一排序
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:803: ERROR: CHECK( order[0] == 1 ) is NOT correct!
+  values: CHECK( 0 == 1 )
+
+/Users/naka/Game/Stoneage/stone-age-server/tests/RulesBattleTest.cpp:804: ERROR: CHECK( order[1] == 0 ) is NOT correct!
+  values: CHECK( 1 == 0 )
+
+===============================================================================
+[doctest] test cases:  4 |  0 passed |  4 failed | 104 skipped
+[doctest] assertions: 49 | 34 passed | 15 failed |
+[doctest] Status: FAILURE!

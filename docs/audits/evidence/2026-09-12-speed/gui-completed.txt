@@ -1,0 +1,46 @@
+2026-09-12 09:49:21.773 stone_age_client[88099:963435] BattleScene: conn: 127.0.0.1:54201
+2026-09-12 09:49:21.776 stone_age_client[88099:963435] BattleScene: dialing…
+2026-09-12 09:49:21.845 stone_age_client[88099:963435] BattleScene: connected
+2026-09-12 09:49:21.845 stone_age_client[88099:963435] BattleScene: handshake sent
+2026-09-12 09:49:21.871 stone_age_client[88099:963435] BattleScene: 进场:我的槽位=0 battle_id=1
+2026-09-12 09:49:21.871 stone_age_client[88099:963435] BattleScene: snapshot battle=1 units=2
+2026-09-12 09:49:21.871 stone_age_client[88099:963435] BattleScene: —— 第 0 回合 ——
+2026-09-12 09:49:21.871 stone_age_client[88099:963435] BattleScene: (自动) 我方出招 → 敌方 slot=10
+2026-09-12 09:49:21.871 stone_age_client[88099:963435] BattleScene: command=ATTACK turn=0
+2026-09-12 09:49:21.904 stone_age_client[88099:963435] BattleScene: —— 第 0 回合 ——
+2026-09-12 09:49:22.071 stone_age_client[88099:963435] BattleScene: 攻击者 slot=0 kind=1 技能=0 目标数=1
+2026-09-12 09:49:22.071 stone_age_client[88099:963435] BattleScene: 敌 slot=10 HP+0 骑宠+0 MP+0 flags=0x20
+2026-09-12 09:49:22.071 stone_age_client[88099:963435] BattleScene: 攻击者 slot=10 kind=1 技能=0 目标数=1
+2026-09-12 09:49:22.071 stone_age_client[88099:963435] BattleScene: 我 slot=0 HP+0 骑宠+0 MP+0 flags=0x20
+2026-09-12 09:49:22.071 stone_age_client[88099:963435] BattleScene: snapshot battle=1 units=2
+2026-09-12 09:49:22.071 stone_age_client[88099:963435] BattleScene: 进场:我的槽位=0 battle_id=1
+2026-09-12 09:49:22.071 stone_age_client[88099:963435] BattleScene: —— 第 1 回合 ——
+2026-09-12 09:49:22.071 stone_age_client[88099:963435] BattleScene: (自动) 我方出招 → 敌方 slot=10
+2026-09-12 09:49:22.071 stone_age_client[88099:963435] BattleScene: command=ATTACK turn=1
+2026-09-12 09:49:22.115 stone_age_client[88099:963435] BattleScene: —— 第 1 回合 ——
+2026-09-12 09:49:22.288 stone_age_client[88099:963435] BattleScene: 攻击者 slot=0 kind=1 技能=0 目标数=1
+2026-09-12 09:49:22.288 stone_age_client[88099:963435] BattleScene: 敌 slot=10 HP+0 骑宠+0 MP+0 flags=0x20
+2026-09-12 09:49:22.288 stone_age_client[88099:963435] BattleScene: 攻击者 slot=10 kind=1 技能=0 目标数=1
+2026-09-12 09:49:22.288 stone_age_client[88099:963435] BattleScene: 我 slot=0 HP-291 骑宠+0 MP+0 flags=0x2
+2026-09-12 09:49:22.289 stone_age_client[88099:963435] BattleScene: snapshot battle=1 units=2
+2026-09-12 09:49:22.289 stone_age_client[88099:963435] BattleScene: 进场:我的槽位=0 battle_id=1
+2026-09-12 09:49:22.289 stone_age_client[88099:963435] BattleScene: —— 第 2 回合 ——
+2026-09-12 09:49:22.289 stone_age_client[88099:963435] BattleScene: (自动) 我方出招 → 敌方 slot=10
+2026-09-12 09:49:22.289 stone_age_client[88099:963435] BattleScene: command=ATTACK turn=2
+2026-09-12 09:49:22.324 stone_age_client[88099:963435] BattleScene: —— 第 2 回合 ——
+2026-09-12 09:49:22.472 stone_age_client[88099:963435] BattleScene: 攻击者 slot=0 kind=1 技能=0 目标数=1
+2026-09-12 09:49:22.473 stone_age_client[88099:963435] BattleScene: 敌 slot=10 HP-380 骑宠+0 MP+0 flags=0x2
+2026-09-12 09:49:22.474 stone_age_client[88099:963435] BattleScene: 攻击者 slot=10 kind=1 技能=0 目标数=1
+2026-09-12 09:49:22.474 stone_age_client[88099:963435] BattleScene: 我 slot=0 HP+0 骑宠+0 MP+0 flags=0x20
+2026-09-12 09:49:22.474 stone_age_client[88099:963435] BattleScene: snapshot battle=1 units=2
+2026-09-12 09:49:22.474 stone_age_client[88099:963435] BattleScene: 进场:我的槽位=0 battle_id=1
+2026-09-12 09:49:22.475 stone_age_client[88099:963435] BattleScene: —— 第 3 回合 ——
+2026-09-12 09:49:22.475 stone_age_client[88099:963435] BattleScene: (自动) 我方出招 → 敌方 slot=10
+2026-09-12 09:49:22.475 stone_age_client[88099:963435] BattleScene: command=ATTACK turn=3
+2026-09-12 09:49:22.505 stone_age_client[88099:963435] BattleScene: —— 第 3 回合 ——
+2026-09-12 09:49:22.673 stone_age_client[88099:963435] BattleScene: 攻击者 slot=0 kind=1 技能=0 目标数=1
+2026-09-12 09:49:22.673 stone_age_client[88099:963435] BattleScene: 敌 slot=10 HP-424 骑宠+0 MP+0 flags=0x5
+2026-09-12 09:49:22.673 stone_age_client[88099:963435] BattleScene: 事件 kind=24
+2026-09-12 09:49:22.674 stone_age_client[88099:963435] BattleScene: snapshot battle=1 units=2
+2026-09-12 09:49:22.674 stone_age_client[88099:963435] BattleScene: 战斗结算:胜利
+2026-09-12 09:49:22.688 stone_age_client[88099:963435] main: battle-autotest steps=54 joined=true turns=4 event_msgs=4 events=15 outcome=1 ⇒ PASSED

@@ -706,15 +706,18 @@ std::int32_t computeActionDex(const Combatant &c,
                               const SA::Domain::BattleCommand &command,
                               Random &rng) noexcept
 {
-	// SSRC80 battle.c:4297–4312 / SSRC85:5409–5423 的共同部分。
-	// 系数 0.1 / 不夹下限暂保留为 U01 待核选择，不能称 B80 已证实。
+	// U01 用户采纳 SSRC80 battle.c:4297–4312；先赋给 int dex，再夹到至少 1。
+	// 装备先攻在原 EsCmp:4144 另行相加，不把下限移到最终排序键上。
 	const int work = c.quick + kDexBase;
 	const double jitter = rng.randReal(0, work * kDexJitterRatio);
 	const double priority = command.command_kind ==
 	                                SA::Domain::BattleCommand::CommandKind::USE_ITEM
 	                            ? work * 0.15
 	                            : 0.0;
-	return static_cast<std::int32_t>(work - jitter + priority) + c.mods.sequence;
+	std::int32_t dex = static_cast<std::int32_t>(work - jitter + priority);
+	if (dex <= 0)
+		dex = 1;
+	return dex + c.mods.sequence;
 }
 
 int buildActionOrder(const BattleField &field,
