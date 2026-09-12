@@ -118,8 +118,12 @@ Channel::Channel(Context &context, const std::string &peer_name) : _impl(new Imp
 		else if (X509_VERIFY_PARAM_set1_ip_asc(param, peer_name.c_str()) != 1)
 		{
 			ERR_clear_error();
-			if (SSL_set1_host(d.ssl, peer_name.c_str()) != 1 ||
-			    SSL_set_tlsext_host_name(d.ssl, peer_name.c_str()) != 1)
+			// Set verification on the X509 parameters directly (SSL_set1_host is
+			// deprecated by OpenSSL 4). The typed ctrl call also avoids the legacy
+			// SNI macro's C-style void* cast in GCC's strict warning mode.
+			if (X509_VERIFY_PARAM_set1_host(param, peer_name.data(), peer_name.size()) != 1 ||
+			    SSL_ctrl(d.ssl, SSL_CTRL_SET_TLSEXT_HOSTNAME, TLSEXT_NAMETYPE_host_name,
+			             const_cast<char *>(peer_name.c_str())) != 1)
 				d.error = "TLS peer name configuration failed";
 		}
 	}

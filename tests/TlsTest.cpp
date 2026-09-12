@@ -38,9 +38,12 @@ struct Certificate
 		X509_gmtime_adj(X509_getm_notBefore(certificate), -60);
 		X509_gmtime_adj(X509_getm_notAfter(certificate), 3600);
 		REQUIRE(X509_set_pubkey(certificate, private_key) == 1);
-		X509_NAME *name = X509_get_subject_name(certificate);
+		X509_NAME *name = X509_NAME_new();
+		REQUIRE(name != nullptr);
 		REQUIRE(X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, reinterpret_cast<const unsigned char *>("localhost"), -1, -1, 0) == 1);
+		REQUIRE(X509_set_subject_name(certificate, name) == 1);
 		REQUIRE(X509_set_issuer_name(certificate, name) == 1);
+		X509_NAME_free(name);
 		X509V3_CTX extension_context;
 		X509V3_set_ctx(&extension_context, certificate, certificate, nullptr, nullptr, 0);
 		for (const auto &entry : {std::pair<int, const char *>{NID_basic_constraints, "critical,CA:TRUE"}, {NID_subject_alt_name, "DNS:localhost,IP:127.0.0.1"}})
@@ -96,7 +99,10 @@ TEST_CASE("TLS validates peer identity and tolerates fragmented handshake and re
 	auto client_context = SA::TLS::Context::client(files.cert, error);
 	REQUIRE(server_context);
 	REQUIRE(client_context);
-	SA::TLS::Channel server(*server_context), client(*client_context, "127.0.0.1");
+	const char *peer_name = "127.0.0.1";
+	SUBCASE("IP identity") {}
+	SUBCASE("DNS identity and SNI") { peer_name = "localhost"; }
+	SA::TLS::Channel server(*server_context), client(*client_context, peer_name);
 	CHECK_FALSE(client.ready());
 	for (int i = 0; i < 32 && (!server.ready() || !client.ready()); ++i)
 	{

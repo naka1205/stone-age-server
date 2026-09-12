@@ -73,7 +73,7 @@ def main():
                                       'mysql_password': mysql_password, 'mysql_ca': str(certificates / 'server.pem'),
                                       'redis_host': '127.0.0.1', 'redis_port': 16379, 'redis_password': redis_password}))
         os.chmod(config, 0o600)
-        run(['cmake', '-S', REPO, '-B', build, '-G', 'Ninja', '-DSA_ENABLE_MYSQL_STORAGE=ON', '-Dmysql-concpp_DIR=' + str(connector_home)])
+        run(['cmake', '-S', REPO, '-B', build, '-G', 'Ninja', '-DSA_ENABLE_MYSQL_STORAGE=ON', '-DSA_WERROR=ON', '-Dmysql-concpp_DIR=' + str(connector_home)])
         run(['cmake', '--build', build, '--target', 'stone_age_server', 'sa_mysql_storage_test', 'sa_world_persistence_test', '-j', '2'])
         environment = dict(os.environ); environment['SA_STORAGE_CONFIG'] = str(config)
         run([build / 'tests/sa_mysql_storage_test'], env=environment)

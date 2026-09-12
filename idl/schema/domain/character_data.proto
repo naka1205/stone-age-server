@@ -104,4 +104,3 @@ message CharacterRecord {
   repeated PetSlot pets = 5 [(sa.max_count) = 5];
   repeated ItemSlot items = 6 [(sa.max_count) = 54];
 }
-
