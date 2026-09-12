@@ -1,0 +1,11 @@
+Test project /private/tmp/stoneage-speed-20260912/server
+    Start 15: dr_table
+1/3 Test #15: dr_table .........................   Passed    0.04 sec
+    Start 16: docs_index
+2/3 Test #16: docs_index .......................   Passed    0.04 sec
+    Start 17: code_format
+3/3 Test #17: code_format ......................   Passed    0.66 sec
+
+100% tests passed, 0 tests failed out of 3
+
+Total Test time (real) =   0.74 sec

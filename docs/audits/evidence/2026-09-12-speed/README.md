@@ -7,6 +7,9 @@
 | [before-speed.txt](before-speed.txt) / [after-speed.txt](after-speed.txt) | 相同 F03 回归在旧实现下 15 条断言失败，修改后 49/49 通过；首轮使用全新构建目录 |
 | [server-ctest.txt](server-ctest.txt) / [client-ctest.txt](client-ctest.txt) | AppleClang 21：17/17、5/5；既有世界断言没有放宽 |
 | [server-ci.txt](server-ci.txt) | 服务端完整 CI 6/6：清洁 WERROR 构建、17 项 CTest、相克矩阵反向检查和恢复通过 |
+| [client-ci-local.txt](client-ci-local.txt) / [client-ci-fetch.txt](client-ci-fetch.txt) | 新 pin 的 local/fetch CI 各 8/8；共享战斗 108 用例/2651 断言 |
+| [shared-lock-verification.json](shared-lock-verification.json) | 本地 `shared-v0.23.0`、两仓提交与五个编译路径的对象比对；旧 tag 未移动 |
+| [final-doc-guards.txt](final-doc-guards.txt) | 最终 DR 表、文档索引与代码格式检查，3/3 通过 |
 | [gcc-ctest.txt](gcc-ctest.txt) | GCC 15.2 服务端完整 17/17 |
 | [gui-results.json](gui-results.json) | 实际 TCP/图形客户端 5/5；正常结算退出 0，四类失败退出 1 |
 | [gui-server.txt](gui-server.txt) / [gui-completed.txt](gui-completed.txt) | 本次图形联调的服务端/客户端日志；其他 gui-*.txt 为失败场景 |
