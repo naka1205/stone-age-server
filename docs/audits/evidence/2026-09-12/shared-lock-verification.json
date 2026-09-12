@@ -1,0 +1,39 @@
+{
+  "pin": "shared-v0.22.0",
+  "server_revision": "ffd9823c6675c1d5ff89bfa4ead16a5e99cc62bc",
+  "client_revision": "752b13201067fba123d9b5f654f469abdfd6dfcd",
+  "fetch_repository": "/Users/naka/Game/Stoneage/stone-age-server",
+  "fetch_source": "/private/tmp/stoneage-remediation-20260912/client-fetch/_deps/sa_shared-src",
+  "fetch_from_independent_client_checkout": true,
+  "watched_worktree_clean": true,
+  "watched_paths": [
+    {
+      "path": "shared",
+      "pinned_object": "907a22bac4a126af101060409d36df5937acbbf2",
+      "fetched_object": "907a22bac4a126af101060409d36df5937acbbf2"
+    },
+    {
+      "path": "idl/generated/cpp",
+      "pinned_object": "b4dc43b46d7755ec9fb617c7500841feb23be2bf",
+      "fetched_object": "b4dc43b46d7755ec9fb617c7500841feb23be2bf"
+    },
+    {
+      "path": "tests/RulesBattleTest.cpp",
+      "pinned_object": "d91624414d45029af6a26bf65ee55070257a5925",
+      "fetched_object": "d91624414d45029af6a26bf65ee55070257a5925"
+    },
+    {
+      "path": "tests/RulesProgressionTest.cpp",
+      "pinned_object": "8c6f8d8a0aa724af20cc2a512b6fe24cc7b97e5b",
+      "fetched_object": "8c6f8d8a0aa724af20cc2a512b6fe24cc7b97e5b"
+    },
+    {
+      "path": "tests/support",
+      "pinned_object": "eacdcb8cd8b80c4e445c3f6fe16c495026be6ab5",
+      "fetched_object": "eacdcb8cd8b80c4e445c3f6fe16c495026be6ab5"
+    }
+  ],
+  "local_ci": "8/8 passed; CTest 5/5; 105 battle cases / 2611 assertions",
+  "fetch_ci": "8/8 passed; CTest 5/5; 105 battle cases / 2611 assertions",
+  "remote_publication": "Not performed; local commits/tag and local Git FetchContent verification only"
+}

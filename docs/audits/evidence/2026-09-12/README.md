@@ -9,11 +9,14 @@
 | [server-ci.txt](server-ci.txt) | AppleClang 清洁 WERROR 构建、17 项 CTest、故意改错相克矩阵再恢复的反向检查；最后 6/6 通过 |
 | [world-final.txt](world-final.txt) | 增强后的捕获失败线上标记、宠物真实受伤回写、换宠失败事件回归 |
 | [client-ctest.txt](client-ctest.txt) | 客户端本地联调的 5 项 CTest |
+| [client-ci-local.txt](client-ci-local.txt) / [client-ci-fetch.txt](client-ci-fetch.txt) | 两种共享接入模式的清洁构建、5 项 CTest、105 用例/2611 断言；各 8/8 检查通过 |
+| [shared-lock-verification.json](shared-lock-verification.json) | 本地 `shared-v0.22.0`、两仓提交与五个 watched 路径的对象比对；不代表远端已发布 |
 | [server-gcc.txt](server-gcc.txt) / [client-gcc.txt](client-gcc.txt) | GCC 15.2 的完整 17/17 与 5/5 |
 | [server-sanitizers.txt](server-sanitizers.txt) / [client-sanitizers.txt](client-sanitizers.txt) | ASan+UBSan，halt_on_error=1 |
 | [gui-results.json](gui-results.json) | 真实图形客户端正常结算、版本拒绝、提前断线、畸形帧、超时的退出码与终态 |
 | [gui-server.txt](gui-server.txt) / [gui-completed.txt](gui-completed.txt) | 新服务端与 GUI 成功路径日志；其他 gui-*.txt 为四条失败路径 |
 | [unresolved-data.json](unresolved-data.json) | 最后补证：B80 家族经验表初始化值、对照与源码/数据包指纹 |
+| [final-doc-guards.txt](final-doc-guards.txt) | 最终 DR 表、文档索引和代码格式检查，3/3 通过 |
 | [server-first-full-failure.txt](server-first-full-failure.txt) | 首轮完整测试暴露了尚未更新的成长默认值断言；修正后的通过结果在 server-ci.txt |
 | [server-ci-sandbox-failure.txt](server-ci-sandbox-failure.txt) | 沙箱禁止 bind 导致真实 socket 测试失败；获准环境下的完整结果在 server-ci.txt |
 

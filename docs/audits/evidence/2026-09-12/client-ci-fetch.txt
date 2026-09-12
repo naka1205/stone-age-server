@@ -1,0 +1,144 @@
+✅ ★★ 入口脚本输出编码 —— 全部入口脚本已显式设 UTF-8
+
+$ cmake -S /private/tmp/stoneage-remediation-20260912/client-fetch-src -B /private/tmp/stoneage-remediation-20260912/client-fetch -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSA_CLIENT_TESTS=ON -DSA_CLIENT_WERROR=ON -DSA_SHARED_GIT_REPOSITORY=/Users/naka/Game/Stoneage/stone-age-server
+-- shared/(D2)= 发布态(FetchContent + 锁定 ref)
+--   源码树 : /private/tmp/stoneage-remediation-20260912/client-fetch/_deps/sa_shared-src
+--   HEAD   : ffd9823c6675c1d5ff89bfa4ead16a5e99cc62bc
+--   锁定 ref: shared-v0.22.0
+-- SG::Engine 未找到 ⇒ **只建 D2 闸门**(sa_shared + 黄金用例集),跳过 core 与入口。
+   这不是错误:D2 闸门零引擎依赖,是本阶段的验收点。
+   要建表现层,先装引擎前缀并设 SA_ENGINE_PREFIX / SA_GAMEPLAY_PREFIX。
+-- shared/ 与引擎隔离(构建图)= ✅ 闭包 {sa_shared, sa_idl} 无引擎目标(无引擎前缀,路径一项不可判)
+-- Configuring done (0.5s)
+-- Generating done (0.0s)
+-- Build files have been written to: /private/tmp/stoneage-remediation-20260912/client-fetch
+
+✅ ★ shared/ 接入模式 —— fetch(锁定 ref = shared-v0.22.0)
+✅ ★★ 锁定 ref 与源码一致 —— shared-v0.22.0
+✅ ★ shared/ 与锁定 ref 一致
+
+$ ctest --test-dir /private/tmp/stoneage-remediation-20260912/client-fetch -C RelWithDebInfo -N
+Test project /private/tmp/stoneage-remediation-20260912/client-fetch
+Could not find executable /private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_battle_test
+Looked in the following places:
+/private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_battle_test
+/private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_battle_test
+/private/tmp/stoneage-remediation-20260912/client-fetch/tests/RelWithDebInfo/sa_client_rules_battle_test
+/private/tmp/stoneage-remediation-20260912/client-fetch/tests/RelWithDebInfo/sa_client_rules_battle_test
+RelWithDebInfo//private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_battle_test
+RelWithDebInfo//private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_battle_test
+private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_battle_test
+private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_battle_test
+private/tmp/stoneage-remediation-20260912/client-fetch/tests/RelWithDebInfo/sa_client_rules_battle_test
+private/tmp/stoneage-remediation-20260912/client-fetch/tests/RelWithDebInfo/sa_client_rules_battle_test
+RelWithDebInfo/private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_battle_test
+RelWithDebInfo/private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_battle_test
+  Test #1: d2_rules_battle
+Could not find executable /private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_progression_test
+Looked in the following places:
+/private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_progression_test
+/private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_progression_test
+/private/tmp/stoneage-remediation-20260912/client-fetch/tests/RelWithDebInfo/sa_client_rules_progression_test
+/private/tmp/stoneage-remediation-20260912/client-fetch/tests/RelWithDebInfo/sa_client_rules_progression_test
+RelWithDebInfo//private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_progression_test
+RelWithDebInfo//private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_progression_test
+private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_progression_test
+private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_progression_test
+private/tmp/stoneage-remediation-20260912/client-fetch/tests/RelWithDebInfo/sa_client_rules_progression_test
+private/tmp/stoneage-remediation-20260912/client-fetch/tests/RelWithDebInfo/sa_client_rules_progression_test
+RelWithDebInfo/private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_progression_test
+RelWithDebInfo/private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_progression_test
+  Test #2: d2_rules_progression
+Could not find executable /private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_net_test
+Looked in the following places:
+/private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_net_test
+/private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_net_test
+/private/tmp/stoneage-remediation-20260912/client-fetch/tests/RelWithDebInfo/sa_client_net_test
+/private/tmp/stoneage-remediation-20260912/client-fetch/tests/RelWithDebInfo/sa_client_net_test
+RelWithDebInfo//private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_net_test
+RelWithDebInfo//private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_net_test
+private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_net_test
+private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_net_test
+private/tmp/stoneage-remediation-20260912/client-fetch/tests/RelWithDebInfo/sa_client_net_test
+private/tmp/stoneage-remediation-20260912/client-fetch/tests/RelWithDebInfo/sa_client_net_test
+RelWithDebInfo/private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_net_test
+RelWithDebInfo/private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_net_test
+  Test #3: client_net
+  Test #4: engine_isolation
+  Test #5: code_format
+
+Total Tests: 5
+
+✅ ★★ 测试注册清单 —— 5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+
+$ cmake --build /private/tmp/stoneage-remediation-20260912/client-fetch --config RelWithDebInfo --clean-first --parallel
+[1/1] Cleaning all built files...
+Cleaning... 0 files.
+[1/17] Building CXX object sa_shared/CMakeFiles/sa_shared.dir/rules/Progression.cpp.o
+[2/17] Building CXX object sa_shared/CMakeFiles/sa_shared.dir/rules/Status.cpp.o
+[3/17] Building CXX object sa_shared/CMakeFiles/sa_shared.dir/rules/Battle.cpp.o
+[4/17] Linking CXX static library sa_shared/libsa_shared.a
+[5/17] Building CXX object sa_shared/CMakeFiles/sa_wire.dir/wire/Framing.cpp.o
+[6/17] Building CXX object src/net/CMakeFiles/sa_net.dir/TcpTransport.cpp.o
+[7/17] Building CXX object src/battle/CMakeFiles/sa_battle.dir/BattlePresenter.cpp.o
+[8/17] Linking CXX static library sa_shared/libsa_wire.a
+[9/17] Building CXX object src/net/CMakeFiles/sa_net.dir/ClientSession.cpp.o
+[10/17] Linking CXX static library src/battle/libsa_battle.a
+[11/17] Linking CXX static library src/net/libsa_net.a
+[12/17] Building CXX object tests/CMakeFiles/sa_client_rules_progression_test.dir/__/_deps/sa_shared-src/tests/RulesProgressionTest.cpp.o
+[13/17] Linking CXX executable tests/sa_client_rules_progression_test
+[14/17] Building CXX object tests/CMakeFiles/sa_client_net_test.dir/ClientNetTest.cpp.o
+[15/17] Linking CXX executable tests/sa_client_net_test
+[16/17] Building CXX object tests/CMakeFiles/sa_client_rules_battle_test.dir/__/_deps/sa_shared-src/tests/RulesBattleTest.cpp.o
+[17/17] Linking CXX executable tests/sa_client_rules_battle_test
+
+✅ 清洁构建(SA_CLIENT_WERROR ⇒ 告警即失败)
+
+$ ctest --test-dir /private/tmp/stoneage-remediation-20260912/client-fetch -C RelWithDebInfo --output-on-failure
+Test project /private/tmp/stoneage-remediation-20260912/client-fetch
+    Start 1: d2_rules_battle
+1/5 Test #1: d2_rules_battle ..................   Passed    3.15 sec
+    Start 2: d2_rules_progression
+2/5 Test #2: d2_rules_progression .............   Passed    0.10 sec
+    Start 3: client_net
+3/5 Test #3: client_net .......................   Passed    0.09 sec
+    Start 4: engine_isolation
+4/5 Test #4: engine_isolation .................   Passed    0.07 sec
+    Start 5: code_format
+5/5 Test #5: code_format ......................   Passed    0.06 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Total Test time (real) =   3.48 sec
+
+✅ ctest —— 100% tests passed, 0 tests failed out of 5
+
+$ /private/tmp/stoneage-remediation-20260912/client-fetch/tests/sa_client_rules_battle_test
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  105 |  105 passed | 0 failed | 0 skipped
+[doctest] assertions: 2611 | 2611 passed | 0 failed |
+[doctest] Status: SUCCESS!
+
+✅ ★ 黄金用例集规模 —— 105 用例 / 2611 断言
+
+══════════════════════════════════════════════════════════════════════
+汇总
+══════════════════════════════════════════════════════════════════════
+  ✅ ★★ 入口脚本输出编码
+       全部入口脚本已显式设 UTF-8
+  ✅ ★ shared/ 接入模式
+       fetch(锁定 ref = shared-v0.22.0)
+  ✅ ★★ 锁定 ref 与源码一致
+       shared-v0.22.0
+  ✅ ★ shared/ 与锁定 ref 一致
+  ✅ ★★ 测试注册清单
+       5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+  ✅ 清洁构建(SA_CLIENT_WERROR ⇒ 告警即失败)
+  ✅ ctest
+       100% tests passed, 0 tests failed out of 5
+  ✅ ★ 黄金用例集规模
+       105 用例 / 2611 断言
+══════════════════════════════════════════════════════════════════════
+✅ 全部 8 项通过
