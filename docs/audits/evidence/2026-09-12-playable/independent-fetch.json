@@ -1,0 +1,13 @@
+{
+  "client_commit": "2909d022c31f7d30f371e73ea2394dc07353305a",
+  "shared_commit": "b642045388c7d5cc0de9d4bec05b6bfb43b7d8a1",
+  "shared_tag": "shared-v0.26.0",
+  "shared_remote": "https://gitee.com/naka507/stone-age-server",
+  "client_checkout": "isolated detached worktree",
+  "has_sibling_server": false,
+  "ctest_passed": 7,
+  "ctest_total": 7,
+  "ci_verify_passed": 8,
+  "content_version": "p2-b934dc8a501ca820ad40282a649120f7",
+  "atlas_hashes_verified": 9
+}

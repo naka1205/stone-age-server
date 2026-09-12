@@ -1,0 +1,53 @@
+=== 0_D2 闸门 · Linux · GCC.txt ===
+2026-09-12T08:35:44.1917975Z -- shared/(D2)= 发布态(FetchContent + 锁定 ref)
+2026-09-12T08:35:44.1919960Z --   锁定 ref: shared-v0.26.0
+2026-09-12T08:35:44.1920657Z -- Found OpenSSL: /usr/lib/x86_64-linux-gnu/libcrypto.so (found suitable version "3.0.13", minimum required is "1.1.1")
+2026-09-12T08:35:44.1927932Z ✅ ★ shared/ 接入模式 —— fetch(锁定 ref = shared-v0.26.0)
+2026-09-12T08:35:44.1928752Z ✅ ★★ 锁定 ref 与源码一致 —— shared-v0.26.0
+2026-09-12T08:35:44.7921251Z ✅ ★★ 测试注册清单 —— 7 条全部注册:client_json, client_net, client_tls, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T08:36:17.6241097Z 100% tests passed, 0 tests failed out of 7
+2026-09-12T08:36:17.6242649Z ✅ ctest —— 100% tests passed, 0 tests failed out of 7
+2026-09-12T08:36:17.6295052Z [doctest] test cases:  115 |  115 passed | 0 failed | 0 skipped
+2026-09-12T08:36:17.6295705Z [doctest] assertions: 2763 | 2763 passed | 0 failed |
+2026-09-12T08:36:17.6297016Z ✅ ★ 黄金用例集规模 —— 115 用例 / 2763 断言
+2026-09-12T08:36:17.6300857Z        fetch(锁定 ref = shared-v0.26.0)
+2026-09-12T08:36:17.6301785Z        shared-v0.26.0
+2026-09-12T08:36:17.6303736Z        7 条全部注册:client_json, client_net, client_tls, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T08:36:17.6308649Z        100% tests passed, 0 tests failed out of 7
+2026-09-12T08:36:17.6310812Z ✅ 全部 8 项通过
+
+=== 1_D2 闸门 · macOS · Apple clang.txt ===
+2026-09-12T08:35:42.7480310Z -- shared/(D2)= 发布态(FetchContent + 锁定 ref)
+2026-09-12T08:35:42.7481390Z --   锁定 ref: shared-v0.26.0
+2026-09-12T08:35:42.7481810Z -- Found OpenSSL: /opt/homebrew/Cellar/openssl@3/3.6.4/lib/libcrypto.dylib (found suitable version "3.6.4", minimum required is "1.1.1")
+2026-09-12T08:35:42.7485490Z ✅ ★ shared/ 接入模式 —— fetch(锁定 ref = shared-v0.26.0)
+2026-09-12T08:35:42.7486200Z ✅ ★★ 锁定 ref 与源码一致 —— shared-v0.26.0
+2026-09-12T08:35:42.7950130Z ✅ ★★ 测试注册清单 —— 7 条全部注册:client_json, client_net, client_tls, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T08:35:51.2228370Z 100% tests passed out of 7
+2026-09-12T08:35:51.2228870Z ✅ ctest —— 100% tests passed out of 7
+2026-09-12T08:35:51.2265840Z [doctest] test cases:  115 |  115 passed | 0 failed | 0 skipped
+2026-09-12T08:35:51.2266180Z [doctest] assertions: 2763 | 2763 passed | 0 failed |
+2026-09-12T08:35:51.2267300Z ✅ ★ 黄金用例集规模 —— 115 用例 / 2763 断言
+2026-09-12T08:35:51.2269070Z        fetch(锁定 ref = shared-v0.26.0)
+2026-09-12T08:35:51.2269410Z        shared-v0.26.0
+2026-09-12T08:35:51.2270180Z        7 条全部注册:client_json, client_net, client_tls, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T08:35:51.2271230Z        100% tests passed out of 7
+2026-09-12T08:35:51.2272040Z ✅ 全部 8 项通过
+
+=== 2_D2 闸门 · Windows · MSVC.txt ===
+2026-09-12T08:37:34.1688698Z -- shared/(D2)= 发布态(FetchContent + 锁定 ref)
+2026-09-12T08:37:34.1691090Z --   锁定 ref: shared-v0.26.0
+2026-09-12T08:37:34.1692368Z -- Found OpenSSL: optimized;C:/Program Files/OpenSSL/lib/VC/x64/MD/libcrypto.lib;debug;C:/Program Files/OpenSSL/lib/VC/x64/MDd/libcrypto.lib (found suitable version "4.0.2", minimum required is "1.1.1")
+2026-09-12T08:37:34.1702489Z ✅ ★ shared/ 接入模式 —— fetch(锁定 ref = shared-v0.26.0)
+2026-09-12T08:37:34.1702911Z ✅ ★★ 锁定 ref 与源码一致 —— shared-v0.26.0
+2026-09-12T08:37:34.8794396Z ✅ ★★ 测试注册清单 —— 7 条全部注册:client_json, client_net, client_tls, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T08:38:16.4213058Z 100% tests passed out of 7
+2026-09-12T08:38:16.4214740Z ✅ ctest —— 100% tests passed out of 7
+2026-09-12T08:38:16.4219521Z [doctest] test cases:  115 |  115 passed | 0 failed | 0 skipped
+2026-09-12T08:38:16.4220105Z [doctest] assertions: 2763 | 2763 passed | 0 failed |
+2026-09-12T08:38:16.4221492Z ✅ ★ 黄金用例集规模 —— 115 用例 / 2763 断言
+2026-09-12T08:38:16.4225346Z        fetch(锁定 ref = shared-v0.26.0)
+2026-09-12T08:38:16.4226121Z        shared-v0.26.0
+2026-09-12T08:38:16.4227369Z        7 条全部注册:client_json, client_net, client_tls, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T08:38:16.4228560Z        100% tests passed out of 7
+2026-09-12T08:38:16.4231318Z ✅ 全部 8 项通过

@@ -1,0 +1,38 @@
+{
+  "repo": "naka1205/stone-age-client",
+  "sha": "2909d022c31f7d30f371e73ea2394dc07353305a",
+  "runs": [
+    {
+      "id": 34683659769,
+      "name": "CI",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "2909d022c31f7d30f371e73ea2394dc07353305a",
+      "html_url": "https://github.com/naka1205/stone-age-client/actions/runs/34683659769",
+      "run_attempt": 1,
+      "jobs": [
+        {
+          "id": 103526714313,
+          "name": "D2 闸门 · Windows · MSVC",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/naka1205/stone-age-client/actions/runs/34683659769/job/103526714313"
+        },
+        {
+          "id": 103526714396,
+          "name": "D2 闸门 · macOS · Apple clang",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/naka1205/stone-age-client/actions/runs/34683659769/job/103526714396"
+        },
+        {
+          "id": 103526714450,
+          "name": "D2 闸门 · Linux · GCC",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/naka1205/stone-age-client/actions/runs/34683659769/job/103526714450"
+        }
+      ]
+    }
+  ]
+}

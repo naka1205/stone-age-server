@@ -39,7 +39,24 @@
 | 共享战斗 | **115 用例 / 2,763 断言**，沿用已发布基础反击规则 |
 | 原生 GUI 操作 | 登录创建 → 移动遇敌 → 手动捕获/击杀 → 保存退出 → 重登 → 服务端重启，检查角色、宠物与道具保持一致；结果与截图见下方证据目录 |
 
-[图形验收与发布证据](evidence/2026-09-12-playable/)包含运行结果、最终截图及远端 CI 摘要。共享版本与远端 CI 在发布后补记，不能用 P1 的历史绿色替代本批验收。
+[图形验收与发布证据](evidence/2026-09-12-playable/)包含运行结果、最终截图及远端 CI 摘要。最终原生 GUI 验收执行 27 步移动、15 回合、1 场战斗，捕获 1 只宠物并获得经验，之后保存重登和服务端重启检查均通过。
+
+## 发布与跨平台验证
+
+| 项 | 结果 |
+|---|---|
+| 共享版本 | `shared-v0.26.0` → `b642045388c7d5cc0de9d4bec05b6bfb43b7d8a1`，Gitee/GitHub 已同步 |
+| 客户端 | `2909d022c31f7d30f371e73ea2394dc07353305a`，锁定 v0.26.0，两远端已同步 |
+| 服务端 CI | [34683200105](https://github.com/naka1205/stone-age-server/actions/runs/34683200105)：Linux/macOS/Windows 各 21/21，完整验证各 6/6；真实 MySQL/Redis job 为 70/70 断言，全 4 项通过 |
+| 客户端 CI | [34683659769](https://github.com/naka1205/stone-age-client/actions/runs/34683659769)：三平台均为远端 FetchContent 模式、7/7 测试、完整验证 8/8，全 3 项通过 |
+| 独立取源 | 客户端 `2909d02` 的独立工作树，无兄弟服务端；从 Gitee FetchContent 实际取得 `b642045` / v0.26.0，测试 7/7、完整验证 8/8、9 张图集哈希全部一致 |
+| 原版证据仓 | `stoneage-plan` 的 `4bb4e7b` 已推送其配置的 Gitee 远端 |
+
+首次 v0.25.0 的 CI 揭示两处跨平台差异：GCC 会检查 OpenSSL SNI 宏里的 C 风格指针转换，Windows 安装的 OpenSSL 4.0.2 已弃用 `SSL_set1_host` 且将 subject name getter 改为 const。修复使用 `X509_VERIFY_PARAM_set1_host` 与有明确类型的 SNI 控制调用，测试显式创建 subject name；补测正确 DNS/IP 身份和错误主机名，并把客户端宿主运行库及存储 CI 纳入告警即错误的约束。新发 v0.26.0，保留已发布的 v0.25.0，不移动 tag。
+
+已读取上述所有 job 的原始日志。通过环境中的 OpenSSL 分别为 Linux 3.0.13、macOS 3.6.4、Windows 4.0.2；[服务端摘录](evidence/2026-09-12-playable/server-ci-excerpts.txt)和[客户端摘录](evidence/2026-09-12-playable/client-ci-excerpts.txt)保留取源、测试集合与实际结果。
+
+独立验证的[完整日志](evidence/2026-09-12-playable/independent-fetch.log)和[提交/哈希记录](evidence/2026-09-12-playable/independent-fetch.json)已保存。P2/P3 的本切片交付完成；下列范围继续留给后续批次。
 
 ## 当前边界
 

@@ -1,0 +1,188 @@
+✅ ★★ 入口脚本输出编码 —— 全部入口脚本已显式设 UTF-8
+
+$ cmake -S /private/tmp/stoneage-playable-release/isolated-client -B /private/tmp/stoneage-playable-release/isolated-build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSA_CLIENT_TESTS=ON -DSA_CLIENT_WERROR=ON -DSA_SHARED_GIT_REPOSITORY=https://gitee.com/naka507/stone-age-server -G Ninja
+-- shared/(D2)= 发布态(FetchContent + 锁定 ref)
+--   源码树 : /private/tmp/stoneage-playable-release/isolated-build/_deps/sa_shared-src
+--   HEAD   : b642045388c7d5cc0de9d4bec05b6bfb43b7d8a1
+--   锁定 ref: shared-v0.26.0
+-- SG::Engine 未找到 ⇒ **只建 D2 闸门**(sa_shared + 黄金用例集),跳过 core 与入口。
+   这不是错误:D2 闸门零引擎依赖,是本阶段的验收点。
+   要建表现层,先装引擎前缀并设 SA_ENGINE_PREFIX / SA_GAMEPLAY_PREFIX。
+-- shared/ 与引擎隔离(构建图)= ✅ 闭包 {sa_shared, sa_idl} 无引擎目标(无引擎前缀,路径一项不可判)
+-- Configuring done (0.6s)
+-- Generating done (0.0s)
+-- Build files have been written to: /private/tmp/stoneage-playable-release/isolated-build
+
+✅ ★ shared/ 接入模式 —— fetch(锁定 ref = shared-v0.26.0)
+✅ ★★ 锁定 ref 与源码一致 —— shared-v0.26.0
+✅ ★ shared/ 与锁定 ref 一致
+
+$ ctest --test-dir /private/tmp/stoneage-playable-release/isolated-build -C RelWithDebInfo -N
+Test project /private/tmp/stoneage-playable-release/isolated-build
+Could not find executable /private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_json_test
+Looked in the following places:
+/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_json_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_json_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_json_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_json_test
+RelWithDebInfo//private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_json_test
+RelWithDebInfo//private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_json_test
+private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_json_test
+private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_json_test
+private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_json_test
+private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_json_test
+RelWithDebInfo/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_json_test
+RelWithDebInfo/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_json_test
+  Test #1: client_json
+Could not find executable /private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_tls_test
+Looked in the following places:
+/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_tls_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_tls_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_tls_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_tls_test
+RelWithDebInfo//private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_tls_test
+RelWithDebInfo//private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_tls_test
+private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_tls_test
+private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_tls_test
+private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_tls_test
+private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_tls_test
+RelWithDebInfo/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_tls_test
+RelWithDebInfo/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_tls_test
+  Test #2: client_tls
+Could not find executable /private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_battle_test
+Looked in the following places:
+/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_battle_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_battle_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_rules_battle_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_rules_battle_test
+RelWithDebInfo//private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_battle_test
+RelWithDebInfo//private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_battle_test
+private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_battle_test
+private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_battle_test
+private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_rules_battle_test
+private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_rules_battle_test
+RelWithDebInfo/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_battle_test
+RelWithDebInfo/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_battle_test
+  Test #3: d2_rules_battle
+Could not find executable /private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_progression_test
+Looked in the following places:
+/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_progression_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_progression_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_rules_progression_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_rules_progression_test
+RelWithDebInfo//private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_progression_test
+RelWithDebInfo//private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_progression_test
+private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_progression_test
+private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_progression_test
+private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_rules_progression_test
+private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_rules_progression_test
+RelWithDebInfo/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_progression_test
+RelWithDebInfo/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_progression_test
+  Test #4: d2_rules_progression
+Could not find executable /private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_net_test
+Looked in the following places:
+/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_net_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_net_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_net_test
+/private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_net_test
+RelWithDebInfo//private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_net_test
+RelWithDebInfo//private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_net_test
+private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_net_test
+private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_net_test
+private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_net_test
+private/tmp/stoneage-playable-release/isolated-build/tests/RelWithDebInfo/sa_client_net_test
+RelWithDebInfo/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_net_test
+RelWithDebInfo/private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_net_test
+  Test #5: client_net
+  Test #6: engine_isolation
+  Test #7: code_format
+
+Total Tests: 7
+
+✅ ★★ 测试注册清单 —— 7 条全部注册:client_json, client_net, client_tls, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+
+$ cmake --build /private/tmp/stoneage-playable-release/isolated-build --config RelWithDebInfo --clean-first --parallel
+[1/1] Cleaning all built files...
+Cleaning... 0 files.
+[1/27] Building CXX object sa_shared/CMakeFiles/sa_shared.dir/rules/Status.cpp.o
+[2/27] Building CXX object sa_shared/CMakeFiles/sa_shared.dir/rules/Progression.cpp.o
+[3/27] Building CXX object sa_shared/CMakeFiles/sa_shared.dir/rules/Battle.cpp.o
+[4/27] Building CXX object sa_shared/CMakeFiles/sa_wire.dir/wire/Framing.cpp.o
+[5/27] Linking CXX static library sa_shared/libsa_shared.a
+[6/27] Linking CXX static library sa_shared/libsa_wire.a
+[7/27] Building CXX object src/battle/CMakeFiles/sa_battle.dir/BattlePresenter.cpp.o
+[8/27] Building CXX object src/net/CMakeFiles/sa_net.dir/TcpTransport.cpp.o
+[9/27] Linking CXX static library src/battle/libsa_battle.a
+[10/27] Building CXX object sa_tls/CMakeFiles/sa_tls.dir/Channel.cpp.o
+[11/27] Building CXX object sa_shared/CMakeFiles/sa_data.dir/data/Json.cpp.o
+[12/27] Building CXX object src/net/CMakeFiles/sa_net.dir/ClientSession.cpp.o
+[13/27] Linking CXX static library sa_tls/libsa_tls.a
+[14/27] Linking CXX static library sa_shared/libsa_data.a
+[15/27] Linking CXX static library src/net/libsa_net.a
+[16/27] Building CXX object sa_content/CMakeFiles/sa_content.dir/Bundle.cpp.o
+[17/27] Linking CXX static library sa_content/libsa_content.a
+[18/27] Building CXX object tests/CMakeFiles/sa_client_tls_test.dir/__/_deps/sa_shared-src/tests/TlsTest.cpp.o
+[19/27] Linking CXX executable tests/sa_client_tls_test
+[20/27] Building CXX object tests/CMakeFiles/sa_client_rules_progression_test.dir/__/_deps/sa_shared-src/tests/RulesProgressionTest.cpp.o
+[21/27] Linking CXX executable tests/sa_client_rules_progression_test
+[22/27] Building CXX object tests/CMakeFiles/sa_client_json_test.dir/__/_deps/sa_shared-src/tests/JsonTest.cpp.o
+[23/27] Linking CXX executable tests/sa_client_json_test
+[24/27] Building CXX object tests/CMakeFiles/sa_client_net_test.dir/ClientNetTest.cpp.o
+[25/27] Linking CXX executable tests/sa_client_net_test
+[26/27] Building CXX object tests/CMakeFiles/sa_client_rules_battle_test.dir/__/_deps/sa_shared-src/tests/RulesBattleTest.cpp.o
+[27/27] Linking CXX executable tests/sa_client_rules_battle_test
+
+✅ 清洁构建(SA_CLIENT_WERROR ⇒ 告警即失败)
+
+$ ctest --test-dir /private/tmp/stoneage-playable-release/isolated-build -C RelWithDebInfo --output-on-failure
+Test project /private/tmp/stoneage-playable-release/isolated-build
+    Start 1: client_json
+1/7 Test #1: client_json ......................   Passed    1.29 sec
+    Start 2: client_tls
+2/7 Test #2: client_tls .......................   Passed    0.53 sec
+    Start 3: d2_rules_battle
+3/7 Test #3: d2_rules_battle ..................   Passed    0.40 sec
+    Start 4: d2_rules_progression
+4/7 Test #4: d2_rules_progression .............   Passed    0.38 sec
+    Start 5: client_net
+5/7 Test #5: client_net .......................   Passed    0.39 sec
+    Start 6: engine_isolation
+6/7 Test #6: engine_isolation .................   Passed    0.07 sec
+    Start 7: code_format
+7/7 Test #7: code_format ......................   Passed    0.08 sec
+
+100% tests passed, 0 tests failed out of 7
+
+Total Test time (real) =   3.14 sec
+
+✅ ctest —— 100% tests passed, 0 tests failed out of 7
+
+$ /private/tmp/stoneage-playable-release/isolated-build/tests/sa_client_rules_battle_test
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  115 |  115 passed | 0 failed | 0 skipped
+[doctest] assertions: 2763 | 2763 passed | 0 failed |
+[doctest] Status: SUCCESS!
+
+✅ ★ 黄金用例集规模 —— 115 用例 / 2763 断言
+
+══════════════════════════════════════════════════════════════════════
+汇总
+══════════════════════════════════════════════════════════════════════
+  ✅ ★★ 入口脚本输出编码
+       全部入口脚本已显式设 UTF-8
+  ✅ ★ shared/ 接入模式
+       fetch(锁定 ref = shared-v0.26.0)
+  ✅ ★★ 锁定 ref 与源码一致
+       shared-v0.26.0
+  ✅ ★ shared/ 与锁定 ref 一致
+  ✅ ★★ 测试注册清单
+       7 条全部注册:client_json, client_net, client_tls, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+  ✅ 清洁构建(SA_CLIENT_WERROR ⇒ 告警即失败)
+  ✅ ctest
+       100% tests passed, 0 tests failed out of 7
+  ✅ ★ 黄金用例集规模
+       115 用例 / 2763 断言
+══════════════════════════════════════════════════════════════════════
+✅ 全部 8 项通过

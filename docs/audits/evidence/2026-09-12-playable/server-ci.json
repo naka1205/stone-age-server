@@ -1,0 +1,45 @@
+{
+  "repo": "naka1205/stone-age-server",
+  "sha": "b642045388c7d5cc0de9d4bec05b6bfb43b7d8a1",
+  "runs": [
+    {
+      "id": 34683200105,
+      "name": "CI",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "b642045388c7d5cc0de9d4bec05b6bfb43b7d8a1",
+      "html_url": "https://github.com/naka1205/stone-age-server/actions/runs/34683200105",
+      "run_attempt": 1,
+      "jobs": [
+        {
+          "id": 103525494537,
+          "name": "MySQL 8.4.8 + Redis 8.6.2 integration",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/naka1205/stone-age-server/actions/runs/34683200105/job/103525494537"
+        },
+        {
+          "id": 103525494621,
+          "name": "macOS · Apple clang",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/naka1205/stone-age-server/actions/runs/34683200105/job/103525494621"
+        },
+        {
+          "id": 103525494647,
+          "name": "Windows · MSVC",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/naka1205/stone-age-server/actions/runs/34683200105/job/103525494647"
+        },
+        {
+          "id": 103525494699,
+          "name": "Linux · GCC",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/naka1205/stone-age-server/actions/runs/34683200105/job/103525494699"
+        }
+      ]
+    }
+  ]
+}

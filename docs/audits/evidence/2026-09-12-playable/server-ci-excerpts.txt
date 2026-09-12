@@ -1,0 +1,37 @@
+=== 0_Linux · GCC.txt ===
+2026-09-12T08:25:20.7437957Z -- Found OpenSSL: /usr/lib/x86_64-linux-gnu/libcrypto.so (found suitable version "3.0.13", minimum required is "1.1.1")
+2026-09-12T08:25:21.2782235Z ✅ ★★ 测试注册清单 —— 21 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, json, model_pool, module_boundaries, net_framing, net_tcp, platform_config, playable_content, rules_battle, rules_progression, server_self_test, shared_purity, tls, world_map, world_persistence, world_tick
+2026-09-12T08:26:20.3923332Z 100% tests passed, 0 tests failed out of 21
+2026-09-12T08:26:20.3924484Z ✅ ctest —— 100% tests passed, 0 tests failed out of 21
+2026-09-12T08:26:51.5193830Z 100% tests passed, 0 tests failed out of 2
+2026-09-12T08:26:51.5195799Z ✅ ★ 断言防线反向验证 —— 改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T08:26:51.5204727Z        21 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, json, model_pool, module_boundaries, net_framing, net_tcp, platform_config, playable_content, rules_battle, rules_progression, server_self_test, shared_purity, tls, world_map, world_persistence, world_tick
+2026-09-12T08:26:51.5208679Z        100% tests passed, 0 tests failed out of 21
+2026-09-12T08:26:51.5212743Z ✅ 全部 6 项通过
+
+=== 1_Windows · MSVC.txt ===
+2026-09-12T08:26:55.0581313Z -- Found OpenSSL: optimized;C:/Program Files/OpenSSL/lib/VC/x64/MD/libcrypto.lib;debug;C:/Program Files/OpenSSL/lib/VC/x64/MDd/libcrypto.lib (found suitable version "4.0.2", minimum required is "1.1.1")
+2026-09-12T08:26:55.7128860Z ✅ ★★ 测试注册清单 —— 21 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, json, model_pool, module_boundaries, net_framing, net_tcp, platform_config, playable_content, rules_battle, rules_progression, server_self_test, shared_purity, tls, world_map, world_persistence, world_tick
+2026-09-12T08:28:02.3100598Z 100% tests passed out of 21
+2026-09-12T08:28:02.3101424Z ✅ ctest —— 100% tests passed out of 21
+2026-09-12T08:28:32.8169405Z 100% tests passed out of 2
+2026-09-12T08:28:32.8170828Z ✅ ★ 断言防线反向验证 —— 改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T08:28:32.8176457Z        21 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, json, model_pool, module_boundaries, net_framing, net_tcp, platform_config, playable_content, rules_battle, rules_progression, server_self_test, shared_purity, tls, world_map, world_persistence, world_tick
+2026-09-12T08:28:32.8179320Z        100% tests passed out of 21
+2026-09-12T08:28:32.8181954Z ✅ 全部 6 项通过
+
+=== 2_macOS · Apple clang.txt ===
+2026-09-12T08:25:06.2612050Z -- Found OpenSSL: /opt/homebrew/Cellar/openssl@3/3.6.4/lib/libcrypto.dylib (found suitable version "3.6.4", minimum required is "1.1.1")
+2026-09-12T08:25:06.3145280Z ✅ ★★ 测试注册清单 —— 21 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, json, model_pool, module_boundaries, net_framing, net_tcp, platform_config, playable_content, rules_battle, rules_progression, server_self_test, shared_purity, tls, world_map, world_persistence, world_tick
+2026-09-12T08:25:38.7492860Z 100% tests passed out of 21
+2026-09-12T08:25:38.7493410Z ✅ ctest —— 100% tests passed out of 21
+2026-09-12T08:25:51.4166990Z 100% tests passed out of 2
+2026-09-12T08:25:51.4167660Z ✅ ★ 断言防线反向验证 —— 改错矩阵后 assert 确实触发并使测试失败 ⇒ sa_enable_assertions() 有效
+2026-09-12T08:25:51.4171510Z        21 条全部注册:code_format, contract_smoke, docs_index, dr_table, idl_smoke, idl_verify, json, model_pool, module_boundaries, net_framing, net_tcp, platform_config, playable_content, rules_battle, rules_progression, server_self_test, shared_purity, tls, world_map, world_persistence, world_tick
+2026-09-12T08:25:51.4174670Z        100% tests passed out of 21
+2026-09-12T08:25:51.4175650Z ✅ 全部 6 项通过
+
+=== 3_MySQL 8.4.8 + Redis 8.6.2 integration.txt ===
+2026-09-12T08:25:28.2756505Z -- Found OpenSSL: /usr/lib/x86_64-linux-gnu/libcrypto.so (found suitable version "3.0.13", minimum required is "1.1.1")
+2026-09-12T08:25:49.9865331Z [doctest] assertions: 70 | 70 passed | 0 failed |
+2026-09-12T08:25:50.1226751Z 100% tests passed, 0 tests failed out of 1
