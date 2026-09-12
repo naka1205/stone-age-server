@@ -1,0 +1,107 @@
+0_D2 闸门 · Windows · MSVC.txt
+2026-09-12T02:38:42.0186857Z -- shared/(D2)= 发布态(FetchContent + 锁定 ref)
+2026-09-12T02:38:42.0189619Z --   锁定 ref: shared-v0.23.0
+2026-09-12T02:38:42.0206756Z ✅ ★ shared/ 接入模式 —— fetch(锁定 ref = shared-v0.23.0)
+2026-09-12T02:38:42.0207753Z ✅ ★★ 锁定 ref 与源码一致 —— shared-v0.23.0
+2026-09-12T02:38:42.0208424Z ✅ ★ shared/ 与锁定 ref 一致
+2026-09-12T02:38:42.5253797Z ✅ ★★ 测试注册清单 —— 5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T02:39:08.6722716Z 100% tests passed out of 5
+2026-09-12T02:39:08.6724625Z ✅ ctest —— 100% tests passed out of 5
+2026-09-12T02:39:08.6728147Z [doctest] test cases:  108 |  108 passed | 0 failed | 0 skipped
+2026-09-12T02:39:08.6728794Z [doctest] assertions: 2651 | 2651 passed | 0 failed |
+2026-09-12T02:39:08.6734132Z        fetch(锁定 ref = shared-v0.23.0)
+2026-09-12T02:39:08.6734643Z   ✅ ★★ 锁定 ref 与源码一致
+2026-09-12T02:39:08.6735408Z   ✅ ★ shared/ 与锁定 ref 一致
+2026-09-12T02:39:08.6736577Z        5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T02:39:08.6738189Z        100% tests passed out of 5
+2026-09-12T02:39:08.6740183Z ✅ 全部 8 项通过
+
+D2 闸门 · Windows · MSVC/7_D2 闸门(发布态 · 清洁构建 · ctest · 用例集规模).txt
+2026-09-12T02:38:42.0186848Z -- shared/(D2)= 发布态(FetchContent + 锁定 ref)
+2026-09-12T02:38:42.0189611Z --   锁定 ref: shared-v0.23.0
+2026-09-12T02:38:42.0204046Z ✅ ★ shared/ 接入模式 —— fetch(锁定 ref = shared-v0.23.0)
+2026-09-12T02:38:42.0207745Z ✅ ★★ 锁定 ref 与源码一致 —— shared-v0.23.0
+2026-09-12T02:38:42.0208418Z ✅ ★ shared/ 与锁定 ref 一致
+2026-09-12T02:38:42.5253787Z ✅ ★★ 测试注册清单 —— 5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T02:39:08.6722712Z 100% tests passed out of 5
+2026-09-12T02:39:08.6724612Z ✅ ctest —— 100% tests passed out of 5
+2026-09-12T02:39:08.6728142Z [doctest] test cases:  108 |  108 passed | 0 failed | 0 skipped
+2026-09-12T02:39:08.6728788Z [doctest] assertions: 2651 | 2651 passed | 0 failed |
+2026-09-12T02:39:08.6734125Z        fetch(锁定 ref = shared-v0.23.0)
+2026-09-12T02:39:08.6734637Z   ✅ ★★ 锁定 ref 与源码一致
+2026-09-12T02:39:08.6735400Z   ✅ ★ shared/ 与锁定 ref 一致
+2026-09-12T02:39:08.6736568Z        5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T02:39:08.6738184Z        100% tests passed out of 5
+2026-09-12T02:39:08.6740179Z ✅ 全部 8 项通过
+
+1_D2 闸门 · Linux · GCC.txt
+2026-09-12T02:38:13.7565174Z -- shared/(D2)= 发布态(FetchContent + 锁定 ref)
+2026-09-12T02:38:13.7568217Z --   锁定 ref: shared-v0.23.0
+2026-09-12T02:38:13.7577426Z ✅ ★ shared/ 接入模式 —— fetch(锁定 ref = shared-v0.23.0)
+2026-09-12T02:38:13.7578047Z ✅ ★★ 锁定 ref 与源码一致 —— shared-v0.23.0
+2026-09-12T02:38:13.7578406Z ✅ ★ shared/ 与锁定 ref 一致
+2026-09-12T02:38:14.5041870Z ✅ ★★ 测试注册清单 —— 5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T02:38:43.5920564Z 100% tests passed, 0 tests failed out of 5
+2026-09-12T02:38:43.5922615Z ✅ ctest —— 100% tests passed, 0 tests failed out of 5
+2026-09-12T02:38:43.5972091Z [doctest] test cases:  108 |  108 passed | 0 failed | 0 skipped
+2026-09-12T02:38:43.5972824Z [doctest] assertions: 2651 | 2651 passed | 0 failed |
+2026-09-12T02:38:43.6023094Z        fetch(锁定 ref = shared-v0.23.0)
+2026-09-12T02:38:43.6023394Z   ✅ ★★ 锁定 ref 与源码一致
+2026-09-12T02:38:43.6023878Z   ✅ ★ shared/ 与锁定 ref 一致
+2026-09-12T02:38:43.6024568Z        5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T02:38:43.6025544Z        100% tests passed, 0 tests failed out of 5
+2026-09-12T02:38:43.6026786Z ✅ 全部 8 项通过
+
+D2 闸门 · Linux · GCC/7_D2 闸门(发布态 · 清洁构建 · ctest · 用例集规模).txt
+2026-09-12T02:38:13.7565164Z -- shared/(D2)= 发布态(FetchContent + 锁定 ref)
+2026-09-12T02:38:13.7568208Z --   锁定 ref: shared-v0.23.0
+2026-09-12T02:38:13.7577420Z ✅ ★ shared/ 接入模式 —— fetch(锁定 ref = shared-v0.23.0)
+2026-09-12T02:38:13.7578041Z ✅ ★★ 锁定 ref 与源码一致 —— shared-v0.23.0
+2026-09-12T02:38:13.7578402Z ✅ ★ shared/ 与锁定 ref 一致
+2026-09-12T02:38:14.5041848Z ✅ ★★ 测试注册清单 —— 5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T02:38:43.5920559Z 100% tests passed, 0 tests failed out of 5
+2026-09-12T02:38:43.5922609Z ✅ ctest —— 100% tests passed, 0 tests failed out of 5
+2026-09-12T02:38:43.5972086Z [doctest] test cases:  108 |  108 passed | 0 failed | 0 skipped
+2026-09-12T02:38:43.5972819Z [doctest] assertions: 2651 | 2651 passed | 0 failed |
+2026-09-12T02:38:43.6023092Z        fetch(锁定 ref = shared-v0.23.0)
+2026-09-12T02:38:43.6023392Z   ✅ ★★ 锁定 ref 与源码一致
+2026-09-12T02:38:43.6023845Z   ✅ ★ shared/ 与锁定 ref 一致
+2026-09-12T02:38:43.6024564Z        5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T02:38:43.6025541Z        100% tests passed, 0 tests failed out of 5
+2026-09-12T02:38:43.6026783Z ✅ 全部 8 项通过
+
+2_D2 闸门 · macOS · Apple clang.txt
+2026-09-12T02:38:20.0689660Z -- shared/(D2)= 发布态(FetchContent + 锁定 ref)
+2026-09-12T02:38:20.0690890Z --   锁定 ref: shared-v0.23.0
+2026-09-12T02:38:20.0702050Z ✅ ★ shared/ 接入模式 —— fetch(锁定 ref = shared-v0.23.0)
+2026-09-12T02:38:20.0702380Z ✅ ★★ 锁定 ref 与源码一致 —— shared-v0.23.0
+2026-09-12T02:38:20.0702580Z ✅ ★ shared/ 与锁定 ref 一致
+2026-09-12T02:38:20.1078000Z ✅ ★★ 测试注册清单 —— 5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T02:38:26.8143350Z 100% tests passed out of 5
+2026-09-12T02:38:26.8169200Z ✅ ctest —— 100% tests passed out of 5
+2026-09-12T02:38:26.8213860Z [doctest] test cases:  108 |  108 passed | 0 failed | 0 skipped
+2026-09-12T02:38:26.8217270Z [doctest] assertions: 2651 | 2651 passed | 0 failed |
+2026-09-12T02:38:26.8234700Z        fetch(锁定 ref = shared-v0.23.0)
+2026-09-12T02:38:26.8234890Z   ✅ ★★ 锁定 ref 与源码一致
+2026-09-12T02:38:26.8235210Z   ✅ ★ shared/ 与锁定 ref 一致
+2026-09-12T02:38:26.8235670Z        5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T02:38:26.8236350Z        100% tests passed out of 5
+2026-09-12T02:38:26.8237330Z ✅ 全部 8 项通过
+
+D2 闸门 · macOS · Apple clang/7_D2 闸门(发布态 · 清洁构建 · ctest · 用例集规模).txt
+2026-09-12T02:38:20.0689660Z -- shared/(D2)= 发布态(FetchContent + 锁定 ref)
+2026-09-12T02:38:20.0690890Z --   锁定 ref: shared-v0.23.0
+2026-09-12T02:38:20.0702040Z ✅ ★ shared/ 接入模式 —— fetch(锁定 ref = shared-v0.23.0)
+2026-09-12T02:38:20.0702370Z ✅ ★★ 锁定 ref 与源码一致 —— shared-v0.23.0
+2026-09-12T02:38:20.0702580Z ✅ ★ shared/ 与锁定 ref 一致
+2026-09-12T02:38:20.1077990Z ✅ ★★ 测试注册清单 —— 5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T02:38:26.8143350Z 100% tests passed out of 5
+2026-09-12T02:38:26.8169190Z ✅ ctest —— 100% tests passed out of 5
+2026-09-12T02:38:26.8213850Z [doctest] test cases:  108 |  108 passed | 0 failed | 0 skipped
+2026-09-12T02:38:26.8217250Z [doctest] assertions: 2651 | 2651 passed | 0 failed |
+2026-09-12T02:38:26.8234690Z        fetch(锁定 ref = shared-v0.23.0)
+2026-09-12T02:38:26.8234890Z   ✅ ★★ 锁定 ref 与源码一致
+2026-09-12T02:38:26.8235210Z   ✅ ★ shared/ 与锁定 ref 一致
+2026-09-12T02:38:26.8235670Z        5 条全部注册:client_net, code_format, d2_rules_battle, d2_rules_progression, engine_isolation
+2026-09-12T02:38:26.8236350Z        100% tests passed out of 5
+2026-09-12T02:38:26.8237320Z ✅ 全部 8 项通过

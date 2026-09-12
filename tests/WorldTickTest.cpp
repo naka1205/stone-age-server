@@ -3907,3 +3907,100 @@ TEST_CASE("发送失败同步触发断线时，握手拒绝和 tick 出站都不
 	CHECK(world.sessionCount() == 0);
 	CHECK(world.playerCount() == 0);
 }
+
+TEST_CASE("P1:敌人先攻被玩家反击击杀，经验和道具属于反击者")
+{
+	Fixture f;
+	const auto id = f.transport.connect();
+	const auto hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	auto initial = makeField();
+	auto &player = initial.at(0);
+	player.hp = player.max_hp = 10000;
+	player.level = 1;
+	player.attack = 10000;
+	player.defense = 10000;
+	player.quick = player.fix_dex = 0;
+	player.mods.counter_bonus = 101;
+	player.mods.no_duck = true;
+	player.mods.immune_critical = true;
+	initial.at(10) = {};
+	const auto battle = f.world.startBattle(initial);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	auto encounter = makeWuliEncounterFixedLv1();
+	encounter.exp = 37;
+	encounter.item[0] = 1234;
+	encounter.item_prob[0] = 1000;
+	REQUIRE(f.world.spawnEnemyToField(battle, 10, makeWuliTemplate(), encounter, 1));
+	auto *field = const_cast<SA::Rules::BattleField *>(f.world.battleField(battle));
+	field->at(10).quick = 1000;
+	field->at(10).mods.immune_critical = true;
+	field->at(10).mods.no_duck = true;
+	f.transport.clearSent(id);
+	attackTurn(f, id, battle, 10);
+	REQUIRE(f.world.stats(battle)->finished);
+	CHECK(f.world.playerExp(id) == 37);
+	REQUIRE(f.world.playerItemAt(id, SA::Model::kStartItemArray) != nullptr);
+	CHECK(f.world.playerItemAt(id, SA::Model::kStartItemArray)->item_id == 1234);
+	ClientMirror mirror;
+	mirror.feed(f.transport.sent(id));
+	std::vector<unsigned> attackers;
+	bool counter_death = false;
+	for (const auto &batch : mirror.event_batches)
+		for (const auto &event : batch.events)
+		{
+			if (event.body_kind == SA::Domain::BattleEvent::BodyKind::HIT)
+				attackers.push_back(event.body.hit.attacker);
+			if (event.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE && event.body.damage.target == 10)
+				counter_death = (event.body.damage.flags & static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_COUNTER)) != 0 &&
+				                (event.body.damage.flags & static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DEATH)) != 0;
+		}
+	REQUIRE(attackers.size() == 2);
+	CHECK(attackers[0] == 10);
+	CHECK(attackers[1] == 0);
+	CHECK(counter_death);
+}
+
+TEST_CASE("P1:世界逐行动提交保留状态清指令结果")
+{
+	Fixture f;
+	const auto id = f.transport.connect();
+	const auto battle = joinWithSpawnedEnemies(f, id, 1, 1);
+	auto *field = const_cast<SA::Rules::BattleField *>(f.world.battleField(battle));
+	for (int slot : {0, 10})
+	{
+		auto &unit = field->at(slot);
+		unit.hp = unit.max_hp = 10000;
+		unit.attack = 100;
+		unit.defense = 50;
+		unit.mods.no_duck = true;
+		unit.mods.immune_critical = true;
+	}
+	field->at(0).quick = 1000;
+	field->at(0).mods.counter_bonus = 101;
+	field->at(10).quick = 0;
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = field->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+	cmd.command.attack.target = 10;
+	f.world.onBattleCommand(id, cmd);
+	// 指令接收后、行动前发生状态变化，验证宿主在下一位行动前保留清指令结果。
+	field->at(0).status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_PARALYSIS);
+	field->at(0).status_turns = 1;
+	f.transport.clearSent(id);
+	f.clock.advance(2000);
+	f.world.tick();
+	ClientMirror mirror;
+	mirror.feed(f.transport.sent(id));
+	int hits = 0;
+	for (const auto &batch : mirror.event_batches)
+		for (const auto &event : batch.events)
+			if (event.body_kind == SA::Domain::BattleEvent::BodyKind::HIT)
+			{
+				++hits;
+				CHECK(event.body.hit.attacker == 10);
+			}
+	CHECK(hits == 1);
+}

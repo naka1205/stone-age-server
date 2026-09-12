@@ -1,0 +1,34 @@
+{
+  "server_head": "4440957aec29269c1a6a6effc40f2c1e03c15f7f",
+  "client_head": "22823764404fe276edfcd1d7121cd11c3b580b63",
+  "shared_tag": "shared-v0.23.0",
+  "shared_commit": "6a2882f9c9e11c613ce06332a0c0b0eab190430d",
+  "server_ci_run": 34668170412,
+  "client_ci_run": 34668198719,
+  "server_ci_platforms": [
+    "Linux GCC",
+    "macOS AppleClang",
+    "Windows MSVC"
+  ],
+  "client_ci_platforms": [
+    "Linux GCC",
+    "macOS AppleClang",
+    "Windows MSVC"
+  ],
+  "server_ctest": {
+    "passed": 17,
+    "total": 17
+  },
+  "client_ctest": {
+    "passed": 5,
+    "total": 5
+  },
+  "remote_fetch": {
+    "repository": "https://gitee.com/naka507/stone-age-server",
+    "tag": "shared-v0.23.0",
+    "head": "6a2882f9c9e11c613ce06332a0c0b0eab190430d",
+    "ci_checks_passed": 8,
+    "battle_cases": 108,
+    "battle_assertions": 2651
+  }
+}

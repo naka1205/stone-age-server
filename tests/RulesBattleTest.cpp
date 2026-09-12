@@ -39,6 +39,40 @@ using namespace SA::Rules;
 using SA::Domain::BattleStatus;
 using SA::Domain::CannotActReason;
 
+TEST_CASE("P1:普攻后反击并以真实反击者产出事件")
+{
+	// SSRC80 battle.c:7794–7807：普通攻击全部结束后才开始交替反击。
+	BattleField field{};
+	TurnCommands commands{};
+	for (int slot : {0, 10})
+	{
+		auto &c = field.at(slot);
+		c.occupied = true;
+		c.kind = CombatantKind::kPlayer;
+		c.hp = c.max_hp = 10000;
+		c.level = 1;
+		c.attack = 100;
+		c.defense = 50;
+		c.mods.no_duck = true;
+		c.mods.immune_critical = true;
+		commands.present[slot] = true;
+		commands.commands[slot].command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		commands.commands[slot].command.attack.target = static_cast<std::uint32_t>(10 - slot);
+	}
+	field.at(10).mods.counter_bonus = 101; // 玩家没有 100% 上限，源码 :3515–3530。
+	ScriptedRandom rng({10000});
+	SA::Domain::BattleEvents events{};
+	ActionEffects effects{};
+	REQUIRE(resolveAction(field, commands, RulesConfig{}, rng, 0, events, effects));
+	REQUIRE(events.events.size() == 4);
+	CHECK(events.events[0].body.hit.attacker == 0);
+	CHECK(events.events[1].body.damage.target == 10);
+	CHECK(events.events[2].body.hit.attacker == 10);
+	CHECK(events.events[3].body.damage.target == 0);
+	CHECK((events.events[3].body.damage.flags & static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_COUNTER)) != 0);
+	CHECK(events.events[3].body.damage.hp_delta == static_cast<int>(events.events[1].body.damage.hp_delta * 0.75));
+}
+
 TEST_CASE("F01/F03/F16:原表达式的截断边界与道具优先级")
 {
 	Combatant attacker{}, defender{};
@@ -85,6 +119,7 @@ Combatant makeCombatant(CombatantKind kind, int atk, int def, int quick = 0)
 	c.attack = atk;
 	c.defense = def;
 	c.quick = quick;
+	c.fix_dex = quick;
 	return c;
 }
 
@@ -776,6 +811,7 @@ TEST_CASE("F03/U01:先完成整数转换再夹 dex 下限，仍消耗一次随�
 		for (int quick : {-21, -20, -19})
 		{
 			c.quick = quick;
+			c.fix_dex = quick;
 			// w=1、jitter=1 时，用药表达式为 0.15，赋给 int 为 0，随后夹到 1。
 			ScriptedRandom rng({9999});
 			CHECK(computeActionDex(c, cmd, rng) == 1);
@@ -3140,4 +3176,224 @@ TEST_CASE("ResolveTurn⚠️★★:状态推进在**每个角色行动前**逐�
 			++enemy_poison_dmg;
 	}
 	CHECK(enemy_poison_dmg == 0); // ★★ 死者不掉这一回合的毒血
+}
+
+TEST_CASE("P1:反击固定敏捷的整数截断与类型分支")
+{
+	// SSRC80 CounterCalc :1413–1463；这里给手算结果，不复制被测公式。
+	auto a = makeCombatant(CombatantKind::kPlayer, 1, 1, 100);
+	auto b = makeCombatant(CombatantKind::kPlayer, 1, 1, 92);
+	CHECK(computeCounterBase(a, b) == 10); // sqrt((100-92)/0.08)
+	a.quick = 1;                           // 战斗临时敏捷不改变 WORKFIXDEX。
+	CHECK(computeCounterBase(a, b) == 10);
+	a.kind = CombatantKind::kPet;
+	b.kind = CombatantKind::kEnemy;
+	a.fix_dex = b.fix_dex = 6;
+	CHECK(computeCounterBase(a, b) == 5); // int(6*0.8)=4 → sqrt(25)
+	a.kind = CombatantKind::kPlayer;
+	CHECK(computeCounterBase(a, b) == 6); // int(6*0.6)=3 → int(sqrt(37))
+	a.kind = CombatantKind::kEnemy;
+	b.kind = CombatantKind::kPet;
+	a.fix_dex = 100;
+	b.fix_dex = 60;
+	CHECK(computeCounterBase(a, b) == 4); // /10，不开根
+	a.kind = CombatantKind::kPet;
+	b.kind = CombatantKind::kPlayer;
+	a.fix_dex = 60;
+	b.fix_dex = 100;
+	CHECK(computeCounterBase(a, b) == 2); // int(4*0.6)
+}
+
+TEST_CASE("P1:反击武器表方向、未知武器与严格阈值")
+{
+	auto a = makeCombatant(CombatantKind::kPlayer, 1, 1, 100);
+	auto b = makeCombatant(CombatantKind::kPlayer, 1, 1, 92);
+	b.mods.unarmed = false;
+	b.mods.weapon = WeaponClass::kAxe;
+	int per = 0;
+	ScriptedRandom below({699}), edge({700});
+	CHECK(rollCounter(a, b, below, &per));
+	CHECK(per == 7); // 拳反斧 table[1][2]=7，行是反击者。
+	CHECK_FALSE(rollCounter(a, b, edge));
+	a.mods.unarmed = false;
+	a.mods.weapon = WeaponClass::kAxe;
+	b.mods.unarmed = true;
+	ScriptedRandom axe({799});
+	CHECK(rollCounter(a, b, axe, &per));
+	CHECK(per == 8); // 斧反拳 table[2][1]=8。
+	for (const auto weapon : {WeaponClass::kOther, WeaponClass::kSpear})
+	{
+		a.mods.weapon = weapon;
+		ScriptedRandom unknown({900});
+		CHECK_FALSE(rollCounter(a, b, unknown, &per));
+		CHECK(per == 9); // :3453 未映射的类型回落 NONE，无越界第 8 行。
+	}
+}
+
+TEST_CASE("P1:玩家和宠敌反击概率的下限、上限及取数次数")
+{
+	auto a = makeCombatant(CombatantKind::kPlayer, 1, 1);
+	auto b = a;
+	ScriptedRandom player({1});
+	CHECK_FALSE(rollCounter(a, b, player)); // 玩家 roll < 1，永不成功。
+	CHECK(player.calls() == 1);
+	a.kind = CombatantKind::kPet;
+	ScriptedRandom pet({1}), pet_miss({2});
+	CHECK(rollCounter(a, b, pet)); // 宠敌 roll <= 1，保留万分之一。
+	CHECK_FALSE(rollCounter(a, b, pet_miss));
+	CHECK(pet.calls() == 1);
+	a.kind = CombatantKind::kPlayer;
+	a.mods.counter_bonus = 101;
+	ScriptedRandom player_high({10000});
+	CHECK(rollCounter(a, b, player_high)); // 玩家不夹 100%，不能复用宠物口径。
+	a.kind = CombatantKind::kEnemy;
+	a.fix_dex = 2000;
+	int per = 0;
+	ScriptedRandom enemy_high({10000});
+	CHECK(rollCounter(a, b, enemy_high, &per));
+	CHECK(per == 100);
+	for (const auto weapon : {WeaponClass::kBow, WeaponClass::kThrow})
+	{
+		for (int side : {0, 1})
+		{
+			a.mods.weapon = b.mods.weapon = WeaponClass::kNone;
+			(side == 0 ? a : b).mods.weapon = weapon;
+			ScriptedRandom ranged({1});
+			CHECK_FALSE(rollCounter(a, b, ranged));
+			CHECK(ranged.calls() == 0);
+		}
+	}
+}
+
+namespace
+{
+Duel counterDuel()
+{
+	auto d = makeDuel(100, 50);
+	for (int slot : {0, 10})
+	{
+		auto &c = d.field.at(slot);
+		c.kind = CombatantKind::kPlayer;
+		c.attack = 100;
+		c.defense = 50;
+		c.hp = c.max_hp = 10000;
+		c.mods.no_duck = true;
+		c.mods.immune_critical = true;
+		c.mods.counter_bonus = 101;
+		setAttack(d.cmds, slot, 10 - slot);
+	}
+	return d;
+}
+} // namespace
+
+TEST_CASE("P1:反击在多段普攻后发生，连锁上限五次且不附毒或推进计时")
+{
+	auto d = counterDuel();
+	d.field.at(0).mods.unarmed = false;
+	d.field.at(0).mods.attack_num_min = 3;
+	d.field.at(0).mods.attack_num_max = 3;
+	d.field.at(10).mods.suit_poison = 10000;
+	d.field.at(10).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_POISON);
+	d.field.at(10).status_turns = 4;
+	ScriptedRandom rng({10000});
+	SA::Domain::BattleEvents events{};
+	ActionEffects effects{};
+	REQUIRE(resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, events, effects));
+	REQUIRE(events.events.size() == 14); // 一个 Hit + 三段 + 五个(Hit,Damage)
+	CHECK(events.events[0].body.hit.target_count == 3);
+	for (std::size_t i = 1; i <= 3; ++i)
+		CHECK(events.events[i].body.damage.target == 10);
+	for (std::size_t link = 0; link < 5; ++link)
+	{
+		const auto &hit = events.events[4 + link * 2].body.hit;
+		const auto &damage = events.events[5 + link * 2].body.damage;
+		CHECK(hit.attacker == (link % 2 == 0 ? 10 : 0));
+		CHECK(hit.target_count == 1);
+		CHECK(damage.target == (link % 2 == 0 ? 0 : 10));
+		CHECK((damage.flags & static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_COUNTER)) != 0);
+		CHECK(damage.status_applied == BattleStatus::BATTLE_ST_NONE);
+	}
+	CHECK(countKind(events, SA::Domain::BattleEvent::BodyKind::STATUS_TICK) == 0);
+	CHECK(rng.calls() == 22); // 三段各两次，五反各三次，固定三段抽一次。
+}
+
+TEST_CASE("P1:反击链在防御、非攻击指令、ABIO、死亡和会心处终止")
+{
+	for (const auto kind : {SA::Domain::BattleCommand::CommandKind::GUARD,
+	                        SA::Domain::BattleCommand::CommandKind::WAIT,
+	                        SA::Domain::BattleCommand::CommandKind::USE_ITEM})
+	{
+		auto d = counterDuel();
+		setKind(d.cmds, 10, kind);
+		ScriptedRandom rng({10000});
+		SA::Domain::BattleEvents events{};
+		ActionEffects effects{};
+		REQUIRE(resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, events, effects));
+		CHECK(countKind(events, SA::Domain::BattleEvent::BodyKind::HIT) == 1);
+	}
+	for (int mode : {0, 1, 2, 3})
+	{
+		auto d = counterDuel();
+		if (mode == 0)
+			d.field.at(10).mods.abio = true;
+		if (mode == 1)
+			d.field.at(10).damage_react = 1;
+		if (mode == 2)
+			d.field.at(10).hp = 1;
+		if (mode == 3)
+		{
+			d.field.at(10).mods.immune_critical = false;
+			d.field.at(0).mods.equip_critical = 1000;
+		}
+		ScriptedRandom rng({1});
+		SA::Domain::BattleEvents events{};
+		ActionEffects effects{};
+		REQUIRE(resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, events, effects));
+		CHECK(countKind(events, SA::Domain::BattleEvent::BodyKind::HIT) == 1);
+	}
+	SUBCASE("反击自身会心后不再被反击")
+	{
+		auto d = counterDuel();
+		d.field.at(0).mods.immune_critical = false;
+		d.field.at(10).mods.equip_critical = 1000;
+		ScriptedRandom rng({1});
+		SA::Domain::BattleEvents events{};
+		ActionEffects effects{};
+		REQUIRE(resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, events, effects));
+		REQUIRE(events.events.size() == 4);
+		CHECK((events.events[3].body.damage.flags & static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_CRITICAL)) != 0);
+	}
+	SUBCASE("反击被闪避仍允许下一次反击")
+	{
+		auto d = counterDuel();
+		d.field.at(0).mods.no_duck = false;
+		d.field.at(0).mods.always_dodge = true;
+		ScriptedRandom rng({10000});
+		SA::Domain::BattleEvents events{};
+		ActionEffects effects{};
+		REQUIRE(resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, events, effects));
+		CHECK(countKind(events, SA::Domain::BattleEvent::BodyKind::HIT) == 6);
+		CHECK((events.events[3].body.damage.flags & static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DODGE)) != 0);
+	}
+}
+
+TEST_CASE("P1:到期麻痹清掉的攻击指令不能在反击时复活")
+{
+	auto d = counterDuel();
+	d.field.at(0).quick = 1000;
+	d.field.at(0).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_PARALYSIS);
+	d.field.at(0).status_turns = 1;
+	ScriptedRandom action_rng({10000});
+	SA::Domain::BattleEvents action{};
+	ActionEffects effects{};
+	REQUIRE(resolveAction(d.field, d.cmds, RulesConfig{}, action_rng, 0, action, effects));
+	CHECK(effects.command_cleared);
+	CHECK(countKind(action, SA::Domain::BattleEvent::BodyKind::HIT) == 0);
+	ScriptedRandom turn_rng({10000});
+	SA::Domain::BattleEvents turn{};
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, turn_rng, turn));
+	CHECK(countKind(turn, SA::Domain::BattleEvent::BodyKind::HIT) == 1);
+	for (const auto &event : turn.events)
+		if (event.body_kind == SA::Domain::BattleEvent::BodyKind::HIT)
+			CHECK(event.body.hit.attacker == 10);
 }

@@ -1266,8 +1266,9 @@ SA::Rules::BattleField makeDemoField()
 	me.attack = me_stats.attack;   // 322
 	me.defense = me_stats.defense; // 88
 	me.quick = me_stats.quick;     // 200
-	me.max_hp = me_stats.max_hp;   // 860
-	me.hp = me.max_hp;             // ★ 满血入场:hp 不再是独立的手填值
+	me.fix_dex = me_stats.quick;
+	me.max_hp = me_stats.max_hp; // 860
+	me.hp = me.max_hp;           // ★ 满血入场:hp 不再是独立的手填值
 
 	// foe:各维按比例略低 ⇒ 攻防速血全弱一档,但**打得动**(性质 ① 要求它能打死玩家)。
 	SA::Rules::Combatant &foe = f.at(SA::Rules::kSideOffset);
@@ -1285,7 +1286,8 @@ SA::Rules::BattleField makeDemoField()
 	foe.attack = foe_stats.attack;   // 273
 	foe.defense = foe_stats.defense; // 57
 	foe.quick = foe_stats.quick;     // 150
-	foe.max_hp = foe_stats.max_hp;   // 590
+	foe.fix_dex = foe_stats.quick;
+	foe.max_hp = foe_stats.max_hp; // 590
 	foe.hp = foe.max_hp;
 	return f;
 }
@@ -1326,6 +1328,7 @@ SA::Rules::Combatant makePlayerCombatant()
 	c.attack = st.attack;
 	c.defense = st.defense;
 	c.quick = st.quick;
+	c.fix_dex = st.quick;
 	c.max_hp = st.max_hp;
 	c.hp = c.max_hp;
 	return c;
@@ -2159,7 +2162,15 @@ void World::tick()
 				applyEvents(action, b.field, wctx);
 				if (effects.item_used)
 					consumeUsedItem(b, actor, s.players, s.items);
-				settleDeaths(b, actor, s.enemies);
+				if (effects.command_cleared)
+					b.commands.commands[actor].command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+				// 基础反击链在死亡时终止；最后一条 Hit 标记实际击杀方。
+				// 无 Hit 时仍按原行动者结算状态死亡，不把反击战果记给先攻者。
+				int profit_actor = actor;
+				for (const auto &event : action.events)
+					if (event.body_kind == SA::Domain::BattleEvent::BodyKind::HIT)
+						profit_actor = static_cast<int>(event.body.hit.attacker);
+				settleDeaths(b, profit_actor, s.enemies);
 				bool changed_entries = false;
 				for (const auto &event : action.events)
 				{
@@ -3477,6 +3488,7 @@ bool enterPetToField(SA::Rules::BattleField &field, int owner_field_slot,
 	dst.attack = stats.attack;
 	dst.defense = stats.defense;
 	dst.quick = stats.quick;
+	dst.fix_dex = stats.quick;
 	dst.max_hp = stats.max_hp;
 	// ⚠️★ **HP 夹取(原版 char.c:3555 `HP = min(HP, WORKMAXHP)`)本批不做**,dst.hp 保留
 	//    上面投影的 pet.hp。★★ **M.4b 后这条的理由换了,两条都记下来**:
@@ -4252,6 +4264,7 @@ bool enterEnemyToField(SA::Rules::BattleField &field, int field_slot,
 	dst.attack = stats.attack;
 	dst.defense = stats.defense;
 	dst.quick = stats.quick;
+	dst.fix_dex = stats.quick;
 	dst.max_hp = stats.max_hp;
 	// ⚠️ HP 不夹取 —— 理由**与 enterPetToField 不同**,见 Api.h 声明处:
 	//    夹取属回合准备阶段的 complianceParameter(`BATTLE_TurnParam`,未移植)。

@@ -1,0 +1,98 @@
+Start testing: Sep 12 10:40 CST
+----------------------------------------------------------
+1/5 Testing: d2_rules_battle
+1/5 Test: d2_rules_battle
+Command: "/private/tmp/stoneage-release-20260912/client-fetch-build/tests/sa_client_rules_battle_test"
+Directory: /private/tmp/stoneage-release-20260912/client-fetch-build/tests
+"d2_rules_battle" start time: Sep 12 10:40 CST
+Output:
+----------------------------------------------------------
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  108 |  108 passed | 0 failed | 0 skipped
+[doctest] assertions: 2651 | 2651 passed | 0 failed |
+[doctest] Status: SUCCESS!
+<end of output>
+Test time =   1.90 sec
+----------------------------------------------------------
+Test Passed.
+"d2_rules_battle" end time: Sep 12 10:40 CST
+"d2_rules_battle" time elapsed: 00:00:01
+----------------------------------------------------------
+
+2/5 Testing: d2_rules_progression
+2/5 Test: d2_rules_progression
+Command: "/private/tmp/stoneage-release-20260912/client-fetch-build/tests/sa_client_rules_progression_test"
+Directory: /private/tmp/stoneage-release-20260912/client-fetch-build/tests
+"d2_rules_progression" start time: Sep 12 10:40 CST
+Output:
+----------------------------------------------------------
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases: 13 | 13 passed | 0 failed | 0 skipped
+[doctest] assertions: 85 | 85 passed | 0 failed |
+[doctest] Status: SUCCESS!
+<end of output>
+Test time =   0.38 sec
+----------------------------------------------------------
+Test Passed.
+"d2_rules_progression" end time: Sep 12 10:40 CST
+"d2_rules_progression" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/5 Testing: client_net
+3/5 Test: client_net
+Command: "/private/tmp/stoneage-release-20260912/client-fetch-build/tests/sa_client_net_test"
+Directory: /private/tmp/stoneage-release-20260912/client-fetch-build/tests
+"client_net" start time: Sep 12 10:40 CST
+Output:
+----------------------------------------------------------
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  11 |  11 passed | 0 failed | 0 skipped
+[doctest] assertions: 777 | 777 passed | 0 failed |
+[doctest] Status: SUCCESS!
+<end of output>
+Test time =   0.39 sec
+----------------------------------------------------------
+Test Passed.
+"client_net" end time: Sep 12 10:40 CST
+"client_net" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/5 Testing: engine_isolation
+4/5 Test: engine_isolation
+Command: "/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14" "/private/tmp/stoneage-release-20260912/client-isolated/tools/check_engine_isolation.py" "--shared-root" "/private/tmp/stoneage-release-20260912/client-fetch-build/_deps/sa_shared-src" "--client-src" "/private/tmp/stoneage-release-20260912/client-isolated/src" "--watched" "shared" "--watched" "idl/generated/cpp" "--watched" "tests/RulesBattleTest.cpp" "--watched" "tests/RulesProgressionTest.cpp" "--watched" "tests/support"
+Directory: /private/tmp/stoneage-release-20260912/client-fetch-build/tests
+"engine_isolation" start time: Sep 12 10:40 CST
+Output:
+----------------------------------------------------------
+✅ shared/ 与引擎隔离检查通过 —— 扫描 35 个文件(shared, idl/generated/cpp, tests/RulesBattleTest.cpp, tests/RulesProgressionTest.cpp, tests/support),引擎头清单 = 仅快照(无引擎前缀)
+<end of output>
+Test time =   0.08 sec
+----------------------------------------------------------
+Test Passed.
+"engine_isolation" end time: Sep 12 10:40 CST
+"engine_isolation" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/5 Testing: code_format
+5/5 Test: code_format
+Command: "/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14" "/private/tmp/stoneage-release-20260912/client-isolated/tools/check_format.py"
+Directory: /private/tmp/stoneage-release-20260912/client-fetch-build/tests
+"code_format" start time: Sep 12 10:40 CST
+Output:
+----------------------------------------------------------
+✅ .clang-format 检查通过(扫描 14 个文件,Apple clang-format version 21.0.0 (clang-2100.1.1.101))
+<end of output>
+Test time =   0.07 sec
+----------------------------------------------------------
+Test Passed.
+"code_format" end time: Sep 12 10:40 CST
+"code_format" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Sep 12 10:40 CST

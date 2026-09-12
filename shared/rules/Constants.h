@@ -128,11 +128,10 @@ inline constexpr double kCriticalDamageDefFactor = 0.5;
 //   ⚠️ DR-BT11 裁定改数据驱动 ⇒ 判据落在 `CombatModifiers.immune_critical` 标志位,
 //     不比对图号(图号是实现方式不是玩法)。此处保留原图号只作**溯源注释**,代码不用它。
 
-// 反击伤害 = damage × 0.75,下限 1。[8.0] §3.5
-//
-// ⚠️★ **反击本身仍未实现**:它是一个完整的次级攻击序列且依赖 `BATTLE_GetDamageReact`
-//    (光/镜/守/反弹 = L4 状态系统),输入面远大于暴击 ⇒ 排在状态系统之后。
-//    这两个常量目前无人调用,先留着,不代表已覆盖。
+// SSRC80 battle_event.c:46 / 1413–1463 / 3655；battle.c:7794。
+inline constexpr float kCounterPara = 0.08f;
+inline constexpr int kCounterChainMax = 5;
+// 正伤害乘 0.75 后最低 1；未命中仍为 0。
 inline constexpr double kCounterDamageRate = 0.75;
 inline constexpr int kCounterDamageMin = 1;
 
@@ -274,8 +273,8 @@ enum class WeaponClass : std::uint8_t
 	kOther = 7,
 };
 inline constexpr int kWeaponClassCount = 8;
-// ⚠️ 攻方只有 7 类(kOther 不作为攻方出现在原表里)—— 移植时须核对第 8 行的处置,
-//    05 §3.5 的表只给了 7 行。已登记为移植期核对项。
+// 原映射函数只映射拳/斧/棍/弓/投掷，其余回落 NONE；空装备映射 FIST。
+// 因此 OTHER 不进入第 8 行，SPEAR 也不使用表中第 5 行（源码 :3453）。
 
 // ── 入场与槽位 ──────────────────────────────────────────────────
 //

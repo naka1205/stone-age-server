@@ -37,6 +37,7 @@
 
 #include "rules/Status.h" // 批次 L4.1:状态施加 / 每回合推进
 
+#include <algorithm>
 #include <cmath>
 
 namespace SA::Rules
@@ -593,6 +594,93 @@ bool rollCritical(const Combatant &attacker,
 	// ★ 判定用**严格小于**(`:1592`),与回避的 `<=` 不同 —— 逐位照源码。
 	//   ⚠️ `perCri` 原版是 `(int)per`(先截断再比),不是拿 float 直接比 ⇒ 保留截断。
 	return rng.rand(1, kCriticalRollMax) < static_cast<int>(per);
+}
+
+int computeCounterBase(const Combatant &attacker, const Combatant &defender) noexcept
+{
+	// SSRC80 battle_event.c:1413–1463。DEX 和 Work 都是 int；ratio/per 是 float。
+	const int at_dex = attacker.fix_dex;
+	int df_dex = defender.fix_dex;
+	float divisor = kCounterPara;
+	bool root = true;
+	if (attacker.isEnemy() && defender.kind == CombatantKind::kPet)
+	{
+		divisor = 10.0f;
+		root = false;
+	}
+	else if (attacker.kind == CombatantKind::kPet && defender.isEnemy())
+		df_dex = static_cast<int>(df_dex * 0.8);
+	else if (!attacker.isPlayer() && defender.isPlayer())
+	{
+		divisor = 10.0f;
+		root = false;
+	}
+	else if (attacker.isPlayer() && !defender.isPlayer())
+		df_dex = static_cast<int>(df_dex * 0.6);
+	const float big = static_cast<float>(std::max(at_dex, df_dex));
+	const float small = static_cast<float>(std::min(at_dex, df_dex));
+	const float ratio = at_dex >= df_dex ? 1.0f : (big <= 0.0f ? 0.0f : small / big);
+	const int work = static_cast<int>(std::max(0.0f, (big - small) / divisor));
+	const float per = (root ? static_cast<float>(std::sqrt(static_cast<double>(work)))
+	                        : static_cast<float>(work)) *
+	                  ratio;
+	return static_cast<int>(per);
+}
+
+bool rollCounter(const Combatant &attacker, const Combatant &defender,
+                 Random &rng, int *out_percent) noexcept
+{
+	if (out_percent != nullptr)
+		*out_percent = 0;
+	const auto ranged = [](const Combatant &c)
+	{
+		return c.mods.wielding_bow || c.mods.weapon == WeaponClass::kBow ||
+		       c.mods.weapon == WeaponClass::kThrow;
+	};
+	if (ranged(attacker) || ranged(defender))
+		return false;
+	const int base = computeCounterBase(attacker, defender);
+	float per = static_cast<float>(base);
+	if (attacker.isPlayer())
+	{
+		// :3443–3462。空装备是 FIST；原映射不处理 SPEAR/OTHER，回落 NONE。
+		constexpr int table[7][8] = {
+		    {10, 9, 8, 8, 5, 0, 0, 0}, {10, 9, 7, 7, 6, 0, 0, 0}, {9, 8, 10, 10, 7, 0, 0, 0}, {8, 8, 10, 10, 7, 0, 0, 0}, {6, 6, 8, 8, 9, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0}};
+		const auto weapon = [](const Combatant &c)
+		{
+			if (c.mods.unarmed || c.mods.weapon == WeaponClass::kClaw)
+				return 1;
+			if (c.mods.weapon == WeaponClass::kAxe)
+				return 2;
+			if (c.mods.weapon == WeaponClass::kRod)
+				return 3;
+			return 0;
+		};
+		per = static_cast<float>(base * table[weapon(attacker)][weapon(defender)] * 0.1 +
+		                         attacker.luck + attacker.mods.counter_bonus);
+		if (out_percent != nullptr)
+			*out_percent = static_cast<int>(per);
+		per *= 100;
+		if (per <= 0)
+		{
+			per = 1;
+			if (out_percent != nullptr)
+				*out_percent = 0;
+		}
+		return static_cast<float>(rng.rand(1, 10000)) < per;
+	}
+	// :3537–3581。S_NOGUARD 的技能加成随技能域接入；普通宠/敌路径如下。
+	per = std::min(per, 100.0f);
+	if (out_percent != nullptr)
+		*out_percent = static_cast<int>(per);
+	per *= 100;
+	if (per <= 0)
+	{
+		per = 1;
+		if (out_percent != nullptr)
+			*out_percent = 1;
+	}
+	return static_cast<float>(rng.rand(1, 10000)) <= per;
 }
 
 std::int32_t computeCriticalDamage(const BattleField &field,
@@ -1273,14 +1361,22 @@ static bool resolveOrdered(BattleField field,
 		//    `checkCanAct` 读的是 `actor`(快照,状态可能已在预推进里解除)⇒ 只靠它
 		//    会放行,被清掉的指令就"复活"了。
 		if (status_cmd_cleared[actor_slot])
+		{
+			if (effects != nullptr)
+				effects->command_cleared = true;
 			continue;
+		}
 
 		// ★ DR-BT5:能否行动的**唯一**判据。上行校验与结算走同一个函数。
 		// ⚠️ 不产事件:不可行动的原因走 `BattleSelfInfo.cannot_act` 在**指令阶段**下发
 		//    (DR-CP7 菜单置灰),而不是等结算完再告诉玩家"你刚才动不了"——
 		//    那正是 DR-CP6 反对的假交互。
 		if (checkCanAct(actor) != SA::Domain::CannotActReason::CANNOT_ACT_NONE)
+		{
+			if (effects != nullptr)
+				effects->command_cleared = true;
 			continue;
+		}
 
 		const SA::Domain::BattleCommand &cmd = commands.commands[actor_slot];
 
@@ -1512,231 +1608,176 @@ static bool resolveOrdered(BattleField field,
 		if (!target.occupied || dead[target_slot])
 			continue;
 
-		// ── 攻击次数(§3.9 / DR-BT1)──────────────────────────────
-		const int hits = rollAttackCount(actor, config, rng);
+		// 一次普通打击和一次反击共用伤害/HP/唤醒路径；反击不重复推进状态，
+		// 不摇空手多段，也不附加普通攻击专属的装备毒（SSRC80 :3604–3811）。
+		struct StrikeResult
+		{
+			bool emitted = false;
+			bool continue_counter = false;
+		};
+		const auto strike = [&](int from, int to, bool counter) -> StrikeResult
+		{
+			const Combatant &striker = field.at(from);
+			const Combatant &victim = field.at(to);
+			const bool guarding = commands.present[to] && isGuarding(commands.commands[to]) &&
+			                      (victim.status != static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION) || victim.status_turns <= 0);
+			const bool can_chain = !guarding && striker.damage_react <= 0 && victim.damage_react <= 0;
+			const bool dodge = rollDodge(striker, victim, guarding, isCastingSpell(commands, to), config, rng);
+			bool critical = false;
+			int damage = 0;
+			if (!dodge)
+			{
+				critical = rollCritical(striker, victim, rng);
+				damage = critical && !striker.mods.wielding_bow
+				             ? computeCriticalDamage(field, striker, victim, config, rng)
+				             : computeDamage(field, striker, victim, config, rng);
+				if (guarding)
+					damage = static_cast<int>(damage * rollGuardFactor(rng));
+				damage = std::max(0, damage);
+				if (counter)
+				{
+					// AttackSeq :1722 的末尾补摇先于 Counter :3657 的 0.75。
+					if (damage < 1)
+						damage = rng.rand(0, 1);
+					if (damage == 0)
+						return {}; // BATTLE_RET_MISS：不追加 counter 文本，停止连锁。
+					damage = std::max(kCounterDamageMin, static_cast<int>(damage * kCounterDamageRate));
+				}
+			}
+			if (counter)
+			{
+				auto *hit = sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
+				if (hit == nullptr)
+					return {};
+				hit->body.hit.attacker = static_cast<std::uint32_t>(from);
+				hit->body.hit.kind = SA::Domain::AttackKind::ATTACK_KIND_MELEE;
+				hit->body.hit.target_count = 1;
+			}
+			auto *event = sink.push(SA::Domain::BattleEvent::BodyKind::DAMAGE);
+			if (event == nullptr)
+				return {};
+			auto &d = event->body.damage;
+			d.target = static_cast<std::uint32_t>(to);
+			if (counter)
+				d.flags = static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_COUNTER);
+			if (dodge)
+			{
+				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DODGE);
+				return {true, can_chain};
+			}
+			if (critical)
+				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
+			if (guarding)
+				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_GUARD);
+			else if (!critical && !counter)
+				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);
 
-		SA::Domain::BattleEvent *hit_event =
-		    sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
+			int to_player = damage;
+			int to_pet = 0;
+			if (victim.has_ride && pet_hp[to] > 0)
+			{
+				const RideSplit split = splitRideDamage(damage, victim.defense, victim.ride_defense);
+				to_player = split.player;
+				to_pet = split.pet;
+			}
+			const int overflow = std::max(0, to_player - hp[to]);
+			hp[to] -= to_player;
+			pet_hp[to] -= to_pet;
+			d.hp_delta = -to_player;
+			d.pet_hp_delta = -to_pet;
+			const int previous_accumulator = ult_acc[to];
+			const KnockbackKind knockback = rollKnockback(damage, overflow, victim.max_hp,
+			                                              ult_acc[to], victim.mods.immune_knockback, &ult_acc[to]);
+			if (knockback == KnockbackKind::kOneShot)
+				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_2);
+			else if (knockback == KnockbackKind::kAccumulated)
+				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_1);
+			if (ult_acc[to] != previous_accumulator)
+			{
+				auto *changed = sink.push(SA::Domain::BattleEvent::BodyKind::KNOCKBACK_STATE);
+				if (changed == nullptr)
+					return {true, false};
+				changed->body.knockback_state.target = static_cast<std::uint32_t>(to);
+				changed->body.knockback_state.accumulator = ult_acc[to];
+			}
+			if (hp[to] <= 0)
+			{
+				dead[to] = true;
+				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DEATH);
+				// Counter :3740–3755：非玩家被会心击杀的额外打飞抽签。
+				if (counter)
+				{
+					const bool extra = victim.mods.abio || (!victim.isPlayer() && critical && rng.rand(1, 100) < 50);
+					if (extra && !victim.mods.immune_knockback)
+					{
+						d.flags &= ~static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_2);
+						d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_1);
+					}
+				}
+			}
+			if (to_player > 0 && status[to] == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_SLEEP))
+			{
+				auto *wake = sink.push(SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE);
+				if (wake == nullptr)
+					return {true, false};
+				wake->body.status_change.target = static_cast<std::uint32_t>(to);
+				wake->body.status_change.status = SA::Domain::BattleStatus::BATTLE_ST_SLEEP;
+				wake->body.status_change.applied = false;
+				status[to] = 0;
+				status_turns[to] = 0;
+			}
+			field.at(to).status = status[to];
+			field.at(to).status_turns = status_turns[to];
+			field.at(to).hp = std::max(0, hp[to]);
+			field.at(to).ride_hp = std::max(0, pet_hp[to]);
+			field.at(to).dead = dead[to];
+			field.at(to).ultimate_accumulator = ult_acc[to];
+			if (!counter && damage > 0 && striker.mods.suit_poison > 0)
+			{
+				const int poison = static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+				if (rollStatusAttack(field.is_pvp, striker, field.at(to), poison,
+				                     striker.mods.suit_poison, kSuitPoisonRange, kSuitPoisonBai, rng, nullptr))
+				{
+					status[to] = static_cast<std::uint8_t>(poison);
+					status_turns[to] = statusTurnsOnApply(kSuitPoisonTurns);
+					field.at(to).status = status[to];
+					field.at(to).status_turns = status_turns[to];
+					d.status_applied = SA::Domain::BattleStatus::BATTLE_ST_POISON;
+				}
+			}
+			return {true, can_chain && !critical && !dead[to]};
+		};
+
+		const int hits = rollAttackCount(actor, config, rng);
+		auto *hit_event = sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
 		if (hit_event == nullptr)
 			break;
 		hit_event->body.hit.attacker = static_cast<std::uint32_t>(actor_slot);
 		hit_event->body.hit.kind = SA::Domain::AttackKind::ATTACK_KIND_MELEE;
-		hit_event->body.hit.skill_id = 0;
-		hit_event->body.hit.variant = 0;
-		hit_event->body.hit.target_count = 0; // ★ 逐段回填,见下
-
-		const bool guarding = commands.present[target_slot] &&
-		                      isGuarding(commands.commands[target_slot]) &&
-		                      (target.status != static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION) || target.status_turns <= 0);
-		const bool casting = isCastingSpell(commands, target_slot);
-
-		std::uint32_t emitted = 0;
-		for (int h = 0; h < hits; ++h)
+		bool continue_counter = false;
+		for (int h = 0; h < hits && !dead[target_slot]; ++h)
 		{
-			// ★ 目标在多段之间可能被打死 ⇒ 剩余段数作废(原版同样逐段查存活)。
-			if (dead[target_slot])
+			const auto result = strike(actor_slot, target_slot, false);
+			if (result.emitted)
+				++hit_event->body.hit.target_count;
+			continue_counter = result.continue_counter;
+			if (sink.overflowed())
 				break;
-
-			SA::Domain::BattleEvent *dmg_event =
-			    sink.push(SA::Domain::BattleEvent::BodyKind::DAMAGE);
-			if (dmg_event == nullptr)
-				break;
-			SA::Domain::Damage &d = dmg_event->body.damage;
-			d.target = static_cast<std::uint32_t>(target_slot);
-			d.hp_delta = 0;
-			d.pet_hp_delta = 0;
-			d.mp_delta = 0;
-			d.flags = 0;
-			d.status_applied = SA::Domain::BattleStatus::BATTLE_ST_NONE;
-			++emitted;
-
-			// ── 回避(§3.2)───────────────────────────────────────
-			//
-			// ⚠️ 闪避也要产事件:客户端要演"闪"这个动作(原版 BD 带 BCF_DODGE)。
-			//    ★ 而且**必须在这里就产**,不能"闪了就跳过" —— 事件流是演出脚本,
-			//      少一条客户端就少一个动作,1.4 的验收口径正是逐条一致。
-			if (rollDodge(actor, target, guarding, casting, config, rng))
-			{
-				d.flags = static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DODGE);
-				continue;
-			}
-
-			// ── 暴击(§3.3,批次 A.3)──────────────────────────────
-			//
-			// ⚠️★ **判定必须在算伤害之前、且无论命中与否都消费同一个 RNG 抽取** ——
-			//    原版 `AttackSeq`(`:1590`)先 `RAND(1,10000)` 判暴击,再据结果选伤害源:
-			//      暴击 + 非弓 → CriDamageCalc(带防御附加);暴击 + 弓 / 未暴击 → DamageCalc。
-			//    ★ 持弓不吃暴击伤害加成(`:1594`),但**仍置暴击标志**(客户端要演"会心")。
-			//    ⇒ 顺序即 RNG 序列的一部分,换位置 ⇒ 同种子给出不同战斗。
-			const bool is_crit = rollCritical(actor, target, rng);
-			std::int32_t damage;
-			if (is_crit && !actor.mods.wielding_bow)
-			{
-				damage = computeCriticalDamage(field, actor, target, config, rng);
-			}
-			else
-			{
-				damage = computeDamage(field, actor, target, config, rng);
-			}
-			if (is_crit)
-			{
-				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
-			}
-
-			// ── 防御减伤:六档随机(§3.5)────────────────────────────
-			//
-			// ⚠️★ 触发条件是「守方指令 = 防御 **且 混乱值 ≤ 0**」——
-			//    两条都在 `guarding` 里,别只判指令。
-			if (guarding)
-			{
-				damage = static_cast<std::int32_t>(damage * rollGuardFactor(rng));
-				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_GUARD);
-			}
-			else if (!is_crit)
-			{
-				// ★ NORMAL 与 CRITICAL 互斥(原版 `BCF_NORMAL` / `BCF_KAISHIN` 是 switch(iRet)
-				//   的两个分支)⇒ 暴击命中**不**再置 NORMAL。守方防御时置 GUARD(项目自有建模)。
-				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);
-			}
-			if (damage < 0)
-				damage = 0;
-
-			// ── 骑宠分摊(§3.6,DR-BT2 原式)──────────────────────
-			std::int32_t to_player = damage;
-			std::int32_t to_pet = 0;
-			if (target.has_ride && pet_hp[target_slot] > 0)
-			{
-				const RideSplit split =
-				    splitRideDamage(damage, target.defense, target.ride_defense);
-				to_player = split.player;
-				to_pet = split.pet;
-			}
-
-			// ★ 溢出量(原 `addpoint`,`:2040`):打前 HP 减伤害若为负,取其绝对值。
-			//   ⚠️★ 打飞看的是**主人 HP** 的溢出(`BATTLE_DamageSub` 里 `hp` 是守方本体),
-			//     不是骑宠;骑宠分摊只改 to_player 的数值 ⇒ 用打到主人身上的 to_player 算。
-			const std::int32_t hp_before = hp[target_slot];
-			const std::int32_t overflow =
-			    (hp_before - to_player < 0) ? (to_player - hp_before) : 0;
-
-			hp[target_slot] -= to_player;
-			pet_hp[target_slot] -= to_pet;
-			d.hp_delta = -to_player;
-			d.pet_hp_delta = -to_pet;
-
-			// ★ 骑宠死亡的连带(§3.6:解除骑乘 + 换回原图 + 置落马标记)在**表现侧**,
-			//   由调用方按 `pet_hp_delta` 打完后的 HP 判定并下发 BattleSnapshot。
-			//   ⇒ L3 不产 RideState —— 那是快照字段,不是事件。
-
-			// ── 打飞判定(§3.8,批次 A.4)────────────────────────────
-			//
-			// ⚠️★ **必须在死亡标记之前**:原版 `BATTLE_DamageSub` 先算 IsUltimate、再由外层
-			//    据 HP<=0 判死并按打飞标志分流战果 ⇒ 打飞与死亡可同回合并存(一击致死且打飞)。
-			//    ★ 判定进 L3,累加器的持久化与清零走事件由调用方在 ApplyEvents 落地。
-			const std::int32_t prev_acc = ult_acc[target_slot];
-			const KnockbackKind kb = rollKnockback(
-			    damage, overflow, target.max_hp, ult_acc[target_slot],
-			    target.mods.immune_knockback, &ult_acc[target_slot]);
-			if (kb == KnockbackKind::kOneShot)
-			{
-				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_2);
-			}
-			else if (kb == KnockbackKind::kAccumulated)
-			{
-				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ULTIMATE_1);
-			}
-			// ★ 累加器**变化时**才回写(单开低频事件,不塞进热路径的 Damage —— 见
-			//   battle_events.proto 的 KnockbackState 注记:塞 Damage 会越过 8 KB 零分配红线)。
-			//   ⚠️ 累加后的新值由 L3 给,ApplyEvents 直接写、不重算(免疫+一击角落会分叉)。
-			if (ult_acc[target_slot] != prev_acc)
-			{
-				SA::Domain::BattleEvent *kbev =
-				    sink.push(SA::Domain::BattleEvent::BodyKind::KNOCKBACK_STATE);
-				if (kbev == nullptr)
-					break;
-				kbev->body.knockback_state.target = static_cast<std::uint32_t>(target_slot);
-				kbev->body.knockback_state.accumulator = ult_acc[target_slot];
-			}
-
-			if (hp[target_slot] <= 0)
-			{
-				dead[target_slot] = true;
-				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DEATH);
-			}
-
-			// F05: 原 battle_event.c:2764–2765，在伤害之后、附加状态之前唤醒。
-			if (to_player > 0 && status[target_slot] ==
-			                         static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_SLEEP))
-			{
-				auto *wake = sink.push(SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE);
-				if (wake == nullptr)
-					break;
-				wake->body.status_change.target = static_cast<std::uint32_t>(target_slot);
-				wake->body.status_change.status = SA::Domain::BattleStatus::BATTLE_ST_SLEEP;
-				wake->body.status_change.applied = false;
-				status[target_slot] = 0;
-				status_turns[target_slot] = 0;
-			}
-			field.at(target_slot).status = status[target_slot];
-			field.at(target_slot).status_turns = status_turns[target_slot];
-			field.at(target_slot).hp = hp[target_slot] > 0 ? hp[target_slot] : 0;
-			field.at(target_slot).dead = dead[target_slot];
-
-			// ── 普攻附带状态:带毒装备(`battle_event.c:2903`,批次 L4.1)────
-			//
-			// ★★ 这是**净核里唯一的普攻附带状态来源**(`_SUIT_ADDPART4`,8.0 开):
-			//      if (gBattleStausChange == -1 && SUITPOISON > 0)
-			//          gBattleStausChange = POISON, gBattleStausTurn = 3, suitpoison = SUITPOISON;
-			//    ⇒ 与 A.3 暴击 / A.4 打飞同族,是**普攻链路自己的机制**,不依赖宠技职技。
-			//
-			// ⚠️★ 三处顺序/判据都照源码,任一处挪动都会改 rng 序列:
-			//    ① 在 `BATTLE_DamageSub` **之后**(伤害、分摊、打飞、HP 写都已完成);
-			//    ② 判据是 `damage > 0` —— 用**分摊前的总伤害**(源码 `*pDamage` 只在
-			//       SHOWMERCY 分支被改写,分摊值落局部变量 ⇒ 这里的 damage 仍是总伤);
-			//    ③ `gBattleStausChange == -1` 那道门:技能已指定状态时**装备毒让位** ——
-			//       本批无技能路径 ⇒ 恒成立,照抄但不声称它要紧(纪律 ⓪)。
-			// ⚠️★★ **默认 `suit_poison == 0` ⇒ 整段不进 ⇒ 不摇 rng** ⇒ 既有用例的
-			//    rng 序列逐位不变(同 I.4 的 `item_heal_power` 默认 0)。
-			if (damage > 0 && actor.mods.suit_poison > 0)
-			{
-				// ★ 喂**镜像**状态:同回合前面若已给它挂上状态,全局互斥必须看得见。
-				Combatant tgt_now = target;
-				tgt_now.status = status[target_slot];
-				tgt_now.status_turns = status_turns[target_slot];
-
-				const int st = static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
-				int per = 0;
-				if (rollStatusAttack(field.is_pvp, actor, tgt_now, st,
-				                     actor.mods.suit_poison, kSuitPoisonRange,
-				                     kSuitPoisonBai, rng, &per))
-				{
-					// ★★ 落地回合数 = 声明值 + 1(`:2918` 的 `gBattleStausTurn + 1`)——
-					//    带毒装备声明 3 ⇒ 实际 **4**。同 DR-BT15「逃跑首次即 2」那族。
-					status[target_slot] = static_cast<std::uint8_t>(st);
-					status_turns[target_slot] = statusTurnsOnApply(kSuitPoisonTurns);
-					field.at(target_slot).status = status[target_slot];
-					field.at(target_slot).status_turns = status_turns[target_slot];
-
-					// ★ 附带状态走 `Damage.status_applied`(IDL 为此留的字段),
-					//   不另发 StatusChange —— 后者对应原版的 `BM`,本批只在**解除**时用。
-					d.status_applied = SA::Domain::BattleStatus::BATTLE_ST_POISON;
-
-					// ⚠️★ **有意不落地:施加当场清目标指令**(`:2932-2937`)。
-					//    原版对**麻痹 / 睡眠 / 石化 / 魔障**四种在施加当场把目标的
-					//    `BATTLE_COM_NONE` 写掉(目标若尚未行动,这一趟就被跳过)。
-					//    ★ 本批唯一的施加者是带毒装备 ⇒ 状态恒为**毒**,而毒**不在**那四种里
-					//      ⇒ 这段逻辑在本批**没有任何输入能让它执行**,写下来就是
-					//      **无法反向验证的死代码**(纪律 ⓪:冗余的分支没有能区分它的输入)。
-					//    ⇒ 判据函数 `clearsCommandOnApply()` 已在 Status.h 建好并有单元用例,
-					//      接入技能/魔法施加路径的那一批在此处消费它。
-					(void)per; // per 是原版用于广播文案的命中率,本批不下发
-				}
-			}
-
-			// ⚠️ 反击(§3.5)在此处插入 —— 批次 0.5 未实现,理由见 battle.h。
 		}
-
-		hit_event->body.hit.target_count = emitted;
+		// SSRC80 battle.c:7794–7807：最后一段的 ContFlg 决定是否开始，最多五次。
+		for (int link = 0; link < kCounterChainMax && continue_counter && !sink.overflowed(); ++link)
+		{
+			const int from = (link % 2 == 0) ? target_slot : actor_slot;
+			const int to = (link % 2 == 0) ? actor_slot : target_slot;
+			const auto &striker = field.at(from);
+			if (dead[from] || dead[to] || !striker.occupied || !field.at(to).occupied ||
+			    striker.mods.abio || !commands.present[from] || status_cmd_cleared[from] ||
+			    commands.commands[from].command_kind != SA::Domain::BattleCommand::CommandKind::ATTACK)
+				break;
+			if (!rollCounter(striker, field.at(to), rng))
+				break;
+			continue_counter = strike(from, to, true).continue_counter;
+		}
 		if (sink.overflowed())
 			break;
 	}

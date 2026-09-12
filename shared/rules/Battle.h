@@ -48,7 +48,8 @@ struct TurnCommands
 
 struct ActionEffects
 {
-	bool item_used = false; // 实际执行的资源消耗，不是指令投影。
+	bool item_used = false;       // 实际执行的资源消耗，不是指令投影。
+	bool command_cleared = false; // 状态推进清掉指令，宿主须保留到本回合结束。
 };
 
 // order 由宿主每回合只生成一次。本接口不再摇行动速度。
@@ -87,34 +88,9 @@ SA::Domain::CannotActReason checkCanAct(const Combatant &c) noexcept;
 //    「strncat 第三参用错、等价于无上界 strcat,余量仅 56 字节且无第二道防线」
 //    的教训 —— 新实现宁可分包,不可静默截断。
 //
-// ═══ ★★ 批次 0.5 的覆盖边界(2026-09-03)═══════════════════════
-//
-// 本函数对应原版 `BATTLE_Battling` 的 1,983 行,规模见 `00` §1.3.1 的批次表。
-// **批次 0.5 只交付「调度骨架 + 普攻链路」**,即 §2.2 一个回合里的第 6 步本身:
-//
-//   ✅ 已覆盖:行动顺序(§2.5,含 DR-BT8 同速裁决)· 指令分发 · CanAct 否决 ·
-//              攻击次数(§3.9,DR-BT1)· 回避(§3.2)· 伤害(§3.1/§3.4)·
-//              防御减伤六档(§3.5)· 骑宠分摊(§3.6,DR-BT2 原式)·
-//              死亡标记 · 事件产出与截断保护
-//
-//   ⬜ 未覆盖,**且每条都注明了为什么**:
-//     | 项 | 为什么不在本批次 |
-//     |---|---|
-//     | 暴击(§3.3) | ★★ **文档只给了 `per` 的构成,没给判定阈与取数入口** —— 见下 |
-//     | 反击(§3.5) | ★★ 同上,且 `CounterTbl` 的行列归属在文档里也是含糊的 |
-//     | 六种反应类型(§3.7) | 批次 A/B(职业/宠物技能链路) |
-//     | 打飞(§3.8)· 状态附加(§4.3) | 同上 |
-//     | 逃跑 / 捕获 / 道具 / 换宠 / 宠技 / 职技 / 咒术 | 指令本身属批次 A–D |
-//     | dex 的其余 8 档修正(§2.5) | 绑在上面那些尚未接入的指令上 |
-//
-// ⚠️★ **暴击与反击是有意留空,不是漏掉的。** 移植期(2026-09-03)复核 `05` §3.3 /
-//    §3.5 时发现:两处都写全了 `per` 的**构成式**,却都**没有写判定阈**
-//    (回避 §3.2 写了 `RAND(1,10000) ≤ per`,暴击只写到 `clamp(1,10000)` 为止;
-//     反击连 clamp 都没有)。
-//    ⇒ 照 §3.2 的形状"推"一个判定式出来,就是把猜测固化成黄金用例集的基线 ——
-//      而 `00` §0 已认下 ③ 层不可自证,用例集是**唯一**补偿手段,基线错了补偿反成负资产。
-//    ⇒ 正确处置是**回到 `battle_event.c` 补齐这两处的取数入口后再实现**,
-//      已登记为 `01` §13 欠债 1 的子项。
+// 当前覆盖：普攻/防御、逃跑、捕获、换宠、HP 恢复药、基础异常状态，
+// 以及整次普攻后最多五次交替反击。特殊反应和完整技能链路仍另批接入。
+// 反击的依据与边界见 docs/journal/16-counterattack.md。
 bool resolveTurn(const BattleField &field,
                  const TurnCommands &commands,
                  const RulesConfig &config,
@@ -149,6 +125,14 @@ int buildActionOrder(const BattleField &field,
 int rollAttackCount(const Combatant &attacker,
                     const RulesConfig &config,
                     Random &rng) noexcept;
+
+// 基础反击。attacker 是本次反击者，defender 是被反击者。
+// 固定敏捷先走 int 截断；玩家按武器表、幸运和装备加成，以 roll < per 判定；
+// 宠物/敌人以 roll <= per 判定。弓/投掷任一侧装备时不消耗随机数。
+// 指令、存活、ABIO 及连锁边界由 resolveAction 处理，特殊技能反应另批接入。
+int computeCounterBase(const Combatant &attacker, const Combatant &defender) noexcept;
+bool rollCounter(const Combatant &attacker, const Combatant &defender,
+                 Random &rng, int *out_percent = nullptr) noexcept;
 
 // 防御减伤系数(§3.5)。★ **不是固定系数,是 RAND(1,100) 分六档**,
 // 期望 ≈ 0.175 且 **25% 概率完全免伤**。

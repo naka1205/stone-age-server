@@ -244,7 +244,9 @@ struct Combatant
 	std::int32_t attack = 0;
 	std::int32_t defense = 0;
 	std::int32_t quick = 0; // 敏捷,回避与行动顺序都用它
-	std::int32_t luck = 0;  // ★ 上限 25(DR-BT1 的量化前提)
+	// WORKFIXDEX：反击读取基础敏捷，不受酒醉等战斗临时 QUICK 修改影响。
+	std::int32_t fix_dex = 0;
+	std::int32_t luck = 0; // ★ 上限 25(DR-BT1 的量化前提)
 
 	// ★ 魅力(原 `CHAR_WORKFIXCHARM`)—— 捕获的**乘性主因子**(§6.2:`× charm / 50`
 	//   ⇒ 魅力 50 时系数为 1)。⚠️ 只在捕获判定里用,不参与伤害/回避 ⇒ 默认 0。

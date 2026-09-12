@@ -19,9 +19,10 @@
 | [`13-world.md`](13-world.md) | W.1 移动视野 · W.2/W.3 刷怪游荡 · W.4 暗雷 · W.5 明雷 | 4 |
 | [`14-item.md`](14-item.md) | 道具域 I.1 背包 · I.2 扣道具 · I.3 掉落 · I.4 使用 | 4 |
 | [`15-status.md`](15-status.md) | L4.1 状态异常系统 | 1 |
+| [`16-counterattack.md`](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
 | [`90-push-windows.md`](90-push-windows.md) | 九次 `shared-v0.x.0` 推送窗口的闭合核实 | 9 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **56** |
+| **合计** | | **57** |
 
 ## 全量映射表(按编号)
 
@@ -83,6 +84,7 @@
 | §9.0.53 | 批次 I.4 —— 使用道具:战斗内 HP 恢复药 | 2026-09-11 | [`14-item.md`](14-item.md) |
 | §9.0.54 | 推送窗口执行记录 —— shared-v0.21.0 | 2026-09-11 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.55 | 批次 L4.1 —— 状态异常系统:单槽状态机 + 带毒装备 + 每回合推进 | 2026-09-11 | [`15-status.md`](15-status.md) |
+| §9.0.56 | 基础反击：整次普攻后最多五次交替反击与真实战果归属 | 2026-09-12 | [`16-counterattack.md`](16-counterattack.md) |
 
 ---
 
@@ -95,4 +97,3 @@
 | [`../11-decision-register.md`](../11-decision-register.md) | DR 决策寄存器(跨双端单一收敛口) |
 | [`../backlog/`](../backlog/) | 还欠什么:欠债表 · 划外顺延 · 待拍板 · 永久不可判定 |
 | [`../deviations/`](../deviations/) | 和原版哪里不一样:有意改变 · 照抄的缺陷 · 净核划外 · 文档与源码分叉 |
-
