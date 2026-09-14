@@ -2,31 +2,31 @@
 ========================================================================
   0. 环境
 ========================================================================
-服务端仓 : E:\Game\StoneAge\stone-age-server
-客户端仓 : E:\Game\StoneAge\stone-age-client
+服务端仓 : C:\Users\vboxuser\Work\game\stoneage\stone-age-server
+客户端仓 : C:\Users\vboxuser\Work\game\stoneage\stone-age-client
 已装 VS 主版本 : 18
-生成器   : Visual Studio 18 2026 / RelWithDebInfo
-未在 PATH 找到 cl.exe ⇒ 载入 VS 开发者环境:C:\Program Files\Microsoft Visual Studio\18\Community
-cmake : C:\Program Files\CMake\bin\cmake.exe
-ctest : C:\Program Files\CMake\bin\ctest.exe
-python : C:\Users\nkk\AppData\Local\Programs\Python\Python312\python.exe
-MSVC : Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36243 for x64
+⚠️ 生成器 : 未匹配到「VS 装了 × cmake 也认识」的生成器 ⇒ 走 CMake 默认生成器 / RelWithDebInfo
+   ⚠️ 这一行必须留在报告里 —— 「用的哪个编译器」是本次结论的一部分。
+未在 PATH 找到 cl.exe ⇒ 载入 VS 开发者环境:C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools
+cmake : C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe
+ctest : C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe
+python : C:\Program Files\AutoClaw\resources\python\python.exe
+MSVC : Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36257 for x64
 
 ========================================================================
   1. 服务端 × MSVC —— 配置 + 构建 + ctest
 ========================================================================
-清理旧构建目录(保证告警数是真的):E:\Game\StoneAge\stone-age-server\build\msvc
+清理旧构建目录(保证告警数是真的):C:\Users\vboxuser\Work\game\stoneage\stone-age-server\build\msvc
 [通过] 服务端 CMake 配置  —— exit=0
 [通过] 服务端 MSVC 构建  —— exit=0 · 告警 0 条
-[通过] 服务端 ctest  —— 100% tests passed, 0 tests failed out of 4
+[通过] 服务端 ctest  —— 100% tests passed, 0 tests failed out of 20
 
 ========================================================================
   2. 客户端 d2-only × MSVC —— ★★ D2 的完整形态
 ========================================================================
-清理旧构建目录:E:\Game\StoneAge\stone-age-client\build\msvc-d2
 [通过] 客户端 CMake 配置(d2-only 等价)  —— exit=0
 [通过] 客户端 MSVC 构建  —— exit=0 · 告警 0 条
-[通过] ★★ 客户端黄金用例集(MSVC)  —— 100% tests passed, 0 tests failed out of 1
+[通过] ★★ 客户端黄金用例集(MSVC)  —— 100% tests passed, 0 tests failed out of 7
 
 ========================================================================
   3. 浮点逐位一致(/fp:precise + 关闭 FMA 合并)
@@ -46,28 +46,27 @@ MSVC : Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36243 for x64
   5. Python 侧检查(路径分隔符 / 编码)
 ========================================================================
 [通过] shared/ 纯度检查(Windows)  —— exit=0
-[通过] IDL 生成物同步(Windows)  —— ⏭ 未验 —— 本机无 protoc(构建期工具)。★ 已确认给的是清晰诊断而非 traceback
-  ⚠️ 「schema 与生成物同步」这道关**本趟未验**。它不属 B 类方言,但 CI 上不能缺(02 §8)。
+[通过] IDL 生成物同步(Windows)  —— exit=0
 
 ========================================================================
   6. ★ 断言防线反向验证(防「绿色的假测试」)
 ========================================================================
 [通过] ★ 断言防线反向验证  —— 改错矩阵后 assert 确实触发并使测试失败 ⇒ /UNDEBUG 在 MSVC 下有效
-  已还原 constants.h 并重建 sg_contract_smoke。
+  已还原 constants.h 并重建 sa_contract_smoke。
 
 ========================================================================
   汇总
 ========================================================================
   ✅ 服务端 CMake 配置                             exit=0
   ✅ 服务端 MSVC 构建                              exit=0 · 告警 0 条
-  ✅ 服务端 ctest                                100% tests passed, 0 tests failed out of 4
+  ✅ 服务端 ctest                                100% tests passed, 0 tests failed out of 20
   ✅ 客户端 CMake 配置(d2-only 等价)                 exit=0
   ✅ 客户端 MSVC 构建                              exit=0 · 告警 0 条
-  ✅ ★★ 客户端黄金用例集(MSVC)                        100% tests passed, 0 tests failed out of 1
+  ✅ ★★ 客户端黄金用例集(MSVC)                        100% tests passed, 0 tests failed out of 7
   ✅ 浮点逐位一致                                   黄金用例集全绿 ⇒ 期望值为手算基准,等价于与 macOS 逐位一致
   ✅ 数据模型探针                                   sizeof(long)=4 sizeof(void*)=8 sizeof(wchar_t)=2 CHAR_MIN=-128
   ✅ shared/ 纯度检查(Windows)                    exit=0
-  ✅ IDL 生成物同步(Windows)                       ⏭ 未验 —— 本机无 protoc(构建期工具)。★ 已确认给的是清晰诊断而非 traceback
+  ✅ IDL 生成物同步(Windows)                       exit=0
   ✅ ★ 断言防线反向验证                               改错矩阵后 assert 确实触发并使测试失败 ⇒ /UNDEBUG 在 MSVC 下有效
 
 通过 11 · 失败 0
@@ -75,4 +74,4 @@ MSVC : Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36243 for x64
 ★★ B 类 MSVC 方言出清 ⇒ D2「一份规则两端编译」可结案。
    ⇒ 可以切回 macOS。把本报告带回,并按 00 §9.0.7 更新欠债 7 / 客户端欠债 8。
 
-报告已写入:E:\Game\StoneAge\stone-age-server\tools\win_validate_report.txt
+报告已写入:C:\Users\vboxuser\Work\game\stoneage\stone-age-server\tools\win_validate_report.txt

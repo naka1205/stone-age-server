@@ -2,9 +2,17 @@
 """Regression for REAL bitmap orientation at the PNG export boundary."""
 from pathlib import Path
 import struct
+import sys
 import tempfile
 import unittest
 import zlib
+
+# Embedded Python (_pth layout) does not add the script's own directory to
+# sys.path; insert it explicitly so the sibling module import resolves.
+# A no-op under a regular Python layout.
+_script_dir = str(Path(__file__).resolve().parent)
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
 
 from build_playable_content import blit_bottom_up, map_bitmap, png
 

@@ -215,7 +215,12 @@ if ($warnCount -gt 0) {
 
 $testOut = & ctest --test-dir $sBuild -C $Config --output-on-failure 2>&1
 $testOut | Out-Host
-Record "服务端 ctest" ($LASTEXITCODE -eq 0) (($testOut | Select-String "tests passed" | Select-Object -First 1) -replace '\s+', ' ')
+# ★ 防假绿灯(§9.0.9 ②):注册测试全缺席时 ctest 打印 "No tests were found!!!" 且退出码仍为 0
+#   ⇒ 通过条件必须是「退出码 0 **且**确有 "tests passed" 摘要行」,缺摘要行按失败处理。
+$testSummary = ($testOut | Select-String "tests passed" | Select-Object -First 1)
+Record "服务端 ctest" (($LASTEXITCODE -eq 0) -and ($null -ne $testSummary)) `
+    $(if ($null -ne $testSummary) { $testSummary -replace '\s+', ' ' }
+      else { "未发现任何注册测试 ⇒ 按失败处理(防假绿灯)" })
 Pop-Location
 
 # ─────────────────────────────────────────────────────────────────
@@ -242,7 +247,11 @@ if ($ClientDir -ne "") {
 
     $ctOut = & ctest --test-dir $cBuild -C $Config --output-on-failure 2>&1
     $ctOut | Out-Host
-    Record "★★ 客户端黄金用例集(MSVC)" ($LASTEXITCODE -eq 0) (($ctOut | Select-String "tests passed" | Select-Object -First 1) -replace '\s+', ' ')
+    # ★ 防假绿灯(§9.0.9 ②):同上 —— 无注册测试时退出码也是 0,缺 "tests passed" 摘要行按失败处理。
+    $ctSummary = ($ctOut | Select-String "tests passed" | Select-Object -First 1)
+    Record "★★ 客户端黄金用例集(MSVC)" (($LASTEXITCODE -eq 0) -and ($null -ne $ctSummary)) `
+        $(if ($null -ne $ctSummary) { $ctSummary -replace '\s+', ' ' }
+          else { "未发现任何注册测试 ⇒ 按失败处理(防假绿灯)" })
     Pop-Location
 } else {
     Record "客户端 d2-only × MSVC" $false "跳过 —— 未找到客户端仓"
@@ -316,7 +325,13 @@ Record "shared/ 纯度检查(Windows)" ($LASTEXITCODE -eq 0) "exit=$LASTEXITCODE
 $idlOut = (& python idl\codegen\saidl_gen.py --verify 2>&1) -join "`n"
 $idlOut | Out-Host
 $idlExit = $LASTEXITCODE
-if (Get-Command protoc -ErrorAction SilentlyContinue) {
+# ★ 判定口径须与被调方一致:saidl_gen.py 是「PROTOC 环境变量或 PATH 上的 protoc,二者有其一」。
+#   只看 PATH 会漏掉 PROTOC 指向有效可执行文件的场景 —— 验证实际成功却被记成「本机无 protoc」,
+#   报告印的就不是观测。二者都缺 ⇒ 才走下面的「未验/诊断」分支(口径不变)。
+$hasPathProtoc = [bool](Get-Command protoc -ErrorAction SilentlyContinue)
+$hasEnvProtoc = (-not [string]::IsNullOrEmpty($env:PROTOC)) -and `
+                (Test-Path -LiteralPath $env:PROTOC -PathType Leaf)
+if ($hasPathProtoc -or $hasEnvProtoc) {
     Record "IDL 生成物同步(Windows)" ($idlExit -eq 0) "exit=$idlExit"
 } else {
     $cleanDiag = ($idlOut -match "找不到 protoc") -and ($idlOut -notmatch "Traceback")
