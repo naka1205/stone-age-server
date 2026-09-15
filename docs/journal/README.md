@@ -89,6 +89,7 @@
 | §9.0.57 | 批次 I\| —— 战斗指令入口校验:指令接收时的持有与目标门 | 2026-09-15 | [`14-item.md`](14-item.md) |
 | §9.0.58 | 批次 A4 —— 经济地基:GoldLedger 单入口 + 战斗产币 | 2026-09-15 | [`17-economy.md`](17-economy.md) |
 | §9.0.59 | Windows 本机 OpenSSL 根自动探测 —— configure 阻塞解除 | 2026-09-15 | [`17-economy.md`](17-economy.md) |
+| §9.0.60 | 推送窗口执行记录 —— shared-v0.27.0(I| / A4 / OpenSSL 探测三笔同窗) | 2026-09-15 | [`90-push-windows.md`](90-push-windows.md) |
 
 ---
 

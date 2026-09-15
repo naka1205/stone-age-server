@@ -1,8 +1,8 @@
-# journal / 90-push-windows — 推送窗口执行记录
+﻿# journal / 90-push-windows — 推送窗口执行记录
 
 > **本文件收录**:每次 `shared-v0.x.0` 前推的闭合核实:两仓 × 两远端 SHA 与 tag 集合差、CI 三平台、客户端发布态 FetchContent 日志正文。★ 与批次记录分开存放,因为它们答的是**同一个问题的九次重复**。
 >
-> **批次编号**:§9.0.32 · §9.0.34 · §9.0.38 · §9.0.41 · §9.0.43 · §9.0.47 · §9.0.49 · §9.0.52 · §9.0.54(共 9 节,§9.0.32 – §9.0.54 区间内)
+> **批次编号**:§9.0.32 · §9.0.34 · §9.0.38 · §9.0.41 · §9.0.43 · §9.0.47 · §9.0.49 · §9.0.52 · §9.0.54(共 9 节,§9.0.32 – §9.0.54 区间内;§9.0.58 起的窗口记录随批次写入各功能文件)
 >
 > ★ **编号沿用 `00-architecture.md` 原 §9.0.x 体系,搬家未改号** —— 全仓约 600 处 `§9.0.x` 引用因此继续有效。总映射见 [`README.md`](README.md)。
 >
@@ -419,3 +419,27 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 ⇒ ★ **道具域(I.1–I.4)四批至此全部落地并全部推送完毕**。
 
 ---
+
+### 9.0.60 ★ 推送窗口执行记录 —— `shared-v0.27.0`(2026-09-15)
+
+> **一个窗口、一个 tag 盖三笔**:批次 I|(入口校验,§9.0.57)· 批次 A4 经济地基(§9.0.58)· Windows OpenSSL 根探测(§9.0.59)。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `fde500d` · `shared-v0.27.0`(附注)—— **gitee(`origin`)与 github(`workercrew` 镜像)`ls-remote` 核实一致**(`df1ff64` tag 对象 → peel `fde500d`) |
+| client master | `2d93a9d`(pin v0.26.0 → **v0.27.0**)—— gitee + github(workercrew)双远端核实一致 |
+| server CI(workercrew) | [run 34931043755](https://github.com/workercrew/stone-age-server/actions/runs/34931043755):**Windows MSVC / Linux GCC / macOS Apple clang 全 success** + MySQL 8.4.8 + Redis 8.6.2 integration success |
+| client CI(workercrew) | [run 34932589367](https://github.com/workercrew/stone-age-client/actions/runs/34932589367):D2 闸门三平台(Windows MSVC / macOS Apple clang / Linux GCC)**全 success**,发布态 fetch 锁定 ref = `shared-v0.27.0` |
+| 本机独立发布态复验 | 干净克隆 gitee 客户端到**无同级服务端**的临时目录,`ci_verify --expect-mode fetch`:**8 项全过**(fetch 模式 · 锁定 ref = v0.27.0 · 与源码一致 · 7 条全部注册 · ctest 7/7 · **115 用例 / 2,763 断言**) |
+| server 本机 ci_verify | **6 项全过**(22 条全部注册含 `gold_writes` · ctest 22/22 · SA_WERROR 清洁构建 0 告警 · 断言防线反向验证通过) |
+
+#### ② 镜像拓扑变更(记账,非代码)
+
+- **GitHub 镜像从 `naka1205/*` 迁到 `workercrew/*`**:`naka1205/stone-age-client` 已 404、`workercrew/stone-age-client` 2026-09-14 新建(先为空仓)。本窗口起两仓 CI 与镜像推送均在 `workercrew` 下(server push 权限实测 403 on naka1205 ⇒ 凭据属 workercrew)。⚠️ **两仓 `.github/workflows/ci.yml` 的 `REPO_URL=github.com/${{ github.repository_owner }}/stone-age-server` 依赖 repository_owner == workercrew ⇒ 已随迁自动成立**(客户端 CI 三平台取源成功即实证);`docs/audits/2026-09-12-*` 里的 `naka1205` 链接已失效,**历史审计链接不回改**(记此为证)。
+- 首推时序遵守 §9.0.9:server(master+tag)先行、client 换 pin 后推,tag 两远端 `ls-remote` 各自核实。
+
+#### ③ 教训
+
+- **`code_format` 在本机客户端验证里"静默缺失"一次**:本机 PATH 无 clang-format ⇒ CMake 按"缺工具不注册"先例跳过注册,首跑注册清单 7 缺 1 硬失败 —— **守卫按设计工作了**(它就是为"少一条则绿色不完整"而立)。处置:本机 `pip install clang-format==21.1.8`(与 CI 同 pin)后复跑 7/7 全过。⇒ 与服务端 §9.0.30 同一条:CI 上必须有,接住"没有"的是 EXPECTED_TESTS,不是安装步骤。
