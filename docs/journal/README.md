@@ -92,6 +92,7 @@
 | §9.0.60 | 推送窗口执行记录 —— shared-v0.27.0(I| / A4 / OpenSSL 探测三笔同窗) | 2026-09-15 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.61 | 批次 B1 —— 直攻系宠技:RENZOKU / GBREAK(2) / MIGHTY / POWERBALANCE | 2026-09-15 | [`18-petskill.md`](18-petskill.md) |
 | §9.0.62 | 推送窗口执行记录 —— shared-v0.28.0(批次 B1) | 2026-09-15 | [`90-push-windows.md`](90-push-windows.md) |
+| §9.0.63 | 批次 B2 —— 宠技槽(B2a)+ CHARGE 集气(B2b);宠技列校正 c25..c31 | 2026-09-15 | [`18-petskill.md`](18-petskill.md) |
 
 ---
 
