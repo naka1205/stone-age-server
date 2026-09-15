@@ -1411,7 +1411,31 @@ EnemyTemplate makeWuliTemplate()
 	t.fire = 0;
 	t.wind = 0;
 	t.image = 100250;
+	// ★ 宠技槽(批次 B2a)= `enemybase1.txt` 第 1 行(乌力)的实测真值:
+	//   c26..c32(0 基 25..31)= {1, 0,0,0,0,0,0} —— 1 = 攻击(PETSKILL_NormalAttack),
+	//   其余 0 = 无技能。⚠️ 简报曾把乌力记成"全 0"——那是把 0 基 18..24 列
+	//   (WINDAT+状态抗性)误当宠技列所致;宠技列在 0 基 25..31(见 Api.h 校正注)。
+	t.pet_skills[0] = 1;
 	REQUIRE(t.name.assign("乌力"));
+	return t;
+}
+
+// 带宠技的模板:`enemybase1.txt` tempno=678(乌力斯坦)的实测宠技槽形状
+//   {30, 41, -1, -1, -1, -1, -1} —— **30 = 突击 CHARGE**(petskill2.txt 第 11 行,
+//   option `1 攻%+90`),41 = 合体前技(id 在表内),后五槽 -1 = 空槽。
+// ⚠️ 8.0 里 CHARGE(30) 共 60 行、背水(50) 共 6 行 —— 拿真值做 fixture,
+//   别拿简报里"乌力布鲁=30 / 黑乌力=50"那两个例子(它们是风属值,见 Api.h 校正注)。
+EnemyTemplate makeChargeSkillTemplate()
+{
+	EnemyTemplate t = makeWuliTemplate();
+	t.pet_skills[0] = 30; // 突击(CHARGE)
+	t.pet_skills[1] = 41;
+	t.pet_skills[2] = -1; // 空槽:与 0 同样不命中任何真实技能 id
+	t.pet_skills[3] = -1;
+	t.pet_skills[4] = -1;
+	t.pet_skills[5] = -1;
+	t.pet_skills[6] = -1;
+	REQUIRE(t.name.assign("乌力斯坦"));
 	return t;
 }
 
@@ -4616,13 +4640,65 @@ TEST_CASE("P1:世界逐行动提交保留状态清指令结果")
 // ⓘ 本节的战斗开局都走"敌人高血 / attack=0"的可存活对局(同 I| 系列的
 //   `startSurvivableDuelBattle` 取向):回合能推进,而血量只由玩家的宠技决定。
 
+// 给本回合的玩家槽下一条 PET_SKILL 指令并推进一回合(同 `useItemTurn` 的口径)。
+void petSkillTurn(Fixture &f, SA::Net::ConnectionId id, BattleId battle,
+                  std::uint32_t skill_id, std::uint32_t target_slot)
+{
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = f.world.battleField(battle)->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::PET_SKILL;
+	cmd.command.pet_skill.skill_id = skill_id;
+	cmd.command.pet_skill.target = target_slot;
+	f.world.onBattleCommand(id, cmd);
+	f.clock.advance(2000);
+	f.world.tick();
+}
+
+// ── B2 的 fixture 前提:玩家要有一只**带宠技槽的默认宠** ─────────────────────
+//
+// ★★ B2 起,PET_SKILL 指令要过 W| 持有门(主人的默认宠七槽里有该 skill_id)⇒
+//    B1 时代的"无宠玩家直接发宠技"不再成立。fixture 经 `givePetToPlayer` seam
+//    注入一只宠,再走一回合 PET_OUT 叫出 —— `default_pet` 的唯一写者是换宠指令
+//    (DR-BT21),seam 刻意不绕过它 ⇒ 这一步顺带覆盖了那条指令链。
+// ⚠️ 叫出的宠会站进宠位槽(owner+5):它不是会话槽 ⇒ 不挡回合就绪,也没有指令
+//   (fillEnemyCommands 只填敌方)⇒ 每回合站着不动,不影响各用例对敌方血量的断言
+//   (敌方目标选取是"玩家侧第一个活着的" = 槽 0)。
+void giveSkillPetAndCallOut(Fixture &f, SA::Net::ConnectionId id, BattleId battle,
+                            std::initializer_list<std::int32_t> skills)
+{
+	SA::Model::Pet pet{};
+	pet.hp = 100;
+	pet.vital = pet.str = pet.tough = pet.dex = 10; // 三围推导有非 0 源即可
+	int i = 0;
+	for (std::int32_t s : skills)
+		if (i < static_cast<int>(SA::Model::Pet::kPetSkillSlots))
+			pet.pet_skills[static_cast<std::size_t>(i++)] = s;
+	REQUIRE(pet.name.assign("技宠"));
+	const int pet_slot = f.world.givePetToPlayer(id, pet);
+	REQUIRE(pet_slot >= 0);
+
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = f.world.battleField(battle)->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::PET_OUT;
+	cmd.command.pet_out.pet_slot = static_cast<std::uint32_t>(pet_slot);
+	f.world.onBattleCommand(id, cmd);
+	f.clock.advance(2000);
+	f.world.tick();
+	REQUIRE(f.world.playerDefaultPet(id) == pet_slot); // default_pet 只有 PET_OUT 写
+}
+
 // 开一场「玩家(有武器、段数恒 1)对一只高血敌人」的对局,专供 B1 世界侧用例:
 //   ★ `unarmed=false` + `attack_num_min/max=1` ⇒ 段数**只可能**来自宠技覆盖,
 //     把空手多段的自由度从这些用例里摘出去(否则击杀边界会变成掷硬币);
 //   ★ quick/luck 归 0 ⇒ 回避基数压到下限,不被 MIGHTY 的「避」干扰;
 //   ★ str/tough = 100 备用(POWERBALANCE 的替换基数);attack 由用例给。
+//   ★ B2 起:开局顺带给玩家一只带宠技槽的默认宠并 PET_OUT 叫出(W| 持有门的
+//     fixture 前提;默认槽 {10,40,50} 恰好盖住 B1 三条用例的 skill_id)。
 BattleId startPetSkillBattle(Fixture &f, SA::Net::ConnectionId id, std::int32_t foe_hp,
-                             std::int32_t attack)
+                             std::int32_t attack,
+                             std::initializer_list<std::int32_t> pet_skills = {10, 40, 50})
 {
 	SA::Rules::BattleField pf{};
 	SA::Rules::Combatant &me = pf.at(0);
@@ -4652,22 +4728,8 @@ BattleId startPetSkillBattle(Fixture &f, SA::Net::ConnectionId id, std::int32_t 
 	foe.luck = 0;
 	const BattleId battle = f.world.startBattle(pf);
 	REQUIRE(f.world.joinBattle(battle, id, 0));
+	giveSkillPetAndCallOut(f, id, battle, pet_skills);
 	return battle;
-}
-
-// 给本回合的玩家槽下一条 PET_SKILL 指令并推进一回合(同 `useItemTurn` 的口径)。
-void petSkillTurn(Fixture &f, SA::Net::ConnectionId id, BattleId battle,
-                  std::uint32_t skill_id, std::uint32_t target_slot)
-{
-	SA::Domain::BattleCommand cmd{};
-	cmd.battle_id = battle;
-	cmd.turn = f.world.battleField(battle)->turn;
-	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::PET_SKILL;
-	cmd.command.pet_skill.skill_id = skill_id;
-	cmd.command.pet_skill.target = target_slot;
-	f.world.onBattleCommand(id, cmd);
-	f.clock.advance(2000);
-	f.world.tick();
 }
 
 TEST_CASE("宠技B1★★:世界侧 —— 空表=跳过、表内 MIGHTY 倍2 ⇒ 越过击杀边界")
@@ -4771,4 +4833,300 @@ TEST_CASE("宠技B1★★:世界侧 —— 背水之战 攻%+25 **从 FIXSTR 替
 	    1000000 - f.world.battleField(battle)->at(SA::Rules::kSideOffset).hp;
 	CHECK(drop >= 100);
 	CHECK(drop <= 500);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  突击 CHARGE(批次 B2b)—— 世界侧:状态机 / 持有门 / 数据面
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 世界侧要验的是 L3 之外的那一半(拍 / 击的判定在 RulesBattleTest 里逐条钉过):
+//   · 集气态跨回合存活在 **BattleInstance::charge_of_slot**(原 COM1/COM3 的替身);
+//   · 拍回合 / 完成击回合由 `injectChargeCommands` **注入合成指令** ⇒ 集气单位
+//     无需新指令即自动行动(原版 IsCharge 豁免 + 菜单置灰);
+//   · 完成击由 `projectChargeState` 投影 charge_ready + 攻%替换;
+//   · 拍 / 击的推进由 `applyChargeEffects` 按 L3 的 ActionEffects 落地。
+//
+// ⚠️★ 集气期间 onBattleCommand **丢弃**来令(集气态存续 ⇒ 该槽按注入指令行动)——
+//   这是"蓄力中宠物菜单置灰"在本仓槽位一体模型下的表意,见 World.cpp 的登记。
+
+TEST_CASE("宠技B2★★:世界侧 —— CHARGE 三拍:蓄力不动手 / 完成击 ×1.9 / 击后清态重蓄")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	// 玩家的默认宠七槽 = {30}(突击)。
+	const BattleId battle =
+	    startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/1000, /*pet_skills=*/{30});
+	f.world.loadPetSkillEffects({
+	    // petskill2.txt 第 11 行:突击 `1 攻%+90`(N=1 拍 / 完成击 ×1.9)。
+	    {/*skill_id=*/30, /*renzoku_hits=*/0, /*damage_mult_percent=*/100,
+	     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/0, /*defense_percent=*/0,
+	     /*charge_turns=*/1, /*charge_attack_percent=*/90},
+	});
+
+	// ── 回合 1:新发指令 = 第一拍(NoAction)⇒ 敌一点没掉 ────────────────
+	petSkillTurn(f, id, battle, /*skill_id=*/30, /*target=*/10);
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		CHECK(fld->at(SA::Rules::kSideOffset).hp == 1000000);
+	}
+
+	// ── 回合 2:完成击。**不再发指令**(客户端不可能重发:集气中菜单置灰)⇒
+	//    集气态自己推着走:注入的合成 PET_SKILL 落普攻管线。
+	//    有效攻 = str + (int)(str×90/100) = 100 + 90 = **190**(attack=1000 被替换)
+	//    ⇒ 落伤 ≈ (190−0.8)×2×0.7 ≈ 265 ⇒ 区间 [150, 500] 三向排除:
+	//      0 = 完成击没发生;~1400 = 按原 attack 打;~2500 = 叠加 90%×attack。
+	//    ⚠️ charge_ready 也在这一击生效(守方不可回避)—— 门①的逐条覆盖在
+	//      RulesBattleTest 的回避用例里,本条只钉它被投影上的后果之一:掉血。
+	f.clock.advance(2000);
+	f.world.tick();
+	std::int32_t after_strike = 0;
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		after_strike = fld->at(SA::Rules::kSideOffset).hp;
+		const std::int32_t drop = 1000000 - after_strike;
+		CHECK(drop >= 150);
+		CHECK(drop <= 500);
+	}
+
+	// ── 回合 3:完成击后集气态已清(原 `:7729` COM1 = NONE)⇒ 此时来令被接受、
+	//    且 PET_SKILL{30} 重新开蓄(第一拍)⇒ 不动手(血量停在完成击之后)。 ──
+	petSkillTurn(f, id, battle, /*skill_id=*/30, /*target=*/10);
+	CHECK(f.world.battleField(battle)->at(SA::Rules::kSideOffset).hp == after_strike);
+
+	// ── 回合 4:新集气的完成击 ⇒ 再掉一次同带伤害(证明集气态**清了**:
+	//    若上一条的来令被丢弃,这里走的会是"第二拍"而不是完成击)。 ──────────
+	const std::int32_t before = f.world.battleField(battle)->at(SA::Rules::kSideOffset).hp;
+	f.clock.advance(2000);
+	f.world.tick();
+	const std::int32_t drop2 = before - f.world.battleField(battle)->at(SA::Rules::kSideOffset).hp;
+	CHECK(drop2 >= 150);
+	CHECK(drop2 <= 500);
+}
+
+TEST_CASE("宠技B2★★:世界侧 —— 持有门:无宠 / 宠无此技 / 表外 id(两道门各司其职)")
+{
+	// W| 持有门(原 battle_command.c:269-335):主人的**默认宠**七槽里要有该 skill_id。
+	//   不过 ⇒ 整条指令降级 WAIT(与 I| 同款:不产事件、不摇 rng)⇒ 敌一点没掉。
+	// ⚠️★ 本用例还钉住**两道门的分工**:持有门管"这只宠会不会"(查宠物实体),
+	//   效果表门管"这招怎么算"(查 PetSkillEffect)。⇒ 「表外 id」有两种情形,
+	//   处置不同而**可观察结果相同**(都不掉血),所以必须成对断言:
+	//     ① 宠没有该技 ⇒ 持有门拒(指令根本没进 L3);
+	//     ② 宠有该技、但效果表没有该行 ⇒ 持有门放行,L3 按表外技能整次跳过(B1 语义)。
+	auto foe_hp = [](Fixture &f, BattleId b)
+	{ return f.world.battleField(b)->at(SA::Rules::kSideOffset).hp; };
+
+	SUBCASE("无默认宠 ⇒ 持有门拒")
+	{
+		Fixture f;
+		const SA::Net::ConnectionId id = f.transport.connect();
+		const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+		f.transport.deliver(id, hs.data(), hs.size());
+		f.world.tick();
+		// 刻意**不给宠**:空手 startPetSkillBattle 有宠 ⇒ 这里手工开局。
+		SA::Rules::BattleField pf{};
+		SA::Rules::Combatant &me = pf.at(0);
+		me.occupied = true;
+		me.kind = SA::Rules::CombatantKind::kPlayer;
+		me.slot = 0;
+		me.level = 20;
+		me.hp = me.max_hp = 1000000;
+		me.attack = 1000;
+		me.str = 100;
+		me.defense = 100;
+		SA::Rules::Combatant &foe = pf.at(SA::Rules::kSideOffset);
+		foe.occupied = true;
+		foe.kind = SA::Rules::CombatantKind::kEnemy;
+		foe.slot = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+		foe.level = 1;
+		foe.hp = foe.max_hp = 1000000;
+		foe.attack = 0;
+		foe.defense = 1;
+		const BattleId battle = f.world.startBattle(pf);
+		REQUIRE(f.world.joinBattle(battle, id, 0));
+		REQUIRE(f.world.playerDefaultPet(id) == -1); // 无默认宠
+
+		// 效果表**注入**了 ⇒ 掉血只可能来自"门没拦住"。
+		f.world.loadPetSkillEffects({
+		    {/*skill_id=*/10, /*renzoku_hits=*/2, /*damage_mult_percent=*/100,
+		     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/0, /*defense_percent=*/0},
+		});
+		petSkillTurn(f, id, battle, /*skill_id=*/10, /*target=*/10);
+		CHECK(foe_hp(f, battle) == 1000000);
+	}
+
+	SUBCASE("有宠但七槽无此技 ⇒ 持有门拒")
+	{
+		Fixture f;
+		const SA::Net::ConnectionId id = f.transport.connect();
+		const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+		f.transport.deliver(id, hs.data(), hs.size());
+		f.world.tick();
+		const BattleId battle =
+		    startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/1000, /*pet_skills=*/{10});
+		REQUIRE(f.world.playerDefaultPet(id) == 0);
+		f.world.loadPetSkillEffects({
+		    {/*skill_id=*/10, /*renzoku_hits=*/2, /*damage_mult_percent=*/100,
+		     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/0, /*defense_percent=*/0},
+		});
+		// 指令要的是 50(背水),宠只有 {10} ⇒ 门拒。
+		petSkillTurn(f, id, battle, /*skill_id=*/50, /*target=*/10);
+		CHECK(foe_hp(f, battle) == 1000000);
+		// 对照:同一只宠发 {10} ⇒ 门过、两段伤害落地(区分"门拒"与"整场不动")。
+		petSkillTurn(f, id, battle, /*skill_id=*/10, /*target=*/10);
+		CHECK(foe_hp(f, battle) < 1000000);
+	}
+
+	SUBCASE("宠有该技但效果表无此行 ⇒ 持有门放行、L3 按表外跳过(B1 语义)")
+	{
+		Fixture f;
+		const SA::Net::ConnectionId id = f.transport.connect();
+		const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+		f.transport.deliver(id, hs.data(), hs.size());
+		f.world.tick();
+		const BattleId battle =
+		    startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/1000, /*pet_skills=*/{50});
+		f.world.loadPetSkillEffects({
+		    {/*skill_id=*/10, /*renzoku_hits=*/2, /*damage_mult_percent=*/100,
+		     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/0, /*defense_percent=*/0},
+		});
+		petSkillTurn(f, id, battle, /*skill_id=*/50, /*target=*/10); // 表外 ⇒ 跳过
+		CHECK(foe_hp(f, battle) == 1000000);
+	}
+}
+
+TEST_CASE("宠技B2★:数据面 —— spawnEnemy 整组拷模板宠技槽(0/-1/表外 id 一律不清洗)")
+{
+	// 1:1 那个 `for(i) unionTable.indexOfPetskill[i] = *(tp + E_T_PETSKILL1 + i)`
+	//   (enemy.c:1204-1206):**原样整组拷**,不把 0(无技能)/ -1(空槽)规整掉。
+	//   ⚠️ 这里刻意用 `makeChargeSkillTemplate`(乌力斯坦 678 行真值:{30, 41, -1×5})
+	//   并额外塞一个表外 id(644,不在 petskill2.txt)⇒ 证明"死引用照存"。
+	EnemyTemplate t = makeChargeSkillTemplate();
+	t.pet_skills[1] = 644; // 表外死引用(实测 81 槽)
+	ScriptedRandom rng({2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	const SA::Model::Enemy e =
+	    spawnEnemy(t, makeWuliEncounterFixedLv1(), 1, rng, SA::Rules::RulesConfig{});
+
+	CHECK(e.pet_skills[0] == 30);  // CHARGE
+	CHECK(e.pet_skills[1] == 644); // ★ 表外 id 照存,不在生成面过滤
+	CHECK(e.pet_skills[2] == -1);  // ★ 空槽照存
+	CHECK(e.pet_skills[3] == -1);
+	CHECK(e.pet_skills[4] == -1);
+	CHECK(e.pet_skills[5] == -1);
+	CHECK(e.pet_skills[6] == -1);
+
+	// 乌力(真值 {1,0,...}):0 = 无技能,也照存。
+	ScriptedRandom rng2({2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	const SA::Model::Enemy w =
+	    spawnEnemy(makeWuliTemplate(), makeWuliEncounterFixedLv1(), 1, rng2,
+	               SA::Rules::RulesConfig{});
+	CHECK(w.pet_skills[0] == 1); // 攻击
+	for (std::size_t i = 1; i < SA::Model::Enemy::kPetSkillSlots; ++i)
+		CHECK(w.pet_skills[i] == 0);
+}
+
+TEST_CASE("宠技B2★★:捕获 —— 宠技七槽从敌人 L2 实体整组拷贝(pet.c:375-377)")
+{
+	// ★★ 本批"技能属于哪只宠物"的**数据面闭环**:模板 → 敌人实体(spawnEnemy)→
+	//   捕获 → 宠物实体(createPetFromCapture)。断言宠物实体七槽 == 模板七槽。
+	// ⚠️ 与 `joinCapturable`(手填战场、无 L2 敌人)不同:这里必须走
+	//   `spawnEnemyToField` 让敌人有 L2 实体,否则拷不到(那正是 M.4b 那半的覆盖)。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	const BattleId battle = f.world.startBattle(makePlayerOnlyField());
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	// 乌力斯坦形状的模板(真值 {30, 41, -1×5})⇒ 敌人实体该带这七槽。
+	REQUIRE(f.world.spawnEnemyToField(battle, SA::Rules::kSideOffset,
+	                                  makeChargeSkillTemplate(),
+	                                  makeWuliEncounterFixedLv1(), /*baselevel=*/1));
+
+	// 敌人实体侧先断言一次(捕获断言的源头)。
+	{
+		const SA::Model::Enemy *src = f.world.battleEnemyAt(battle, SA::Rules::kSideOffset);
+		REQUIRE(src != nullptr);
+		CHECK(src->pet_skills[0] == 30);
+		CHECK(src->pet_skills[1] == 41);
+		CHECK(src->pet_skills[6] == -1);
+	}
+
+	// 捕获要命中:残血 + 可捕(模板表 c38 那个 PETFLG 不参与,可捕性来自敌人表行
+	//   `makeWuliEncounterFixedLv1` 的 capturable=true)。残血经 const_cast 直接
+	//   改战场投影(与 M.1 的 captureTurn 用例同法:判定吃的是 hp/max_hp)。
+	auto *field = const_cast<SA::Rules::BattleField *>(f.world.battleField(battle));
+	REQUIRE(field != nullptr);
+	field->at(SA::Rules::kSideOffset).hp = 1;
+	field->at(SA::Rules::kSideOffset).mods.capturable = true;
+
+	captureTurn(f, id, battle, SA::Rules::kSideOffset);
+	REQUIRE(f.world.petCount() == 1);
+	REQUIRE(f.world.playerPetSlotsUsed(id) == 1);
+
+	const SA::Model::Pet *pet = f.world.playerPetAt(id, 0);
+	REQUIRE(pet != nullptr);
+	// ★★ 七槽整组拷,含 -1 空槽与 0/死引用一律照存(不清洗)。
+	CHECK(pet->pet_skills[0] == 30);
+	CHECK(pet->pet_skills[1] == 41);
+	CHECK(pet->pet_skills[2] == -1);
+	CHECK(pet->pet_skills[3] == -1);
+	CHECK(pet->pet_skills[4] == -1);
+	CHECK(pet->pet_skills[5] == -1);
+	CHECK(pet->pet_skills[6] == -1);
+}
+
+TEST_CASE("宠技B2★:模板带技的敌人仍只普攻(敌人宠技属后续批)")
+{
+	// ⚠️ 本批**有意不让敌人用宠技**:`fillEnemyCommands` 只填 ATTACK(敌人 AI 战术
+	//   属后续批)。判据:模板里带着 CHARGE(30)的敌人,照样**打人掉血**(而不是
+	//   站着蓄力)—— 若哪天敌人 AI 接上宠技,这条会以"玩家不掉血"转红。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = me.max_hp = 1000;
+	me.attack = 1;
+	me.defense = 1;
+	const BattleId battle = f.world.startBattle(pf);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	// 宠技效果表也注入 CHARGE 行 ⇒ "敌人不用宠技"才是唯一解释。
+	f.world.loadPetSkillEffects({
+	    {/*skill_id=*/30, /*renzoku_hits=*/0, /*damage_mult_percent=*/100,
+	     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/0, /*defense_percent=*/0,
+	     /*charge_turns=*/1, /*charge_attack_percent=*/90},
+	});
+	// 敌人由 spawnEnemyToField 生成(模板带 CHARGE 槽、L2 实体在)⇒ 敌方**一切条件
+	//   都齐了**,只有 fillEnemyCommands 不发宠技一条路可走。
+	REQUIRE(f.world.spawnEnemyToField(battle, SA::Rules::kSideOffset,
+	                                  makeChargeSkillTemplate(),
+	                                  makeWuliEncounterFixedLv1(), /*baselevel=*/20));
+	// 玩家发 WAIT(不吃自己的行动),看敌人这一回合做什么。
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = f.world.battleField(battle)->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+	f.world.onBattleCommand(id, cmd);
+	f.clock.advance(2000);
+	f.world.tick();
+
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->at(0).hp < 1000); // 敌人出手了(普攻)
+	CHECK(fld->at(SA::Rules::kSideOffset).hp == fld->at(SA::Rules::kSideOffset).max_hp);
 }

@@ -264,6 +264,17 @@ struct CombatModifiers
 	int pet_skill_attack_percent = 0;
 	int pet_skill_defense_percent = 0;
 
+	// ★★ 突击 CHARGE 的**指令参数**(批次 B2b;`PETSKILL_ChargeAttack`,
+	//    pet_skill.c:614-640,option `N 攻%+P`)—— 与上面六列同一分工:World 按本回合
+	//    PET_SKILL 指令查宠技效果表投影,参数决定 L3 走哪条分支(蓄力拍 vs 直攻)。
+	//   ⚠️ `charge_turns > 0` ⇔ 本指令是蓄力指令;**第一拍在本指令的行动位发生**
+	//     (原版 `case S_CHARGE: BATTLE_Charge(...)` 于行动前调,battle.c:7259:
+	//     COM3 low=N > 0 ⇒ 减一并 NoAction)⇒ 蓄力回合**不摇攻击 rng、不产伤害事件**。
+	//   ⚠️ 归一在投影处:`N<1 || N>10 ⇒ 1`(pet_skill.c:630-634,同 RENZOKU 的取向)。
+	//   ★ **默认 0 = 非蓄力** ⇒ L3 分支不触发,现有用例逐位不受影响。
+	int pet_skill_charge_turns = 0;
+	int pet_skill_charge_percent = 0; // 完成击的 攻% P(完成击时由世界投影进 attack_percent)
+
 	// ── 状态异常(§4,批次 L4.1)──────────────────────────────────
 	//
 	// ★★ **攻方「带毒装备」**(原 `CHAR_SUITPOISON`,`_SUIT_ADDPART4` 在 8.0 **开**,
@@ -396,7 +407,18 @@ struct Combatant
 
 	// ★ 本回合是否处于「集气完成」(原指令 `BATTLE_COM_S_CHARGE_OK`)。
 	//   攻方带此标志时,守方**一律不可回避**(§3.2 六道否决第一道)。
+	//   ★ 批次 B2b 起有了真实写者:完成击那一行动由 World 从实例集气态投影置 true
+	//     (原版 COM1=S_CHARGE_OK 在 `:7729` 攻击段末即清 ⇒ 只作用于完成击本回合)。
 	bool charge_ready = false;
+
+	// ★★ 突击 CHARGE 的**集气态快照**(批次 B2b)—— 世界侧所有的跨回合状态,
+	//   每次行动前由 World 从战斗实例的 `charge_of_slot` 投影进来,L3 只读。
+	//   ⚠️ 与 `charging_turns`(世界末日 CHAR_DOOMTIME)是两族技能,不合并(DR-BT5);
+	//     与 `charge_ready` 也是两件事:本字段管「蓄力过程」,那个管「完成击那一击」。
+	//   -1 = 无集气态(默认 ⇒ L3 分支不触发,现有用例逐位不受影响);
+	//   >0 = 本行动是**蓄力拍**(NoAction:不摇攻击 rng、不产事件,拍后世界侧减一);
+	//   =0 = 本行动是**完成击**(World 同时投影 charge_ready + 攻%替换,见上)。
+	std::int32_t pet_charge_beats = -1;
 
 	// 原 StatusTbl 把酒醉/混乱直接映射到各自的 WORK 计数（battle_event.c:90）。
 	// 当前单槽覆盖内只由 status/status_turns 表达，不维护第二份无人同步的值。

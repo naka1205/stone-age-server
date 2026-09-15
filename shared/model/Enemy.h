@@ -154,6 +154,23 @@ struct Enemy
 	//    本批不读文件 ⇒ 由调用方给,见 `world/Api.h` 的 `EnemyTemplate`。
 	NameStr name{};
 
+	// ── 宠技槽(源码 :1092-1094;原始 8.5 树 `enemy.c:1204-1206`,批次 B2a)────────
+	//
+	// ★★ 1:1 对应 `unionTable.indexOfPetskill[CHAR_MAXPETSKILLHAVE(=7)]`,生成时整组
+	//    从模板拷:`CharNew.unionTable.indexOfPetskill[i] = *(tp + E_T_PETSKILL1 + i)`
+	//    —— 模板表 `enemybase1.txt` 的 `E_T_PETSKILL1..7` 共 7 列(枚举 19..25;
+	//    ⚠️ 按 6 个 char 列 + `ENEMYTEMP_STARTINTNUM=E_T_DATACHARNUM+1=7` 的载入器映射,
+	//    即文件 **0 基 25..31** 列,不是 18..24 —— 2026-09-15 逐列实测校正,见
+	//    `EnemyTemplate::pet_skills`)。捕获时整组拷给 `Pet::pet_skills`(源码 :375-377)。
+	// ⚠️ **0 = 无技能**(实测 36 槽显式写 0;0 在 petskill2.txt 里是「待机」,不动即等价);
+	//    **-1 = 空槽**(实测 896 槽)同样照存不归零 —— 两者都不会命中任何真实技能 id,
+	//    指令侧「表内才有该技能」的门自然把它们拒掉(`World.cpp` 的 PET_SKILL 持有门)。
+	//    表里另有死引用(如 644/645,不在 8.0 加载的 petskill2.txt 里)⇒ 同一道门拒。
+	// ★ 敌人本批**不使用**宠技(`fillEnemyCommands` 只填普攻,敌人 AI 属后续批);
+	//   建槽是为了生成面的完整(1:1)与捕获复制的源头(0 源可拷 = 捕获宠永远无技)。
+	static constexpr std::size_t kPetSkillSlots = 7; // = CHAR_MAXPETSKILLHAVE(char_base.h:48)
+	std::int32_t pet_skills[kPetSkillSlots] = {};
+
 	// ── 捕获相关:★ 两个 **WORK** 字段,不是持久化数值 ──────────────────
 	//
 	// ★★ 这两个把 `Combatant.h` 里那句「1.5 无敌人数值表 ⇒ 调用方按 30 兜底」
@@ -246,8 +263,10 @@ struct Enemy
 //    `Rules::CombatModifiers.equip_critical`;反击排在 L4 之后。
 //    ⚠️ 别看到"暴击已实现"就把 critial 建上 —— 战斗输入走 `Combatant`,不走 L2 实体。
 //
-// ④ **宠技槽** `unionTable.indexOfPetskill[7]`(源码 :1092-1094)⇒ 宠技批次。
-//    ★ 03 §3.2 已裁定 `unionTable` **保留但拆开**,届时按那条落地。
+// ④ ✅ ~~**宠技槽** `unionTable.indexOfPetskill[7]`~~ ⇒ **批次 B2a 已建**为上方
+//    `pet_skills[7]`(源码 :1092-1094 的整组模板拷)。★ 03 §3.2 裁定的 `unionTable`
+//    保留但拆开,在两个结构上各落一份定长数组(不共享类型:敌人侧是生成源、
+//    宠物侧是捕获产物,列宽相同而来源不同 —— 合成一个类型会把"谁拷谁"藏掉)。
 //
 // ⑤ ★★ **Y 五项**(源码 :1154-1158)—— 敌人侧**不建**,而 `Pet` 侧本批**建了**。
 //    这个不对称是有理由的,不是漏:Y 五项是「初值快照」,消费方是**升级 / 成长**

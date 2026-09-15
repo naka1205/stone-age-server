@@ -232,6 +232,25 @@ struct EnemyTemplate
 	//    `sai_w_001_2/3乌力` —— 把等级区间写进了名字,那是**给配表人看的标签**,
 	//    不是玩家看到的名字。⇒ `EnemyEncounter` 因此**不建 name**(见那边文末 ⑧)。
 	SA::Model::NameStr name{};
+
+	// ── 宠技槽(`E_T_PETSKILL1..7`,批次 B2a)──────────────────────────
+	//
+	// ★★ 源码枚举 `include/enemy.h` 里 `E_T_PETSKILL1` = **19**(0 基,`E_T_TEMPNO=0` 起),
+	//    经载入器映射(6 个 char 列 + `ENEMYTEMP_STARTINTNUM = E_T_DATACHARNUM+1 = 7`,
+	//    `enemy.c:315-332`)即 `enemybase1.txt` 的 **0 基 25..31 列**。
+	//    ⚠️★★ **2026-09-15 逐列实测校正**:0 基 18..24 列是 `WINDAT + 六种状态抗性`
+	//      (POISON..CONFUSION),不是宠技 —— 判据有三:
+	//      ① c16..c19 在 1053 行里 1050 行满足「四属和 ∈ [0,100]」(元素列指纹);
+	//      ② 本仓 M.4b 已验证的 `makeWuliTemplate`(乌力=地80/水20)恰落在 c16/c17;
+	//      ③ 18..24 列的值分布(0/10/30/50/100/1000/-100)与宠物技能 id 谱系对不上,
+	//        而 25..31 列的分布(-1/1/2/3/10/11/20/30/40/41/50/…)与 petskill2.txt
+	//        的 id 谱系逐个对上(1=攻击 2=防御 3=破防 10/11=连击 20=忠犬
+	//        **30=突击 CHARGE** 40=一击必杀 **50=背水1** 150=不防守)。
+	//    ★ 实测行:乌力={1,0×6}(第 1 行)· 乌力斯坦(678)={30,41,0×5}(CHARGE 行)
+	//      · 黑乌力={1,2,-1×5};CHARGE(30)共 60 行、背水(50)共 6 行。
+	//    ⚠️ **0 = 无技能**、-1 = 空槽、表外死引用(如 644/645)照存 —— 取值域讨论见
+	//      `Model::Enemy::pet_skills`;生成时整组拷给实体,不清洗(`spawnEnemy`)。
+	std::int32_t pet_skills[SA::Model::Enemy::kPetSkillSlots] = {};
 };
 
 // 敌人表(`enemy1.txt`)的一行 —— 批次 M.5。
@@ -619,9 +638,10 @@ struct ItemEffect
 //    文件解析器(宠技表 D 线导入器尚未落地)。真数据行由 D 线导入期解析
 //    `csa8.0/gmsv/data/petskill2.txt`(GBK)的 option 列后经 `loadPetSkillEffects`
 //    注入;当前由 fixture 注入真数据的几行(见 WorldTickTest)。
-// ★ 只收**直攻系**(本批已回源码确证语义的 4 个技能):
-//     RENZOKU(PETSKILL_ContinuationAttack)/ GBREAK / GBREAK2(PETSKILL_GuardBreak[2])/
-//     MIGHTY(PETSKILL_Mighty)/ POWERBALANCE(PETSKILL_PowerBalance)。
+// ★ 只收**已回源码确证语义的净核技能**:
+//     直攻系 4 个(B1):RENZOKU(PETSKILL_ContinuationAttack)/ GBREAK / GBREAK2
+//     (PETSKILL_GuardBreak[2])/ MIGHTY(PETSKILL_Mighty)/ POWERBALANCE(PETSKILL_PowerBalance);
+//     蓄力 1 个(B2):CHARGE(PETSKILL_ChargeAttack,option `N 攻%+P`)。
 //   其余宠技(治疗/状态/召唤等)各自绑未移植链路 ⇒ 不进本表;表外 skill_id 在 L3
 //   按表外技能处理(整次行动跳过,不退化成普攻)。
 struct PetSkillEffect
@@ -641,6 +661,19 @@ struct PetSkillEffect
 	// POWERBALANCE 的 攻% / 防%(option `攻%+N` / `防%-N` 的 N,可负)。0 = 不改写。
 	std::int32_t attack_percent = 0;
 	std::int32_t defense_percent = 0;
+	// ── 突击 CHARGE(批次 B2b;`PETSKILL_ChargeAttack`,pet_skill.c:614-640)──
+	//
+	// ★ option 形如 `1 攻%+90`:第 1 个数字 = 蓄力拍数 N(`sscanf %d`),`攻%+` 后的
+	//   数字 = 完成击的攻% P(`strstr "攻%"` + `sscanf`)。⇒ 完成击伤害基数的替换式
+	//   是 `WORKATTACKPOWER = FIXSTR + FIXSTR×P×0.01`(battle_event.c:5039-5042,
+	//   P 取 COM3 high)—— **不是** DamageMult。
+	// ⚠️ 蓄力拍数 N 的归一与 RENZOKU 同款:`N<1 || N>10 ⇒ 1`(pet_skill.c:630-634),
+	//   在投影处做(同 `renzoku_hits` 的取向)。**0 = 非蓄力技能**(该行两列不适用)。
+	// ⚠️ 跨回合语义:指令回合起,每次行动位先跑「拍」(NoAction、不摇攻击 rng),
+	//   拍尽后的下一次行动才是完成击(×1.9、守方不可回避)—— 状态机落点见
+	//   `World.cpp` 的 `charge_of_slot`(战斗实例内部态,不上线协议)。
+	std::int32_t charge_turns = 0;          // 蓄力拍数 N;0 = 非蓄力技能
+	std::int32_t charge_attack_percent = 0; // 完成击的 攻% P(option `攻%+N` 的 N)
 };
 
 class World final : public SA::Net::TransportEvents,
@@ -751,6 +784,22 @@ class World final : public SA::Net::TransportEvents,
 	// 返回:放入的背包槽下标(∈ [kStartItemArray, kMaxItemHave));失败(无 L2 玩家 /
 	//    背包满 / 道具池满)返 −1,且**世界一个字节都没动**(门在任何写之前,同捕获三门)。
 	int giveItemToPlayer(SA::Net::SessionId session, const SA::Model::Item &item);
+
+	// 往某会话玩家的宠物槽放一只宠物(批次 B2 的**注入 seam**)。
+	//
+	// ★★ 与 `giveItemToPlayer` 完全同性质:是个**灌入点**,不是玩法。宠物唯一的
+	//    真实写入链路是捕获(M.1),而 B2 的宠技槽持有门要「主人有一只带技能的
+	//    默认宠」才有东西可验 —— 走捕获造 fixture 要拖起整场战斗 + 摇捕获骰,
+	//    本 seam 让门现在就有数据可验(同两个注入表让遇敌有数据可遇)。
+	//    ⇒ 真玩法接宠物领取 / 交易 / 孵化后,宠物由那些路径进槽,本 seam 退回纯测试注入。
+	// ⚠️★★ **不写 `default_pet`** —— 它的唯一写者是换宠指令 PET_OUT(DR-BT21 的裁定:
+	//    唯一入口),本 seam 在它旁边开第二扇门就会把"换宠语义在世界侧只有一处"打破。
+	//    测试要先 PET_OUT 一次再验宠技门,恰好顺带覆盖了那条指令链。
+	// 三道门(顺序 = 预留 → 提交,同捕获):① 无 L2 玩家;② 宠物槽满
+	//   (findFreePetSlot,悬空句柄算占用);③ 宠物池满。失败返 −1,世界一个字节都没动。
+	// 成功返回放入的宠物槽下标(∈ [0, kMaxPetHave)),宠物字段按入参整只落池
+	//   (含 `pet_skills` 七槽 —— 模拟"这只宠从模板带技"的那一半)。
+	int givePetToPlayer(SA::Net::SessionId session, const SA::Model::Pet &pet);
 
 	// ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
 	void requestShutdown() noexcept;

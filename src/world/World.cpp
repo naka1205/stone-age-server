@@ -118,6 +118,26 @@ struct WorldWriteContext
 
 // 战斗事件缓冲。★ 每场战斗**复用一个**:domain::BattleEvents 是 7 KB 的 POD,
 //   每回合新建一个就是每回合一次 7 KB 的拷贝(shared/rules/battle.h 的原话)。
+//
+// ── 集气态(批次 B2b)────────────────────────────────────────
+// ★ 原版 CHARGE 的跨回合存活靠**工作槽**:COM1 = S_CHARGE 经 `BATTLE_AllCharaCWaitSet`
+//   的 `BATTLE_IsCharge` 豁免(battle.c:668)熬过回合末的 COM 清零,COM3 low(剩余拍数)
+//   / high(攻%)随行。我们是「L3 纯函数 + 事件回写」⇒ 这份跨回合状态必须落在
+//   **战斗实例**(世界侧)上,由 World 每行动投影进 Combatant 快照、按 L3 的
+//   ActionEffects 回写推进 —— 与 KnockbackState「L3 判定、世界累加」同一分工。
+// ⚠️ 不上线协议(IDL 不动):它是战斗内部态,客户端的表现(蓄力回合不动、完成击
+//   掉血)由既有事件流承载。
+struct ChargeState
+{
+	// 剩余蓄力拍。**-1 = 无集气态**;>0 = 已开蓄、还有这么多拍(每拍 NoAction);
+	// ==0 = 下一行动是完成击(×1.9 + 守方不可回避)。
+	// ⚠️ 与 `Combatant::charging_turns`(世界末日 CHAR_DOOMTIME)是**两件事**:那是
+	//   「自己发动技能的集气计时」的另一族(DR-BT5),本结构只装宠技 CHARGE。
+	std::int32_t beats = -1;
+	std::int32_t percent = 0;  // 完成击的 攻%(COM3 high,option `攻%+P`)
+	std::int32_t skill_id = 0; // 完成击合成指令要带的 skill_id
+	std::uint32_t target = 0;  // 目标槽(原 COM2 在蓄力期间原样保留)
+};
 struct BattleInstance
 {
 	BattleId id = 0;
@@ -147,6 +167,11 @@ struct BattleInstance
 	//    以及 demo 里手填的那只 foe(见 `makeDemoField`)都没有。
 	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> enemy_of_slot{};
 	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> pet_of_slot{};
+	// 集气态(批次 B2b,见上方 ChargeState)。★ 按**下标句柄**活:单位死亡 / 离场后
+	//   槽位守卫(`occupied && !dead`)让残余状态不再触发;新指令到达即清
+	//   (onBattleCommand,对应原版「蓄力中宠物菜单关闭」—— 新指令不可能,
+	//   我们的槽位一体 ⇒ 以"替换"表意)。
+	std::array<ChargeState, SA::Rules::kSlotCount> charge_of_slot{};
 	std::array<std::optional<int>, SA::Rules::kSlotCount> quick_to_restore{};
 	std::array<bool, SA::Rules::kSlotCount> profit_settled{};
 	std::array<std::int32_t, SA::Rules::kSlotCount> pending_exp{};
@@ -374,6 +399,14 @@ bool createPetFromCapture(const SA::Rules::Combatant &tgt,
 		// 图号(源码 :337-338:两个槽同值 = 敌人的**当前**图号)。
 		pet->origin_image = src_enemy->base_image;
 		pet->base_image = src_enemy->base_image;
+
+		// ── 宠技槽整组拷(源码 :375-377;原始 8.5 树 `pet.c:375-377`,批次 B2a)──
+		// ★ `for(i) CharNew.unionTable.indexOfPetskill[i] = CHAR_getPetSkill(enemyindex, i)`
+		//   —— 7 槽全拷、不清洗:0(无技能)/ -1(空槽)/ 表外死引用照存,与四维同一来源。
+		//   ⚠️ `src_enemy == nullptr`(demo foe / PvP)⇒ 下面整组留 0(结构默认值),
+		//     那是"抓不到数据源"的既定记账,不是新偏差(同四维那一组的 else 注记)。
+		for (std::size_t i = 0; i < SA::Model::Pet::kPetSkillSlots; ++i)
+			pet->pet_skills[i] = src_enemy->pet_skills[i];
 
 		// ⚠️★★ **`luck` 照抄 `variable_ai`,而这看着像 bug 却是原版行为**:
 		//    源码 :347 是 `CharNew.data[CHAR_LUCK] = CHAR_getInt(enemyindex, CHAR_LUCK)`,
@@ -762,6 +795,8 @@ void projectPetSkill(BattleInstance &b, const std::vector<PetSkillEffect> &effec
 		atk.mods.pet_skill_guard_break = 0;
 		atk.mods.pet_skill_attack_percent = 0;
 		atk.mods.pet_skill_defense_percent = 0;
+		atk.mods.pet_skill_charge_turns = 0;
+		atk.mods.pet_skill_charge_percent = 0;
 
 		if (!b.commands.present[slot])
 			continue;
@@ -774,7 +809,10 @@ void projectPetSkill(BattleInstance &b, const std::vector<PetSkillEffect> &effec
 		if (e == nullptr)
 			continue; // 表外技能 / 空表 ⇒ 保持"无技能"⇒ L3 跳过(不退化成普攻)
 
-		atk.mods.pet_skill_direct = true;
+		// ⚠️ 蓄力行**不是**直攻系:第一拍由 L3 的集气分支接管(先于"表外 ⇒ 跳过"
+		//   判定),完成击的 direct 由 `projectChargeState` 按实例态投影 ⇒ 此处不置。
+		if (e->charge_turns == 0)
+			atk.mods.pet_skill_direct = true;
 		// ① RENZOKU 段数归一:`if(N < 1 || N > 10) N = 1;`(pet_skill.c:605-606)——
 		//   ★ 越界**归 1,不是夹到边界**,也不是归"无技能":原版此时仍是 RENZOKU
 		//     (COM1 = S_RENZOKU、gDamageDiv = 1)⇒ 依然跳过段数那笔 rng。
@@ -788,6 +826,137 @@ void projectPetSkill(BattleInstance &b, const std::vector<PetSkillEffect> &effec
 		atk.mods.pet_skill_guard_break = e->guard_break;
 		atk.mods.pet_skill_attack_percent = e->attack_percent;
 		atk.mods.pet_skill_defense_percent = e->defense_percent;
+		// ② CHARGE 蓄力拍数归一(批次 B2b):`N<1 || N>10 ⇒ 1`(pet_skill.c:630-634,
+		//   与 RENZOKU 同款)。⚠️ **归 1 仍是蓄力指令**(原版 COM1=S_CHARGE 照设),
+		//   与"表外"不同;`charge_turns == 0` 的行才是非蓄力技能(不写、保持 0)。
+		if (e->charge_turns != 0)
+		{
+			atk.mods.pet_skill_charge_turns =
+			    (e->charge_turns < 1 || e->charge_turns > 10) ? 1 : e->charge_turns;
+			atk.mods.pet_skill_charge_percent = e->charge_attack_percent;
+		}
+	}
+}
+
+// ── 突击 CHARGE 的三段世界侧接线(批次 B2b)──────────────────────────────
+//
+// ★★ 状态机落点:**战斗实例的 `charge_of_slot[slot]`**(`BattleInstance`,世界侧)。
+//   三段分工与 KnockbackState 同形 —— L3 判定、世界落地:
+//     ① `projectChargeState`  读实例态 ⇒ 写当行动者的 Combatant 快照(拍 / 击);
+//     ② `injectChargeCommands` 实例态非空 ⇒ 给该槽**注入合成指令**(集气单位
+//        无需新指令即自动行动,原版靠 COM1=S_CHARGE 存活 + AI/C_OK 豁免);
+//     ③ `applyChargeEffects`  按 L3 的 ActionEffects 推进/清空实例态。
+//
+// ⚠️★ 原版凭据(逐条复核 2026-09-15,原始 8.5 树):
+//   · 跨回合存活:`BATTLE_AllCharaCWaitSet` 对 `BATTLE_IsCharge` 单位**不**清 COM1
+//     (battle.c:645-661/668)⇒ 集气者是唯一在回合末保住指令的单位;
+//   · 集气中**不可重发指令**:宠物菜单置灰(battle_command.c:945
+//     `BATTLE_IsCharge ⇒ BP_FLG_PET_MENU_OFF`)⇒ 我们的"新指令替换集气"是
+//     槽位一体模型下的替代表意(onBattleCommand 处记明);
+//   · 敌人侧集气自动就绪:battle_ai.c:45 `IsCharge ⇒ C_OK`(本批敌人不用宠技);
+//   · 状态清指令者丢集气:`BATTLE_StatusSeq` 对 `CanMoveCheck == FALSE` 无条件
+//     `COM1 = NONE`(battle.c:5440,无 IsCharge 豁免)⇒ 与 L3「状态门在集气分支
+//     之前」的次序一致。
+
+// ① 把实例集气态投影进该行动者的快照。★ 必须在 `projectPetSkill` **之后**调用:
+//   完成击要覆盖表投影(direct=false / attack_percent=0),改用完成击的那套参数。
+void projectChargeState(BattleInstance &b, int slot)
+{
+	SA::Rules::Combatant &c = b.field.at(slot);
+	// 先归零:上一行动的投影不残留(charge_ready 原版在攻击段末即清,`:7729`)。
+	c.pet_charge_beats = -1;
+	c.charge_ready = false;
+
+	const ChargeState &st = b.charge_of_slot[static_cast<std::size_t>(slot)];
+	if (st.beats < 0)
+		return; // 无集气态
+
+	c.pet_charge_beats = st.beats;
+	if (st.beats != 0)
+		return; // 蓄力拍:L3 只读拍数,参数面保持"无技能"
+
+	// ── 完成击:原 `BATTLE_Charge` 的 `iWork <= 0` 支(battle_event.c:5036-5045)──
+	//   `pow = WORKFIXSTR; pow += pow * N * 0.01;`(N = COM3 high = 攻%)写入
+	//   WORKATTACKPOWER,COM1 置 S_CHARGE_OK ⇒ 本回合落普攻执行组
+	//   (battle.c:7510 fall-through)。
+	// ★ 攻%替换**复用 POWERBALANCE 的落点**(`mods.pet_skill_attack_percent`
+	//   → Battle.cpp 的 `effectiveAttack`):两者都是"从 FIXSTR 重算工作值"的替换式,
+	//   而 `(int)(str + str·p) == str + (int)(str·p)`(p ≥ 0,截断向零)
+	//   ⇒ 与源码的 double 一步式数值等价,不为它另开一条伤害路径。
+	c.charge_ready = true;                        // 守方不可回避(rollDodge 门①)
+	c.mods.pet_skill_direct = true;               // 落普攻管线
+	c.mods.pet_skill_attack_percent = st.percent; // WORKATTACKPOWER 替换
+}
+
+// ② 集气单位无需新指令即自动行动 ⇒ 在等待指令之前给它注入合成指令。
+//   ⚠️ 必须在"回合是否等该槽指令"的判断**之前**跑,否则集气槽会被当成未就绪,
+//     战斗卡到指令超时(原版该单位由 IsCharge 豁免直接 C_OK)。
+//   拍回合注入 WAIT(L3 由 pet_charge_beats 接管,指令本身不执行);
+//   完成击回合注入带原目标的 PET_SKILL(原 COM2 = toindex 在蓄力期间保留)。
+//   ⚠️ 只在**该槽本回合还没有指令**时注入 —— 有真实指令意味着集气已被
+//     onBattleCommand 取消(新指令替换),不该再替它行动。
+void injectChargeCommands(BattleInstance &b)
+{
+	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+	{
+		const ChargeState &st = b.charge_of_slot[static_cast<std::size_t>(slot)];
+		if (st.beats < 0)
+			continue;
+		const SA::Rules::Combatant &c = b.field.at(slot);
+		if (!c.occupied || c.dead)
+			continue; // 离场 / 阵亡:残余状态不再触发(无效槽,不必清)
+		if (b.commands.present[slot])
+			continue;
+
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = b.id;
+		cmd.turn = b.field.turn;
+		if (st.beats > 0)
+		{
+			cmd.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+		}
+		else
+		{
+			cmd.command_kind = SA::Domain::BattleCommand::CommandKind::PET_SKILL;
+			cmd.command.pet_skill.skill_id = static_cast<std::uint32_t>(st.skill_id);
+			cmd.command.pet_skill.target = st.target;
+		}
+		b.commands.commands[slot] = cmd;
+		b.commands.present[slot] = true;
+	}
+}
+
+// ③ 按 L3 的行动结果推进 / 清空实例集气态(原 COM3 low 的减一与 `:7729` 的
+//   COM1 = NONE)。⚠️ 只有 L3 真在**行动位**处理了这一拍 / 这一击才会置这两个标志:
+//   被状态清指令 / 不可行动的单位走不到那里 ⇒ 收不到 charge_beat/charge_strike,
+//   集气在那条路上由 `command_cleared` 一并清掉(见 tick 循环处的注记,
+//   对应原版 `StatusSeq` 对不能行动者无条件 `COM1 = NONE`,battle.c:5440)。
+void applyChargeEffects(BattleInstance &b, int slot, const SA::Rules::ActionEffects &effects)
+{
+	if (effects.charge_beat)
+	{
+		ChargeState &st = b.charge_of_slot[static_cast<std::size_t>(slot)];
+		if (st.beats < 0)
+		{
+			// 首拍(新发指令):N 拍的拍 #1 已在本行动位发生 ⇒ 剩 N-1
+			//   (原 `BATTLE_Charge`:COM3 low = N > 0 ⇒ 减一 + NoAction)。
+			//   参数从**本行动的投影面**取(此刻尚未被下一次投影覆盖)。
+			const SA::Rules::Combatant &c = b.field.at(slot);
+			st.beats = c.mods.pet_skill_charge_turns - 1;
+			st.percent = c.mods.pet_skill_charge_percent;
+			st.skill_id =
+			    static_cast<std::int32_t>(b.commands.commands[slot].command.pet_skill.skill_id);
+			st.target = b.commands.commands[slot].command.pet_skill.target;
+		}
+		else
+		{
+			--st.beats; // 续拍:每拍减一(原 COM3 low--)
+		}
+	}
+	if (effects.charge_strike)
+	{
+		// 完成击已消费:清态(原 `:7729` `COM1 = NONE`)。
+		b.charge_of_slot[static_cast<std::size_t>(slot)] = ChargeState{};
 	}
 }
 
@@ -2224,6 +2393,9 @@ void World::tick()
 			// 已有回合契约：实际玩家还在 C_WAIT 时不能消耗下一回合。
 			// SSRC80 BATTLE_CommandWait (3021–3090)、TimeOutCheck (3881–3919)。
 			// demo 的无人输入演示仍显式隔离；未加入会话的测试战场没有输入收集者。
+			// ★ 集气槽的合成指令注入必须先于等待判定:集气单位无需新指令即自动
+			//   行动(原版 IsCharge 豁免),不注入会让战斗卡到指令超时(批次 B2b)。
+			injectChargeCommands(b);
 			if (!b.demo)
 			{
 				std::vector<SA::Net::SessionId> waiting;
@@ -2312,6 +2484,9 @@ void World::tick()
 				// 宠技参数同样逐行动重投影(B1):宠物换了指令 / 指令被状态清空后,
 				// 旧技能参数不能残留(见 projectPetSkill 卷首的"逐行动重算"注记)。
 				projectPetSkill(b, s.pet_skill_effects);
+				// 集气态投影(B2b)在宠技表投影**之后**:完成击要覆盖表投影的
+				// direct=false / attack_percent=0(见 projectChargeState 卷首)。
+				projectChargeState(b, actor);
 				SA::Domain::BattleEvents action{};
 				SA::Rules::ActionEffects effects;
 				const auto before_rng = b.rng;
@@ -2328,10 +2503,17 @@ void World::tick()
 					break;
 				}
 				applyEvents(action, b.field, wctx);
+				applyChargeEffects(b, actor, effects);
 				if (effects.item_used)
 					consumeUsedItem(b, actor, s.players, s.items);
 				if (effects.command_cleared)
+				{
 					b.commands.commands[actor].command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+					// ★ 集气态一并清掉(批次 B2b):原版 StatusSeq 对不能行动者无条件
+					//   `COM1 = NONE`(battle.c:5440,无 IsCharge 豁免)⇒ 集气夭折,
+					//   不是暂停 —— 与 L3「状态门在集气分支之前」的次序配套。
+					b.charge_of_slot[static_cast<std::size_t>(actor)] = ChargeState{};
+				}
 				// 基础反击链在死亡时终止；最后一条 Hit 标记实际击杀方。
 				// 无 Hit 时仍按原行动者结算状态死亡，不把反击战果记给先攻者。
 				int profit_actor = actor;
@@ -2952,6 +3134,35 @@ int World::giveItemToPlayer(SA::Net::SessionId session, const SA::Model::Item &i
 	return giveItemIntoPlayer(*p, item, s.items);
 }
 
+// 批次 B2 的注入 seam(声明见 Api.h):三门全过才写 ⇒ 失败不留孤儿。
+// ⚠️ 刻意**不写 `default_pet`** —— 它的唯一写者是换宠指令 PET_OUT(DR-BT21),
+//   本 seam 在它旁边开第二扇门就会把"换宠语义在世界侧只有一处"打破。
+int World::givePetToPlayer(SA::Net::SessionId session, const SA::Model::Pet &pet)
+{
+	Impl &s = *_impl;
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (p == nullptr)
+		return -1; // 门 ①:无 L2 玩家实体
+	const int pet_slot = p->findFreePetSlot();
+	if (pet_slot < 0)
+		return -1; // 门 ②:宠物槽满(悬空句柄算占用,两步分工见 Player.h)
+	const SA::Model::EntityHandle handle = s.pets.allocate();
+	if (!handle.valid())
+		return -1; // 门 ③:宠物池满
+	SA::Model::Pet *dst = s.pets.resolve(handle);
+	if (dst == nullptr)
+	{
+		(void)s.pets.release(handle); // 走不到(刚 allocate 成功);守它零成本
+		return -1;
+	}
+	*dst = pet; // 整只落池(含 pet_skills 七槽 —— 模拟"这只宠从模板带技")
+	// 主人反向引用(捕获路径同款;句柄带 generation ⇒ 主人换人后旧引用作废,M10)。
+	dst->owner = s.player_of_session.find(session);
+	// ── 提交:挂进主人的槽(捕获路径 `:391 CHAR_setCharPet` 同位)──
+	p->pets[static_cast<std::size_t>(pet_slot)] = handle;
+	return pet_slot;
+}
+
 std::size_t World::battleCount() const noexcept { return _impl->battles.size(); }
 
 std::size_t World::worldEnemyCount() const noexcept { return _impl->world_enemies.size(); }
@@ -3429,6 +3640,90 @@ void World::onBattleCommand(SA::Net::SessionId id,
 		if (!valid)
 			stored.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
 	}
+
+	// ── W| 入口校验(原版 BattleCommandDispach 的 "W|" 分支,battle_command.c:269-335,
+	//    宠技指令的**持有门**;批次 B2)─────────────────────────────────────
+	//
+	// ⚠️★★ 原版 W| 的发起者身份(回源码复核 2026-09-15):`charaindex` 是**主人**
+	//   (fd 对应的角色),`petnum = CHAR_getInt(charaindex, CHAR_DEFAULTPET)`、
+	//   `petindex = CHAR_getCharPet(charaindex, petnum)` ⇒ 校验对象是**默认宠**,
+	//   技能参数也取自它的宠技槽(`PETSKILL_GetArray(petindex, iNum)` →
+	//   `CHAR_getPetSkill`)。我们的 PET_SKILL 载荷带的是 skill_id(不带槽位 iNum,
+	//   IDL 不动)⇒ 持有门等价化为「默认宠的七槽里**存在**该 skill_id」。
+	// ⚠️ 原版的门与降级(失败即 `CHAR_setWorkInt(petindex, WORKBATTLEMODE, C_OK)`,
+	//   宠物按"无指令"处理 —— 我们等价化为**整条指令降级 WAIT**,与 I| 同款:
+	//   不产事件、不摇 rng;L3 对 WAIT 本就无动作,行为并集不变):
+	//   ① `CHAR_CHECKINDEX(petindex) == FALSE`(无默认宠 / 槽空 / 悬空句柄);
+	//   ② `iNum < 0 || iNum >= CHAR_MAXPETSKILLHAVE`(槽下标域)—— 载荷无 iNum,
+	//     由"七槽扫描"天然覆盖(不存在的槽位自然匹配不到);
+	//   ③ `_PETSKILLBUG`(8.0 开)的主人生死门(ISDIE / HP<=0)—— 本函数入口已拒
+	//     死槽指令(`b.field.at(slot).dead` ⇒ return),等价;
+	//   ④ `checkErrorStatus(petindex)`(宠物状态门)⇒ 复用 `checkCanAct` 的宠物侧:
+	//     宠物**在场**(宠位槽被占)时读其战场快照判;不在场时无快照面,
+	//     与原版场外 WORK 值干净同理,门通过;
+	//   ⑤ `_PETSKILLBUG` 的 CHAR_SLOT 转生门(`CHAR_TRANSMIGRATION < 1 &&
+	//     iNum >= CHAR_SLOT`)—— ★ **有意不复刻并就地记明**:转生系统未移植
+	//     (CHAR_SLOT 的语义本身也属 03 §11 欠债 1 的 693 字段清单),域缺失,
+	//     不猜一个替代表达;
+	//   ⑥ `_FIXWOLF` 的 id 600 狼人变身特判 —— ★ **有意不复刻**:8.0 的
+	//     petskill2.txt(147 行,最大 id 652)里**不存在 id 600**(实测),
+	//     该分支在投产数据上不可达。
+	// ⚠️★ 不在此查宠技**效果表**:表外 id 的"指令不成立"落在结算面
+	//   (projectPetSkill 查不到 ⇒ L3 整次跳过,B1 的既有语义)—— 持有门管
+	//   「这只宠会不会」,效果表管「这招怎么算」,两道门各司其职。
+	if (stored.command_kind == SA::Domain::BattleCommand::CommandKind::PET_SKILL)
+	{
+		bool valid = false;
+		if (SA::Model::Player *owner = s.players.resolve(b.player_of_slot[slot]); owner != nullptr)
+		{
+			// 门 ①(持有):主人有默认宠,且其七槽里有该 skill_id。
+			//   ⚠️ `default_pet` 越界 / 槽空 / 悬空句柄 ⇒ 无宠,门不过(同 CHECKINDEX)。
+			const int dp = owner->default_pet;
+			if (dp >= 0 && dp < static_cast<int>(SA::Model::kMaxPetHave))
+			{
+				const SA::Model::Pet *pet = s.pets.resolve(owner->pets[static_cast<std::size_t>(dp)]);
+				if (pet != nullptr)
+				{
+					for (std::size_t i = 0; i < SA::Model::Pet::kPetSkillSlots; ++i)
+					{
+						if (pet->pet_skills[i] ==
+						    static_cast<std::int32_t>(stored.command.pet_skill.skill_id))
+						{
+							valid = true;
+							break;
+						}
+					}
+				}
+			}
+			// 门 ④(宠物状态):宠物在场 ⇒ 复用 checkCanAct(DR-BT5 唯一真源)。
+			if (valid)
+			{
+				const std::size_t pet_slot = static_cast<std::size_t>(slot) + SA::Rules::kBattlePlayerMax;
+				if (pet_slot < SA::Rules::kSlotCount &&
+				    b.field.at(static_cast<int>(pet_slot)).occupied)
+				{
+					valid = SA::Rules::checkCanAct(b.field.at(static_cast<int>(pet_slot))) ==
+					        SA::Domain::CannotActReason::CANNOT_ACT_NONE;
+				}
+			}
+		}
+		if (!valid)
+			stored.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+	}
+
+	// ★★ 集气中**不接受新指令**(批次 B2b):原版蓄力中宠物菜单置灰
+	//   (battle_command.c:945 `BATTLE_IsCharge ⇒ BP_FLG_PET_MENU_OFF`)⇒ 集气单位
+	//   在原版就不可能被重发指令,拍 / 完成击由存续的 COM1 自动走完。本仓 B1 起
+	//   PET_SKILL 与主人共用指令槽 ⇒ 以"丢弃来令"表意:集气态存续期间
+	//   (beats >= 0)到达的任何指令都被忽略,该槽按注入的合成指令行动。
+	//   ⚠️ **有意偏差,如实登记**:原版主人自己的指令与宠指令是两条流,集气中
+	//     主人照常行动;我们的槽位一体 ⇒ 集气中主人的来令也被丢弃
+	//     (真实数据 N=1 ⇒ 蓄力一拍 + 完成击,至多两回合)。将来指令面
+	//     拆出"宠物指令通道"后此处应随之收窄。
+	//   ⚠️ 走到这里槽必然 occupied 且非 dead(函数入口已拒),残余集气态
+	//     不会困住离场 / 阵亡的槽(它们的 slot_of 已被清除,进不到这里)。
+	if (b.charge_of_slot[static_cast<std::size_t>(slot)].beats >= 0)
+		return;
 
 	b.commands.commands[slot] = stored;
 	b.commands.present[slot] = true;
@@ -4437,6 +4732,15 @@ SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, const EnemyEncounter &enc
 
 	// ── 名字(源码 :1108-1110)──────────────────────────────────────
 	out.name = tmpl.name;
+
+	// ── 宠技槽(源码 :1092-1094;原始 8.5 树 `enemy.c:1204-1206`,批次 B2a)──
+	// ★ 1:1 那个整组拷循环:`for(i) CharNew.unionTable.indexOfPetskill[i] =
+	//   *(tp + E_T_PETSKILL1 + i)` —— 一处夹取 / 清洗都没有(0 = 无技能、-1 = 空槽、
+	//   表外死引用全部照存,取值域讨论见 EnemyTemplate::pet_skills)。
+	// ⚠️ 消费方:① 捕获时整组拷给宠物(pet.c:375-377 同款);② 敌人侧本批**不用**
+	//   (fillEnemyCommands 只填普攻,敌人 AI 属后续批)。
+	for (std::size_t i = 0; i < SA::Model::Enemy::kPetSkillSlots; ++i)
+		out.pet_skills[i] = tmpl.pet_skills[i];
 
 	// ── 模板号(源码 :1200 `CHAR_PETID = *(tp + E_T_TEMPNO)`)──────────
 	// ★ `CHAR_PETID` 的值 = 模板号,捕获扣道具 `IsNeedCaptureItem` 据它查 `NeedEnemy[]` 表。

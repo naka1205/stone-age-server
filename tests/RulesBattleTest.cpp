@@ -3768,3 +3768,109 @@ TEST_CASE("宠技B1★:表外技能(pet_skill_direct=false)⇒ 整次行动跳�
 	CHECK(ev.events.size() == 0);
 	CHECK(rng.calls() == 2); // 仅两位占位者的先攻抖动(基线,同本文件 1203 行那条)
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  突击 CHARGE(批次 B2b)—— 蓄力拍 / 完成击
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 链路(2026-09-15 回 `StoneAge/gmsv/src/battle/` 逐处核实):
+//   `PETSKILL_ChargeAttack`(pet_skill.c:614-640)只把参数塞进工作槽:
+//     COM1 = S_CHARGE · COM2 = toindex · COM3 low = N(拍数)· high = P(攻%)。
+//   真正的三拍发生在**行动位**的 `case BATTLE_COM_S_CHARGE: BATTLE_Charge(...)`
+//   (battle.c:7259-7261)→ `BATTLE_Charge`(battle_event.c:5027-5064):
+//     COM3 low > 0 ⇒ 减一 + `BATTLE_NoAction`(蓄力拍:**无伤害、无攻击取数**);
+//     COM3 low == 0 ⇒ `pow = WORKFIXSTR; pow += pow*P*0.01; WORKATTACKPOWER = pow
+//                      + WORKMODATTACK` 且 COM1 = S_CHARGE_OK,落普攻执行组
+//                      (battle.c:7510 fall-through)。
+//   跨回合存活 = COM1 熬过回合末清零(battle.c:668 的 `BATTLE_IsCharge` 豁免)。
+//
+// ⚠️ L3 侧只落**行动位的拍/击判定**(快照字段 `pet_charge_beats`,由 World 从战斗
+//   实例集气态投影;完成击的 `charge_ready` 与攻%替换同由 World 投影):
+//     · 蓄力拍:不产事件、不摇 rng,只回写 `effects.charge_beat`(世界侧减一);
+//     · 完成击:走既有普攻管线 —— `charge_ready` 的"守方不可回避"是**批次 0 既有**
+//       的 rollDodge 门①(其逐条覆盖见本文件回避用例),攻%替换复用 B1 的
+//       `pet_skill_attack_percent` 落点(effectiveAttack)。
+//   ⇒ 跨回合状态机本身在世界侧,由 WorldTickTest 的端到端用例钉住。
+
+TEST_CASE("宠技B2★:CHARGE 新发指令 = 第一拍(NoAction)⇒ 不摇 rng、不产事件、回写拍")
+{
+	// 原版指令回合**不动手**:ChargeAttack 之后第一次行动跑的是 BATTLE_Charge,
+	//   COM3 low = N = 1 > 0 ⇒ 减一 + NoAction ⇒ 这一回合既无伤害也不掷攻击骰。
+	// 构造:hand-built 投影面(扮演 World 的 projectPetSkill 输出)——
+	//   `pet_skill_charge_turns = 1` / `pet_skill_charge_percent = 90`(petskill2.txt
+	//   第 11 行 `突击 … 1 攻%+90`),指令是 PET_SKILL{30}。
+	Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	d.cmds.commands[0].command.pet_skill.skill_id = 30; // 突击
+	d.field.at(0).mods.pet_skill_charge_turns = 1;
+	d.field.at(0).mods.pet_skill_charge_percent = 90;
+	SA::Domain::BattleEvents ev{};
+	SA::Rules::ActionEffects effects;
+	ScriptedRandom rng({999999999});
+	REQUIRE(SA::Rules::resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, ev, effects));
+
+	CHECK(ev.events.size() == 0); // 蓄力拍不产事件(原版发 `bn|` 表现串,非事件流)
+	CHECK(rng.calls() == 0);      // ★ 不摇攻击取数(拍:减一 + NoAction,原 :5052-5057)
+	CHECK(effects.charge_beat);   // 世界侧据它把实例集气态置成"剩 N−1 = 0"
+	CHECK_FALSE(effects.charge_strike);
+}
+
+TEST_CASE("宠技B2★:CHARGE 续拍(pet_charge_beats>0)⇒ 同样静默 + 回写(pet_skill.c:630)")
+{
+	// 续拍走的是**合成指令**(World 注入 WAIT,见 injectChargeCommands)+ 快照字段
+	//   `pet_charge_beats > 0`。判据与首拍同:不产事件、不摇 rng、回写 charge_beat。
+	Duel d = makeB1Duel(1000, 10, /*pet_skill=*/false);
+	setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::WAIT);
+	d.field.at(0).pet_charge_beats = 2; // 还剩两拍(N=3 的中间拍)
+	SA::Domain::BattleEvents ev{};
+	SA::Rules::ActionEffects effects;
+	ScriptedRandom rng({999999999});
+	REQUIRE(SA::Rules::resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, ev, effects));
+
+	CHECK(ev.events.size() == 0);
+	CHECK(rng.calls() == 0);
+	CHECK(effects.charge_beat);
+	CHECK_FALSE(effects.charge_strike);
+}
+
+TEST_CASE("宠技B2★★:CHARGE 完成击 —— 有效攻 = FIXSTR + FIXSTR×攻%(与 POWERBALANCE 同落点)")
+{
+	// 等价对照法(同 B1 的 POWERBALANCE 用例):完成击的伤害 == 把普攻的 attack
+	//   **直接设成** `str + (int)(str×P)` 时的伤害 —— 逐位一致即同一支公式,
+	//   同时排除"叠加 P%"(attack×1.9)与"没生效"(按原 attack)。
+	// 构造:str = 100、P = 90 ⇒ 有效攻 190;原 attack = 1000(被替换掉)。
+	auto charged_damage = [](std::int32_t atk)
+	{
+		Duel d = makeB1Duel(atk, 10, /*pet_skill=*/true);
+		d.cmds.commands[0].command.pet_skill.skill_id = 30;
+		d.field.at(0).str = 100;
+		d.field.at(0).mods.pet_skill_direct = true;       // World 在完成击投影
+		d.field.at(0).mods.pet_skill_attack_percent = 90; // 完成击的攻%替换
+		d.field.at(0).charge_ready = true;                // 原 S_CHARGE_OK(守方不可回避)
+		d.field.at(0).pet_charge_beats = 0;               // 集气态:本行动 = 完成击
+		SA::Domain::BattleEvents ev{};
+		SA::Rules::ActionEffects effects;
+		ScriptedRandom rng({999999999});
+		REQUIRE(SA::Rules::resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, ev, effects));
+		CHECK(effects.charge_strike); // 世界侧据它清集气态(原 :7729 COM1 = NONE)
+		CHECK_FALSE(effects.charge_beat);
+		const std::vector<std::int32_t> deltas = damageDeltas(ev);
+		REQUIRE(deltas.size() == 1);
+		return -deltas[0];
+	};
+	auto plain_damage = [](std::int32_t atk)
+	{
+		Duel d = makeB1Duel(atk, 10, /*pet_skill=*/false);
+		SA::Domain::BattleEvents ev{};
+		SA::Rules::ActionEffects effects;
+		ScriptedRandom rng({999999999});
+		REQUIRE(SA::Rules::resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, ev, effects));
+		const std::vector<std::int32_t> deltas = damageDeltas(ev);
+		REQUIRE(deltas.size() == 1);
+		return -deltas[0];
+	};
+
+	const std::int32_t charged = charged_damage(1000);
+	CHECK(charged == plain_damage(190));  // = str + str×90/100
+	CHECK(charged != plain_damage(1000)); // 不是"用原攻击"
+	CHECK(charged != plain_damage(1900)); // 不是"叠加 90%"
+}

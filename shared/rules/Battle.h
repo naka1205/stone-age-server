@@ -50,6 +50,15 @@ struct ActionEffects
 {
 	bool item_used = false;       // 实际执行的资源消耗，不是指令投影。
 	bool command_cleared = false; // 状态推进清掉指令，宿主须保留到本回合结束。
+	// ── 突击 CHARGE 的**意图回写**(批次 B2b)────────────────────────
+	//
+	// ★ 蓄力的跨回合状态由宿主(世界侧)所有;L3 是纯函数,拍数的推进按
+	//   KnockbackState 同一分工回写:L3 在**行动位**判定这一拍 / 这一击发生了,
+	//   宿主据此落地实例状态(World.cpp 的 applyChargeEffects)。
+	// ⚠️ 走 ActionEffects 而不是 BattleEvent:集气态是**战斗实例内部态,不上线协议**
+	//   (IDL 不动),而这两个标志恰好只需要"本行动发生了什么"这一内部事实。
+	bool charge_beat = false;   // 本行动是蓄力拍(NoAction:不摇 rng、不产事件)
+	bool charge_strike = false; // 本行动是完成击(已按 charge_ready + 攻%替换走普攻管线)
 };
 
 // order 由宿主每回合只生成一次。本接口不再摇行动速度。

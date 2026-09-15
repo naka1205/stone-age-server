@@ -1421,6 +1421,35 @@ static bool resolveOrdered(BattleField field,
 			continue;
 		}
 
+		// ── 突击 CHARGE 的集气态(批次 B2b)──────────────────────────
+		//
+		// ★ 快照字段 `pet_charge_beats` 由 World 在本行动前从战斗实例的集气态投影
+		//   (-1 = 无)。原版的三拍发生在**行动位**:`case S_CHARGE: BATTLE_Charge(...)`
+		//   (battle.c:7259)在指令参数读取段运行,先于落普攻执行组的 dispatch:
+		//     · COM3 low > 0 ⇒ 减一 + `BATTLE_NoAction`(battle_event.c:5052-5057)
+		//       —— 蓄力拍:**不摇攻击 rng、不产伤害事件**(原版发 `bn|` 串,表现面);
+		//     · COM3 low == 0 ⇒ WORKATTACKPOWER 替换 + COM1 = S_CHARGE_OK
+		//       (`:5039-5045`),**本回合**落普攻执行组(`battle.c:7510` fall-through)。
+		//   ⚠️ 放在状态门之后:原版 StatusSeq 对不能行动者无条件 `COM1 = NONE`
+		//     (`battle.c:5440`)⇒ 被清指令 / 不可行动的集气者走不到这里,
+		//     不会有拍 / 击发生(World 侧也就收不到回写,状态由它自己的门处理)。
+		if (actor.pet_charge_beats > 0)
+		{
+			// 蓄力拍 = NoAction(WAIT 同款:不产事件)。拍后的减一是世界写,
+			// 经 `charge_beat` 回给调用方(见 applyChargeEffects)。
+			if (effects != nullptr)
+				effects->charge_beat = true;
+			continue;
+		}
+		const bool charge_strike = actor.pet_charge_beats == 0;
+		if (charge_strike && effects != nullptr)
+		{
+			// 完成击:charge_ready(守方不可回避)与攻%替换已由 World 投影,
+			// 本行动落普攻执行组 —— 与「新发指令被 StateSeq 清空」的次序语义一致,
+			// 这一刻起集气计划已消费(原 :7729 在攻击段末置 COM1 = NONE)。
+			effects->charge_strike = true;
+		}
+
 		const SA::Domain::BattleCommand &cmd = commands.commands[actor_slot];
 
 		// ── 指令分发 ─────────────────────────────────────────────
@@ -1655,6 +1684,21 @@ static bool resolveOrdered(BattleField field,
 		const bool pet_skill_direct =
 		    cmd.command_kind == SA::Domain::BattleCommand::CommandKind::PET_SKILL &&
 		    actor.mods.pet_skill_direct;
+		// ★★ 新发的**蓄力指令 = 第一拍**(批次 B2b):原版 ChargeAttack 只把参数塞进
+		//    COM1/COM3(pet_skill.c:624-638),真正的拍发生在本行动位的
+		//    `BATTLE_Charge`(COM3 low=N>0 ⇒ 减一 + NoAction)⇒ 指令回合**不动手**:
+		//    不摇 rng、不产伤害事件,拍后状态由 World 按 `charge_beat` 落地。
+		//   ⚠️ 必须先于"表外 ⇒ 跳过"的判定:蓄力指令不是直攻系(pet_skill_direct=false),
+		//     若落在它后面就被静默吞掉、永远开不了蓄。
+		//   ⚠️ `!charge_strike`:完成击回合的合成指令同样携带蓄力技能 id(World 注入),
+		//     但那一行动已由上面的集气态分支接管,不能再当"第一拍"。
+		if (cmd.command_kind == SA::Domain::BattleCommand::CommandKind::PET_SKILL &&
+		    actor.mods.pet_skill_charge_turns > 0 && !charge_strike)
+		{
+			if (effects != nullptr)
+				effects->charge_beat = true;
+			continue;
+		}
 		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::ATTACK &&
 		    !pet_skill_direct)
 		{

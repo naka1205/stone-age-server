@@ -167,6 +167,21 @@ struct Pet
 	std::int32_t mod_ai = 0;
 	std::int32_t variable_ai = 0;
 
+	// ── 宠技槽(源码 :371-373;原始 8.5 树 `pet.c:375-377`,批次 B2a)──────────────
+	//
+	// ★★ 捕获时从敌人 L2 实体**整组拷 7 槽**:
+	//      `for(i) CharNew.unionTable.indexOfPetskill[i] = CHAR_getPetSkill(enemyindex, i)`
+	//    ⇒ 与四维 / 成长率同一来源(`Model::Enemy::pet_skills`,模板表 `E_T_PETSKILL1..7`)。
+	//    ⚠️ 拷贝**一处夹取都没有**:`CHAR_getPetSkill` 原样取、原样放,槽值可以是 0(无技能)、
+	//      -1(空槽)或表外死引用 —— 全都照存(原版如此:查表发生在**用**的时候,
+	//      `PETSKILL_GetArray` 查不到即指令不成立),不在捕获路径上"清洗"数据。
+	// ★ **0 = 无技能**(`enemybase1.txt` 实测);-1 = 空槽。语义与取值域详见
+	//   `Enemy.h` 的 `pet_skills`(同一张模板表的同一组列,不重复展开)。
+	// ⚠️ 消费方 = 战斗指令的**持有门**(「这只宠的七槽里有没有这个技能」)与将来的
+	//   宠技列表下发;本批战斗结算仍走世界侧宠技效果表(`PetSkillEffect`),不直接读这里。
+	static constexpr std::size_t kPetSkillSlots = 7; // = CHAR_MAXPETSKILLHAVE(char_base.h:48)
+	std::int32_t pet_skills[kPetSkillSlots] = {};
+
 	// ── Y 五项:初值快照(源码 :385-389,批次 M.4b)────────────────────
 	//
 	// ✅ **本批建起来了** —— M.1/M.2/M.3 三批都记着「有意不建」,理由是"四维尚无
@@ -213,9 +228,9 @@ struct Pet
 //    `Rules::CombatModifiers.equip_critical`;反击排在 L4 之后。
 //    ⚠️ 别看到"暴击已实现"就把 critial 建上 —— 战斗输入走 Combatant,不走 L2 实体。
 //
-// ⑤ **宠技槽** `unionTable.indexOfPetskill[CHAR_MAXPETSKILLHAVE(7)]`(源码 :371-373)
-//    ⇒ 宠技批次。★ 03 §3.2 已裁定 `unionTable` **保留但拆开**(宠物槽与宠物技能槽
-//    是两件事),届时按那条落地。
+// ⑤ ✅ ~~**宠技槽** `unionTable.indexOfPetskill[CHAR_MAXPETSKILLHAVE(7)]`~~ ⇒
+//    **批次 B2a 已建**为上方 `pet_skills[7]`(捕获从敌人实体整组拷,源码 :371-373)。
+//    ★ 03 §3.2 裁定的 `unionTable` 保留但拆开,与 `Enemy.h` 文末 ④ 同批落地。
 //
 // ⑥ ★ `CHAR_PETMAILEFFECT = RAND(0, PETMAIL_EFFECTMAX)`(源码 :369)⇒ 宠物邮件未移植。
 //    ★★ **连带后果值得记**:不建它 ⇒ 那次 `RAND` 不摇 ⇒ `applyEvents` **不需要
