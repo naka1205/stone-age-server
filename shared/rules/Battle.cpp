@@ -1717,6 +1717,26 @@ static bool resolveOrdered(BattleField field,
 		if (!target.occupied || dead[target_slot])
 			continue;
 
+		// ── 本行动的状态攻击参数(批次 B3a)────────────────────────────
+		//
+		// ★ 镜像原版的两步:g* 每行动重置(`battle.c:7096-7097`
+		//   `gBattleStausChange = -1; gBattleStausTurn = 0;`),派发时由
+		//   `case BATTLE_COM_S_STATUSCHANGE` 从 COM3 读回 low/high(`:7240-7242`)。
+		//   本实现把"读回"落成投影字段的读取 —— `pet_skill_apply_status` 只在
+		//   本回合指令是状态系宠技行时才非 0(World 的 projectPetSkill 逐行动重置)。
+		//   ⚠️ 变量名照源码的 `Staus`(gBattleStausChange 系拼写),便于对源码。
+		int staus_change = -1;         // gBattleStausChange
+		int staus_turn = 0;            // gBattleStausTurn
+		bool staus_from_skill = false; // 状态来自技能(而不是下面的装备毒兜底)
+		if (actor.mods.pet_skill_apply_status > 0)
+		{
+			staus_change = actor.mods.pet_skill_apply_status;
+			staus_turn = actor.mods.pet_skill_status_turns;
+			staus_from_skill = true;
+		}
+		// ⚠️ 完成击(CHARGE)的合成指令同样带宠技 id,但突击不是状态技
+		//   (projectPetSkill 只按表行投影)⇒ 此处天然为 -1,无需另判。
+
 		// 一次普通打击和一次反击共用伤害/HP/唤醒路径；反击不重复推进状态，
 		// 不摇空手多段，也不附加普通攻击专属的装备毒（SSRC80 :3604–3811）。
 		struct StrikeResult
@@ -1903,17 +1923,67 @@ static bool resolveOrdered(BattleField field,
 			field.at(to).ride_hp = std::max(0, pet_hp[to]);
 			field.at(to).dead = dead[to];
 			field.at(to).ultimate_accumulator = ult_acc[to];
-			if (!counter && damage > 0 && striker.mods.suit_poison > 0)
+			// ── 状态攻击(批次 B3a;原 battle_event.c:2902-2965 的内联块)──────
+			//
+			// ★★ 全部落在**普攻执行组**的伤害块内(BATTLE_Attack),顺序照源码:
+			//     ① 装备毒**兜底**(:2903):`if( gBattleStausChange == -1 && SUITPOISON > 0 )`
+			//        ⇒ 技能已指定状态时**遮蔽**装备毒 —— 判据是 `== -1`,不是"或"。
+			//     ② 门(:2907):`damage > 0 && gBattleStausChange >= 0`。
+			//     ③ 判定(:2908-2916):PerOffset = `suitpoison`(技能路径 = 初值 30,
+			//        见 Status.h 的 kPetSkillStatusPer;装备路径 = SUITPOISON 值),
+			//        Range = 40、Bai = 2.0。
+			//     ④ 成功(:2917-2937):StatusTbl 写 `gBattleStausTurn + 1`(酒醉再折半),
+			//        麻痹/睡眠/石化/魔障当场清守方指令。
+			// ⚠️★ **反击段没有这一块**:原版反击走独立函数 `BATTLE_Counter`
+			//   (:3604-3811,不读 g*、不含装备毒分支)⇒ `!counter`。
+			// ⚠️ 装备毒只在**技能未指定状态**时兜底,且**每段命中都重判** ——
+			//   兜底本身不依赖伤害,故放在 `damage > 0` 门之前(源码同序)。
+			if (!counter && staus_change == -1 && striker.mods.suit_poison > 0)
 			{
-				const int poison = static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
-				if (rollStatusAttack(field.is_pvp, striker, field.at(to), poison,
-				                     striker.mods.suit_poison, kSuitPoisonRange, kSuitPoisonBai, rng, nullptr))
+				staus_change = static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+				staus_turn = kSuitPoisonTurns;
+				staus_from_skill = false;
+			}
+			if (!counter && damage > 0 && staus_change >= 0)
+			{
+				// PerOffset:技能状态 = 30(`BATTLE_Attack` 局部变量 suitpoison 的初值
+				//   「基本中毒%」,`:2689` —— 技能路径不走 :2904 那支 ⇒ 不被覆盖);
+				//   装备毒 = 攻方 `CHAR_SUITPOISON` 的值(:2904 同时改写它)。
+				const int status_per = staus_from_skill ? kPetSkillStatusPer
+				                                        : striker.mods.suit_poison;
+				if (rollStatusAttack(field.is_pvp, striker, field.at(to), staus_change,
+				                     status_per, kSuitPoisonRange, kSuitPoisonBai, rng,
+				                     nullptr))
 				{
-					status[to] = static_cast<std::uint8_t>(poison);
-					status_turns[to] = statusTurnsOnApply(kSuitPoisonTurns);
+					status[to] = static_cast<std::uint8_t>(staus_change);
+					// ★ `gBattleStausTurn + 1`(酒醉再折半)—— 共享纯函数,两端同一份。
+					status_turns[to] = statusWorkOnApply(staus_change, staus_turn);
 					field.at(to).status = status[to];
 					field.at(to).status_turns = status_turns[to];
-					d.status_applied = SA::Domain::BattleStatus::BATTLE_ST_POISON;
+
+					if (staus_from_skill)
+					{
+						// ★ 技能状态走 `StatusChange(applied = true)`(L4.1 建的通道;
+						//   回合数由世界侧按本行动的投影参数算,见 World.cpp)。
+						// ⚠️ 带毒装备仍走 `Damage.status_applied`(既有语义 + 既有用例
+						//   钉着"不另发 StatusChange")—— 两条通道各管一半,不重复发。
+						SA::Domain::BattleEvent *sev =
+						    sink.push(SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE);
+						if (sev == nullptr)
+							return {true, false};
+						sev->body.status_change.target = static_cast<std::uint32_t>(to);
+						sev->body.status_change.status =
+						    static_cast<SA::Domain::BattleStatus>(staus_change);
+						sev->body.status_change.applied = true;
+
+						// 施加当场清守方指令(:2932-2937)—— 世界写,经 effects 回给调用方。
+						if (clearsCommandOnApply(staus_change) && effects != nullptr)
+							effects->status_cleared_target = to;
+					}
+					else
+					{
+						d.status_applied = SA::Domain::BattleStatus::BATTLE_ST_POISON;
+					}
 				}
 			}
 			return {true, can_chain && !critical && !dead[to]};

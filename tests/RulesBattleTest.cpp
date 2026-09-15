@@ -3874,3 +3874,260 @@ TEST_CASE("宠技B2★★:CHARGE 完成击 —— 有效攻 = FIXSTR + FIXSTR×�
 	CHECK(charged != plain_damage(1000)); // 不是"用原攻击"
 	CHECK(charged != plain_damage(1900)); // 不是"叠加 90%"
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  宠技·状态攻击(批次 B3a)—— PETSKILL_StatusChange(pet_skill.c:781)
+//  + BATTLE_Attack 的内联状态块(battle_event.c:2902-2965)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 链路(2026-09-15 回源码核实):`PETSKILL_StatusChange` 把状态号/回合塞 COM3
+// low/high(pet_skill.c:819-820)⇒ `battle.c:7240-7242` 派发时读进
+// gBattleStausChange/gBattleStausTurn ⇒ 命中且伤害>0 后走
+// `BATTLE_StatusAttackCheck(…, suitpoison, 40, 2.0, …)`(:2908-2916;PerOffset
+// = 局部变量 suitpoison 的初值 30,`:2689`)⇒ 成功写 `StatusTbl[st] = turn+1`
+// (:2918,酒醉再折半 :2921-2925)、四种状态当场清守方指令(:2932-2937)。
+
+TEST_CASE("宠技B3★★:状态攻击 —— 命中且伤害>0 ⇒ StatusChange(applied=true)(battle_event.c:2907)")
+{
+	// 脚本与带毒装备用例同形:dex 抖动 → 回避(不闪) → 暴击(不暴) → 伤害各步 → 状态判定。
+	//   per = 30(PerOffset) + 0(同级) + 0(幸运) − 0 − 0(四维 0) = 30 ⇒ 1 必中。
+	Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	d.cmds.commands[0].command.pet_skill.skill_id = 60; // 毒攻击
+	d.field.at(0).mods.pet_skill_direct = true;
+	d.field.at(0).mods.pet_skill_apply_status =
+	    static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+	d.field.at(0).mods.pet_skill_status_turns = 3; // option `毒 turn 3`
+
+	// 基线:同一发指令但无状态参数 ⇒ 差一次状态判定的取数。
+	Duel base = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	base.cmds.commands[0].command.pet_skill.skill_id = 60;
+	base.field.at(0).mods.pet_skill_direct = true;
+	SA::Domain::BattleEvents bev{};
+	ScriptedRandom brng({0, 10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+	REQUIRE(resolveTurn(base.field, base.cmds, RulesConfig{}, brng, bev));
+	const int baseline = brng.calls();
+
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({0, 10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+	CHECK(rng.calls() == baseline + 1); // ★ 状态判定恰好多摇一次
+
+	bool applied = false;
+	for (const auto &e : ev.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE)
+		{
+			CHECK(e.body.status_change.target == 10u);
+			CHECK(e.body.status_change.status ==
+			      SA::Domain::BattleStatus::BATTLE_ST_POISON);
+			CHECK(e.body.status_change.applied); // ★ 施加方向(L4.1 只产过解除)
+			applied = true;
+		}
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+		{
+			// ★ 技能状态走 StatusChange 通道;Damage.status_applied 只归带毒装备。
+			CHECK(e.body.damage.status_applied == SA::Domain::BattleStatus::BATTLE_ST_NONE);
+		}
+	}
+	CHECK(applied);
+}
+
+TEST_CASE("宠技B3★★:状态攻击 —— 互斥:目标已有状态 ⇒ 施加失败且**不摇 rng**(:5076-5079)")
+{
+	Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	d.cmds.commands[0].command.pet_skill.skill_id = 60;
+	d.field.at(0).mods.pet_skill_direct = true;
+	d.field.at(0).mods.pet_skill_apply_status =
+	    static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+	d.field.at(0).mods.pet_skill_status_turns = 3;
+	// 守方已经中毒(单槽状态机的"槽非空")⇒ 全局互斥在任何 RAND 之前挡下。
+	d.field.at(10).status =
+	    static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+	d.field.at(10).status_turns = 2;
+
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({0, 10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	bool applied = false;
+	for (const auto &e : ev.events)
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE &&
+		    e.body.status_change.applied)
+			applied = true;
+	CHECK_FALSE(applied); // 施加失败:不产 StatusChange(applied=true)
+
+	// ★ "门不过连骰子都不掷":与"无状态参数"的同一发指令取数**一样多**。
+	Duel base = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	base.cmds.commands[0].command.pet_skill.skill_id = 60;
+	base.field.at(0).mods.pet_skill_direct = true;
+	base.field.at(10).status =
+	    static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+	base.field.at(10).status_turns = 2;
+	SA::Domain::BattleEvents bev{};
+	ScriptedRandom brng({0, 10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+	REQUIRE(resolveTurn(base.field, base.cmds, RulesConfig{}, brng, bev));
+	CHECK(rng.calls() == brng.calls());
+}
+
+TEST_CASE("宠技B3★★★:状态攻击实参 —— PerOffset=30 / Range=40 / Bai=2.0 一起钉死"
+          "(battle_event.c:2689 + :2908-2916,2026-09-15 回源码核正)")
+{
+	// ★ 文档 §4.3 第二组(Range=30 / Bai=1.0)是**魔法/精灵**调用点(:7575/:7642);
+	//   宠技状态攻击走 BATTLE_Attack 内联块:Range=40、Bai=2.0、PerOffset=30。
+	//   守方四维各 25 ⇒ fVitalP = 25/100/0.25×10 = 10;攻 20 级 vs 守 1 级
+	//   ⇒ level = (int)(19×2.0) = 38 < Range ⇒ per = 30 + 38 + 0 − 0 − 10 − 0 = 58。
+	//   ⇒ out_per 直接钉死 58(三个实参任一抄错都会偏离);RAND(1,100)=57 必中、
+	//   =58 必不中钉住判定方向与无 off-by-one。
+	// ⚠️ 直调 rollStatusAttack(它自身只摇一次 RAND),不经过整条 strike ——
+	//   strike 的取数位置随等级/空手档位等前置变化,把边界钉在判定函数上最稳。
+	const auto cast_once = [](int roll)
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+		d.field.at(0).level = 20;
+		d.field.at(0).luck = 0;
+		d.field.at(10).level = 1;
+		d.field.at(10).vital = 25;
+		d.field.at(10).str = 25;
+		d.field.at(10).tough = 25;
+		d.field.at(10).dex = 25;
+		int per = -1;
+		ScriptedRandom rng({roll});
+		const bool ok = SA::Rules::rollStatusAttack(
+		    /*is_pvp=*/false, d.field.at(0), d.field.at(10),
+		    static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_STONE),
+		    SA::Rules::kPetSkillStatusPer, SA::Rules::kSuitPoisonRange,
+		    SA::Rules::kSuitPoisonBai, rng, &per);
+		CHECK(per == 58);
+		CHECK(rng.calls() == 1); // 恰好一次状态判定取数
+		return ok;
+	};
+	CHECK(cast_once(57));       // 57 < 58 ⇒ 命中
+	CHECK_FALSE(cast_once(58)); // 58 < 58 不成立 ⇒ 未命中
+}
+
+TEST_CASE("宠技B3★★:遮蔽 —— 技能状态优先,装备毒被跳过(:2903 判据 `gBattleStausChange == -1`)")
+{
+	// 攻方同时带石化的宠技状态与高命中带毒装备 ⇒ 只走石化那一支:
+	//   StatusChange(applied=true, STONE) 恰一条;装备毒的 Damage.status_applied 不出现。
+	Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	d.cmds.commands[0].command.pet_skill.skill_id = 80;
+	d.field.at(0).mods.pet_skill_direct = true;
+	d.field.at(0).mods.pet_skill_apply_status =
+	    static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_STONE);
+	d.field.at(0).mods.pet_skill_status_turns = 3;
+	d.field.at(0).mods.suit_poison = 200; // 若遮蔽失效 ⇒ 走毒支(per 夹 80 ⇒ 必中)
+
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({0, 10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	int stone_applies = 0;
+	for (const auto &e : ev.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE &&
+		    e.body.status_change.applied)
+		{
+			++stone_applies;
+			CHECK(e.body.status_change.status ==
+			      SA::Domain::BattleStatus::BATTLE_ST_STONE);
+		}
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+			CHECK(e.body.damage.status_applied ==
+			      SA::Domain::BattleStatus::BATTLE_ST_NONE); // 装备毒被遮蔽
+	}
+	CHECK(stone_applies == 1);
+
+	// ★ 恰好多摇一次(状态判定只有一支),不是两支各摇一次。
+	Duel base = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	base.cmds.commands[0].command.pet_skill.skill_id = 80;
+	base.field.at(0).mods.pet_skill_direct = true;
+	SA::Domain::BattleEvents bev{};
+	ScriptedRandom brng({0, 10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+	REQUIRE(resolveTurn(base.field, base.cmds, RulesConfig{}, brng, bev));
+	CHECK(rng.calls() == brng.calls() + 1);
+}
+
+TEST_CASE("宠技B3★:施加当场清指令只限麻痹/睡眠/石化/魔障 —— 石化置位、毒不置位"
+          "(battle_event.c:2932-2937)")
+{
+	// 石化攻击命中 ⇒ effects.status_cleared_target = 守方槽(世界侧改写其指令)。
+	// ⚠️ resolveAction **不抽行动抖动**(那是 buildActionOrder 的两发)⇒ 脚本从
+	//   回避判定起头:回避 10000(不闪) → 暴击 10000(不暴) → 伤害各步 → 状态判定 1。
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+		d.cmds.commands[0].command.pet_skill.skill_id = 80;
+		d.field.at(0).mods.pet_skill_direct = true;
+		d.field.at(0).mods.pet_skill_apply_status =
+		    static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_STONE);
+		d.field.at(0).mods.pet_skill_status_turns = 3;
+		SA::Domain::BattleEvents ev{};
+		SA::Rules::ActionEffects effects;
+		ScriptedRandom rng({10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+		REQUIRE(SA::Rules::resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, ev, effects));
+		CHECK(effects.status_cleared_target == 10);
+	}
+	// 毒攻击不在四态清单里 ⇒ 不清。
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+		d.cmds.commands[0].command.pet_skill.skill_id = 60;
+		d.field.at(0).mods.pet_skill_direct = true;
+		d.field.at(0).mods.pet_skill_apply_status =
+		    static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+		d.field.at(0).mods.pet_skill_status_turns = 3;
+		SA::Domain::BattleEvents ev{};
+		SA::Rules::ActionEffects effects;
+		ScriptedRandom rng({10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+		REQUIRE(SA::Rules::resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, ev, effects));
+		CHECK(effects.status_cleared_target == -1);
+	}
+}
+
+TEST_CASE("宠技B3★:落地回合数 = 声明值+1、酒醉再折半(statusWorkOnApply,:2918 + :2921-2925)")
+{
+	using SA::Domain::BattleStatus;
+	using SA::Rules::statusWorkOnApply;
+	// 毒攻击 turn 3 ⇒ 落地 4(与带毒装备同一 +1 口径)。
+	CHECK(statusWorkOnApply(static_cast<int>(BattleStatus::BATTLE_ST_POISON), 3) == 4);
+	// 猛毒 turn 5 ⇒ 落地 6。
+	CHECK(statusWorkOnApply(static_cast<int>(BattleStatus::BATTLE_ST_POISON), 5) == 6);
+	// 石化 turn 3 ⇒ 落地 4。
+	CHECK(statusWorkOnApply(static_cast<int>(BattleStatus::BATTLE_ST_STONE), 3) == 4);
+	// ★ 泥醉 turn 3:StatusTbl[5] == CHAR_WORKDRUNK 同一字段 ⇒ 写 turn+1 后就地 /2
+	//   ⇒ 落地 2,**不是** 4。turn 5 ⇒ 3。
+	CHECK(statusWorkOnApply(static_cast<int>(BattleStatus::BATTLE_ST_DRUNK), 3) == 2);
+	CHECK(statusWorkOnApply(static_cast<int>(BattleStatus::BATTLE_ST_DRUNK), 5) == 3);
+	// 带毒装备的既有口径不受影响(毒不折半)。
+	CHECK(statusWorkOnApply(static_cast<int>(BattleStatus::BATTLE_ST_POISON),
+	                        SA::Rules::kSuitPoisonTurns) ==
+	      SA::Rules::statusTurnsOnApply(SA::Rules::kSuitPoisonTurns));
+}
+
+TEST_CASE("宠技B3★:铁壁的消费面 —— super_wall + OTHERSTATUSNUMS 提高防御"
+          "(battle_event.c:1195-1200,批次 B3b 接通施加端后补钉)")
+{
+	// 同一脚本两跑:只有守方的铁壁开关不同 ⇒ 伤害必须严格变小、且多摇一次 randMod(20)。
+	struct OneHit
+	{
+		std::int32_t damage;
+		int calls;
+	};
+	const auto one_hit = [](bool wall)
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/false);
+		if (wall)
+		{
+			d.field.at(10).mods.super_wall = true; // MAGICSUPERWALL > 0
+			d.field.at(10).other_status_nums = 30; // OTHERSTATUSNUMS = 30
+		}
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({0, 10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		const std::vector<std::int32_t> deltas = damageDeltas(ev);
+		REQUIRE(deltas.size() == 1);
+		return OneHit{-deltas[0], rng.calls()};
+	};
+	const OneHit plain = one_hit(false);
+	const OneHit walled = one_hit(true);
+	CHECK(walled.damage < plain.damage);    // 防御被抬高 ⇒ 伤害下降
+	CHECK(walled.calls == plain.calls + 1); // (30 + rand()%20)/100 那一次取数
+}

@@ -123,6 +123,8 @@ struct CombatModifiers
 	// ★ 铁壁防御的加成开关(原 `CHAR_MAGICSUPERWALL > 0`,`_MAGIC_SUPERWALL` 8.0 开)。
 	//   ⚠️ 与 `other_status_nums` 是两件事:前者决定**是否**加成,后者是加成**基数**。
 	//   原版只有 `MAGICSUPERWALL > 0` 时才读 `OTHERSTATUSNUMS`。
+	//   ★ 批次 B3b 起有了真实写者:World 从战斗实例的魔法状态槽
+	//   (`magic_status_of_slot`,宠技 id 552 施加)逐行动投影进来 —— 见 World.cpp。
 	bool super_wall = false;
 
 	// ── 捕获(§6.2,批次 A.2)────────────────────────────────────
@@ -274,6 +276,17 @@ struct CombatModifiers
 	//   ★ **默认 0 = 非蓄力** ⇒ L3 分支不触发,现有用例逐位不受影响。
 	int pet_skill_charge_turns = 0;
 	int pet_skill_charge_percent = 0; // 完成击的 攻% P(完成击时由世界投影进 attack_percent)
+
+	// ── 宠技·状态攻击(批次 B3a;`PETSKILL_StatusChange`,pet_skill.c:781-844)──
+	//
+	// ★ option 形如 `毒 turn 3  攻%-30`:状态名按 `aszStatus[i]` 的 **2 字节 GBK
+	//   前缀**匹配出 `i`(1..43,`pet_skill.c:801-809`)、回合取 `turn` 后的数字
+	//   (缺省 3,`:812-817`),塞进 COM3 low/high;`battle.c:7240-7242` 在派发时读进
+	//   gBattleStausChange / gBattleStausTurn ⇒ 攻击命中后走 `BATTLE_StatusAttackCheck`
+	//   (即 rollStatusAttack)。与上面各列同一分工:参数由 World 查表投影,L3 只读。
+	// ★ **默认 0 = 无**(0 不是合法状态号 ⇒ 不进状态攻击,与批次 B3 之前逐位一致)。
+	int pet_skill_apply_status = 0; // 目标状态号 1..11(COME3 low);0 = 非状态技
+	int pet_skill_status_turns = 0; // 声明回合(COM3 high,option `turn N` 的 N)
 
 	// ── 状态异常(§4,批次 L4.1)──────────────────────────────────
 	//

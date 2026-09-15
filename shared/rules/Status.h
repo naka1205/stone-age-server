@@ -91,6 +91,22 @@ constexpr double kSuitPoisonBai = 2.0;
 //    照抄结构但**不声称它要紧**(纪律 ⓪:别给照抄的源码编造理由)。
 constexpr int kStatusHitCap = 80;
 
+// ── 宠技·状态攻击的调用参数(批次 B3a,2026-09-15 回源码核实)────────
+//
+// ★ 原版**唯一的普攻附带状态调用点**在 `BATTLE_Attack` 内(`battle_event.c:2908`):
+//       BATTLE_StatusAttackCheck(attackindex, defindex, gBattleStausChange,
+//                                suitpoison, 40, 2.0, &perStatus)
+//   ⇒ 无论状态来自**技能**(S_STATUSCHANGE)还是**带毒装备**,Range / Bai 都是
+//     **40 / 2.0**(同 `kSuitPoisonRange` / `kSuitPoisonBai`)—— 文档 §4.3 第二组
+//     的「Range=30 / Bai=1.0」是**魔法/精灵路径**的调用点(`:7575` / `:7642`,
+//     PerOffset = 技能表 Success),**不是**宠技状态攻击走的这组。
+// ★ PerOffset 实参 = 局部变量 `suitpoison`,它在 `BATTLE_Attack` 入口初始化为
+//   **30**(`:2689 int suitpoison=30;//基本中毒%`),只有装备毒分支(`:2904`)会
+//   把它改写成 SUITPOISON 值 ⇒ **技能状态路径传的就是这个初值 30**,既不是 0
+//   也不来自数据列。(旁证:`BATTLE_Attack_FIREKILL` 的同款调用点 `:3280`
+//   直接把 30 写死在实参里。)
+constexpr int kPetSkillStatusPer = 30;
+
 // 麻痹分支的固定基数(`:5081`)。
 //
 // ⚠️★ 源码只有 `per = 20; per -= RegTbl[status];` —— **没有装备抗性、没有 fVitalP、
@@ -196,6 +212,27 @@ StatusTickResult tickStatus(const Combatant &c,
 constexpr std::int32_t statusTurnsOnApply(int declared_turns) noexcept
 {
 	return declared_turns + kStatusTurnBonus;
+}
+
+// ★★ 施加成功后写入状态槽的**work 值**(批次 B3a 起,普攻附带状态块全量移植)。
+//
+// 源码顺序(`battle_event.c:2918-2925`):
+//     CHAR_setWorkInt( defindex, StatusTbl[gBattleStausChange],
+//                      gBattleStausTurn + 1 );
+//     if( gBattleStausChange == BATTLE_ST_DRUNK ){
+//         CHAR_setWorkInt( defindex, CHAR_WORKDRUNK,
+//             CHAR_getWorkInt( defindex, CHAR_WORKDRUNK ) / 2 );
+//     }
+// ⚠️★★ 酒醉要**再折半**:`StatusTbl[5] == CHAR_WORKDRUNK` 是同一个字段 ⇒ 先写
+//    turn+1 再就地 /2,净效果是落地 `(声明值 + 1) / 2`(泥醉声明 3 ⇒ 落地 2,
+//    **不是** 4)。照抄"先加后除"的形状,别改成"声明值折半"——逐位不同。
+// ⚠️ 其余状态(含毒)= `statusTurnsOnApply`,即带毒装备路径不受此影响。
+constexpr std::int32_t statusWorkOnApply(int status, int declared_turns) noexcept
+{
+	std::int32_t turns = declared_turns + kStatusTurnBonus;
+	if (status == static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_DRUNK))
+		turns /= 2;
+	return turns;
 }
 
 // 该状态一旦施加就当场清空目标本回合指令吗?(`battle_event.c:2932-2937`)

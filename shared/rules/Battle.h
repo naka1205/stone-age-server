@@ -59,6 +59,17 @@ struct ActionEffects
 	//   (IDL 不动),而这两个标志恰好只需要"本行动发生了什么"这一内部事实。
 	bool charge_beat = false;   // 本行动是蓄力拍(NoAction:不摇 rng、不产事件)
 	bool charge_strike = false; // 本行动是完成击(已按 charge_ready + 攻%替换走普攻管线)
+
+	// ── 状态攻击**施加当场**清掉目标的指令(批次 B3a)────────────────────
+	//
+	// ★ 原版在施加成功后(`battle_event.c:2932-2937`)对**守方**执行
+	//   `CHAR_setWorkInt( defindex, CHAR_WORKBATTLECOM1, BATTLE_COM_NONE )`,
+	//   只列麻痹 / 睡眠 / 石化 / 魔障四种(见 `clearsCommandOnApply`)。
+	//   槽号走这里而不是事件:指令是 L3 的输入面(非 IDL 载荷),清指令是
+	//   **调用方所有的世界写**(同 actor 自己的 command_cleared 那条先例),
+	//   事件流(客户端要演的)已有 StatusChange(applied=true) 承载"中了"。
+	// ★ -1 = 本行动没有清任何人的指令。
+	int status_cleared_target = -1;
 };
 
 // order 由宿主每回合只生成一次。本接口不再摇行动速度。
@@ -100,6 +111,8 @@ SA::Domain::CannotActReason checkCanAct(const Combatant &c) noexcept;
 // 当前覆盖：普攻/防御、逃跑、捕获、换宠、HP 恢复药、基础异常状态、
 // 宠技·直攻系子集（RENZOKU/GBREAK/GBREAK2/MIGHTY/POWERBALANCE，批次 B1；
 // 参数由 World 按 `PET_SKILL.skill_id` 查效果表投影到 `CombatModifiers`），
+// 宠技·状态攻击子集（毒/猛毒/石化/混乱/泥醉/催眠攻击，批次 B3a：
+// 命中且伤害>0 后走 rollStatusAttack，成功发 StatusChange(applied=true)），
 // 以及整次普攻后最多五次交替反击。特殊反应和其余技能链路仍另批接入。
 // 反击的依据与边界见 docs/journal/16-counterattack.md。
 bool resolveTurn(const BattleField &field,

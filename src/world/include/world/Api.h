@@ -674,6 +674,33 @@ struct PetSkillEffect
 	//   `World.cpp` 的 `charge_of_slot`(战斗实例内部态,不上线协议)。
 	std::int32_t charge_turns = 0;          // 蓄力拍数 N;0 = 非蓄力技能
 	std::int32_t charge_attack_percent = 0; // 完成击的 攻% P(option `攻%+N` 的 N)
+	// ── 状态攻击系(批次 B3a;`PETSKILL_StatusChange`,pet_skill.c:781-844)──
+	//
+	// ★ option 形如 `毒 turn 3  攻%-30`:状态名对 `aszStatus[i]` 做 **2 字节 GBK
+	//   前缀**匹配(pet_skill.c:801-809,aszStatus 1..10 = 毒麻眠石醉乱虚剧障默,
+	//   与 StatusTbl/BattleStatus 枚举一致),`turn` 后的数字为回合(:812-817,
+	//   源码缺省 3)⇒ COM3 low/high;`battle.c:7240-7242` 派发时读进 gBattleStausChange
+	//   / gBattleStausTurn,攻击命中后走 `BATTLE_StatusAttackCheck`。
+	// ⚠️ 攻% 部分与 POWERBALANCE 同款**替换式**改写 WORKATTACKPOWER ⇒ 复用
+	//   `attack_percent` 列,不另开字段。
+	// ★ apply_status = aszStatus 匹配出的状态号 1..11;**0 = 非状态技**。
+	std::int32_t apply_status = 0;
+	std::int32_t status_turns = 0; // option `turn N` 的 N(声明值;落地时 +1,酒醉再折半)
+	// ── 魔法状态系(批次 B3b;`PETSKILL_MagicStatusChange`,pet_skill.c:1726)──
+	//
+	// ★ option 形如 `铁壁|3|30|全`(petskill2.txt id 552):第 1 列对 `MagicStatus[]`
+	//   匹配出序号(battle_event.c:7215-7222;`MagicTbl[2] = CHAR_MAGICSUPERWALL` = 铁壁),
+	//   第 2/3 列 = turn / nums(OTHERSTATUSNUMS),第 4 列目标范围(`全` 对单体 toNo
+	//   无展开效果 —— `BATTLE_MultiList` 对 0..19 的 toNo 恒产单体表,battle.c:239-263)。
+	//   结算:`BATTLE_MultiMagicStatusChange`(battle_magic.c:2001)对目标写
+	//   `MAGICSUPERWALL = turn; OTHERSTATUSNUMS = nums` —— **施加端无 rng、无攻击**,
+	//   目标已有任一魔法状态则整笔跳过(:2019-2026 的 MagicTbl 族单槽)。
+	//   过期:`BATTLE_MagicStatusSeq`(battle.c:9059)在该单位**行动位**每回合 --cnt,
+	//   归零即清(battle.c:7077,先于指令派发)。
+	// ★ magic_status = MagicStatus 序号(2 = 铁壁);**0 = 非本系**。
+	std::int32_t magic_status = 0;
+	std::int32_t magic_turns = 0; // option 第 2 列(MAGICSUPERWALL 的持续回合)
+	std::int32_t magic_nums = 0;  // option 第 3 列(OTHERSTATUSNUMS,防御加成基数)
 };
 
 class World final : public SA::Net::TransportEvents,

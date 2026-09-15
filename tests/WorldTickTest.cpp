@@ -4696,9 +4696,16 @@ void giveSkillPetAndCallOut(Fixture &f, SA::Net::ConnectionId id, BattleId battl
 //   ★ str/tough = 100 备用(POWERBALANCE 的替换基数);attack 由用例给。
 //   ★ B2 起:开局顺带给玩家一只带宠技槽的默认宠并 PET_OUT 叫出(W| 持有门的
 //     fixture 前提;默认槽 {10,40,50} 恰好盖住 B1 三条用例的 skill_id)。
+//   ★ B3 起:`foe_attack` / `player_luck` / `suit_poison` / `player_sequence` 四个
+//     默认 0 的参数 —— 铁壁用例要敌人真的动手(foe_attack),状态攻击用例要抬 per
+//     基数(player_luck;per = 30 + 38 + luck,夹 80)与遮蔽对照(suit_poison);
+//     player_sequence = 装备先攻 ⇒ 玩家**恒先手**(与敌人同敏捷时行动抖动会掷
+//     硬币,状态系用例的回合内时序断言需要确定的主先顺序)。
 BattleId startPetSkillBattle(Fixture &f, SA::Net::ConnectionId id, std::int32_t foe_hp,
                              std::int32_t attack,
-                             std::initializer_list<std::int32_t> pet_skills = {10, 40, 50})
+                             std::initializer_list<std::int32_t> pet_skills = {10, 40, 50},
+                             std::int32_t foe_attack = 0, std::int32_t player_luck = 0,
+                             std::int32_t suit_poison = 0, std::int32_t player_sequence = 0)
 {
 	SA::Rules::BattleField pf{};
 	SA::Rules::Combatant &me = pf.at(0);
@@ -4712,7 +4719,9 @@ BattleId startPetSkillBattle(Fixture &f, SA::Net::ConnectionId id, std::int32_t 
 	me.tough = 100;
 	me.defense = 100;
 	me.quick = 0;
-	me.luck = 0;
+	me.luck = player_luck;
+	me.mods.suit_poison = suit_poison;
+	me.mods.sequence = player_sequence;
 	me.mods.unarmed = false;
 	me.mods.attack_num_min = 1;
 	me.mods.attack_num_max = 1;
@@ -4722,7 +4731,7 @@ BattleId startPetSkillBattle(Fixture &f, SA::Net::ConnectionId id, std::int32_t 
 	foe.slot = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
 	foe.level = 1;
 	foe.hp = foe.max_hp = foe_hp;
-	foe.attack = 0; // 不反杀:血量只由玩家的宠技决定
+	foe.attack = foe_attack; // 默认 0 不反杀:血量只由玩家的宠技决定
 	foe.defense = 1;
 	foe.quick = 0;
 	foe.luck = 0;
@@ -5001,6 +5010,310 @@ TEST_CASE("宠技B2★★:世界侧 —— 持有门:无宠 / 宠无此技 / 表
 	}
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  宠技·状态系(批次 B3)—— 世界侧:效果表 → 投影 → L3 → 写回
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 数据面(`csa8.0/gmsv/data/petskill2.txt`,GBK;第 7 列 = skill_id):
+//   id 60  毒攻击   PETSKILL_StatusChange      option `毒 turn 3  攻%-30`
+//   id 61  猛毒攻击 PETSKILL_StatusChange      option `毒 turn 5  攻%-50`
+//   id 80  石化攻击 PETSKILL_StatusChange      option `石 turn 3  攻%-30`
+//   id 90  混乱攻击 PETSKILL_StatusChange      option `乱 turn 3 攻%-30`
+//   id 100 泥醉攻击 PETSKILL_StatusChange      option `醉 turn 3 攻%-30`
+//   id 110 催眠攻击 PETSKILL_StatusChange      option `眠 turn 3  攻%-30`
+//   id 552 铁壁     PETSKILL_MagicStatusChange option `铁壁|3|30|全`
+//
+// ★ 状态命中的命中率是概率(PerOffset=30 + 等级差×Bai,夹 80)⇒ 用例把
+//   player_luck 抬到 25(per = 30 + 38 + 25 ⇒ 夹 80);fixture 种子固定
+//   (RandomSource{0xABCDEF})⇒ 判定逐位确定,红绿可复现。
+// ⚠️ 落地回合数 = 声明值 + 1(`:2918`),而**敌人自己的行动位**会在同回合推进
+//   一次(StatusSeq 在行动位,battle.c:7074)⇒ 回合末读到的是**声明值本身**。
+
+TEST_CASE("宠技B3★★:世界侧 —— 毒攻击(60)命中施加毒;第二发被全局互斥挡下")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	const BattleId battle = startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/1000,
+	                                            /*pet_skills=*/{60}, /*foe_attack=*/0,
+	                                            /*player_luck=*/25, /*suit_poison=*/0, /*player_sequence=*/100);
+	// petskill2.txt 第 17 行:毒攻击 `毒 turn 3  攻%-30`。
+	f.world.loadPetSkillEffects({
+	    {/*skill_id=*/60, /*renzoku_hits=*/0, /*damage_mult_percent=*/100, /*duck_bonus=*/0,
+	     /*guard_break=*/0, /*attack_percent=*/-30, /*defense_percent=*/0,
+	     /*charge_turns=*/0, /*charge_attack_percent=*/0,
+	     /*apply_status=*/static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON),
+	     /*status_turns=*/3},
+	});
+
+	// ── 回合 1:命中 ⇒ 施加。落地 4(声明 3 + 1),敌人行动位推进一次 ⇒ 回合末 3。
+	petSkillTurn(f, id, battle, /*skill_id=*/60, /*target=*/10);
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		CHECK(fld->at(SA::Rules::kSideOffset).hp < 1000000); // 攻击确实落下
+		CHECK(fld->at(SA::Rules::kSideOffset).status ==
+		      static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON));
+		CHECK(fld->at(SA::Rules::kSideOffset).status_turns == 3); // 4 − 1(自身行动位)
+	}
+
+	// ── 回合 2:再打同一发 ⇒ 全局互斥(目标已有状态)⇒ 施加失败,计时照常走。
+	petSkillTurn(f, id, battle, /*skill_id=*/60, /*target=*/10);
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		CHECK(fld->at(SA::Rules::kSideOffset).status ==
+		      static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON));
+		// ★ 互斥失效的话这里会被重置成 4(重新施加)⇒ 转红;2 = 从 3 再递减一次。
+		CHECK(fld->at(SA::Rules::kSideOffset).status_turns == 2);
+	}
+}
+
+TEST_CASE("宠技B3★★:世界侧 —— 猛毒(61)turn 5 ⇒ 落地 6;石化(80)落地 4 且清掉敌人指令")
+{
+	SUBCASE("猛毒:声明 5 ⇒ 回合末 5(6 − 1)")
+	{
+		Fixture f;
+		const SA::Net::ConnectionId id = f.transport.connect();
+		const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+		f.transport.deliver(id, hs.data(), hs.size());
+		f.world.tick();
+		REQUIRE(f.world.playerCount() == 1);
+
+		const BattleId battle = startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/1000,
+		                                            /*pet_skills=*/{61}, /*foe_attack=*/0,
+		                                            /*player_luck=*/25, /*suit_poison=*/0, /*player_sequence=*/100);
+		// petskill2.txt 第 18 行:猛毒攻击 `毒 turn 5  攻%-50`。
+		f.world.loadPetSkillEffects({
+		    {/*skill_id=*/61, /*renzoku_hits=*/0, /*damage_mult_percent=*/100,
+		     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/-50,
+		     /*defense_percent=*/0, /*charge_turns=*/0, /*charge_attack_percent=*/0,
+		     /*apply_status=*/static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON),
+		     /*status_turns=*/5},
+		});
+
+		petSkillTurn(f, id, battle, /*skill_id=*/61, /*target=*/10);
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		CHECK(fld->at(SA::Rules::kSideOffset).status ==
+		      static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON));
+		// ★ 与毒攻击只用 "3" 差一档——若 turn 列没进投影,这里会是 3 ⇒ 转红。
+		CHECK(fld->at(SA::Rules::kSideOffset).status_turns == 5);
+	}
+
+	SUBCASE("石化:状态 4,且敌人本回合指令被当场清掉(不还手)")
+	{
+		Fixture f;
+		const SA::Net::ConnectionId id = f.transport.connect();
+		const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+		f.transport.deliver(id, hs.data(), hs.size());
+		f.world.tick();
+		REQUIRE(f.world.playerCount() == 1);
+
+		// foe_attack > 0:让"敌人这一回合有没有动手"成为可观察量。
+		const BattleId battle = startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/1000,
+		                                            /*pet_skills=*/{80}, /*foe_attack=*/100,
+		                                            /*player_luck=*/25, /*suit_poison=*/0, /*player_sequence=*/100);
+		// petskill2.txt 第 19 行:石化攻击 `石 turn 3  攻%-30`。
+		f.world.loadPetSkillEffects({
+		    {/*skill_id=*/80, /*renzoku_hits=*/0, /*damage_mult_percent=*/100,
+		     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/-30,
+		     /*defense_percent=*/0, /*charge_turns=*/0, /*charge_attack_percent=*/0,
+		     /*apply_status=*/static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_STONE),
+		     /*status_turns=*/3},
+		});
+
+		// 叫宠那回合敌人已经打过一次 ⇒ 以施放前的血量为基线。
+		const std::int32_t hp0 = f.world.battleField(battle)->at(0).hp;
+		petSkillTurn(f, id, battle, /*skill_id=*/80, /*target=*/10);
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		CHECK(fld->at(SA::Rules::kSideOffset).status ==
+		      static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_STONE));
+		CHECK(fld->at(SA::Rules::kSideOffset).status_turns == 3);
+		// ★ 敌人在玩家之后行动(用例给玩家装备先攻)⇒ 施加发生在他行动之前:指令被清
+		//   (battle_event.c:2932-2937)+ checkCanAct 再挡一道 ⇒ 本回合玩家不再掉血。
+		//   若清指令/状态门失效 ⇒ 满攻 100 的敌人会留下新的掉血 ⇒ 转红。
+		CHECK(fld->at(0).hp == hp0);
+	}
+}
+
+TEST_CASE("宠技B3★★:世界侧 —— 泥醉(100)的落地回合要折半(3 + 1 ⇒ 2)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	const BattleId battle = startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/1000,
+	                                            /*pet_skills=*/{100}, /*foe_attack=*/0,
+	                                            /*player_luck=*/25, /*suit_poison=*/0, /*player_sequence=*/100);
+	// petskill2.txt 第 21 行:泥醉攻击 `醉 turn 3 攻%-30`。
+	f.world.loadPetSkillEffects({
+	    {/*skill_id=*/100, /*renzoku_hits=*/0, /*damage_mult_percent=*/100, /*duck_bonus=*/0,
+	     /*guard_break=*/0, /*attack_percent=*/-30, /*defense_percent=*/0,
+	     /*charge_turns=*/0, /*charge_attack_percent=*/0,
+	     /*apply_status=*/static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_DRUNK),
+	     /*status_turns=*/3},
+	});
+
+	petSkillTurn(f, id, battle, /*skill_id=*/100, /*target=*/10);
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->at(SA::Rules::kSideOffset).status ==
+	      static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_DRUNK));
+	// ★ 落地 (3+1)/2 = 2,敌人行动位再推进一次 ⇒ 1。若漏了折半 ⇒ 3 ⇒ 转红。
+	CHECK(fld->at(SA::Rules::kSideOffset).status_turns == 1);
+}
+
+TEST_CASE("宠技B3★★:世界侧 —— 遮蔽:技能状态优先,带毒装备不发动(:2903)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	// 玩家同时带高命中带毒装备(suit_poison = 200 ⇒ per 夹 80)与石化攻击。
+	const BattleId battle = startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/1000,
+	                                            /*pet_skills=*/{80}, /*foe_attack=*/0,
+	                                            /*player_luck=*/25, /*suit_poison=*/200, /*player_sequence=*/100);
+	f.world.loadPetSkillEffects({
+	    {/*skill_id=*/80, /*renzoku_hits=*/0, /*damage_mult_percent=*/100, /*duck_bonus=*/0,
+	     /*guard_break=*/0, /*attack_percent=*/-30, /*defense_percent=*/0,
+	     /*charge_turns=*/0, /*charge_attack_percent=*/0,
+	     /*apply_status=*/static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_STONE),
+	     /*status_turns=*/3},
+	});
+
+	petSkillTurn(f, id, battle, /*skill_id=*/80, /*target=*/10);
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	// ★ 遮蔽生效 ⇒ 中的是**石**;若判据写成 `||` / 顺序反了 ⇒ 中的会是毒 ⇒ 转红。
+	CHECK(fld->at(SA::Rules::kSideOffset).status ==
+	      static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_STONE));
+}
+
+TEST_CASE("宠技B3★:世界侧 —— 表外 id 门与持有门沿用(B3 的 id 走同两道门)")
+{
+	// ① 表外 id:宠有该技(持有门放行),但效果表没有该行 ⇒ L3 整次跳过。
+	{
+		Fixture f;
+		const SA::Net::ConnectionId id = f.transport.connect();
+		const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+		f.transport.deliver(id, hs.data(), hs.size());
+		f.world.tick();
+		REQUIRE(f.world.playerCount() == 1);
+
+		const BattleId battle = startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/1000,
+		                                            /*pet_skills=*/{60}, /*foe_attack=*/0,
+		                                            /*player_luck=*/25, /*suit_poison=*/0, /*player_sequence=*/100);
+		f.world.loadPetSkillEffects({
+		    {/*skill_id=*/10, /*renzoku_hits=*/2, /*damage_mult_percent=*/100,
+		     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/0,
+		     /*defense_percent=*/0},
+		});
+		petSkillTurn(f, id, battle, /*skill_id=*/60, /*target=*/10); // 表外 ⇒ 跳过
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		CHECK(fld->at(SA::Rules::kSideOffset).hp == 1000000);
+		CHECK(fld->at(SA::Rules::kSideOffset).status ==
+		      static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_NONE));
+	}
+
+	// ② 持有门:宠没有该技(七槽无 60)⇒ 指令降级 WAIT,表里有没有都不执行。
+	{
+		Fixture f;
+		const SA::Net::ConnectionId id = f.transport.connect();
+		const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+		f.transport.deliver(id, hs.data(), hs.size());
+		f.world.tick();
+		REQUIRE(f.world.playerCount() == 1);
+
+		const BattleId battle = startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/1000,
+		                                            /*pet_skills=*/{10}, /*foe_attack=*/0,
+		                                            /*player_luck=*/25, /*suit_poison=*/0, /*player_sequence=*/100);
+		f.world.loadPetSkillEffects({
+		    {/*skill_id=*/60, /*renzoku_hits=*/0, /*damage_mult_percent=*/100,
+		     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/-30,
+		     /*defense_percent=*/0, /*charge_turns=*/0, /*charge_attack_percent=*/0,
+		     /*apply_status=*/static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_POISON),
+		     /*status_turns=*/3},
+		});
+		petSkillTurn(f, id, battle, /*skill_id=*/60, /*target=*/10);
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		CHECK(fld->at(SA::Rules::kSideOffset).hp == 1000000);
+		CHECK(fld->at(SA::Rules::kSideOffset).status ==
+		      static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_NONE));
+	}
+}
+
+TEST_CASE("宠技B3★★:世界侧 —— 铁壁(552):施加 super_wall + 30、持续 3 回合后过期")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	// foe_attack > 0:敌人的每一击都要经过守方防御公式(铁壁的消费面)。
+	const BattleId battle = startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/1000,
+	                                            /*pet_skills=*/{552}, /*foe_attack=*/100,
+	                                            /*player_luck=*/0, /*suit_poison=*/0, /*player_sequence=*/100);
+	// petskill2.txt 第 79 行:铁壁 `铁壁|3|30|全`(MagicStatus[2] = 铁壁)。
+	f.world.loadPetSkillEffects({
+	    {/*skill_id=*/552, /*renzoku_hits=*/0, /*damage_mult_percent=*/100, /*duck_bonus=*/0,
+	     /*guard_break=*/0, /*attack_percent=*/0, /*defense_percent=*/0,
+	     /*charge_turns=*/0, /*charge_attack_percent=*/0, /*apply_status=*/0,
+	     /*status_turns=*/0, /*magic_status=*/2, /*magic_turns=*/3, /*magic_nums=*/30},
+	});
+
+	const auto wall_state = [&](int slot)
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		return std::pair{fld->at(slot).mods.super_wall, fld->at(slot).other_status_nums};
+	};
+	const auto waitTurn = [&]()
+	{
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = f.world.battleField(battle)->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+		f.world.onBattleCommand(id, cmd);
+		f.clock.advance(2000);
+		f.world.tick();
+	};
+
+	// ── 回合 1:施放铁壁(目标 = 自己槽 0)。施加在玩家行动位之后、敌人行动之前,
+	//   敌人这一击已经在铁壁之下(逐行动投影)⇒ 回合末即可见。
+	petSkillTurn(f, id, battle, /*skill_id=*/552, /*target=*/0);
+	CHECK(wall_state(0).first);
+	CHECK(wall_state(0).second == 30); // OTHERSTATUSNUMS
+	CHECK_FALSE(wall_state(10).first); // 只落目标槽,不波及敌人
+
+	// ── 回合 2、3:还在(递减 3 → 2 → 1)。
+	waitTurn();
+	CHECK(wall_state(0).first);
+	CHECK(wall_state(0).second == 30);
+	waitTurn();
+	CHECK(wall_state(0).first);
+	CHECK(wall_state(0).second == 30);
+
+	// ── 回合 4:递减到 0 ⇒ 过期清掉(MagicStatusSeq,battle.c:9059-9078)。
+	waitTurn();
+	CHECK_FALSE(wall_state(0).first);
+	CHECK(wall_state(0).second == 0);
+}
 TEST_CASE("宠技B2★:数据面 —— spawnEnemy 整组拷模板宠技槽(0/-1/表外 id 一律不清洗)")
 {
 	// 1:1 那个 `for(i) unionTable.indexOfPetskill[i] = *(tp + E_T_PETSKILL1 + i)`

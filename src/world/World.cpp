@@ -114,6 +114,16 @@ struct WorldWriteContext
 	//   释放 Item 实体。⚠️ 非 const:删道具要 `items->release` + `Player::clearItemSlot`。
 	ItemPool *items = nullptr;
 	SA::Platform::Logger *logger = nullptr;
+
+	// ── 本行动的行动者(批次 B3a)────────────────────────────────
+	//
+	// ★ applyEvents 落 `StatusChange(applied = true)` 时要算**落地的回合数**
+	//   (原版 `StatusTbl[st] = gBattleStausTurn + 1`,回合数随施加者而变:
+	//   毒攻击 3 / 猛毒 5 / 带毒装备 3)。事件本身不带回合数(IDL 不动)⇒
+	//   由**施加者在本行动的投影参数**推出 —— applyEvents 与 resolveAction
+	//   同在一个行动循环体内先后执行,此刻投影未被覆盖,读它即得参数。
+	//   ⚠️ -1 = 无行动者上下文(理论上不发生;此时按带毒装备的声明值兜底)。
+	int actor = -1;
 };
 
 // 战斗事件缓冲。★ 每场战斗**复用一个**:domain::BattleEvents 是 7 KB 的 POD,
@@ -138,6 +148,26 @@ struct ChargeState
 	std::int32_t skill_id = 0; // 完成击合成指令要带的 skill_id
 	std::uint32_t target = 0;  // 目标槽(原 COM2 在蓄力期间原样保留)
 };
+
+// ── 魔法状态(批次 B3b)────────────────────────────────────────
+//
+// ★ 原版 `CHAR_MAGICSUPERWALL` 等 **MagicTbl 族**是 StatusTbl 之外的**另一族 work
+//   槽**(`battle_event.c:61-66`),与 StatusTbl 的单槽异常状态**互不干扰**:
+//   施加端的互斥只在族内扫(`BATTLE_MultiMagicStatusChange`,`battle_magic.c:2019-2026`),
+//   消费端(防御加成)也只认族内字段 ⇒ 不能压进 `Combatant::status`(那会把它卷进
+//   StatusTbl 的全局互斥,行为分叉)。⇒ 落在战斗实例(世界侧内部态,同 ChargeState
+//   的形状与理由:不上线协议,IDL 不动;消费面由逐行动投影进 Combatant 快照)。
+//   客户端表现:原版该施加只有动画串(`Bm|` 回显在 8.0 里已注释掉)⇒ 无事件也照抄。
+// ⚠️ 单槽建模 = 族内互斥的直接产物(原版施加前扫全族,任一 > 0 即跳过)——
+//   与 StatusTbl 单槽同一条结构事实的另一份实例。
+struct MagicStatusState
+{
+	std::int32_t status = 0; // MagicStatus 序号(2 = 铁壁 MAGICSUPERWALL);0 = 无
+	std::int32_t turns = 0;  // 剩余回合(原 MagicTbl[i] 的 work 值)
+	std::int32_t nums = 0;   // OTHERSTATUSNUMS(防御加成基数;过期不单独清,消费端有开关)
+};
+// `MagicStatus[]` 的序号常量(battle_event.c:59-66;B3 只接铁壁这一个消费面)。
+constexpr std::int32_t kMagicSuperWall = 2;
 struct BattleInstance
 {
 	BattleId id = 0;
@@ -172,6 +202,9 @@ struct BattleInstance
 	//   (onBattleCommand,对应原版「蓄力中宠物菜单关闭」—— 新指令不可能,
 	//   我们的槽位一体 ⇒ 以"替换"表意)。
 	std::array<ChargeState, SA::Rules::kSlotCount> charge_of_slot{};
+	// 魔法状态(批次 B3b,见上方 MagicStatusState)。★ 同为实例内部态:
+	//   过期按回合在 tickMagicStatus 递减;施加走 applyMagicStatusPetSkill。
+	std::array<MagicStatusState, SA::Rules::kSlotCount> magic_status_of_slot{};
 	std::array<std::optional<int>, SA::Rules::kSlotCount> quick_to_restore{};
 	std::array<bool, SA::Rules::kSlotCount> profit_settled{};
 	std::array<std::int32_t, SA::Rules::kSlotCount> pending_exp{};
@@ -797,6 +830,8 @@ void projectPetSkill(BattleInstance &b, const std::vector<PetSkillEffect> &effec
 		atk.mods.pet_skill_defense_percent = 0;
 		atk.mods.pet_skill_charge_turns = 0;
 		atk.mods.pet_skill_charge_percent = 0;
+		atk.mods.pet_skill_apply_status = 0; // 批次 B3a:0 = 非状态技
+		atk.mods.pet_skill_status_turns = 0;
 
 		if (!b.commands.present[slot])
 			continue;
@@ -809,9 +844,11 @@ void projectPetSkill(BattleInstance &b, const std::vector<PetSkillEffect> &effec
 		if (e == nullptr)
 			continue; // 表外技能 / 空表 ⇒ 保持"无技能"⇒ L3 跳过(不退化成普攻)
 
-		// ⚠️ 蓄力行**不是**直攻系:第一拍由 L3 的集气分支接管(先于"表外 ⇒ 跳过"
-		//   判定),完成击的 direct 由 `projectChargeState` 按实例态投影 ⇒ 此处不置。
-		if (e->charge_turns == 0)
+		// ⚠️ 蓄力行与魔法状态行(铁壁)**都不是**直攻系:第一拍由 L3 的集气分支接管
+		//   (先于"表外 ⇒ 跳过"判定);铁壁在原版是独立 case(battle.c:8410,
+		//   不落 :7512 的普攻执行组)⇒ L3 整次行动跳过(不摇 rng、不产事件),
+		//   施加由世界侧在行动位做(applyMagicStatusPetSkill)。
+		if (e->charge_turns == 0 && e->magic_status == 0)
 			atk.mods.pet_skill_direct = true;
 		// ① RENZOKU 段数归一:`if(N < 1 || N > 10) N = 1;`(pet_skill.c:605-606)——
 		//   ★ 越界**归 1,不是夹到边界**,也不是归"无技能":原版此时仍是 RENZOKU
@@ -826,6 +863,14 @@ void projectPetSkill(BattleInstance &b, const std::vector<PetSkillEffect> &effec
 		atk.mods.pet_skill_guard_break = e->guard_break;
 		atk.mods.pet_skill_attack_percent = e->attack_percent;
 		atk.mods.pet_skill_defense_percent = e->defense_percent;
+		// ③ 状态攻击参数(批次 B3a):原版在 `PETSKILL_StatusChange` 里塞 COM3
+		//   low/high(pet_skill.c:819-820),无归一化(回合缺省 3 已由表解析保证)
+		//   ⇒ 原样投影,回合数的 +1(酒醉再折半)发生在施加落地那一步。
+		if (e->apply_status > 0)
+		{
+			atk.mods.pet_skill_apply_status = e->apply_status;
+			atk.mods.pet_skill_status_turns = e->status_turns;
+		}
 		// ② CHARGE 蓄力拍数归一(批次 B2b):`N<1 || N>10 ⇒ 1`(pet_skill.c:630-634,
 		//   与 RENZOKU 同款)。⚠️ **归 1 仍是蓄力指令**(原版 COM1=S_CHARGE 照设),
 		//   与"表外"不同;`charge_turns == 0` 的行才是非蓄力技能(不写、保持 0)。
@@ -958,6 +1003,113 @@ void applyChargeEffects(BattleInstance &b, int slot, const SA::Rules::ActionEffe
 		// 完成击已消费:清态(原 `:7729` `COM1 = NONE`)。
 		b.charge_of_slot[static_cast<std::size_t>(slot)] = ChargeState{};
 	}
+}
+
+// ── 魔法状态(铁壁)的世界侧三段接线(批次 B3b)────────────────────────
+//
+// ★★ 状态机落点:**战斗实例的 `magic_status_of_slot[slot]`**,与集气态同形 ——
+//   原版凭据(2026-09-15 回源码核实,原始 8.5 树 `StoneAge/gmsv/src/battle/`):
+//   · 施加:`PETSKILL_MagicStatusChange`(pet_skill.c:1726)置 COM1=S_SUPERWALL ⇒
+//     `battle.c:8410-8416`(独立 case,**不落** :7512 普攻执行组)⇒
+//     `PETSKILL_MagicStatusChange_Battle`(battle_event.c:7203)解析 option
+//     `铁壁|3|30|全` ⇒ `BATTLE_MultiMagicStatusChange`(battle_magic.c:2001):
+//     目标已有**任一** MagicTbl 状态则整笔跳过(:2019-2026),否则
+//     `MAGICSUPERWALL = turn; OTHERSTATUSNUMS = nums`。**施加端无 rng、无攻击、
+//     无事件**(动画串 `Bm|` 在 8.0 已注释,:2027-2031)。
+//   · 消费:防御公式读 `MAGICSUPERWALL > 0` + `OTHERSTATUSNUMS`
+//     (battle_event.c:1195-1200)= L3 既有消费面(mods.super_wall / other_status_nums)。
+//   · 过期:`BATTLE_MagicStatusSeq`(battle.c:9059-9078)在该单位**行动位**每回合
+//     `--cnt`、归零即清 —— 调用点 `battle.c:7077`,先于指令派发(:7240);阵亡单位
+//     在循环头 :7051 被跳过 ⇒ **计时暂停**(复活不复活都无所谓,边角照抄);
+//     离场清理由 `BATTLE_BadStatusAllClr`(battle.c:86-99)承担。
+//   ⚠️ **与原版的登记差异(有意,缩小范围)**:原版递减发生在**每个单位自己的
+//     行动位**(行动序靠后的单位在被攻击前还没减);本实现每回合在行动循环前
+//     统一递减一次 —— 差别只在"到期那一回合里、先于该单位行动的攻击者"看到的
+//     值(原版还是旧值,本实现已清)。方向是"早半回合过期",且只影响到期当回合。
+//     另:原版只递减"到达 C_OK 的单位",本实现对**有状态的在场单位**一律递减
+//     (我们的宠物槽不产指令,照原版口径它们永远 tick 不到 ⇒ 铁壁永不过期,
+//     那是更大的偏差;两害取轻,记明在案)。
+
+// ① 投影:把实例魔法状态写进所有在场槽的快照消费面(每次 resolveAction 前)。
+//   ★ 全槽投影(不只行动者):被攻击的是**任意**槽 —— 与 capture_item_ok 那类
+//   "读世界态才能算出的门"同一分工,世界态在世界侧算好、L3 只读快照。
+//   ⚠️ 无条件覆写 `super_wall` / `other_status_nums`:全仓无第二个写者
+//   (实测:仅有用例手填,RulesBattleTest 直调 L3 不过这里)⇒ 归零语义干净。
+void projectMagicStatus(BattleInstance &b)
+{
+	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+	{
+		SA::Rules::Combatant &c = b.field.at(slot);
+		const MagicStatusState &st = b.magic_status_of_slot[static_cast<std::size_t>(slot)];
+		// 目前 MagicTbl 族只接了铁壁这一个消费面;其余序号(魔抗/火抗…)投影为无,
+		// 与"效果表没有该消费面"一致(不猜)。
+		const bool active = st.status != 0 && st.turns > 0 && st.status == kMagicSuperWall;
+		c.mods.super_wall = active;
+		c.other_status_nums = active ? st.nums : 0;
+	}
+}
+
+// ② 过期推进:每回合行动阶段前跑一次(见上"登记差异")。
+//   阵亡 ⇒ 跳过(原版 :7051 在 Seq 之前 continue ⇒ 计时暂停,照抄);
+//   离场 ⇒ 清(原版 BadStatusAllClr;空槽留着也会被投影挡住,但清了才没有
+//   "新单位进场继承旧状态"的角落)。
+void tickMagicStatus(BattleInstance &b)
+{
+	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+	{
+		MagicStatusState &st = b.magic_status_of_slot[static_cast<std::size_t>(slot)];
+		const SA::Rules::Combatant &c = b.field.at(slot);
+		if (!c.occupied)
+		{
+			st = MagicStatusState{};
+			continue;
+		}
+		if (c.dead || st.turns <= 0)
+			continue;
+		--st.turns; // 原版 `--cnt`(battle.c:9068)
+		if (st.turns <= 0)
+			st = MagicStatusState{}; // 原版 `cnt <= 0 ⇒ 置 0`(:9071)
+	}
+}
+
+// ③ 施加:行动者本回合的指令是**魔法状态系宠技** ⇒ 在其行动位把状态落到目标槽。
+//
+// ★ 调用时机:resolveAction **之后**(与 applyChargeEffects 同位)。理由:
+//   原版的施加发生在行动位的指令派发(case S_SUPERWALL),而 L3 的状态推进/
+//   checkCanAct 门可能清掉本行动(`effects.command_cleared`)⇒ 原版此刻
+//   COM 已被清成 NONE、走不到那个 case ⇒ 门必须是"没被清"而不是"行动前"。
+//   施加后本行动已结束 ⇒ 首个受益/受击者是下一次 resolveAction(它的
+//   projectMagicStatus 会把状态投影进快照)⇒ 与原版"同回合后手攻击者可见"一致。
+// ⚠️ 目标 = 指令载荷的 `pet_skill.target`(原 COM2 = toindex)。原版对 0..19 的
+//   toNo 经 `BATTLE_MultiList` 恒产**单体**表(battle.c:239-263)⇒ `全` 在宠技
+//   路径不产生全体展开(数据描述"己方全体"与实际 mechanics 不符,照抄 mechanics)。
+// ⚠️ 不摇 rng、不产事件(见上,原版施加端就是静默的)。
+void applyMagicStatusPetSkill(BattleInstance &b, int actor,
+                              const std::vector<PetSkillEffect> &effects)
+{
+	if (actor < 0 || actor >= SA::Rules::kSlotCount || !b.commands.present[actor])
+		return;
+	const SA::Domain::BattleCommand &cmd = b.commands.commands[actor];
+	if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::PET_SKILL)
+		return;
+	const PetSkillEffect *e = findPetSkillEffect(effects, cmd.command.pet_skill.skill_id);
+	if (e == nullptr || e->magic_status == 0)
+		return; // 非魔法状态系 ⇒ 什么都不做(L3 也已把它当表外跳过)
+
+	const int target = static_cast<int>(cmd.command.pet_skill.target);
+	if (target < 0 || target >= SA::Rules::kSlotCount)
+		return;
+	const SA::Rules::Combatant &tgt = b.field.at(target);
+	if (!tgt.occupied || tgt.dead)
+		return; // 原版 MultiList 的目标存活检查(battle.c:247-262 的 TargetCheck)
+
+	MagicStatusState &st = b.magic_status_of_slot[static_cast<std::size_t>(target)];
+	if (st.status != 0 && st.turns > 0)
+		return; // ★ 魔法状态族**单槽**(battle_magic.c:2019-2026:已有任一 ⇒ 整笔跳过)
+
+	st.status = e->magic_status;
+	st.turns = e->magic_turns;
+	st.nums = e->magic_nums;
 }
 
 // F07: 只在 resolveAction 返回 item_used 后提交一次。
@@ -1106,8 +1258,26 @@ void applyEvents(SA::Domain::BattleEvents &events,
 
 			if (sc.applied)
 			{
+				// ★★ 批次 B3a 起,这一支有了真实生产者:宠技·状态攻击
+				//   (Battle.cpp 的 strike 成功支)。回合数按**施加者**的投影参数算
+				//   (原版 `StatusTbl[st] = gBattleStausTurn + 1`,`:2918`;声明回合
+				//   随技能而变:毒攻击 3 / 猛毒 5 / 泥醉 3)—— 事件不带回合数
+				//   (IDL 不动)⇒ 从 ctx.actor 在本行动的投影面读回。
+				//   ⚠️ 酒醉的"落地再折半"封在共享纯函数 statusWorkOnApply 里,
+				//     与 L3 侧镜像同一份实现(DR-BT5:不实现第二遍)。
+				//   ⚠️ 匹配不中(状态号 ≠ 投影的状态技参数)⇒ 视同带毒装备口径
+				//     (kSuitPoisonTurns);那是本通道 applied=true 唯一的另一来源。
+				int declared = SA::Rules::kSuitPoisonTurns;
+				if (ctx.actor >= 0 && ctx.actor < SA::Rules::kSlotCount)
+				{
+					const SA::Rules::Combatant &atk = field.at(ctx.actor);
+					if (atk.occupied && atk.mods.pet_skill_apply_status > 0 &&
+					    static_cast<int>(sc.status) == atk.mods.pet_skill_apply_status)
+						declared = atk.mods.pet_skill_status_turns;
+				}
 				c.status = static_cast<std::uint8_t>(sc.status);
-				c.status_turns = SA::Rules::statusTurnsOnApply(SA::Rules::kSuitPoisonTurns);
+				c.status_turns =
+				    SA::Rules::statusWorkOnApply(static_cast<int>(sc.status), declared);
 				break;
 			}
 
@@ -2446,6 +2616,11 @@ void World::tick()
 			// ★ 敌方 AI 先填指令(见 FillEnemyCommands 卷首:这是 battle.h 指定的分工)。
 			fillEnemyCommands(b.field, b.commands);
 
+			// 魔法状态的回合推进(批次 B3b):原版 BATTLE_MagicStatusSeq 在每个单位
+			// 的行动位跑(battle.c:7077);本实现每回合在行动循环前统一跑一次,
+			// 时点差异见 tickMagicStatus 卷首的登记差异。
+			tickMagicStatus(b);
+
 			WorldWriteContext wctx;
 			wctx.battle = &b;
 			wctx.players = &s.players;
@@ -2487,6 +2662,10 @@ void World::tick()
 				// 集气态投影(B2b)在宠技表投影**之后**:完成击要覆盖表投影的
 				// direct=false / attack_percent=0(见 projectChargeState 卷首)。
 				projectChargeState(b, actor);
+				// 魔法状态投影(B3b):任意槽都可能是被攻击者 ⇒ 全槽投影。
+				projectMagicStatus(b);
+				// applyEvents 落施加事件时要用**本行动**的投影参数算回合数(B3a)。
+				wctx.actor = actor;
 				SA::Domain::BattleEvents action{};
 				SA::Rules::ActionEffects effects;
 				const auto before_rng = b.rng;
@@ -2504,6 +2683,23 @@ void World::tick()
 				}
 				applyEvents(action, b.field, wctx);
 				applyChargeEffects(b, actor, effects);
+				// 魔法状态系宠技的施加(B3b):在行动位、且本行动**没被状态/不可行动
+				// 清掉**才发生(原版 COM 被清 ⇒ 走不到 case S_SUPERWALL,battle.c:5440)。
+				if (!effects.command_cleared)
+					applyMagicStatusPetSkill(b, actor, s.pet_skill_effects);
+				// 状态攻击施加当场清掉**目标**的指令(B3a;原版 battle_event.c:2932-2937
+				// 对守方 `COM1 = NONE`,只列麻痹/睡眠/石化/魔障)—— 与上面 actor 自己
+				// 的 command_cleared 同款:改写成 WAIT,L3 对 WAIT 无动作。
+				// ⚠️ 若目标本回合尚未行动,后续派发由 checkCanAct 再挡一道
+				//   (field.status 已落地)⇒ 双保险同源于一个状态位,不冲突。
+				if (effects.status_cleared_target >= 0 &&
+				    effects.status_cleared_target < SA::Rules::kSlotCount &&
+				    b.commands.present[effects.status_cleared_target] &&
+				    !b.field.at(effects.status_cleared_target).dead)
+				{
+					b.commands.commands[effects.status_cleared_target].command_kind =
+					    SA::Domain::BattleCommand::CommandKind::WAIT;
+				}
 				if (effects.item_used)
 					consumeUsedItem(b, actor, s.players, s.items);
 				if (effects.command_cleared)
