@@ -295,3 +295,34 @@ shared-v0.8.0 + 客户端 `d2-only` 复验**,两仓 × 两远端一起推 tag(§
 均非遗漏,见 `Combatant.h` 的 `ultimate_accumulator` 注记。
 
 ---
+
+### 9.0.68 ★★ 批次 A-β d1 —— AttackSeq 尾补摇忠实重排(GBREAK 清零回归包装层)+ 尾摇钉(批次 A 余项第二子批第一步,2026-09-16)
+
+**为什么是它**:A-β 诊断批(只读)发现非反击段缺 `AttackSeq:1722-1723` 的尾补摇 `if((*pDamage) < 1) (*pDamage) = RAND(0,1);` —— journal 与 `05-battle.md` 均无有意裁定记载,counter 段注释反而确认它存在 ⇒ 定性**遗漏**,照抄补齐。它同时是 Guardian「至少吃 1」(:1770-1778)的前置。
+
+#### ① 过程教训(本批最值钱的一条:测试转红 = 位置判据,不是测试错)
+
+第一版插入把尾摇放在 MIGHTY/RENZOKU 之后(16 行,B1 GBREAK 测试 3 断言当场转红:`vs_plain 1≠0` · `plain_calls 7≠6`)。**AutoCoder 回 SSRC80 原树逐行复核后裁定:测试是对的,插入位置不忠实** —— 源码结构是:
+- AttackSeq(:1619-1786)内序:闪避 → GuardianCheck → 暴击 → DamageCalc → opt 链(GBREAK `;;` 只短路 GuardAdjust;GBREAK2 ×1.3/×0.7)→ GuardAdjust → **尾摇 :1722-1723** → PREVENT_TEAMATTACK(未建模) → ==0 处理 :1770-1778(MISS / 守护 ⇒ NORMAL+damage=1 / 真防御 ⇒ ALLGUARD) → **MIGHTY :1786(`(*pDamage) *= gBattleDamageModyfy`,AttackSeq 末行)** → return;
+- **`BATTLE_S_GBreak`(:4508-4560)是包装层**:先调 AttackSeq(伤害完整算出、尾摇已摇),**之后**才对非防御者 `damage=0; MISS`(:4537-4544)⇒ 非防御者被 AttackSeq 全额消费 rng 但**不吃尾摇**(清零前伤害完整 ≥1)。
+
+#### ② 交付
+
+- `shared/rules/Battle.cpp` strike 管线(非反击段)重排为源码序:GBREAK 空分支(只短路 GuardAdjust,清零移出 opt 链)→ GuardAdjust → **尾摇**(`!counter` 门;counter 由其后既有块负责,两路各摇一次互斥不双摇)→ ==0 处理(语义已对齐:守方真防御事件带 DAMAGE_FLAG_GUARD、否则 NORMAL ⇒ 未补新代码未发明事件;Guardian 的 damage=1 注释预留)→ MIGHTY → RENZOKU → **S_GBreak 清零**(`if (gbreak == 1 && !guarding) damage = 0;`,管线最末,对应包装层)。
+- `tests/RulesBattleTest.cpp` **只新增 1 例**(既有断言一字未动):「尾摇★:非反击段 —— GuardAdjust 削到 0 ⇒ 补摇 50% 得 1、恰多 1 笔 rng」(11 断言;0.50 档 2×0.5=1 不触发 / 0.00 档尾摇取 1 或 0 / calls 恰 +1,ScriptedRandom 逐值)。
+- ⚠️ 任务简报示例注入"去掉 min-15 钳"式样在本批同样预判:第一版简报写的注入"去掉尾摇"有区分力,RV-① 照做。
+
+#### ③ 复验(全部 MSVC / VS 18 BuildTools,SA_WERROR=ON)
+
+| 项 | 结果 |
+|---|---|
+| ctest 全量 | **22/22**(AutoCoder 独立复跑通过) |
+| 用例计数 | `rules_battle` 134 例/2,919 → **135 例/2,930 断言**(+1 钉例);`world_tick` 139 例/2,504 **零回归零重钉**;B1 GBREAK 测试**原样转绿**(`vs_plain 0==0 · calls 6==5+1`) |
+| 反向验证(全新构建目录 `build/rv_a1b`,注入器脚本 + pristine 备份) | ①删尾摇 ⇒ **恰 3 断言转红**(全在钉例,预测命中);②GBREAK 清零挪回尾摇前(旧错误位置)⇒ **恰 3 断言转红**(正是 B1 三断言 ⇒ 位置判据有区分力);各还原+bump mtime+重建复绿 |
+| 残留检查 | `RV_INJECT` grep **0**;与 pristine 备份 `cmp` **字节一致** |
+| 格式 | `check_format --fix` 后 code_format 绿 |
+
+#### ④ 登记
+
+① **shared/rules 有实质改动 ⇒ 须打 tag 前推 + 客户端换 pin**(与 A-α 合窗口执行);② **反击链资格残留**:GBREAK-vs-plain(MISS) 现管线理论上仍可进 counter 链(`continue_counter` 在清零前计算),而原版 `case BATTLE_COM_S_GBREAK`(battle.c:8486)无 counter 循环 —— 属 B1 既有建模结构、无用例钉它(B1 plain 组守方无指令,链在 `!present` 断),留待后续批连登记一起裁定;③ MultiList/Guardian/CheckSameSide/CountAlive 为 A-β d2 主体(诊断规格已备,见 roadmap A-β 行);④ `build/rv_a1b` 与 `build/msvc_rv` 留在 build/(gitignore 覆盖)可随手删。
+
