@@ -23,7 +23,7 @@
 | [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
 | [`90-push-windows.md`](90-push-windows.md) | 九次 `shared-v0.x.0` 推送窗口的闭合核实 | 9 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **60** |
+| **合计** | | **61** |
 
 ## 全量映射表(按编号)
 
@@ -90,6 +90,7 @@
 | §9.0.58 | 批次 A4 —— 经济地基:GoldLedger 单入口 + 战斗产币 | 2026-09-15 | [`17-economy.md`](17-economy.md) |
 | §9.0.59 | Windows 本机 OpenSSL 根自动探测 —— configure 阻塞解除 | 2026-09-15 | [`17-economy.md`](17-economy.md) |
 | §9.0.60 | 推送窗口执行记录 —— shared-v0.27.0(I| / A4 / OpenSSL 探测三笔同窗) | 2026-09-15 | [`90-push-windows.md`](90-push-windows.md) |
+| §9.0.61 | 批次 B1 —— 直攻系宠技:RENZOKU / GBREAK(2) / MIGHTY / POWERBALANCE | 2026-09-15 | [`18-petskill.md`](18-petskill.md) |
 
 ---
 
