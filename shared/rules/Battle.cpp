@@ -1783,20 +1783,45 @@ static bool resolveOrdered(BattleField field,
 				}
 				else if (gbreak == 1)
 				{
-					// BATTLE_S_GBreak(battle_event.c:4530-4544):守方**不防御(或防御中
-					//   混乱)** ⇒ `damage = 0`,整次攻击落 MISS —— 它是"专打防御"的技能,
-					//   对不防御者完全无效。防御中的全额不减(else-if 链短路了 GuardAdjust)。
-					if (!guarding)
-						damage = 0;
+					// 源码 `if(opt == S_GBREAK) ;;`(:1695)—— **空语句**:AttackSeq 内对伤害
+					//   不做任何事,只把整条 else-if 链短路(GuardAdjust 连 rng 都不摇)。
+					//   「不防御 ⇒ 0 伤」的清零不在 AttackSeq 里,而在包装层 S_GBreak
+					//   (:4508-4560)调完 AttackSeq **之后**才做 ⇒ 见本块末尾的「S_GBreak 清零」。
 				}
 				else if (guarding)
 				{
 					damage = static_cast<int>(damage * rollGuardFactor(rng));
 				}
-				// ── MIGHTY 伤害倍率(battle_event.c:1781,AttackSeq 末行,无条件乘)──
+				// ── AttackSeq 尾摇(A-β 交付 1 修正版;SSRC80 battle_event.c:1722-1723)──
 				//
-				// ★ 位置语义:倍率在防御/破防分支**之后**、RENZOKU 分摊**之前**
-				//   (倍率在 AttackSeq 内,分摊在 AttackSeq 之后的 BATTLE_Attack :2723)。
+				// ★ 源码序:AttackSeq 内 GuardAdjust(含 GBREAK 系 else-if 链)**之后**:
+				//     `if((*pDamage) < 1) (*pDamage) = RAND( 0, 1 );`
+				//   ⇒ 本管线照此排在 GuardAdjust 之后、==0 处理(:1770-1778)与 MIGHTY
+				//   (:1786)之前。对**所有**攻击段无条件生效 —— 与 opt 无关(GBREAK/
+				//   GBREAK2 也吃这一摇);counter 段经同一 AttackSeq 亦摇一次,见下方
+				//   counter 块(其后再接 :3657 的 ×0.75,故留守在管末)—— 两路各摇一次、
+				//   互斥不双摇。
+				//   ⚠️★ 与 S_GBreak 清零的先后(包装层 :4508-4560,清零 :4537-4544):
+				//     清零在**尾摇之后** ⇒ 非防御者被 AttackSeq 全额消费 rng(闪避+暴击+
+				//     伤害计算),但清零前伤害完整 ≥1、**不吃尾摇**。旧版把清零放在本摇
+				//     之前 ⇒ 0 被摇成 1 且多耗 1 笔 rng(B1「宠技B1★★:GBREAK」三条断言
+				//     转红即为此)。
+				if (!counter && damage < 1)
+					damage = rng.rand(0, 1);
+				damage = std::max(0, damage);
+				// ── ==0 处理(SSRC80 battle_event.c:1770-1778;语义锚,本批不改行为)──
+				//
+				// ★ 源码:`if((*pDamage) == 0){ iRet = BATTLE_RET_MISS; 有守护者(Guardian)⇒
+				//   NORMAL + (*pDamage)=1; else if(守方真防御) iRet = ALLGUARD; }`。
+				//   本管线沿用既有 miss 路径:**不新增事件**,damage==0 照常发 Damage、
+				//   hp_delta=0(下游按「未落伤」消费);守方真防御 ⇒ 事件带
+				//   DAMAGE_FLAG_GUARD(= ALLGUARD 的语义位),否则带 DAMAGE_FLAG_NORMAL
+				//   (= MISS 的表达位)。守护者接管(NORMAL + damage=1)本批未做 Guardian
+				//   ⇒ 注释预留:Guardian 批落地时在此处补 `damage = 1`。
+				// ── MIGHTY 伤害倍率(battle_event.c:1786,AttackSeq 末行,无条件乘)──
+				//
+				// ★ 源码序:==0 处理(:1770-1778)**之后**、RENZOKU 分摊**之前**
+				//   (倍率是 AttackSeq 的末行,分摊在 AttackSeq 之后的 BATTLE_Attack :2723)。
 				//   ★ 类型语义照源码:`gBattleDamageModyfy = COM3 low * 0.01`
 				//     (battle.c:7294 —— int × **double** 字面量 → 存进 float 变量;
 				//     倍3 ⇒ double 3.0000000000000004 → float 3.0f,与"int×0.01f 一步
@@ -1822,7 +1847,16 @@ static bool resolveOrdered(BattleField field,
 					if (damage <= 0)
 						damage = 1;
 				}
-				damage = std::max(0, damage);
+				// ── S_GBreak 包装层清零(battle_event.c:4508-4560,清零 :4537-4544)──
+				//
+				// ★ S_GBreak 是**包装层**:先调 AttackSeq(伤害按完整公式算出、尾摇已摇),
+				//   **之后**才判守方真防御(裸 GUARD + 未混乱 = 上面的 `guarding`):是 ⇒
+				//   照常落伤(DamageSub);否 ⇒ `damage = 0`、整击落 MISS。⇒ 清零排在
+				//   尾摇/==0/MIGHTY/RENZOKU 之后:非防御者先被 AttackSeq 全额消费 rng,
+				//   再清零走既有 MISS 路径(Damage 事件 hp_delta=0)。GBREAK 是单发专用
+				//   指令、效果行不带段数 ⇒ 与 RENZOKU 分摊不相干。
+				if (gbreak == 1 && !guarding)
+					damage = 0;
 				if (counter)
 				{
 					// AttackSeq :1722 的末尾补摇先于 Counter :3657 的 0.75。

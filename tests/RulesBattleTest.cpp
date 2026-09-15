@@ -3654,6 +3654,44 @@ TEST_CASE("宠技B1★★:GBREAK —— 专打防御:对防御者全额、其余
 	CHECK(plain_calls == guard_calls + 1);
 }
 
+TEST_CASE("尾摇★:非反击段 —— GuardAdjust 削到 0 ⇒ 补摇 50% 得 1、恰多 1 笔 rng(battle_event.c:1722-1723)")
+{
+	// A-β 交付 1 修正版的最小钉(AttackSeq 尾摇,非反击段):
+	//   守方真防御 + GuardAdjust 最强档 0.00(roll ≤ 25)把 2 点伤害削到 0 ⇒
+	//   命中 `if((*pDamage) < 1) (*pDamage) = RAND(0,1);` ⇒ ScriptedRandom 逐值
+	//   给 0/1 ⇒ 50% 得 1、50% 落 0(MISS:Damage 事件照发、hp_delta=0);
+	//   对照组取最弱档 0.50(2×0.5=1,削不没)⇒ 不触发 ⇒ 触发组**恰多 1 笔**取数。
+	//   ⚠️ 全局系数取 100:默认 70 会把 2×70/100=1,强弱两档都削到 0,对照失效。
+	auto run = [](int guard_roll, int tail_value, std::int32_t *damage_out) -> int
+	{
+		RulesConfig config{};
+		config.damage_calc_percent = 100;
+		Duel d = makeB1Duel(75, 100, /*pet_skill=*/false);
+		setKind(d.cmds, 10, SA::Domain::BattleCommand::CommandKind::GUARD);
+		SA::Domain::BattleEvents ev{};
+		// 取数序:双 dex → 会心(per=0 恒不中) → 守方 randMod(10)(取 0,保
+		//   defense=70.02 ⇒ 落第一分段) → RAND(0, attack/16)(取 2 ⇒ 基数 2)
+		//   → GuardAdjust 档位 → 尾摇(仅触发组消费)。
+		ScriptedRandom rng({0, 0, 0, 0, 2, guard_roll, tail_value});
+		REQUIRE(resolveTurn(d.field, d.cmds, config, rng, ev));
+		const std::vector<std::int32_t> deltas = damageDeltas(ev);
+		REQUIRE(deltas.size() == 1);
+		*damage_out = -deltas[0];
+		return rng.calls();
+	};
+
+	std::int32_t weak = 0, strong1 = 0, strong0 = 0;
+	const int weak_calls = run(100, 0, &weak);      // 0.50 档:2×0.5=1 ⇒ 不触发
+	const int strong1_calls = run(25, 1, &strong1); // 0.00 档:2×0=0 ⇒ 尾摇取 1
+	const int strong0_calls = run(25, 0, &strong0); // 0.00 档:尾摇取 0 ⇒ MISS
+
+	CHECK(weak == 1);                       // 对照:最弱档削不没,不走尾摇
+	CHECK(strong1 == 1);                    // 50% 的「1」面
+	CHECK(strong0 == 0);                    // 50% 的「0」面:事件照发、hp_delta=0(既有 miss 路径)
+	CHECK(strong1_calls == weak_calls + 1); // 尾摇恰多 1 笔
+	CHECK(strong0_calls == weak_calls + 1);
+}
+
 TEST_CASE("宠技B1★★:MIGHTY 伤害 ×倍 —— AttackSeq 末行(battle_event.c:1781)")
 {
 	auto run = [](int mult_percent, std::int32_t *damage_out)
