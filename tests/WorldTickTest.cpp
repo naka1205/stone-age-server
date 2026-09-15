@@ -3165,6 +3165,107 @@ TEST_CASE("经济:战死者没有战利品(ISDIE 门,源码 :4252)")
 	CHECK(f.world.playerExp(id) == 0);
 }
 
+TEST_CASE("经济:击杀者随后死亡 —— 暂存经验不给死者、金币 0(ISDIE 门在 finished 落点)")
+{
+	// ★★ 与上一条(战死者没有战利品)的差别在**时序**:那条是"没杀过任何人就死";
+	//   这条先让玩家**完成击杀**(settleDeaths 已把经验记进 pending_exp,World.cpp
+	//   逐行动边界 L2719),再让他在 finished **之前**死去 ⇒ 钉原版
+	//   `BATTLE_GetExpGold`(SSRC80 battle.c:3308)开头的 `CHAR_ISDIE` 提前返回
+	//   (:3327-3329)是在 **flush 落点**判定,不是击杀瞬间 —— 击杀时记的账,
+	//   死了就不给:经验(deliverPlayerProfit 的 dead 门)与金(finished 产币段的
+	//   dead 门)一并归零。两条门共用一个源码出处,但分属两段代码 ⇒ 都得钉。
+	//
+	// ⚠️ 日志用 info 级(同「审计事件进了日志通道」那条):收场 tick 上
+	//   kBattleFinished 恒有一条;kGoldChanged 应为 **0 条**(全队死 ⇒ 产币三门
+	//   第一门就拦下)。若哪天有人把 dead 门改坏,这条会以 +2 转红。
+	SA::Platform::ServerConfig config = SA::Platform::parseConfig(
+	                                        R"({"protocol_version": 1, "log_level": "info",
+	        "tempo": { "tick_hz": 100, "battle_turn_interval_ms": 1000 }})")
+	                                        .config;
+	SA::Platform::ManualClock clock{0};
+	SA::Platform::Logger logger{SA::Platform::LogLevel::kInfo};
+	SA::Platform::RandomSource random{0xABCDEF};
+	SA::Net::LoopbackTransport transport{};
+	World world{config, clock, logger, random, transport};
+
+	const SA::Net::ConnectionId id = transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(config.protocol_version);
+	transport.deliver(id, hs.data(), hs.size());
+	world.tick();
+	REQUIRE(world.playerCount() == 1);
+	REQUIRE(world.playerExp(id) == 0);
+	REQUIRE(world.playerGold(id) == 0);
+
+	// 玩家:强攻(一击杀敌)、脆皮(扛不住两下)、先手(先完成击杀)。
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = 18000; // 敌 B 一击 11625..12750 ⇒ 第 1 回合必存活、第 2/3 回合必死
+	me.max_hp = 18000;
+	me.attack = 100000; // 秒杀真乌力
+	me.defense = 0;
+	me.quick = 500; // 先手(乌力 lv10 quick ≈ 25,B 见下)
+	me.luck = 0;    // 守方 luck 进回避率 ⇒ 0 让 B 的命中只由 dex 差决定
+	// 敌 B(手造,slot 11):慢于玩家(dex ∈ [364,519] 压不过玩家的 [364,520] 上界内
+	// 仍可能先手 —— 无妨,两种顺序断言都成立)、攻击按 kDamageRate=2 折算
+	// 一击 11625..12750、对 500 敏玩家的回避率 ≈7% ⇒ 最多三回合内必完成击杀。
+	SA::Rules::Combatant &killer = pf.at(SA::Rules::kSideOffset + 1);
+	killer.occupied = true;
+	killer.kind = SA::Rules::CombatantKind::kEnemy;
+	killer.slot = static_cast<std::uint8_t>(SA::Rules::kSideOffset + 1);
+	killer.level = 10;
+	killer.hp = 5000;
+	killer.max_hp = 5000;
+	killer.attack = 6000;
+	killer.defense = 0;
+	killer.quick = 499;
+	killer.luck = 0;
+	const BattleId battle = world.startBattle(pf);
+	REQUIRE(world.joinBattle(battle, id, 0));
+
+	// 敌 A(slot 10):真 L2 乌力 lv10(exp 19;击杀 ⇒ pending_exp +12)。
+	// ★ 必须是真敌人:手造 foe 没有 L2 实体,settleDeaths 里 resolve 不到 ⇒ 不记账。
+	REQUIRE(world.spawnEnemyToField(battle, SA::Rules::kSideOffset,
+	                                makeWuliTemplate(), makeWuliEncounterFixedLv1(),
+	                                /*baselevel=*/10));
+
+	// 第 1 回合出招收割;之后一律待机 —— 玩家若再出手杀了 B,战斗会以
+	// 玩家获胜收场,这条时序用例就空转了(这正是要防的假绿)。
+	const std::uint64_t before_finish = logger.emitted();
+	for (int i = 0; i < 30; ++i)
+	{
+		if (battleFinished(world, battle))
+			break;
+		const SA::Rules::BattleField *fld = world.battleField(battle);
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = fld->turn;
+		cmd.command_kind = fld->turn == 0 ? SA::Domain::BattleCommand::CommandKind::ATTACK
+		                                  : SA::Domain::BattleCommand::CommandKind::WAIT;
+		cmd.command.attack.target = static_cast<std::uint32_t>(SA::Rules::kSideOffset);
+		world.onBattleCommand(id, cmd);
+		clock.advance(2000);
+		world.tick();
+	}
+	REQUIRE(battleFinished(world, battle));
+
+	// ★ 时序确实发生了(否则本用例空转):击杀目标已倒、击杀者已阵亡。
+	const SA::Rules::BattleField *after = world.battleField(battle);
+	REQUIRE(after != nullptr);
+	CHECK(after->at(SA::Rules::kSideOffset).dead); // A:被玩家击杀(⇒ pending_exp 已记账)
+	CHECK(after->at(0).dead);                      // 玩家:finished 前被 B 击杀
+
+	// ★ 经验不给死者:击杀时已进 pending_exp,flush 时 ISDIE 门拦下。
+	CHECK(world.playerExp(id) == 0);
+	// ★ 金币 0:finished 产币段的 dead 门 ⇒ 没有 kGoldChanged。
+	CHECK(world.playerGold(id) == 0);
+	// ★ 收场 tick 的 info 日志差恰为 1(只有 battle_finished,无 gold_changed)。
+	CHECK(logger.emitted() == before_finish + 1);
+}
+
 TEST_CASE("经济:审计事件真的进了日志通道(kGoldChanged,第 ③ 步的生产出口)")
 {
 	// ★ 上面几条验的是账本语义(sink 捕获);这条验**生产接线**:

@@ -15,7 +15,7 @@
 | [`04-infra-naming.md`](04-infra-naming.md) | 项目定位澄清 · SA/SG 前缀 · P0–P6 命名改造 | 2 |
 | [`10-battle-core.md`](10-battle-core.md) | L3 战斗:批次 0.5 调度 · A.1 逃跑 · A.2 捕获 · A.3 暴击 · A.4 打飞 | 5 |
 | [`11-model-attr.md`](11-model-attr.md) | L2 实体池与实体族 · M.1–M.4b 属性推导与四维公式 · 换宠 | 7 |
-| [`12-encounter.md`](12-encounter.md) | M.5 敌人表 · R.1 随机源 · M.6/M.7 遇敌链 · 战果结算 | 5 |
+| [`12-encounter.md`](12-encounter.md) | M.5 敌人表 · R.1 随机源 · M.6/M.7 遇敌链 · 战果结算 · A-α 战果总装 | 6 |
 | [`13-world.md`](13-world.md) | W.1 移动视野 · W.2/W.3 刷怪游荡 · W.4 暗雷 · W.5 明雷 | 4 |
 | [`14-item.md`](14-item.md) | 道具域 I.1 背包 · I.2 扣道具 · I.3 掉落 · I.4 使用 | 4 |
 | [`15-status.md`](15-status.md) | L4.1 状态异常系统 | 1 |
@@ -23,7 +23,7 @@
 | [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
 | [`90-push-windows.md`](90-push-windows.md) | 九次 `shared-v0.x.0` 推送窗口的闭合核实 | 9 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **61** |
+| **合计** | | **62** |
 
 ## 全量映射表(按编号)
 
@@ -96,6 +96,7 @@
 | §9.0.64 | 推送窗口执行记录 —— shared-v0.29.0(批次 B2) | 2026-09-15 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.65 | 批次 B3 —— 状态系宠技 + 铁壁;宠技状态实参核正(per=30/Range=40/Bai=2.0) | 2026-09-15 | [`18-petskill.md`](18-petskill.md) |
 | §9.0.66 | 推送窗口执行记录 —— shared-v0.30.0(批次 B3) | 2026-09-15 | [`90-push-windows.md`](90-push-windows.md) |
+| §9.0.67 | 批次 A-α —— 战果总装:AddProfit 对账 + expForKill 纯函数化 + ISDIE 门 finished 落点钉 | 2026-09-16 | [`12-encounter.md`](12-encounter.md) |
 
 ---
 

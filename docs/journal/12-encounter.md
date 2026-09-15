@@ -611,3 +611,36 @@ R.1(§9.0.36 ④)把「M.5 两条归一的理由失效」改在了三处代码�
 | GCC / MSVC | 只在 Apple clang 21 跑过,交 CI(★ `enemyExp` 的浮点一致性正是 CI 三平台要验的) |
 
 ---
+
+### 9.0.67 ★★ 批次 A-α —— 战果总装:AddProfit 对账 + expForKill 纯函数化 + ISDIE 门 finished 落点钉(批次 A 余项首子批,2026-09-16)
+
+**为什么是它**:09-16 用户批准按《进展分析报告》行动计划执行;roadmap 新增的批次 A 子批简报(§「批次 A 余项」)把 A-α(战果总装)列为首子批 —— 它是 A 批里最便宜的一格(底表真状态 0 · 串 0 · rng 0),且直接收 §9.0.40 ⑦ 的部分登记残缺。第 1 步只读诊断 + 第 2 步实现批由 ZCode 执行、AutoCoder 抽查。
+
+#### ① 诊断结论(第 1 步,SSRC80 原始树逐行核实)
+
+- **`BATTLE_AddProfit`(battle.c:5171-5179)是分发器**:dpbattle → `BATTLE_AddDuelPoint`(:4779-4880,DANTAI 关 = 8.0 激活),否则 → `BATTLE_AddExpItem`(:4946-5110:掉落→经验→骑宠→AI→死亡标记)。**金币不在 AddProfit/AddExpItem 里** —— 原版金在结束 flush `BATTLE_GetExpGold`(:3308,ISDIE 提前 return :3327-3329)→ `BATTLE_GetExp`;`BATTLE_Finish`/`BATTLE_Stop` 对两侧全部入场单位 flush。
+- **现状大面已对齐**:settleDeaths ↔ AddExpItem(等级差衰减公式逐值等价 · 掉落摇点节奏已钉)· deliverPlayerProfit ↔ GetExpGold · 产币三门(§9.0.58)· addGold 零 rng。**rng 结论**:结算段内写操作挪动不改变任何 rng 序列(战斗实例 `b.rng` 与世界 `world_rng` 物理分离、addGold 纯算术)。
+- **四条良性偏离维持登记**(不实现,各属其域):①骑宠 ×0.6(:5078,Pet 无 exp 字段)②多 winner 分摊(:5040 起 charaindex[] 循环,当前无合击)③决斗点分配(:4779-4880,Player 无 dp 字段)④`CHAR_setMaxExp(enemy,0)`(:5096,敌实体回池销毁)。另:DEADCOUNT / `Pet_Check_Die` / Ultimate·NormalDeadExtra 钩子(:5098-5108)各属其域。
+
+#### ② 交付(全部 world 侧,shared/ 与 idl/ 零改动 ⇒ 锁定 ref 不前推)
+
+- `src/world/World.cpp`:`expForKill(actor_level, enemy_level, enemy_exp)` 文件内匿名命名空间纯函数(零 rng、零世界态),settleDeaths 内联公式替换为调用,**行为零变化**;注释附 SSRC80 锚点(EXPGET_MAXLEVEL=5 :5038 / EXPGET_DIV=15 :5039 / 公式段 :5040-5062)。
+- **对账注释三处**:settleDeaths 头(对应物 = AddExpItem,分发器二分由 `eligible` 门 + finished 产币段 `!b.dp_battle` 共同承担)· deliverPlayerProfit(对应物 = GetExpGold 的经验/掉落一半,金不在本函数)· finished 产币段(金在 finished ↔ GetExpGold flush;BATTLE_Finish :3558/:3598 · BATTLE_Stop :3639/:3651 · GetProfit :3540-3546 · ISDIE 门 SSRC80 :3327-3329 / 8.5 :4254-4256,修正旧注释 :4252 的树归属偏差)。四条良性偏离逐条点名,防后人误读。
+- `tests/WorldTickTest.cpp` 新增 1 例:**「经济:击杀者随后死亡 —— 暂存经验不给死者、金币 0(ISDIE 门在 finished 落点)」**(12 断言)—— 与既有「战死者没有战利品」的差别在**时序**:先完成击杀(settleDeaths 已记 pending_exp)再于 finished 前被反杀 ⇒ 钉 GetExpGold 的 ISDIE 门在 **flush 落点**判定:经验与金一并归零;收场 tick info 日志差恰为 1(只有 battle_finished,kGoldChanged 无该玩家)。HP 调节取 kDamageRate=2.0 伤害窗 (12750,19375] 内(18000),玩家此后一律 WAIT 防假绿。
+- ⚠️ **2b「决斗点怪经验照发」跳过**(有据):既有「经济:决斗点怪不给金」(:3062)已断言 gold==0 且 **exp==0**;而"pending_exp 正常发放(非零)"在 dp 战斗**不可达也不忠实** —— 原版分发器把 dp 战斗整条引去 AddDuelPoint(无经验段),本实现 `eligible` 的 `!b.dp_battle` 同源拦下,且 dp 怪判定树本身 exp=0。「DR-EC6 门与经验域解耦」是结构事实(deliverPlayerProfit 无条件先走,金循环才被 `if (!b.dp_battle)` 包住),已写入注释。若需别的可观察形态另补钉。
+
+#### ③ 复验(全部 MSVC / VS 18 BuildTools,RelWithDebInfo + SA_WERROR)
+
+| 项 | 结果 |
+|---|---|
+| 增量构建 | 0 告警(主目录 `build/msvc`;开测前 `contract_smoke` 曾挂 —— **旧 obj 残留的陈旧二进制**,强制重建复绿,与源码无关;源码矩阵 25 格手核 + 脚本双验一致) |
+| ctest 全量 | **22/22**(AutoCoder 独立复跑通过) |
+| 用例计数 | `rules_battle` 134 例/2,919 断言零回归;`world_tick` 138 例/2,492 → **139 例/2,504**(+1 例/+12 断言) |
+| 反向验证 ①(全新构建目录 `build/msvc_rv`) | `expForKill` 钳位注入 `min(15, 20-delta)` → `min(15, 15-delta)`(改变可观察值:e2e 经验 12→6)⇒ **恰 1 断言转红**(`playerExp == 12`);还原+bump mtime+重建 ⇒ 139/139 复绿。⚠️ 任务示例"去掉 min-15 钳"经推导是**死分支**(delta>5 ⇒ 20−delta ≤ 14,永不过 15 钳,SSRC80 原式同假)—— 注入无区分力,改用同分支实变;同 §9.0.62 "先证明注入有区分力"教训 |
+| 反向验证 ②(同上) | finished 产币段删 `if (…dead) continue;`(改变可观察值:死亡击杀者 gold 0→10 且 kGoldChanged +1)⇒ **恰 3 断言转红**(既有战死者金断言 + 新用例金断言 + 日志差;exp 断言保持绿 ⇒ 两道门独立性旁证);还原后复绿 |
+| 残留检查 | 注入指纹(RV-INJECT / `15 - delta` / continue 注释)grep + Select-String 双查 **0 命中**;`min(15, 20 - delta)` 与 ISDIE 门各恰存 1 处 |
+
+#### ④ 登记残缺(有据划出,非遗漏)
+
+① 决斗点分配(AddDuelPoint 语义:死者失 10% 千分率截断、胜者均摊、己侧死给对侧存活 `BATTLE_AddDpAlive`)—— 属 dp 域批次,需 Player dp 字段;② 多 winner 分摊 —— 等合击;③ 骑宠 ×0.6 —— 等宠物成长域;④ DEADCOUNT / Pet_Check_Die / Extra 钩子 —— 各属其域;⑤ 展开视图 `tools/unifdef_80/gmsv` 不在本工作区(只有报告),若将来生成,行号锚点应换算复核(语义不受影响);⑥ `build/msvc_rv` 反向验证目录留在 build/(被 .gitignore 覆盖),可随手删。
+

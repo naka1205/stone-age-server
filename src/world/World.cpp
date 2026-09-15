@@ -573,7 +573,15 @@ void syncPetState(BattleInstance &b, PetPool &pets)
 		}
 }
 
-// 原 BATTLE_GetExpGold: 存活玩家在结束/主动离场时领取暂存收益。
+// 对账(A-α 批):= 原版 `BATTLE_GetExpGold`(SSRC80 `battle.c:3308`)的
+// **经验/掉落一半** —— 结束(finished)或主动离场时,把战斗中暂存的收益
+// (WORKGETEXP → pending_exp;拾得道具 → getitem)交付给**存活**玩家。
+// 源码 :3327-3329 的 `CHAR_ISDIE` 提前返回(`return 0`)在这里是函数开头的
+// `dead` 门 —— 门在 flush 落点,不在击杀瞬间:击杀时记的账,死了就不给。
+// ⚠️ 金币**不在本函数**:原版 GetExpGold 里的 `gold += getBattleGold()`
+// (8.5 `battle.c:3851-3860`;SSRC80 全树无 getBattleGold 符号)在本实现走
+// finished 段的 GoldLedger 产币(见下方「战斗产币」注释)—— 与经验域解耦:
+// dp 门只拦金,不拦这里的经验/掉落交付。
 void deliverPlayerProfit(BattleInstance &b, int slot, PlayerPool &players, ItemPool &items)
 {
 	if (slot < 0 || slot >= SA::Rules::kBattlePlayerMax || b.field.at(slot).dead)
@@ -598,8 +606,54 @@ void deliverPlayerProfit(BattleInstance &b, int slot, PlayerPool &players, ItemP
 	}
 }
 
+// 等级差衰减经验 —— 逐值照抄 SSRC80 `battle.c:5040-5062`(树基 = SSRC80 原始,
+// `StoneAge/gmsv/src/battle/battle.c`;`EXPGET_MAXLEVEL 5` 在 :5038、`EXPGET_DIV 15`
+// 在 :5039 —— 本仓不引入这两个宏,以字面量 5 / 15 钉住):
+//
+//   差 = 攻方等级 − 敌方等级;
+//   差 ≤ 5 ⇒ 全额;
+//   差 > 5 ⇒ b = 20 − 差,再钳到 15(源码:`b = 5+15−差` 与 `20−差` 同值,
+//             `if(b>15) b=15` —— std::min 一句等价);
+//   b ≤ 0 ⇒ 1;否则 exp × b / 15,再 max(1)。
+//
+// 纯函数:零 rng、零世界态读写(settleDeaths 的 rng 消耗只在掉落段,见下)。
+int expForKill(int actor_level, int enemy_level, int enemy_exp) noexcept
+{
+	int delta = actor_level - enemy_level;
+	int exp = enemy_exp;
+	if (delta > 5) // EXPGET_MAXLEVEL
+	{
+		delta = std::min(15, 20 - delta); // EXPGET_DIV
+		exp = delta <= 0 ? 1 : std::max(1, exp * delta / 15);
+	}
+	return exp;
+}
+
 // F18: battle.c:7051/8900 的本次行动者列表；当前没有合击，列表只有 actor。
 // 下一位行动前结算新死亡；单归属也必须消耗 RAND(0,0)。
+//
+// ── 对账(A-α 批):本函数 = 原版战果分配的对应物 ──────────────────────────
+// 原版分发器 `BATTLE_AddProfit`(SSRC80 `battle.c:5171-5179`)按 dpbattle 二分:
+// 决斗点怪走 `BATTLE_AddDuelPoint`(:4779-4880),其余走 `BATTLE_AddExpItem`
+// (:4946-5110,掉落→经验→骑宠→AI→死亡标记)。本实现没有独立的分发函数:
+// 这里的 `eligible`(`!b.dp_battle` 门)与 finished 产币段的 `!b.dp_battle`
+// (见 deliverPlayerProfit / 战斗产币两处)合起来就是那个二分。
+// ⚠️ 金币**不在** AddProfit / AddExpItem 里 —— 原版金在结束 flush
+// `BATTLE_GetExpGold`(:3308),对应物 = deliverPlayerProfit(暂存经验/掉落交付)
+// + finished 段的 GoldLedger 产币(见 :2830 起的「战斗产币」注释)。
+//
+// 已登记的良性偏离(维持,不实现 —— 逐条点名,对账用):
+//   ① 骑宠经验 ×0.6(:5078 `nowexp *= 0.6`)不复刻 —— Pet 实体无 exp 字段,
+//      宠物经验未接持久化(见下方「经验属于实际行动单位」注);
+//   ② 多 winner:原版把经验记给**本次行动者列表**里的每一个人(:5040 起
+//      `charaindex[]` 循环,合击时多人)—— 当前没有合击,列表只有 actor,
+//      单归属全额(profit_actor 见调用点 :2715 的 Hit 归属);
+//   ③ 决斗点分配(AddDuelPoint :4779-4880)不复刻 —— Player 实体无 dp 字段,
+//      属 dp 域批次;本实现只在 finished 产币段拦金(exp 域由 eligible 同源拦下);
+//   ④ `CHAR_setMaxExp(enemy, 0)`(:5096)不复刻 —— 敌实体整只回池
+//      (EntityPool 释放即清),防重复结算由 profit_settled 承担,不需要那个记号。
+//   另:死亡侧钩子 `Pet_Check_Die` / CHAR_DEADCOUNT / Ultimate·NormalDead
+//   Extra(:5098-5108)各属其域(宠物 / 统计 / 掉落扩展),不在战果域复刻。
 void settleDeaths(BattleInstance &b, int actor, const EnemyPool &enemies)
 {
 	const bool eligible = actor >= 0 && actor < SA::Rules::kSideOffset &&
@@ -630,14 +684,9 @@ void settleDeaths(BattleInstance &b, int actor, const EnemyPool &enemies)
 				bag[static_cast<std::size_t>(b.rng.rand(0, 2))] = item_id;
 		}
 		// 经验属于实际行动单位；宠物经验未接持久化，不能转赠主人。
-		int delta = b.field.at(actor).level - enemy->level;
-		int exp = enemy->exp;
-		if (delta > 5)
-		{
-			delta = std::min(15, 20 - delta);
-			exp = delta <= 0 ? 1 : std::max(1, exp * delta / 15);
-		}
-		b.pending_exp[static_cast<std::size_t>(actor)] += exp;
+		// (等级差衰减公式 = 上方 expForKill,SSRC80 :5040-5062 逐值。)
+		b.pending_exp[static_cast<std::size_t>(actor)] +=
+		    expForKill(b.field.at(actor).level, enemy->level, enemy->exp);
 	}
 }
 
@@ -2821,20 +2870,28 @@ void World::tick()
 
 				// ── 战斗产币(经济地基批,DR-EC6;接点 = 战果结算,exp 分配旁)──────────
 				//
-				// ★ 源码形状:`BATTLE_Finish` 对**两侧**全部入场单位逐个调 `BATTLE_GetProfit`
-				//   (`battle.c:3598`,8.0;胜负只影响 WinFunc/掉落,不影响这条),
-				//   非决斗点怪走 `BATTLE_GetExpGold`(`:3540-3546` 的 `dpbattle` 分支),
-				//   `BATTLE_GetExp` 里无条件 `gold += getBattleGold()` 钳到随身上限
-				//   (8.5 `battle.c:3851-3860`;8.0 公式不可判定 —— 证据边界见 world/Api.h 的 GoldLedger 节)。
+				// ★ 对账(A-α 批):原版把金放在**结束 flush**,不在 AddProfit/ AddExpItem 里。
+				//   `BATTLE_Finish`(SSRC80 `battle.c:3558`)对**两侧**全部入场单位逐个调
+				//   `BATTLE_GetProfit`(:3598;`BATTLE_Stop`:3639 同构,:3651;
+				//   胜负只影响 WinFunc/掉落,不影响这条),非决斗点怪经 `:3540-3546` 的
+				//   `dpbattle` 分支进 `BATTLE_GetExpGold`(:3308),其中
+				//   `gold += getBattleGold()` 钳到随身上限(8.5 `battle.c:3851-3860`;
+				//   8.0 公式不可判定 —— 证据边界见 world/Api.h 的 GoldLedger 节)。
+				//   ⚠️ 本实现的分工:**金在本段走 GoldLedger**,**经验/掉落暂存在
+				//   deliverPlayerProfit 交付**(上方)—— 两半合起来才是 GetExpGold 的对应物。
 				//   ⇒ 三个门都在这里,账本只管记账:
-				//   ① **死亡不给**(源码 `BATTLE_GetExpGold:4252-4254` 的 `CHAR_ISDIE` 提前返回;
-				//      逃跑/超时离场的玩家已不在 player_of_slot 里,resolve 不到 ⇒ 自然跳过);
-				//   ② **决斗点怪不给金**(dpbattle ⇒ 走 `BATTLE_GetDuelPoint` 不走 GetExpGold);
-				//   ③ **每场一次**:本段只在战斗 finished 时走一遍,battles 随即 retire。
+				//   ① **死亡不给**(源码 `CHAR_ISDIE` 提前返回:SSRC80 `:3327-3329` /
+				//      8.5 `:4254-4256`;逃跑/超时离场的玩家已不在 player_of_slot 里,
+				//      resolve 不到 ⇒ 自然跳过);
+				//   ② **决斗点怪不给金**(dpbattle ⇒ 走 `BATTLE_GetDuelPoint`(SSRC80 :4779)
+				//      不走 GetExpGold;⚠️ 决斗点的**记账**本身不复刻 —— Player 实体无
+				//      dp 字段,属 dp 域批次,即 settleDeaths 对账注里的良性偏离 ③);
+				//   ③ **每场一次**:本段只在战斗 finished 时走一遍,battles 随即 retire
+				//      (原版逐单位 flush 同样每场一次,两者等价)。
 				if (!b.dp_battle)
 					for (int slot = 0; slot < SA::Rules::kBattlePlayerMax; ++slot)
 					{
-						// 源码 :4252 的 ISDIE 门(死亡不给)。
+						// 源码 CHAR_ISDIE 门(死亡不给;SSRC80 :3327-3329 / 8.5 :4254-4256)。
 						if (b.field.at(slot).dead)
 							continue;
 						// 逃跑 / 超时离场的玩家已不在场(源码里 BATTLE_Exit 把他们清出
