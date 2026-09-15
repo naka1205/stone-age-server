@@ -19,11 +19,12 @@ MSVC : Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36257 for x64
 清理旧构建目录(保证告警数是真的):C:\Users\vboxuser\Work\game\stoneage\stone-age-server\build\msvc
 [通过] 服务端 CMake 配置  —— exit=0
 [通过] 服务端 MSVC 构建  —— exit=0 · 告警 0 条
-[通过] 服务端 ctest  —— 100% tests passed, 0 tests failed out of 20
+[通过] 服务端 ctest  —— 100% tests passed, 0 tests failed out of 22
 
 ========================================================================
   2. 客户端 d2-only × MSVC —— ★★ D2 的完整形态
 ========================================================================
+清理旧构建目录:C:\Users\vboxuser\Work\game\stoneage\stone-age-client\build\msvc-d2
 [通过] 客户端 CMake 配置(d2-only 等价)  —— exit=0
 [通过] 客户端 MSVC 构建  —— exit=0 · 告警 0 条
 [通过] ★★ 客户端黄金用例集(MSVC)  —— 100% tests passed, 0 tests failed out of 7
@@ -59,7 +60,7 @@ MSVC : Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36257 for x64
 ========================================================================
   ✅ 服务端 CMake 配置                             exit=0
   ✅ 服务端 MSVC 构建                              exit=0 · 告警 0 条
-  ✅ 服务端 ctest                                100% tests passed, 0 tests failed out of 20
+  ✅ 服务端 ctest                                100% tests passed, 0 tests failed out of 22
   ✅ 客户端 CMake 配置(d2-only 等价)                 exit=0
   ✅ 客户端 MSVC 构建                              exit=0 · 告警 0 条
   ✅ ★★ 客户端黄金用例集(MSVC)                        100% tests passed, 0 tests failed out of 7

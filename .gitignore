@@ -14,3 +14,9 @@ cmake-build-*/
 
 # macOS
 .DS_Store
+
+# 本机一次性验证/诊断日志（归档进 docs/audits/evidence/ 后不入库根目录残留）
+/civ.log
+
+/tools/win_validate_report.2026-09-02.bak.txt
+
