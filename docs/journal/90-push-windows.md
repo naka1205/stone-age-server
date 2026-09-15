@@ -443,3 +443,21 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 #### ③ 教训
 
 - **`code_format` 在本机客户端验证里"静默缺失"一次**:本机 PATH 无 clang-format ⇒ CMake 按"缺工具不注册"先例跳过注册,首跑注册清单 7 缺 1 硬失败 —— **守卫按设计工作了**(它就是为"少一条则绿色不完整"而立)。处置:本机 `pip install clang-format==21.1.8`(与 CI 同 pin)后复跑 7/7 全过。⇒ 与服务端 §9.0.30 同一条:CI 上必须有,接住"没有"的是 EXPECTED_TESTS,不是安装步骤。
+### 9.0.62 ★ 推送窗口执行记录 —— `shared-v0.28.0`(2026-09-15)
+
+> **一个窗口、一个 tag 盖两笔**:批次 B1 直攻系宠技(§9.0.61)。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `6d9b6e5` · `shared-v0.28.0`(附注)—— gitee + github(workercrew)`ls-remote` 核实一致 |
+| client master | `a241d39`(pin v0.27.0 → **v0.28.0**)—— 双远端一致 |
+| server CI(workercrew) | run **completed/success**(`6d9b6e5`) |
+| client CI(workercrew) | run **completed/success**(`a241d39`,D2 闸门三平台,发布态 fetch 锁定 ref = v0.28.0) |
+| 本机独立发布态复验 | 干净克隆(无同级服务端)`ci_verify --expect-mode fetch`:**8 项全过**(fetch · v0.28.0 · 与源码一致 · 7 条全部注册 · ctest 7/7 · **124 用例 / 2,856 断言**) |
+| server 本机 ci_verify | **6 项全过**(22 条全部注册 · ctest 22/22 · SA_WERROR 清洁构建 · 断言防线反向验证通过) |
+
+#### ② 教训(本窗口唯一要紧的一条)
+
+- **反向验证注入"要先问它改变了哪个可观察值"**:RV① 首版注入"(int) 整除替换 float 除"**0 条转红** —— 正 int 域上 `(int)((float)a/b)` 与 `a/b` 截断结果**逐位一致**,注入对 fixture 无区分力;换成"去掉 `≤0 抬 1`"注入后 4 断言精确转红。同 §9.0.36 ⑥「断言的形状」/ M.5 ⑤ 那族第四次:注入无区分力 ≠ 代码没缺口,**先证明注入本身有区分力,再采信"没有红"**。
