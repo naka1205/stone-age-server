@@ -712,6 +712,85 @@ void projectItemUsePower(BattleInstance &b, PlayerPool &players, const ItemPool 
 	}
 }
 
+// 宠技效果表按 skill_id 线性查一行(批次 B1)。表内无此技能 ⇒ nullptr(= 表外技能)。
+//   ★ 线性查同 `findItemHealPower` —— 表小(只装直攻系),不值当上哈希。
+const PetSkillEffect *findPetSkillEffect(const std::vector<PetSkillEffect> &effects,
+                                         std::uint32_t skill_id)
+{
+	for (const PetSkillEffect &e : effects)
+		if (e.skill_id == static_cast<std::int32_t>(skill_id))
+			return &e;
+	return nullptr;
+}
+
+// 把「本回合 PET_SKILL 指令的技能参数」投影到 L3 输入面(批次 B1 直攻系宠技)。
+//
+// ★★ 与 `projectItemUsePower`(I.4)/ `projectCaptureItemGate`(A.2)同款分工:参数来自
+//    **宠技效果表**这个世界态(数据表;`Model::Pet` 尚无宠技槽 ⇒ 直接按指令里的
+//    `skill_id` 查表,不做"宠位 → 技能槽"二次寻址 —— 该槽属后续批),L3 纯函数看不到
+//    ⇒ World 在每次 `resolveAction` 之前按 PET_SKILL 指令查好、写进攻方 `CombatModifiers`。
+//   ⚠️★ **必须在 resolveAction 前**:技能参数决定 L3 走哪条结算分支(连击段数 / 破除防御 /
+//     倍率);放到结算后补判等于 L3 先按"无技能"跑完一遍,rng 与伤害都已错位。
+//   ⚠️★ **也只投影参数,不在这里替 L3 算伤害** —— 与原版分工一致:`PETSKILL_*`
+//     只把参数塞进 COM3 / 写工作值(`pet_skill.c`),结算读参数(`battle.c` / `battle_event.c`)。
+//
+// ★ 两个"归一化"在本处(指令语义,同原版在 PETSKILL_* 里做的那两下):
+//    ① RENZOKU 段数 `if(N < 1 || N > 10) N = 1;`(`pet_skill.c:605-606`)——
+//       ★ **越界归 1,不是夹到边界**:N=11 / 0 / −3 一律 1。⚠️ 别"顺手"夹成 10。
+//    ② 表外 skill_id ⇒ 六个字段保持默认(`pet_skill_direct=false`)⇒ L3 整次行动跳过。
+//
+// ★ 每轮对**所有槽**先归零再按需写入(同 `projectItemUsePower` 的"每回合重算"取向):
+//   上次投影不残留 —— 宠物换了指令 / 技能被状态清空后都立刻回到"无技能"。
+//   ⚠️★ **登记一处与原版的角落差异**:原版 POWERBALANCE 在**选指令**时就写死了工作值,
+//     即便该行动随后被状态清空/打断,减防也留到本回合结束;本实现逐行动重算 ⇒
+//     指令被清空后回到原值。差异只在"宠物本回合选了背水、随后被麻痹/混乱清掉指令"
+//     这一角落,且方向是"少扣一次防",不产生新玩法。不为此保留跨行动脏态。
+//   ⚠️ 不改 `mods` 之外的东西:世界态(MP / 背包 / 宠位)一个字节都不动。
+void projectPetSkill(BattleInstance &b, const std::vector<PetSkillEffect> &effects)
+{
+	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+	{
+		SA::Rules::Combatant &atk = b.field.at(slot);
+		if (!atk.occupied)
+			continue;
+
+		// 归零 = 回到"无技能"(Combatant.h 里每个字段的默认值)。
+		atk.mods.pet_skill_direct = false;
+		atk.mods.pet_skill_hits = 0;
+		atk.mods.pet_skill_damage_percent = 100;
+		atk.mods.pet_skill_duck_bonus = 0;
+		atk.mods.pet_skill_guard_break = 0;
+		atk.mods.pet_skill_attack_percent = 0;
+		atk.mods.pet_skill_defense_percent = 0;
+
+		if (!b.commands.present[slot])
+			continue;
+		const SA::Domain::BattleCommand &cmd = b.commands.commands[slot];
+		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::PET_SKILL)
+			continue;
+
+		const PetSkillEffect *e =
+		    findPetSkillEffect(effects, cmd.command.pet_skill.skill_id);
+		if (e == nullptr)
+			continue; // 表外技能 / 空表 ⇒ 保持"无技能"⇒ L3 跳过(不退化成普攻)
+
+		atk.mods.pet_skill_direct = true;
+		// ① RENZOKU 段数归一:`if(N < 1 || N > 10) N = 1;`(pet_skill.c:605-606)——
+		//   ★ 越界**归 1,不是夹到边界**,也不是归"无技能":原版此时仍是 RENZOKU
+		//     (COM1 = S_RENZOKU、gDamageDiv = 1)⇒ 依然跳过段数那笔 rng。
+		//   ⚠️ 表里 `renzoku_hits == 0` 的行是**非连击技能**(该列不适用)⇒ 不写、
+		//     保持 0(= 不覆盖段数),否则会把 GBREAK/MIGHTY 也误当成 1 段覆盖。
+		if (e->renzoku_hits != 0)
+			atk.mods.pet_skill_hits =
+			    (e->renzoku_hits < 1 || e->renzoku_hits > 10) ? 1 : e->renzoku_hits;
+		atk.mods.pet_skill_damage_percent = e->damage_mult_percent;
+		atk.mods.pet_skill_duck_bonus = e->duck_bonus;
+		atk.mods.pet_skill_guard_break = e->guard_break;
+		atk.mods.pet_skill_attack_percent = e->attack_percent;
+		atk.mods.pet_skill_defense_percent = e->defense_percent;
+	}
+}
+
 // F07: 只在 resolveAction 返回 item_used 后提交一次。
 void consumeUsedItem(BattleInstance &b, int slot, PlayerPool &players, ItemPool &items)
 {
@@ -1578,6 +1657,11 @@ struct World::Impl : GoldAuditSink
 	//     由 `loadItemEffects` 注入(fixture / 阶段 2 D 线导入)。按 item_id 线性查(表小)。
 	std::vector<ItemEffect> item_effects{};
 
+	// ── 宠技·直攻系效果表(批次 B1)────────────────────────────────────────
+	//   ★ 与 item_effects 同款:默认空 ⇒ PET_SKILL 一律"表外技能"(L3 整次行动跳过、
+	//     不摇 rng),现有用例不受影响。由 `loadPetSkillEffects` 注入。按 skill_id 线性查。
+	std::vector<PetSkillEffect> pet_skill_effects{};
+
 	// ── 世界刷怪点与世界态敌人(批次 W.2 / W.3)──────────────────────────────
 	//   spawn_points:注入的刷怪点(loadSpawnPoints,默认空 ⇒ 世界无常驻怪);
 	//   world_enemies:当前在地图上的敌人。★ 与战斗态敌人**共用 `enemies` 池但分开跟踪** ——
@@ -2225,6 +2309,9 @@ void World::tick()
 				// 前一步可能删掉背包物品，不能复用回合开始时的门投影。
 				projectCaptureItemGate(b, s.players, s.enemies, s.items);
 				projectItemUsePower(b, s.players, s.items, s.item_effects);
+				// 宠技参数同样逐行动重投影(B1):宠物换了指令 / 指令被状态清空后,
+				// 旧技能参数不能残留(见 projectPetSkill 卷首的"逐行动重算"注记)。
+				projectPetSkill(b, s.pet_skill_effects);
 				SA::Domain::BattleEvents action{};
 				SA::Rules::ActionEffects effects;
 				const auto before_rng = b.rng;
@@ -2848,6 +2935,11 @@ void World::loadSpawnPoints(std::vector<SpawnPoint> points)
 void World::loadItemEffects(std::vector<ItemEffect> effects)
 {
 	_impl->item_effects = std::move(effects);
+}
+
+void World::loadPetSkillEffects(std::vector<PetSkillEffect> effects)
+{
+	_impl->pet_skill_effects = std::move(effects);
 }
 
 int World::giveItemToPlayer(SA::Net::SessionId session, const SA::Model::Item &item)

@@ -4596,3 +4596,179 @@ TEST_CASE("P1:世界逐行动提交保留状态清指令结果")
 			}
 	CHECK(hits == 1);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  宠技·直攻系(批次 B1)—— 世界侧:效果表 → 投影 → L3 → 写回
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 世界侧要验的是 L3 之外的那一半(各技能的结算语义在 RulesBattleTest 里逐条钉过):
+//   `projectPetSkill` —— 按本回合 `PET_SKILL.skill_id` 查**宠技效果表**,把参数投影进
+//   攻方 `CombatModifiers`;表外技能保持"无技能"⇒ L3 整次行动跳过(不退化成普攻)。
+//
+// ⚠️★ 表的**数据来源**:与 I.4 的 `ItemEffect` 同款 —— 本批不做 D 线文件加载器
+//   (`petskill2.txt` 是 GBK、归口 D 线导入),这里用 `loadPetSkillEffects` 注入
+//   **真数据行**(`.claude`/数据表里逐列抄下来的那几行),阶段 2 由导入器灌入同一接口。
+//   petskill2.txt(GBK)列:名称,说明,函数名,option,…,第 7 列 = skill_id,末列 = 别名:
+//     第 5 行:  连续攻击   PETSKILL_ContinuationAttack  option `2`        → 10
+//     第 12 行: 一击必杀   PETSKILL_Mighty              `倍2 回避30`      → 40
+//     第 14 行: 背水之战其之１ PETSKILL_PowerBalance     `攻%+25 防%-35`   → 50
+//
+// ⓘ 本节的战斗开局都走"敌人高血 / attack=0"的可存活对局(同 I| 系列的
+//   `startSurvivableDuelBattle` 取向):回合能推进,而血量只由玩家的宠技决定。
+
+// 开一场「玩家(有武器、段数恒 1)对一只高血敌人」的对局,专供 B1 世界侧用例:
+//   ★ `unarmed=false` + `attack_num_min/max=1` ⇒ 段数**只可能**来自宠技覆盖,
+//     把空手多段的自由度从这些用例里摘出去(否则击杀边界会变成掷硬币);
+//   ★ quick/luck 归 0 ⇒ 回避基数压到下限,不被 MIGHTY 的「避」干扰;
+//   ★ str/tough = 100 备用(POWERBALANCE 的替换基数);attack 由用例给。
+BattleId startPetSkillBattle(Fixture &f, SA::Net::ConnectionId id, std::int32_t foe_hp,
+                             std::int32_t attack)
+{
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = me.max_hp = 1000000;
+	me.attack = attack;
+	me.str = 100;
+	me.tough = 100;
+	me.defense = 100;
+	me.quick = 0;
+	me.luck = 0;
+	me.mods.unarmed = false;
+	me.mods.attack_num_min = 1;
+	me.mods.attack_num_max = 1;
+	SA::Rules::Combatant &foe = pf.at(SA::Rules::kSideOffset);
+	foe.occupied = true;
+	foe.kind = SA::Rules::CombatantKind::kEnemy;
+	foe.slot = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+	foe.level = 1;
+	foe.hp = foe.max_hp = foe_hp;
+	foe.attack = 0; // 不反杀:血量只由玩家的宠技决定
+	foe.defense = 1;
+	foe.quick = 0;
+	foe.luck = 0;
+	const BattleId battle = f.world.startBattle(pf);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	return battle;
+}
+
+// 给本回合的玩家槽下一条 PET_SKILL 指令并推进一回合(同 `useItemTurn` 的口径)。
+void petSkillTurn(Fixture &f, SA::Net::ConnectionId id, BattleId battle,
+                  std::uint32_t skill_id, std::uint32_t target_slot)
+{
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = f.world.battleField(battle)->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::PET_SKILL;
+	cmd.command.pet_skill.skill_id = skill_id;
+	cmd.command.pet_skill.target = target_slot;
+	f.world.onBattleCommand(id, cmd);
+	f.clock.advance(2000);
+	f.world.tick();
+}
+
+TEST_CASE("宠技B1★★:世界侧 —— 空表=跳过、表内 MIGHTY 倍2 ⇒ 越过击杀边界")
+{
+	// 这次战斗把「倍率有没有生效」落在**击杀边界**上(不靠随机区间):
+	//   攻 60000(敌防 1)⇒ 单发落伤 ≈ (60000−0.8)×2×0.7 ∈ [8.1万, 8.7万] < 10万;
+	//   ×倍2 ⇒ [16万, 17万] > 10万 ⇒ **必杀**。⇒ 掉到 0 只有"倍率生效"一种解释。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	const BattleId battle = startPetSkillBattle(f, id, /*foe_hp=*/100000, /*attack=*/60000);
+
+	// —— 第一回合:表**还没注入** ⇒ skill_id=40 是"表外技能" ⇒ 整次行动跳过 ——
+	petSkillTurn(f, id, battle, /*skill_id=*/40, /*target=*/10);
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		CHECK(fld->at(SA::Rules::kSideOffset).hp == 100000); // 一点没掉
+	}
+
+	// —— 注入真数据行(petskill2.txt 第 12 行:一击必杀 倍2 回避30)——
+	//   ⚠️ `duck_bonus` 这里填 0:本条只验倍率链路。填 30 会让这一发有 30% 概率被闪,
+	//   击杀边界变成掷硬币(回避符号本身由 RulesBattleTest 的 MIGHTY 用例专门钉)。
+	f.world.loadPetSkillEffects({
+	    {/*skill_id=*/40, /*renzoku_hits=*/0, /*damage_mult_percent=*/200,
+	     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/0, /*defense_percent=*/0},
+	});
+
+	// —— 第二回合:同一发指令 ⇒ ×倍2 ⇒ 越过 10 万击杀线 ——
+	petSkillTurn(f, id, battle, /*skill_id=*/40, /*target=*/10);
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		CHECK(fld->at(SA::Rules::kSideOffset).hp == 0);
+	}
+}
+
+TEST_CASE("宠技B1★★:世界侧 —— 连续攻击 N=2 两段分摊(指令→表→投影→L3→写回)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	const BattleId battle = startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/60000);
+
+	// 第一回合:空表 ⇒ 跳过(与上一条同款对照)。
+	petSkillTurn(f, id, battle, /*skill_id=*/10, /*target=*/10);
+	REQUIRE(f.world.battleField(battle) != nullptr);
+	CHECK(f.world.battleField(battle)->at(SA::Rules::kSideOffset).hp == 1000000);
+
+	// 注入 petskill2.txt 第 5 行(连续攻击 option `2`)。
+	f.world.loadPetSkillEffects({
+	    {/*skill_id=*/10, /*renzoku_hits=*/2, /*damage_mult_percent=*/100,
+	     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/0, /*defense_percent=*/0},
+	});
+	petSkillTurn(f, id, battle, /*skill_id=*/10, /*target=*/10);
+
+	const std::int32_t drop =
+	    1000000 - f.world.battleField(battle)->at(SA::Rules::kSideOffset).hp;
+	// ★ 两段、每段 = (int)(单段/2) ⇒ **总伤 ≈ 单发**:单发落伤 ≈ (60000−0.8)×2×0.7
+	//   ∈ [8.1万, 8.7万](与上面 MIGHTY 用例同一支算式)⇒ 总伤也落在同一带内。
+	//   ⚠️ 这个区间正是"分摊"的判别力所在:若忘了 /N(两段全额),总伤会翻番到
+	//     ~16 万+(⇒ 本条转红);若段数被改成 3+ 也会掉出区间。
+	CHECK(drop >= 80000);
+	CHECK(drop <= 88000);
+}
+
+TEST_CASE("宠技B1★★:世界侧 —— 背水之战 攻%+25 **从 FIXSTR 替换**有效攻击")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	// 玩家 attack=1000 但 str=100:背水把有效攻**替换**成 100 + (int)(100×0.25) = 125
+	//   ⇒ 落伤 ≈ (125−0.8)×2×0.7 ≈ 170 上下;若实现成"叠加 25%"则是 attack×1.25 = 1250
+	//   ⇒ 落伤 ~1700+;若没生效则是 0。⇒ 区间 [100, 500] 三向排除。
+	const BattleId battle = startPetSkillBattle(f, id, /*foe_hp=*/1000000, /*attack=*/1000);
+
+	petSkillTurn(f, id, battle, /*skill_id=*/50, /*target=*/10); // 空表 ⇒ 跳过
+	REQUIRE(f.world.battleField(battle) != nullptr);
+	CHECK(f.world.battleField(battle)->at(SA::Rules::kSideOffset).hp == 1000000);
+
+	// 注入 petskill2.txt 第 14 行(背水之战其之１ `攻%+25 防%-35`)。
+	f.world.loadPetSkillEffects({
+	    {/*skill_id=*/50, /*renzoku_hits=*/0, /*damage_mult_percent=*/100,
+	     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/25, /*defense_percent=*/-35},
+	});
+	petSkillTurn(f, id, battle, /*skill_id=*/50, /*target=*/10);
+
+	const std::int32_t drop =
+	    1000000 - f.world.battleField(battle)->at(SA::Rules::kSideOffset).hp;
+	CHECK(drop >= 100);
+	CHECK(drop <= 500);
+}

@@ -1160,6 +1160,11 @@ TEST_CASE("ResolveTurn:批次 0.5 未接入的指令一律跳过,不产事件")
 	//    ⇒ 恰好走「非恢复药 ⇒ 不产事件」那支 —— 与 CAPTURE 当年一样是**巧合命中**,
 	//    不是覆盖边界。留着会掩盖「用有效恢复药应当产 SetHp 且摇一次 rng」。
 	//    它现在的行为由下面「使用道具」系列用例钉住。
+	// ⚠️★ PET_SKILL 已于批次 B1 接入**直攻系子集**(RENZOKU/GBREAK/GBREAK2/MIGHTY/
+	//    POWERBALANCE,由 `pet_skill_direct` 门放行)⇒ 本表**保留**它,但语义已变:
+	//    未投影的 PET_SKILL(表外技能 / 空表)= "什么都不做" —— 那是 B1 有意保留的
+	//    门(表外技能不得退化成普攻),不再是"指令未接入"。表内直攻系的行为由上面
+	//    「宠技B1」系列用例钉住。
 	using K = SA::Domain::BattleCommand::CommandKind;
 	for (const auto k : {K::GUARD, K::WAIT,
 	                     K::PET_SKILL, K::PROF_SKILL, K::SPELL})
@@ -3396,4 +3401,370 @@ TEST_CASE("P1:到期麻痹清掉的攻击指令不能在反击时复活")
 	for (const auto &event : turn.events)
 		if (event.body_kind == SA::Domain::BattleEvent::BodyKind::HIT)
 			CHECK(event.body.hit.attacker == 10);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  宠技·直攻系(批次 B1)—— RENZOKU / GBREAK / GBREAK2 / MIGHTY / POWERBALANCE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 链路(2026-09-15 回 `StoneAge/gmsv/src/battle/` 逐处核实,行号均为该树):
+//   `PETSKILL_*`(`pet_skill.c`)在**选指令**时把参数塞进 `CHAR_WORKBATTLECOM3` 高低 16 位
+//     (RENZOKU 段数 / MIGHTY 倍率+避 / GBREAK 无参)或直接改写工作值(POWERBALANCE)
+//     → `battle.c:7247-7296` 的指令设置段把参数读进 g\*(每次行动前重置 `:7094`/`:7139`)
+//     → 五个指令码**全部落普攻执行组**:`battle.c:7514-7520` 与 `BATTLE_COM_ATTACK`
+//       fall-through;GBREAK / GBREAK2 是单发专用 case(`:8486` / `:8495`),执行的仍是
+//       同一条 `BATTLE_AttackSeq` + `BATTLE_DamageSub` 管线(`battle_event.c:4508`/`:4841`)
+//     → 分摊在 `BATTLE_Attack`(`battle_event.c:2723`)、倍率在 AttackSeq 末行(`:1781`)、
+//       破除防御在 `:1695-1705`、避在 `DuckCheck`(`:857`)。
+//   ⇒ L3 侧:参数经 `CombatModifiers` 投影(测试里**手工置位** = 扮演 World 的
+//     `projectPetSkill` 输出),结算分支都在 strike 管线里;世界侧链路(效果表 → 投影)
+//     由 `WorldTickTest` 钉住。
+//
+// ⓘ 本节统一用 `ScriptedRandom({极大值})`:每个自由度都取该区间上界 ⇒ 不闪避 / 不暴击 /
+//   防御档位取最弱一档(0.50),于是每场伤害**逐位确定**,而 `calls()` 可数。
+
+namespace
+{
+
+// 一回合内全部 Damage 事件的 hp_delta(负数;0 伤也会产事件 ⇒ 长度即命中次数)。
+std::vector<std::int32_t> damageDeltas(const SA::Domain::BattleEvents &ev)
+{
+	std::vector<std::int32_t> out;
+	for (const auto &e : ev.events)
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+			out.push_back(e.body.damage.hp_delta);
+	return out;
+}
+
+// B1 用例通用开局:slot0(玩家,攻 `atk`)对 slot10(敌,防 `def`)—— 敌血拉高到打不死,
+//   让段数 / 段间互不干扰。★ mods 由用例逐条置位(L3 用例里它扮演 World 的投影结果)。
+Duel makeB1Duel(int atk, int def, bool pet_skill)
+{
+	Duel d = makeDuel(atk, def);
+	d.field.at(10).hp = d.field.at(10).max_hp = 1000000;
+	if (pet_skill)
+	{
+		setKind(d.cmds, 0, SA::Domain::BattleCommand::CommandKind::PET_SKILL);
+		d.cmds.commands[0].command.pet_skill.skill_id = 10;
+		d.cmds.commands[0].command.pet_skill.target = 10;
+	}
+	return d;
+}
+
+} // namespace
+
+TEST_CASE("宠技B1★★:RENZOKU —— 段数=N 覆盖、每段伤害 = (int)(D/N)(battle_event.c:2723)")
+{
+	// 基线:同数值普攻的单段伤害 D(全自由度取上界 ⇒ 逐位确定)。
+	Duel base = makeB1Duel(1000, 10, /*pet_skill=*/false);
+	SA::Domain::BattleEvents bev{};
+	ScriptedRandom brng({999999999});
+	REQUIRE(resolveTurn(base.field, base.cmds, RulesConfig{}, brng, bev));
+	const std::vector<std::int32_t> bd = damageDeltas(bev);
+	REQUIRE(bd.size() == 1);
+	const std::int32_t base_damage = -bd[0];
+	REQUIRE(base_damage > 3); // 让 /3 的截断有区分力(不是退化到 1)
+
+	// RENZOKU N=3 ⇒ 三段,每段 = (int)((float)D / 3.0f)。
+	//   ★ damage 是 int、gDamageDiv 是 float ⇒ 除法在 float 上做、赋回才截断。
+	Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	d.field.at(0).mods.pet_skill_direct = true;
+	d.field.at(0).mods.pet_skill_hits = 3;
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({999999999});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	const std::vector<std::int32_t> deltas = damageDeltas(ev);
+	REQUIRE(deltas.size() == 3); // ★ 段数覆盖(battle.c:7263 attack_max = COM3 low)
+	const std::int32_t per =
+	    static_cast<std::int32_t>(static_cast<float>(base_damage) / 3.0f);
+	CHECK(per < base_damage); // 全程**不是**各段全额(与 DR-BT1 空手多段是两件事)
+	CHECK(-deltas[0] == per);
+	CHECK(-deltas[1] == per);
+	CHECK(-deltas[2] == per);
+	// HIT 事件:target_count = 实际段数(事件体零初始化后逐段 ++,与既有口径一致)。
+	REQUIRE(ev.events.size() >= 4);
+	CHECK(ev.events[0].body_kind == SA::Domain::BattleEvent::BodyKind::HIT);
+	CHECK(ev.events[0].body.hit.target_count == 3);
+}
+
+TEST_CASE("宠技B1★:RENZOKU 分摊后 ≤0 抬回 1(battle_event.c:2725)—— 不是 max(0,·)")
+{
+	// 守方防御压过攻方攻击 ⇒ 基数 = RAND(0,1) 取上界 = 1(⚠️ 全局系数这一局取 100,
+	//   否则 1×70/100 = 0,连"有伤害"都不成立 —— 本条要的是"有伤害、但 /N 后不足 1"
+	//   这个缝);N=4 ⇒ 1/4.0f = 0.25 → 赋回 int **截 0** → 源码那一行
+	//   `if(damage <= 0) damage = 1;` 抬回 1。
+	//   ⚠️ 若照 `std::max(0, damage)` 给 0,这一段就变成"完全没打中" ⇒ 本用例转红。
+	RulesConfig config{};
+	config.damage_calc_percent = 100;
+	Duel d = makeB1Duel(1, 1000, /*pet_skill=*/true);
+	d.field.at(0).mods.pet_skill_direct = true;
+	d.field.at(0).mods.pet_skill_hits = 4;
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({999999999});
+	REQUIRE(resolveTurn(d.field, d.cmds, config, rng, ev));
+
+	const std::vector<std::int32_t> deltas = damageDeltas(ev);
+	REQUIRE(deltas.size() == 4);
+	for (const auto delta : deltas)
+		CHECK(delta == -1); // 每段 1,不是 0
+}
+
+TEST_CASE("宠技B1★:RENZOKU 段数是**覆盖** —— 跳过 rollAttackCount 的那笔取数(battle.c:7263)")
+{
+	// 有武器(unarmed=false)的行动者:普攻要抽一次段数(`rollAttackCount`);
+	//   RENZOKU 覆盖 ⇒ 不再抽(`attack_max = COM3 low` 直接赋值,原「GetAttackCount /
+	//   空手幸运档位」整段被跳过)。取 N=1 ⇒ 除这一笔外两条路径取数序列完全一致
+	//   ⇒ calls 差**恰为 1**,且单段伤害相同。
+	auto run = [](bool renzoku, std::int32_t *damage_out) -> int
+	{
+		Duel d = makeB1Duel(1000, 10, renzoku);
+		d.field.at(0).mods.unarmed = false;
+		d.field.at(0).mods.attack_num_min = 1;
+		d.field.at(0).mods.attack_num_max = 1;
+		if (renzoku)
+		{
+			d.field.at(0).mods.pet_skill_direct = true;
+			d.field.at(0).mods.pet_skill_hits = 1;
+		}
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({999999999});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		const std::vector<std::int32_t> deltas = damageDeltas(ev);
+		REQUIRE(deltas.size() == 1);
+		*damage_out = -deltas[0];
+		return rng.calls();
+	};
+
+	std::int32_t plain_damage = 0, renzoku_damage = 0;
+	const int plain_calls = run(/*renzoku=*/false, &plain_damage);
+	const int renzoku_calls = run(/*renzoku=*/true, &renzoku_damage);
+	CHECK(plain_calls - renzoku_calls == 1);
+	CHECK(renzoku_damage == plain_damage); // N=1 ⇒ /1 无变化(浮点往返逐位相同)
+}
+
+TEST_CASE("宠技B1★★:GBREAK2 —— 守方防御(裸 COM)×1.3 / 否则 ×0.7(battle_event.c:1699)")
+{
+	// 基线口径:raw = 无防御普攻伤害;guarded = 普攻 vs 防御(×0.50 最弱档,
+	//   ScriptedRandom 取上界 ⇒ RAND(1,100)=100)。先把这一对基线钉住。
+	auto attack_run = [](bool guard, int confusion_turns, std::int32_t *damage_out) -> int
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/false);
+		if (guard)
+			setKind(d.cmds, 10, SA::Domain::BattleCommand::CommandKind::GUARD);
+		d.field.at(10).status =
+		    confusion_turns > 0 ? static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_CONFUSION) : 0;
+		d.field.at(10).status_turns = confusion_turns;
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({999999999});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		const std::vector<std::int32_t> deltas = damageDeltas(ev);
+		REQUIRE(deltas.size() == 1);
+		*damage_out = -deltas[0];
+		return rng.calls();
+	};
+	auto gbreak2_run = [](bool guard, int confusion_turns, std::int32_t *damage_out) -> int
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+		if (guard)
+			setKind(d.cmds, 10, SA::Domain::BattleCommand::CommandKind::GUARD);
+		d.field.at(10).status =
+		    confusion_turns > 0 ? static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_CONFUSION) : 0;
+		d.field.at(10).status_turns = confusion_turns;
+		d.field.at(0).mods.pet_skill_direct = true;
+		d.field.at(0).mods.pet_skill_guard_break = 2;
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({999999999});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		const std::vector<std::int32_t> deltas = damageDeltas(ev);
+		REQUIRE(deltas.size() == 1);
+		*damage_out = -deltas[0];
+		return rng.calls();
+	};
+
+	std::int32_t raw = 0, guarded = 0;
+	const int raw_calls = attack_run(false, 0, &raw);
+	const int guarded_calls = attack_run(true, 0, &guarded);
+	CHECK(guarded == static_cast<std::int32_t>(raw * 0.50)); // 防御减伤基线(0.50 档)
+	// 取数笔数:守方防御 ⇒ rollDodge 第一道前置直接 return(**不摇回避骰**),
+	//   但伤害后要摇一笔防御档位;不防御 ⇒ 摇回避骰、不摇档位 ⇒ **笔数恰好相等**。
+	CHECK(guarded_calls == raw_calls);
+
+	std::int32_t g2_guard = 0, g2_plain = 0, g2_confused = 0;
+	const int g2_guard_calls = gbreak2_run(true, 0, &g2_guard);
+	const int g2_plain_calls = gbreak2_run(false, 0, &g2_plain);
+	(void)gbreak2_run(true, 1, &g2_confused);
+
+	CHECK(g2_guard == static_cast<std::int32_t>(raw * 1.3)); // 守方防御 ⇒ 更痛
+	CHECK(g2_plain == static_cast<std::int32_t>(raw * 0.7)); // 不防御 ⇒ 打折
+	// ★ 判据是**裸 COM**(不含混乱):混乱中的防御指令仍取 ×1.3 —— 与"真防御"
+	//   (含混乱判定,防御减伤用)不是同一个门。这一条就是挡两者混用的。
+	CHECK(g2_confused == g2_guard);
+	// 取数笔数:守方防御时 GBREAK2 与普攻同前提(都不摇回避骰),但 GBREAK2 短路了
+	//   GuardAdjust ⇒ **少摇一笔防御档位**(battle_event.c:1695 的 else-if 链)。
+	CHECK(g2_guard_calls == guarded_calls - 1);
+	// 不防御时两者前提同(都摇回避骰、都不摇档位)⇒ 笔数相等。
+	CHECK(g2_plain_calls == raw_calls);
+}
+
+TEST_CASE("宠技B1★★:GBREAK —— 专打防御:对防御者全额、其余 0 伤(battle_event.c:4530)")
+{
+	// `BATTLE_S_GBreak`:伤害**只在**守方本回合指令 = GUARD 且未混乱时落下
+	//   (`:4530-4544` 的 if/else —— 否则 `damage = 0` 且返回 MISS)。
+	//   ★ 防御时全额:AttackSeq 的 `if(opt == GBREAK) ;;`(`:1695`)短路了整个 else-if 链
+	//     ⇒ 连 `BATTLE_GuardAdjust` 都不套、也不摇那一笔 rng。
+	auto run = [](bool guard, int confusion_turns, std::int32_t *damage_out) -> int
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+		if (guard)
+			setKind(d.cmds, 10, SA::Domain::BattleCommand::CommandKind::GUARD);
+		d.field.at(10).status =
+		    confusion_turns > 0 ? static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_CONFUSION) : 0;
+		d.field.at(10).status_turns = confusion_turns;
+		d.field.at(0).mods.pet_skill_direct = true;
+		d.field.at(0).mods.pet_skill_guard_break = 1;
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({999999999});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		const std::vector<std::int32_t> deltas = damageDeltas(ev);
+		REQUIRE(deltas.size() == 1);
+		*damage_out = -deltas[0];
+		return rng.calls();
+	};
+
+	std::int32_t raw = 0;
+	ScriptedRandom rng({999999999});
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/false);
+		SA::Domain::BattleEvents ev{};
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		raw = -damageDeltas(ev)[0];
+	}
+
+	std::int32_t vs_guard = 0, vs_plain = 0, vs_confused_guard = 0;
+	const int guard_calls = run(true, 0, &vs_guard);
+	const int plain_calls = run(false, 0, &vs_plain);
+	(void)run(true, 1, &vs_confused_guard);
+
+	CHECK(vs_guard == raw);        // 全额 —— 既不减伤也不 ×1.3(与 GBREAK2 的分野)
+	CHECK(vs_plain == 0);          // 对不防御者完全无效(MISS)
+	CHECK(vs_confused_guard == 0); // "防御中混乱"不算真防御 ⇒ 同样不落伤
+	// 取数笔数:对不防御者要**摇回避骰**(守方非防御 ⇒ rollDodge 走完整概率支),
+	//   对防御者第一道前置直接 return、GBREAK 又不摇防御档位 ⇒ 少一笔。
+	CHECK(plain_calls == guard_calls + 1);
+}
+
+TEST_CASE("宠技B1★★:MIGHTY 伤害 ×倍 —— AttackSeq 末行(battle_event.c:1781)")
+{
+	auto run = [](int mult_percent, std::int32_t *damage_out)
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+		d.field.at(0).mods.pet_skill_direct = true;
+		d.field.at(0).mods.pet_skill_damage_percent = mult_percent;
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({999999999});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		const std::vector<std::int32_t> deltas = damageDeltas(ev);
+		REQUIRE(deltas.size() == 1);
+		*damage_out = -deltas[0];
+	};
+
+	std::int32_t base_damage = 0;
+	run(100, &base_damage); // 倍率 100 = ×1.0 = 无技能(默认值)
+	Duel plain = makeB1Duel(1000, 10, /*pet_skill=*/false);
+	SA::Domain::BattleEvents pev{};
+	ScriptedRandom prng({999999999});
+	REQUIRE(resolveTurn(plain.field, plain.cmds, RulesConfig{}, prng, pev));
+	CHECK(base_damage == -damageDeltas(pev)[0]); // 100 = 与"无技能"逐位一致
+
+	std::int32_t double_damage = 0, triple_damage = 0;
+	run(200, &double_damage); // 一击必杀  `倍2` = petskill2.txt 第 12 行的 iBai
+	run(300, &triple_damage); // 一击必杀改 `倍3` = 第 13 行
+	// 倍率 = iBai × 0.01(battle.c:7294)—— 200/300 在 float 下恰为 2.0f / 3.0f。
+	CHECK(double_damage == static_cast<std::int32_t>(
+	                           static_cast<float>(base_damage) * 2.0f));
+	CHECK(triple_damage == static_cast<std::int32_t>(
+	                           static_cast<float>(base_damage) * 3.0f));
+	CHECK(double_damage > base_damage);
+}
+
+TEST_CASE("宠技B1★★★:MIGHTY「避30」= **守方回避率 +30**,不是攻方命中(battle_event.c:857)")
+{
+	// ⚠️★ 这一条钉的是符号判定:源码是该 g* 唯一的消费点 `per += gBattleDuckModyfy`,
+	//   而 `per` 此时就是**守方**的回避率(乘 100 后与 RAND(1,10000) 比,越大越易闪)。
+	//   全路径无取负;数据描述亦一致 ——「给予两倍的攻击伤害但是**命中率下降**」
+	//   (petskill2.txt 第 12 行)⇒ 攻方更易被闪 = 守方回避 +30。
+	// 构造:quick 全 0 ⇒ per 基数 0(≤0 钳到 1);同一枚回避骰取 3000:
+	//   无技能 per=1 ⇒ 3000 > 1 不闪;避30 per=3000 ⇒ 3000 ≤ 3000 **闪**。
+	auto run = [](int duck_bonus) -> std::uint32_t
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+		d.field.at(0).mods.pet_skill_direct = true;
+		d.field.at(0).mods.pet_skill_duck_bonus = duck_bonus;
+		SA::Domain::BattleEvents ev{};
+		// 前两笔是两位占位者的先攻抖动,第三笔才是回避那一摇。
+		ScriptedRandom rng({999999999, 999999999, 3000});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		REQUIRE(ev.events.size() >= 2);
+		REQUIRE(ev.events[1].body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE);
+		return ev.events[1].body.damage.flags;
+	};
+
+	const std::uint32_t no_duck = run(/*duck_bonus=*/0);
+	const std::uint32_t duck30 = run(/*duck_bonus=*/30);
+	const auto dodge_flag =
+	    static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DODGE);
+	CHECK((no_duck & dodge_flag) == 0u); // 同一枚骰子:不闪
+	CHECK((duck30 & dodge_flag) != 0u);  // 加 30 个百分点后:闪 ⇒ 方向是"守方回避上升"
+}
+
+TEST_CASE("宠技B1★★:POWERBALANCE —— 有效攻防从 FIXSTR/TOUGH **替换**(pet_skill.c:755)")
+{
+	// 原版直接写工作值:WORKATTACKPOWER = WORKFIXSTR + (int)(WORKFIXSTR×攻%),
+	//   WORKDEFENCEPOWER = WORKFIXTOUGH + (int)(WORKFIXTOUGH×防%)。
+	// ⚠️★ 是**替换**:str=100、攻%+25 ⇒ 有效攻 125 —— **不是** 1000×1.25 = 1250。
+	//   对照法:另一场把 attack 直接设成 125 的普攻 ⇒ 伤害逐位一致(逐位等 = 同一支公式)。
+	auto damage_of = [](int atk, int def, auto &&setup)
+	{
+		Duel d = makeB1Duel(atk, def, /*pet_skill=*/false);
+		setup(d.field.at(0), d.field.at(10));
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({999999999});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		const std::vector<std::int32_t> deltas = damageDeltas(ev);
+		REQUIRE(deltas.size() == 1);
+		return -deltas[0];
+	};
+
+	const auto no_setup = [](Combatant &, Combatant &) {};
+	// ① 攻方:str=100、攻%+25 ⇒ 有效攻 125。
+	const std::int32_t boosted_attack =
+	    damage_of(1000, 10, [](Combatant &me, Combatant &)
+	              {
+		              me.str = 100;
+		              me.mods.pet_skill_attack_percent = 25; });
+	CHECK(boosted_attack == damage_of(125, 10, no_setup));
+	CHECK(boosted_attack != damage_of(1000, 10, no_setup));
+	CHECK(boosted_attack != damage_of(1250, 10, no_setup)); // 不是"叠加 25%"
+
+	// ② 守方:tough=100、防%-35 ⇒ 有效防 100 + (int)(100×−0.35f) = 65。
+	const std::int32_t weakened_defense =
+	    damage_of(1000, 800, [](Combatant &, Combatant &foe)
+	              {
+		              foe.tough = 100;
+		              foe.mods.pet_skill_defense_percent = -35; });
+	CHECK(weakened_defense == damage_of(1000, 65, no_setup));
+	CHECK(weakened_defense != damage_of(1000, 800, no_setup));
+}
+
+TEST_CASE("宠技B1★:表外技能(pet_skill_direct=false)⇒ 整次行动跳过、不摇攻击取数")
+{
+	// World 未投影(空表 / 表外 skill_id)时 `pet_skill_direct` 保持 false ⇒ L3 走的
+	//   是"跳过"而不是"打了一下" —— 这是**门**,不是优化:未移植的宠技不能退化成普攻。
+	Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({999999999});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+	CHECK(ev.events.size() == 0);
+	CHECK(rng.calls() == 2); // 仅两位占位者的先攻抖动(基线,同本文件 1203 行那条)
 }

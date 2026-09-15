@@ -173,6 +173,97 @@ struct CombatModifiers
 	//     ⇒ 现有用例的 rng 序列不受影响。
 	std::int32_t item_heal_power = 0;
 
+	// ── 宠技·直攻系(批次 B1)────────────────────────────────────
+	//
+	// ★★ 本组字段全部是**本回合 PET_SKILL 指令的参数投影**:`skill_id` → 技能效果表
+	//    → 这里。表在世界侧(宠技效果表是数据表,且 `Model::Pet` 尚无宠技槽,1.5 由
+	//    注入式表提供,同 I.4 的 `ItemEffect`)⇒ 与 `item_heal_power` / `capture_item_ok`
+	//    同款分工:World 在 `resolveAction` **之前**投影,L3 只读快照字段、不读数据表。
+	//    ★ 参数来自原版 `PETSKILL_*(charaindex, toindex, array, data)` 的 option 解析
+	//      (`pet_skill.c`):它们把参数塞进 `CHAR_WORKBATTLECOM3` 的高低 16 位,再由
+	//      `battle.c` 的指令设置段读进 g*(`battle.c:7247-7296`)后由结算读。
+	//    ⚠️ 原版这些参数是**文件级 g\* 变量**,每次行动前重置
+	//      (`battle.c:7094-7095` / `:7139`)、攻击循环后与反击链前再重置
+	//      (`battle.c:7791-7792`,`BATTLE_Counter` 里 `gDamageDiv = 1.0`
+	//      `battle_event.c:3646`)⇒ **只作用于本行动者的普攻循环**,反击不受影响。
+	//      本实现把"只作用于本行动者"落在**逐指令投影 + 仅非反击段生效**上(见 Battle.cpp)。
+	//    ★ **全部默认值 = 无技能** ⇒ 非 PET_SKILL 指令 / 表外技能一律与批次 B1 之前
+	//      逐位一致(不掉血、不摇 rng)。
+
+	// ★★ 「本指令已按效果表确认为**直攻系**技能」。★ 它是**门**,不是冗余标志:
+	//    L3 的 PET_SKILL 分支只在它为 true 时才走攻击管线 —— 表外技能(尚未移植的
+	//    治疗 / 状态 / 咒术宠技 id)必须"什么都不做",**不能**静默退化成一次普攻。
+	//    原版同义:查不到 petskill 函数(或函数未把 COM 置成直攻系)时指令不成立。
+	bool pet_skill_direct = false;
+
+	// ★★ 连续攻击 RENZOKU 的段数 N(原 `PETSKILL_ContinuationAttack` 的 COM3 low,
+	//    `pet_skill.c:604-610`;结算见 `battle.c:7263-7264`:`attack_max = COM3 low;
+	//    gDamageDiv = attack_max`)。
+	//    ⚠️★ **这不是"抽"出来的段数,是覆盖**:`attack_max` 被直接赋值,原来那套
+	//      `BATTLE_GetAttackCount` / 空手幸运档位(`battle.c:7140-7166`)**整段被跳过**。
+	//      ⇒ L3 侧它覆盖 `rollAttackCount`(且**不消费**那一次 rng;宠物侧原版本来也不消费,
+	//      见 `:7144-7145` 的 `!= CHAR_TYPEPLAYER ⇒ attack_max = 1`)。
+	//    ⚠️★★ 原版**不是**把 N 夹到 [1,10] 而是 `if(N < 1 || N > 10) N = 1;`
+	//      (`pet_skill.c:605-606`)—— 越界(含 11、0、负数)一律**回到 1**,不是夹到边界。
+	//      归一化发生在**世界侧的投影**(指令语义,同原版在 PETSKILL_* 里做的事)。
+	//    ★ **默认 0 = 无**(0 不是合法 N:源码越界即 1)⇒ 走 `rollAttackCount`,与现状逐位一致。
+	int pet_skill_hits = 0;
+
+	// ★★ 一击必杀 MIGHTY 的**伤害倍率**(原 `gBattleDamageModyfy = COM3 low * 0.01`,
+	//    `battle.c:7294`;COM3 low = `(int)(倍 × 100)`,`pet_skill.c:724-728`)。
+	//    ⇒ 取值为**倍×100**(倍2 ⇒ 200),结算 `(*pDamage) *= 倍`
+	//      (`battle_event.c:1781`,在 `BATTLE_AttackSeq` 的**最末一行** —— 晚于暴击、
+	//      晚于破除防御分支、晚于防御减伤,且**无条件执行**,见 Battle.cpp 的落点注记)。
+	//    ★ **默认 100 = ×1.0 = 无**(原版每次都乘,无技能时 `gBattleDamageModyfy = 1.0`
+	//      —— 数值上即恒等)⇒ 不改现状。
+	int pet_skill_damage_percent = 100;
+
+	// ★★ 一击必杀 MIGHTY 的「避」值(原 `gBattleDuckModyfy = COM3 high`,
+	//    `battle.c:7295`;数据 option 的 `避N`,如 `倍2 回避30`)。
+	//    ⚠️★★ **它不是攻方命中加成,是守方回避率加成**:源码唯一消费点在 `BATTLE_DuckCheck`
+	//    的 `per += gBattleDuckModyfy`(`battle_event.c:857`)—— 而此时 `per` 就是**守方**
+	//    的回避率(最终 `per *= 100` 后与 `RAND(1,10000)` 比,越大越容易闪)。
+	//    全路径**没有任何取负**(2026-09-15 对 `StoneAge/gmsv/src/battle/` 复核:`gBattleDuckModyfy`
+	//    只有"声明 / 归零 / 取 COM3 high / 这一处 += "四个出现点,无 `-=`、无一元负号)。
+	//    数据描述亦一致:`一击必杀,给予两倍的攻击伤害但是**命中率下降**`
+	//    (`csa8.0/gmsv/data/petskill2.txt` 第 12 行)⇒ 攻方更易被闪 = 守方回避 +30。
+	//    ⇒ L3 落在 `rollDodge` 的 `per += config.dodge_modifier` 同一处(那正是本仓对
+	//      同一个 g* 的既有参数化),单位与它相同(百分比点,乘 100 前)。
+	//    ★ **默认 0 = 无**。
+	int pet_skill_duck_bonus = 0;
+
+	// ★★ 破除防御系的两个指令码(原版是**两个不同 COM、两个不同 petskill 函数**):
+	//      1 = `BATTLE_COM_S_GBREAK`  (`PETSKILL_GuardBreak`, `pet_skill.c:1188`)
+	//      2 = `BATTLE_COM_S_GBREAK2` (`PETSKILL_GuardBreak2`,`pet_skill.c:1092`)
+	//    ⚠️★ **两者都不套防御减伤**(`battle_event.c:1695-1700` 的 `if(opt == GBREAK) ;;`
+	//      短路了整条 `else if` 链,连 `BATTLE_GuardAdjust` 也一并跳过)。
+	//    ⚠️★★ **两者的落点不同**(2026-09-15 回源码核实,与 05 文档口径有出入):
+	//      · GBREAK(`BATTLE_S_GBreak`,`battle_event.c:4508`):伤害只在**守方本回合指令
+	//        为 GUARD 且未混乱**时才落(`:4530-4544` 的 if/else —— 否则 `damage = 0` 且
+	//        返回 MISS)。⇒ 它是"**专打防御**"的技能,对不防御者**完全无效**。
+	//      · GBREAK2(`BATTLE_S_GBreak2`,`:4841`):**无条件**落伤,并按守方指令二选一
+	//        乘系数 —— `if(守方 COM1 == GUARD) ×1.3 else ×0.7`(`:1699-1705`)。
+	//        ⚠️ 这里的判据是**裸 COM 比较,不含混乱判定**(与防御减伤那条不同);
+	//        1.3/0.7 是 `double` 字面量 ⇒ 逐位按 double 乘后回 int。
+	//    ★ **默认 0 = 无**(非 GBREAK 系指令)。
+	int pet_skill_guard_break = 0;
+
+	// ★★ 背水之战 POWERBALANCE 改写的**有效攻击力/防御力**(原 `PETSKILL_PowerBalance`,
+	//    `pet_skill.c:740-775`):在**指令时刻**直接把工作值写掉 ——
+	//        WORKATTACKPOWER  = WORKFIXSTR  + (int)(WORKFIXSTR  × 攻%)
+	//        WORKDEFENCEPOWER = WORKFIXTOUGH + (int)(WORKFIXTOUGH × 防%)
+	//    ⇒ 是**替换**(不是叠加,也不看武器),且**此后一切读该工作值的地方都受影响**
+	//      (自己那一击的 `BATTLE_DamageCalc`、被别人打时的伤害与暴击附加防御项)。
+	//    ★ 原版这一写在**选指令**时发生、到下一回合三围重算才失效 ⇒ 本批落在 L3:
+	//      按这两个百分点从 `Combatant::str` / `tough`(即 WORKFIXSTR/WORKFIXTOUGH)重算
+	//      有效值,供该回合所有消费者读(见 Battle.cpp 的 `effectiveAttack/Defense`)。
+	//      ⚠️ 世界侧的投影是**逐行动重算**的 ⇒ "指令被状态清空后仍保留减防"这一原版
+	//      角落行为不复刻(登记,见 World.cpp 的 projectPetSkill)。
+	//    ★ **默认 0 = 不改写**(fPer 为 0 ⇒ 重算值恰等于 `WORKFIX* + 0`;但实现里 0 走
+	//      直通原值,连 float 往返都不做 ⇒ 与现状逐位一致)。
+	int pet_skill_attack_percent = 0;
+	int pet_skill_defense_percent = 0;
+
 	// ── 状态异常(§4,批次 L4.1)──────────────────────────────────
 	//
 	// ★★ **攻方「带毒装备」**(原 `CHAR_SUITPOISON`,`_SUIT_ADDPART4` 在 8.0 **开**,

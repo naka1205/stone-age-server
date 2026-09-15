@@ -88,8 +88,10 @@ SA::Domain::CannotActReason checkCanAct(const Combatant &c) noexcept;
 //    「strncat 第三参用错、等价于无上界 strcat,余量仅 56 字节且无第二道防线」
 //    的教训 —— 新实现宁可分包,不可静默截断。
 //
-// 当前覆盖：普攻/防御、逃跑、捕获、换宠、HP 恢复药、基础异常状态，
-// 以及整次普攻后最多五次交替反击。特殊反应和完整技能链路仍另批接入。
+// 当前覆盖：普攻/防御、逃跑、捕获、换宠、HP 恢复药、基础异常状态、
+// 宠技·直攻系子集（RENZOKU/GBREAK/GBREAK2/MIGHTY/POWERBALANCE，批次 B1；
+// 参数由 World 按 `PET_SKILL.skill_id` 查效果表投影到 `CombatModifiers`），
+// 以及整次普攻后最多五次交替反击。特殊反应和其余技能链路仍另批接入。
 // 反击的依据与边界见 docs/journal/16-counterattack.md。
 bool resolveTurn(const BattleField &field,
                  const TurnCommands &commands,

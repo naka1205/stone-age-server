@@ -613,6 +613,36 @@ struct ItemEffect
 	std::int32_t heal_power = 0;
 };
 
+// 宠技·直攻系效果表的一行(批次 B1)—— 按 `skill_id` 查「这一招怎么结算」。
+//
+// ⚠️★★ **不是 petskill2.txt 的 1:1 移植**,与 `ItemEffect` 同一取向:世界层不含 GBK
+//    文件解析器(宠技表 D 线导入器尚未落地)。真数据行由 D 线导入期解析
+//    `csa8.0/gmsv/data/petskill2.txt`(GBK)的 option 列后经 `loadPetSkillEffects`
+//    注入;当前由 fixture 注入真数据的几行(见 WorldTickTest)。
+// ★ 只收**直攻系**(本批已回源码确证语义的 4 个技能):
+//     RENZOKU(PETSKILL_ContinuationAttack)/ GBREAK / GBREAK2(PETSKILL_GuardBreak[2])/
+//     MIGHTY(PETSKILL_Mighty)/ POWERBALANCE(PETSKILL_PowerBalance)。
+//   其余宠技(治疗/状态/召唤等)各自绑未移植链路 ⇒ 不进本表;表外 skill_id 在 L3
+//   按表外技能处理(整次行动跳过,不退化成普攻)。
+struct PetSkillEffect
+{
+	// 宠技表主键(= BattleCommand::command.pet_skill.skill_id 的匹配键;
+	//   petskill2.txt 第 7 列,如 连击2=10 / 一击必杀=40 / 背水1=50)。
+	std::int32_t skill_id = 0;
+	// RENZOKU 段数 N(option 第 1 个数字,如 `2`)。0 = 非连击。
+	//   ⚠️ 原版越界归 1 而非夹边界(pet_skill.c:605-606)—— 归一化在投影处做。
+	std::int32_t renzoku_hits = 0;
+	// MIGHTY 伤害倍率 = 倍×100(option `倍N` ⇒ N×100)。100 = ×1.0。
+	std::int32_t damage_mult_percent = 100;
+	// MIGHTY「避」(option `避N` / `回避N` 的 N)—— 守方回避率 +N 百分点。
+	std::int32_t duck_bonus = 0;
+	// 破除防御系指令码:0 = 非本系;1 = GBREAK(专打防御);2 = GBREAK2(×1.3/×0.7)。
+	std::int32_t guard_break = 0;
+	// POWERBALANCE 的 攻% / 防%(option `攻%+N` / `防%-N` 的 N,可负)。0 = 不改写。
+	std::int32_t attack_percent = 0;
+	std::int32_t defense_percent = 0;
+};
+
 class World final : public SA::Net::TransportEvents,
 
                     public SA::Net::SessionHost
@@ -703,6 +733,14 @@ class World final : public SA::Net::TransportEvents,
 	//    **不摇 rng**)。现有用例不注入即不受影响;使用道具用例显式注入 fixture。同
 	//    `loadEncounterTables`:真数据由 D 线导入期解析 itemset6.txt 后经本接口灌入,本表不解析文件。
 	void loadItemEffects(std::vector<ItemEffect> effects);
+
+	// 注入宠技·直攻系效果表(批次 B1)—— 按 `skill_id` 查「这招怎么结算」。
+	//
+	// ⚠️★ 与 `loadItemEffects` 完全同款:默认空 ⇒ 任何 PET_SKILL 指令都查不到
+	//    (`pet_skill_direct` 恒 false ⇒ L3 整次行动跳过、不摇 rng、不产事件)。
+	//    现有用例不注入即不受影响;宠技用例显式注入 fixture(真数据行)。
+	//    真数据由 D 线导入期解析 petskill2.txt(GBK)后经本接口灌入,本表不解析文件。
+	void loadPetSkillEffects(std::vector<PetSkillEffect> effects);
 
 	// 往某会话玩家的背包放一个道具(批次「捕获扣道具」的**注入 seam**)。
 	//

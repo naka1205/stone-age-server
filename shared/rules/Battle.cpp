@@ -224,6 +224,35 @@ double elementCoefficient(const Combatant &attacker, const Combatant &defender) 
 	return sum / kElementDivisor;
 }
 
+// ── 宠技·直攻系:POWERBALANCE 的有效攻防(批次 B1)──────────────
+//
+// 1:1 移植 `PETSKILL_PowerBalance`(`pet_skill.c:740-775`)对工作值的**替换式**改写:
+//     WORKATTACKPOWER  = WORKFIXSTR   + (int)(WORKFIXSTR   × 攻%)
+//     WORKDEFENCEPOWER = WORKFIXTOUGH + (int)(WORKFIXTOUGH × 防%)
+// ⚠️★ 是**替换**不是叠加:原版直接写工作值、不看武器 —— 实现必须同样"从 FIXSTR 重算",
+//    不能写成 `attack × (1 + p)`:`attack` 可能被别的来源(骑宠合成等)抬高,那样会偏离
+//    原版。FIXSTR/FIXTOUGH 映射到 `Combatant::str` / `tough`(它们本来就承载 WORKFIX*)。
+// ⚠️ 浮点语义照源码:`fPer = 攻%/100` 的 float 除法 + `(int)(str × fPer)` 截断。
+// ★ 默认 0(无技能)⇒ 直通原值,连 float 往返都不做 ⇒ 与 B1 之前逐位一致。
+//   ★ 「防御」那一半本回合**双向生效**:该单位当守方时同样读到改写值
+//     (被别人打也是读 WORKDEFENCEPOWER)—— 由所有消费点走这两个取数函数实现
+//     (computeDamage / computeCriticalDamage / splitRideDamage 调用点,见下)。
+std::int32_t effectiveAttack(const Combatant &c) noexcept
+{
+	if (c.mods.pet_skill_attack_percent == 0)
+		return c.attack;
+	const f32 per = static_cast<f32>(c.mods.pet_skill_attack_percent) / 100.0f;
+	return c.str + static_cast<std::int32_t>(static_cast<f32>(c.str) * per);
+}
+
+std::int32_t effectiveDefense(const Combatant &c) noexcept
+{
+	if (c.mods.pet_skill_defense_percent == 0)
+		return c.defense;
+	const f32 per = static_cast<f32>(c.mods.pet_skill_defense_percent) / 100.0f;
+	return c.tough + static_cast<std::int32_t>(static_cast<f32>(c.tough) * per);
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  伤害主公式
 // ═══════════════════════════════════════════════════════════════════
@@ -239,33 +268,36 @@ std::int32_t computeDamage(const BattleField &field,
 	// ── 第 1 步:取攻防 ──────────────────────────────────────────
 	//
 	// 骑宠合成(§3.1)。⚠️ 近战 0.8/0.8、投掷 1.0/0.4 —— 投掷判据是武器类。
+	// ★ POWERBALANCE(B1)改写的是**合成前**的攻(工作值),合成仍照原样叠在上面
+	//   —— 与原版"写工作值、合成照读"的顺序一致。
 	f32 attack;
 	if (!attacker.has_ride)
 	{
-		attack = static_cast<f32>(attacker.attack);
+		attack = static_cast<f32>(effectiveAttack(attacker));
 	}
 	else if (attacker.mods.weapon == WeaponClass::kThrow)
 	{
-		attack = static_cast<f32>(kRideThrowSelf * attacker.attack +
+		attack = static_cast<f32>(kRideThrowSelf * effectiveAttack(attacker) +
 		                          kRideThrowPet * attacker.ride_attack);
 	}
 	else
 	{
-		attack = static_cast<f32>(kRideMeleeSelf * attacker.attack +
+		attack = static_cast<f32>(kRideMeleeSelf * effectiveAttack(attacker) +
 		                          kRideMeleePet * attacker.ride_attack);
 	}
 
 	// ★ `_BATTLE_NEWPOWER` 在 8.0 **开** ⇒ defense = 0.70 × DEF。
 	//   ⚠️ 关闭态是完全不同的公式(0.45·DEF + 0.2·QUICK + 0.1·FIXVITAL),
 	//     D7 裁定单基线 ⇒ **不为它留分支**(constants.h 已注明)。
+	//   ★ POWERBALANCE 的「防」同样改写工作值 ⇒ 这里取 effectiveDefense。
 	f32 defense;
 	if (!defender.has_ride)
 	{
-		defense = static_cast<f32>(defender.defense * kDefenseCoefNewPower);
+		defense = static_cast<f32>(effectiveDefense(defender) * kDefenseCoefNewPower);
 	}
 	else
 	{
-		defense = static_cast<f32>((defender.defense + defender.ride_defense) * 0.5 *
+		defense = static_cast<f32>((effectiveDefense(defender) + defender.ride_defense) * 0.5 *
 		                           kDefenseCoefNewPower);
 	}
 
@@ -471,6 +503,15 @@ bool rollDodge(const Combatant &attacker,
 	per *= wari;
 	per += df_luck;
 	per += config.dodge_modifier; // 原 gBattleDuckModyfy(① g* 参数化)
+
+	// MIGHTY「避」(批次 B1):同一个 g* 的技能侧入参 —— `gBattleDuckModyfy =
+	//   COM3 high`(battle.c:7295)→ `per += gBattleDuckModyfy`(battle_event.c:857)。
+	//   ★ 符号已回源码确证:**+ 守方回避率**(非"+攻方命中",全路径无取负;
+	//     论证见 combatant.h 的 pet_skill_duck_bonus 注记)。单位同 dodge_modifier
+	//     (百分比点,乘 100 之前),也同处硬上限 75% 之前。
+	//   ★ 读攻方自己的 mods ⇒ 反击段的"攻方"(反击者)指令必为 ATTACK、投影已归零
+	//     ⇒ 反击不受 MIGHTY 影响,与原版反击链前重置 g* 一致(battle.c:7791-7792)。
+	per += attacker.mods.pet_skill_duck_bonus;
 
 	if (attacker.status == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_DRUNK) && attacker.status_turns > 0)
 		per += rng.rand(20, 30); // ★ 酒醉真正生效处
@@ -698,7 +739,9 @@ std::int32_t computeCriticalDamage(const BattleField &field,
 	const std::int32_t base = computeDamage(field, attacker, defender, config, rng);
 
 	// ⚠️ LVdef 由 Combatant::level 保证 ≥ 1(默认值 1)⇒ 不会除零;仍显式记明。
-	const f32 add = static_cast<f32>(defender.defense) *
+	// ★ POWERBALANCE(B1)改写的正是 WORKDEFENCEPOWER ⇒ 附加项同样读到改写值
+	//   (走 effectiveDefense;无技能时直通原值,行为不变)。
+	const f32 add = static_cast<f32>(effectiveDefense(defender)) *
 	                static_cast<f32>(attacker.level) /
 	                static_cast<f32>(defender.level) *
 	                static_cast<f32>(kCriticalDamageDefFactor);
@@ -1382,10 +1425,13 @@ static bool resolveOrdered(BattleField field,
 
 		// ── 指令分发 ─────────────────────────────────────────────
 		//
-		// ⚠️★ 批次 0.5 只接 ATTACK / GUARD / WAIT 三种。其余七种**显式落到 default**
-		//    并被跳过 —— 不是"忘了写",是它们各自绑着未移植的链路(见 battle.h 的表)。
+		// ⚠️★ 批次 0.5 只接 ATTACK / GUARD / WAIT,PET_SKILL / PROF_SKILL / SPELL
+		//    按"各绑未移植链路"显式跳过 —— 不是"忘了写"。
 		//    ⇒ 接入时在这里补 case,**不要**在调用方拦截:那会让 L3 之外出现第二处
 		//      指令语义,与 DR-BT5「唯一真源」同类的错误。
+		//    ★ 已接入:ESCAPE(A.1)/ CAPTURE(A.2)/ PET_IN·PET_OUT(DR-BT21)/
+		//      USE_ITEM(I.4)/ **PET_SKILL 的直攻系子集(B1)**。PROF_SKILL / SPELL
+		//      与 PET_SKILL 的其余子集仍在此跳过。
 		// ── 逃跑(§6.1,批次 A.1)──────────────────────────────────
 		//
 		// ⚠️★ **宠物不能逃**(`battle.c:9746` 的 `!= CHAR_TYPEPET`)—— 在此拦,
@@ -1593,15 +1639,34 @@ static bool resolveOrdered(BattleField field,
 			continue;
 		}
 
-		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::ATTACK)
+		// ── 宠技·直攻系(批次 B1)──────────────────────────────────
+		//
+		// ★★ 五个指令码在原版**全部落普攻执行组**:`case BATTLE_COM_S_RENZOKU /
+		//    MIGHTY / POWERBALANCE / …`(`battle.c:7514-7520`)与 `BATTLE_COM_ATTACK`
+		//    共用 fall-through;GBREAK / GBREAK2 是**单发专用 case**(`:8486` / `:8495`),
+		//    但执行的是同一条 `BATTLE_AttackSeq` + `BATTLE_DamageSub` 管线
+		//    (`battle_event.c:4508` / `:4841`)。⇒ 这里共用下面同一条 strike 管线,
+		//    技能差异**全部**由 `mods` 承载(参数投影见 World.cpp `projectPetSkill`)。
+		//   ⚠️★ 只有**表内直攻系**技能放行(`pet_skill_direct` 由 World 投影)。表外
+		//    技能(治疗 / 状态 / 咒术等未移植链路)与职技 / 咒术同样在此跳过 ——
+		//    **不能**静默退化成一次普攻:那会让"尚未实现的技能"变成"打了一下"。
+		//    原版同义:查不到 petskill 函数即指令不成立(`BATTLE_NoAction`)。
+		//   ⚠️ 目标槽取 `pet_skill.target`(载荷字段名不同,语义同 attack.target)。
+		const bool pet_skill_direct =
+		    cmd.command_kind == SA::Domain::BattleCommand::CommandKind::PET_SKILL &&
+		    actor.mods.pet_skill_direct;
+		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::ATTACK &&
+		    !pet_skill_direct)
 		{
 			// GUARD 与 WAIT 本身不产事件:防御的效果体现在**被攻击时**的减伤(§3.5),
 			// 由下方攻击链路读 `IsGuarding` 得到。
-			// 宠技 / 职技 / 咒术仍落这里被跳过；用药及换宠已在上方接入。
+			// 宠技(表外)/ 职技 / 咒术仍落这里被跳过；用药及换宠已在上方接入。
 			continue;
 		}
 
-		const int target_slot = static_cast<int>(cmd.command.attack.target);
+		const int target_slot = static_cast<int>(pet_skill_direct
+		                                             ? cmd.command.pet_skill.target
+		                                             : cmd.command.attack.target);
 		if (target_slot < 0 || target_slot >= kSlotCount)
 			continue;
 		const Combatant &target = field.at(target_slot);
@@ -1619,7 +1684,12 @@ static bool resolveOrdered(BattleField field,
 		{
 			const Combatant &striker = field.at(from);
 			const Combatant &victim = field.at(to);
-			const bool guarding = commands.present[to] && isGuarding(commands.commands[to]) &&
+			// 守方「指令 = GUARD」的**裸判定**(B1:GBREAK2 的 ×1.3/×0.7 只看它,
+			//   不含混乱判定 —— battle_event.c:1699 原样)。
+			const bool guarding_cmd =
+			    commands.present[to] && isGuarding(commands.commands[to]);
+			// 守方「真防御」= 裸判定 + 未混乱:防御减伤与 GBREAK 的落伤门都认这个。
+			const bool guarding = guarding_cmd &&
 			                      (victim.status != static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION) || victim.status_turns <= 0);
 			const bool can_chain = !guarding && striker.damage_react <= 0 && victim.damage_react <= 0;
 			const bool dodge = rollDodge(striker, victim, guarding, isCastingSpell(commands, to), config, rng);
@@ -1631,8 +1701,63 @@ static bool resolveOrdered(BattleField field,
 				damage = critical && !striker.mods.wielding_bow
 				             ? computeCriticalDamage(field, striker, victim, config, rng)
 				             : computeDamage(field, striker, victim, config, rng);
-				if (guarding)
+				// ── 破除防御系 / 防御减伤(批次 B1;battle_event.c:1695-1720)──
+				//
+				// ★ 原版是**一条 else-if 链**:`if(opt==GBREAK) ;; else if(opt==GBREAK2)
+				//   {×1.3 / ×0.7} else if(REGRET2/SONIC2)… else if(守方防御且未混乱)
+				//   GuardAdjust` ⇒ GBREAK / GBREAK2 都**不套**防御减伤(连 GuardAdjust
+				//   的 rng 都不摇),GBREAK2 的判据是**裸 COM**。
+				// ★ 反击段恒无技能:原版在反击链前把 g\* 全部归零/归一
+				//   (battle.c:7791-7792;gDamageDiv 由 BATTLE_Counter 归 1.0,
+				//   battle_event.c:3646)⇒ 这里 `counter ⇒ gbreak=0`。
+				const int gbreak = counter ? 0 : striker.mods.pet_skill_guard_break;
+				if (gbreak == 2)
+				{
+					// `(*pDamage) = (*pDamage)*1.3 / *0.7`(:1699-1705)—— int × double,
+					//   赋回截断。守方 GUARD ⇒ 反而更痛(破防惩罚的逆面),否则 ×0.7。
+					damage = static_cast<int>(damage * (guarding_cmd ? 1.3 : 0.7));
+				}
+				else if (gbreak == 1)
+				{
+					// BATTLE_S_GBreak(battle_event.c:4530-4544):守方**不防御(或防御中
+					//   混乱)** ⇒ `damage = 0`,整次攻击落 MISS —— 它是"专打防御"的技能,
+					//   对不防御者完全无效。防御中的全额不减(else-if 链短路了 GuardAdjust)。
+					if (!guarding)
+						damage = 0;
+				}
+				else if (guarding)
+				{
 					damage = static_cast<int>(damage * rollGuardFactor(rng));
+				}
+				// ── MIGHTY 伤害倍率(battle_event.c:1781,AttackSeq 末行,无条件乘)──
+				//
+				// ★ 位置语义:倍率在防御/破防分支**之后**、RENZOKU 分摊**之前**
+				//   (倍率在 AttackSeq 内,分摊在 AttackSeq 之后的 BATTLE_Attack :2723)。
+				//   ★ 类型语义照源码:`gBattleDamageModyfy = COM3 low * 0.01`
+				//     (battle.c:7294 —— int × **double** 字面量 → 存进 float 变量;
+				//     倍3 ⇒ double 3.0000000000000004 → float 3.0f,与"int×0.01f 一步
+				//     算到 float"不同路 ⇒ 这里照抄两步:先 double 乘、再落 float)。
+				//     percent=100(无技能)不进这里,行为与 B1 之前逐位一致。
+				if (!counter && striker.mods.pet_skill_damage_percent != 100)
+				{
+					const float mult =
+					    static_cast<float>(striker.mods.pet_skill_damage_percent * 0.01);
+					damage = static_cast<int>(static_cast<float>(damage) * mult);
+				}
+				// ── RENZOKU 每段分摊(battle_event.c:2723-2726,BATTLE_Attack 内)──
+				//
+				// ★ 源码原样:`if(gDamageDiv != 0.0 && damage > 0){ damage /= gDamageDiv;
+				//   if(damage <= 0) damage = 1; }`。⚠️★★ damage 是 **int**、gDamageDiv 是
+				//   **float** ⇒ 除法在 float 上做、赋回 int **才截断**,截断**之后**才抬下限 1
+				//   (base=2、N=4 ⇒ 0.5 → 截 0 → 抬 1;base=5、N=2 ⇒ 2.5 → 2,不抬)。
+				//   分摊只作用于本行动者的普攻各段;反击段不适用(:3646 已归 1.0)。
+				if (!counter && striker.mods.pet_skill_hits > 0 && damage > 0)
+				{
+					damage = static_cast<int>(static_cast<float>(damage) /
+					                          static_cast<float>(striker.mods.pet_skill_hits));
+					if (damage <= 0)
+						damage = 1;
+				}
 				damage = std::max(0, damage);
 				if (counter)
 				{
@@ -1676,7 +1801,9 @@ static bool resolveOrdered(BattleField field,
 			int to_pet = 0;
 			if (victim.has_ride && pet_hp[to] > 0)
 			{
-				const RideSplit split = splitRideDamage(damage, victim.defense, victim.ride_defense);
+				// ★ 守方防御取工作值(B1:POWERBALANCE 改写后同样被读到 —— 原版
+				//   BATTLE_DamageSubCale 读的就是 WORKDEFENCEPOWER,battle_event.c:2660)。
+				const RideSplit split = splitRideDamage(damage, effectiveDefense(victim), victim.ride_defense);
 				to_player = split.player;
 				to_pet = split.pet;
 			}
@@ -1748,7 +1875,15 @@ static bool resolveOrdered(BattleField field,
 			return {true, can_chain && !critical && !dead[to]};
 		};
 
-		const int hits = rollAttackCount(actor, config, rng);
+		// ★★ RENZOKU 的段数是**覆盖**不是叠加(批次 B1;battle.c:7263
+		//   `attack_max = COM3 low`):原 `BATTLE_GetAttackCount` / 空手幸运档位
+		//   (`:7140-7166`)**整段被跳过** ⇒ 不消费那笔 rng(宠物侧原版本来就不消费:
+		//   非 PLAYER 直接 attack_max=1、不进 RAND,`:7144-7145`)。
+		//   ⚠️ DR-BT1 的空手多段是「各段全额」,RENZOKU 是「每段 /N」—— 两者**不是
+		//   同一件事**:分摊在 strike 里做(见上),这里只管段数覆盖。
+		const int hits = actor.mods.pet_skill_hits > 0
+		                     ? actor.mods.pet_skill_hits
+		                     : rollAttackCount(actor, config, rng);
 		auto *hit_event = sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
 		if (hit_event == nullptr)
 			break;
