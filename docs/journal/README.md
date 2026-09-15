@@ -95,6 +95,7 @@
 | §9.0.63 | 批次 B2 —— 宠技槽(B2a)+ CHARGE 集气(B2b);宠技列校正 c25..c31 | 2026-09-15 | [`18-petskill.md`](18-petskill.md) |
 | §9.0.64 | 推送窗口执行记录 —— shared-v0.29.0(批次 B2) | 2026-09-15 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.65 | 批次 B3 —— 状态系宠技 + 铁壁;宠技状态实参核正(per=30/Range=40/Bai=2.0) | 2026-09-15 | [`18-petskill.md`](18-petskill.md) |
+| §9.0.66 | 推送窗口执行记录 —— shared-v0.30.0(批次 B3) | 2026-09-15 | [`90-push-windows.md`](90-push-windows.md) |
 
 ---
 

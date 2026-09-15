@@ -479,3 +479,17 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 #### ② 教训
 
 - **派单简报的列位口径错误在开工前被执行者用数据分布拦下**(宠技列 c25..c31 非 18..24;判据三条,见 §9.0.63)——「回源码核实」这条纪律同样适用于**派单人写进任务简报的事实**;简报是输入,不是规格,规格仍是源码与真数据。
+### 9.0.66 ★ 推送窗口执行记录 —— `shared-v0.30.0`(2026-09-15)
+
+> **一个窗口、一个 tag 盖两笔**:批次 B3 状态系宠技 + 铁壁(§9.0.65)。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `621d61d` · `shared-v0.30.0`(附注)—— gitee + github(workercrew)`ls-remote` 核实一致 |
+| client master | `8685a8d`(pin v0.29.0 → **v0.30.0**)—— 双远端一致 |
+| server CI(workercrew) | run **completed/success**(`621d61d`) |
+| client CI(workercrew) | run **completed/success**(`8685a8d`,D2 闸门三平台,发布态 fetch 锁定 ref = v0.30.0) |
+| 本机独立发布态复验 | 干净克隆(无同级服务端)`ci_verify --expect-mode fetch`:**8 项全过**(fetch · v0.30.0 · 与源码一致 · 7 条全部注册 · ctest 7/7 · **134 用例 / 2,919 断言**) |
+| server 本机 ci_verify | **6 项全过**(22 条全部注册 · ctest 22/22) |
