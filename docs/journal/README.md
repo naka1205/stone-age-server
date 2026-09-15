@@ -1,4 +1,4 @@
-# journal — 开发流程账总索引
+﻿# journal — 开发流程账总索引
 
 > 逐批次的**取证 / 交付 / 复验 / 教训**。原 `00-architecture.md` §9.0.1–9.0.55 整体迁入,
 > **编号一律沿用,搬家未改号** —— 全仓约 600 处 `§9.0.x` 引用因此继续有效。
@@ -19,10 +19,11 @@
 | [`13-world.md`](13-world.md) | W.1 移动视野 · W.2/W.3 刷怪游荡 · W.4 暗雷 · W.5 明雷 | 4 |
 | [`14-item.md`](14-item.md) | 道具域 I.1 背包 · I.2 扣道具 · I.3 掉落 · I.4 使用 | 4 |
 | [`15-status.md`](15-status.md) | L4.1 状态异常系统 | 1 |
-| [`16-counterattack.md`](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
+| [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
+| [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
 | [`90-push-windows.md`](90-push-windows.md) | 九次 `shared-v0.x.0` 推送窗口的闭合核实 | 9 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **57** |
+| **合计** | | **60** |
 
 ## 全量映射表(按编号)
 
@@ -86,6 +87,8 @@
 | §9.0.55 | 批次 L4.1 —— 状态异常系统:单槽状态机 + 带毒装备 + 每回合推进 | 2026-09-11 | [`15-status.md`](15-status.md) |
 | §9.0.56 | 基础反击：整次普攻后最多五次交替反击与真实战果归属 | 2026-09-12 | [`16-counterattack.md`](16-counterattack.md) |
 | §9.0.57 | 批次 I\| —— 战斗指令入口校验:指令接收时的持有与目标门 | 2026-09-15 | [`14-item.md`](14-item.md) |
+| §9.0.58 | 批次 A4 —— 经济地基:GoldLedger 单入口 + 战斗产币 | 2026-09-15 | [`17-economy.md`](17-economy.md) |
+| §9.0.59 | Windows 本机 OpenSSL 根自动探测 —— configure 阻塞解除 | 2026-09-15 | [`17-economy.md`](17-economy.md) |
 
 ---
 

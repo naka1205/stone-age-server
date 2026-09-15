@@ -178,6 +178,16 @@ enum class LogEvent : std::uint16_t
 	//   `no_encounter`(enemy_id 在敌人表查不到 ⇒ 多半没 loadEncounterTables)·
 	//   `no_template`(敌人表行的 temp_no 在模板表查不到)。★ 池满另走 kEntityPoolExhausted。
 	kWorldEnemySpawnFailed = 212,
+	// ★★ 石币账务审计(2026-09-15,经济地基批,`GoldLedger` 第 ③ 步的唯一出口)。
+	//
+	// ⚠️★ 它不是调试日志,是 `00` §8.4.3 三步不变式的第三步:任何石币变更
+	//    (含**被钳位销毁的溢出**与**被拒绝的扣账**)都必须在这里留下一条带
+	//    **变更前后余额**(`before`/`after`)与**处置名**(`disposition`)的记录 ——
+	//    原版 96 个写点里 62.5% 绕过 API 且一条日志不写(`12` §2.3 / §8.3 C33),
+	//    本事件就是那个洞的封条。字段:`reason`/`delta`/`before`/`after`/
+	//    `disposition`/`overflow`/`corr`(本批 = battle_id;完整 correlation id
+	//    模型挂阶段 2 的 2.2 审计事件模型,与捕获第 3 步 `LogPet` 同处)。
+	kGoldChanged = 213,
 };
 
 // 日志字段。定长语义、不做格式化字符串 —— printf 风格的日志无法被机器消费。

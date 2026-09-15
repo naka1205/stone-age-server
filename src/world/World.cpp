@@ -1371,8 +1371,26 @@ static_assert(SA::Rules::kSideOffset == 10,
               "demo_battle.slot 的配置上限(config.cpp 里的 9)是按 "
               "kSideOffset == 10 写死的;kSideOffset 变了就要同步改那里");
 
-struct World::Impl
+struct World::Impl : GoldAuditSink
 {
+	// ── GoldLedger 第 ③ 步的出口(world/Api.h 的 GoldLedger 节)──────────────
+	//
+	// ★ 账本把审计事件交到这里,这里转进**现有**日志通道(kGoldChanged)——
+	//   事件不另开一条通道,但**也不可能没有通道**:add/del 无条件调 sink,
+	//   而生产路径上 sink 就是本 Impl。
+	void onGoldTx(const GoldTx &tx) const override
+	{
+		logger.log(SA::Platform::LogLevel::kInfo, SA::Platform::LogEvent::kGoldChanged,
+		           {{"corr", tx.correlation},
+		            {"delta", static_cast<std::int64_t>(tx.delta)},
+		            {"before", static_cast<std::int64_t>(tx.before)},
+		            {"after", static_cast<std::int64_t>(tx.after)},
+		            {"overflow", static_cast<std::int64_t>(tx.overflow)},
+		            {"pre_clamped", static_cast<std::int64_t>(tx.pre_clamped)},
+		            {"disposition", std::string_view(goldDispositionName(tx.disposition))},
+		            {"reason", std::string_view(goldReasonName(tx.reason))}});
+	}
+
 	// 一条连接上的全部状态。★ Connection 与 Session 在 1.5 是 1:1,
 	//   但类型是分开的 —— 01 §5.2 明写两者生命周期不同,
 	//   压在一起正是原版 LoginType 的毛病。重连窗口留到阶段 2。
@@ -2335,6 +2353,37 @@ void World::tick()
 				const bool player_won = sideWipedOut(b.field, true) && !sideWipedOut(b.field, false);
 				for (int slot = 0; slot < SA::Rules::kBattlePlayerMax; ++slot)
 					deliverPlayerProfit(b, slot, s.players, s.items);
+
+				// ── 战斗产币(经济地基批,DR-EC6;接点 = 战果结算,exp 分配旁)──────────
+				//
+				// ★ 源码形状:`BATTLE_Finish` 对**两侧**全部入场单位逐个调 `BATTLE_GetProfit`
+				//   (`battle.c:3598`,8.0;胜负只影响 WinFunc/掉落,不影响这条),
+				//   非决斗点怪走 `BATTLE_GetExpGold`(`:3540-3546` 的 `dpbattle` 分支),
+				//   `BATTLE_GetExp` 里无条件 `gold += getBattleGold()` 钳到随身上限
+				//   (8.5 `battle.c:3851-3860`;8.0 公式不可判定 —— 证据边界见 world/Api.h 的 GoldLedger 节)。
+				//   ⇒ 三个门都在这里,账本只管记账:
+				//   ① **死亡不给**(源码 `BATTLE_GetExpGold:4252-4254` 的 `CHAR_ISDIE` 提前返回;
+				//      逃跑/超时离场的玩家已不在 player_of_slot 里,resolve 不到 ⇒ 自然跳过);
+				//   ② **决斗点怪不给金**(dpbattle ⇒ 走 `BATTLE_GetDuelPoint` 不走 GetExpGold);
+				//   ③ **每场一次**:本段只在战斗 finished 时走一遍,battles 随即 retire。
+				if (!b.dp_battle)
+					for (int slot = 0; slot < SA::Rules::kBattlePlayerMax; ++slot)
+					{
+						// 源码 :4252 的 ISDIE 门(死亡不给)。
+						if (b.field.at(slot).dead)
+							continue;
+						// 逃跑 / 超时离场的玩家已不在场(源码里 BATTLE_Exit 把他们清出
+						// Entry,:3596 的 CHAR_CHECKINDEX 即 continue ⇒ 战果结算没有他们;
+						// exp 走的是本实现的"离场即领暂存"适配,金没有暂存态 ⇒ 不给)。
+						if (!b.field.at(slot).occupied)
+							continue;
+						SA::Model::Player *p =
+						    s.players.resolve(b.player_of_slot[static_cast<std::size_t>(slot)]);
+						if (p == nullptr)
+							continue;
+						(void)addGold(*p, GoldReason::kBattleReward, kBattleGold,
+						              /*trans=*/0, static_cast<std::uint64_t>(b.id), s);
+					}
 
 				// ── 下发 BattleResult(战斗结束都发,告知胜负 + 经验)战果结算批次 ──────
 				//
@@ -3479,6 +3528,13 @@ int World::playerExp(SA::Net::SessionId session) const
 	const SA::Model::Player *p =
 	    _impl->players.resolve(_impl->player_of_session.find(session));
 	return p == nullptr ? -1 : static_cast<int>(p->exp);
+}
+
+int World::playerGold(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : static_cast<int>(p->gold);
 }
 
 World::PlayerPos World::playerPos(SA::Net::SessionId session) const

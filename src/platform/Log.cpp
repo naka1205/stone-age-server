@@ -99,6 +99,8 @@ const char *eventName(LogEvent e) noexcept
 		return "world_enemy_spawned";
 	case LogEvent::kWorldEnemySpawnFailed:
 		return "world_enemy_spawn_failed";
+	case LogEvent::kGoldChanged:
+		return "gold_changed";
 	}
 	return "unknown";
 }

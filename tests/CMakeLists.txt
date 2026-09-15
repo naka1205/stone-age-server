@@ -207,6 +207,15 @@ if(Python3_FOUND)
   add_test(NAME module_boundaries
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_SOURCE_DIR}/tools/check_module_boundaries.py)
+  # ── ★★ GoldLedger 唯一入口的守卫(经济地基批,00 §8.4.3)────────────────
+  #
+  # 与上面两条同族:那两条守 D2 与「进程内捷径」,这一条守**石币的唯一写入口** ——
+  # `12` §2.3 实测原版 96 个写点里 62.5% 绕过 API 且不写日志,而那类写点
+  # 不报错、不崩溃 ⇒ 只有边界检查能拦(编译期 private 与生成模板
+  # copyPlayerData 冲突,登记于 journal/17-economy.md §源码依据)。
+  add_test(NAME gold_writes
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_SOURCE_DIR}/tools/check_gold_writes.py)
   # IDL schema 与生成物同步(02 §8 检查 1–3 + 生成物入库)
   #
   # ⚠️★ 它需要 **protoc**,而 protoc 是**构建期工具**、不是运行时依赖:

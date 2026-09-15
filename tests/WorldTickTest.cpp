@@ -2786,6 +2786,421 @@ TEST_CASE("战果:端到端 —— 打赢野怪,玩家按等级差衰减涨经�
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  经济地基:GoldLedger 单入口 + 战斗产币(计划项 A4,DR-EC6)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ★★ 这一组验的是 `00` §8.4.3 那条不变式的两半:
+//    ① **三步不可拆** —— 钳位 → 溢出处置 → 审计(单元级,注入捕获式 sink 逐字段核对);
+//    ② **唯一入口真的被走** —— 战斗产币从结算点经账本落到实体(端到端,观察面 playerGold)。
+// ⚠️ 上限 / 溢出的**边界**用例走持久化面(save 记录可摆位),见 world_persistence。
+
+namespace
+{
+// 捕获式审计 sink —— 账本第 ③ 步的可断言形态。生产路径上这个角色由
+// `World::Impl` 担当(转进 `Platform::Logger` 的 kGoldChanged)。
+struct CapturingAuditSink final : SA::World::GoldAuditSink
+{
+	mutable std::vector<SA::World::GoldTx> txs;
+	void onGoldTx(const SA::World::GoldTx &tx) const override { txs.push_back(tx); }
+};
+
+// 局部摆位的 Player(测试构造物,不是世界实体 —— 与守卫脚本的分工见
+// tools/check_gold_writes.py 卷首 ②:运行期可达的实体只活在 src/world 池里)。
+SA::Model::Player playerWithGold(std::int32_t gold)
+{
+	SA::Model::Player p{};
+	p.gold = gold;
+	return p;
+}
+} // namespace
+
+TEST_CASE("EC:入账三步 —— 正常入账 / 触上限 / 已在上限 / 超限存量(char_base.c:3225-3261)")
+{
+	CapturingAuditSink sink;
+
+	SUBCASE("正常入账:全额生效")
+	{
+		SA::Model::Player p = playerWithGold(100);
+		const SA::World::GoldTx tx = SA::World::addGold(
+		    p, SA::World::GoldReason::kBattleReward, 10, /*trans=*/0, 7, sink);
+		CHECK(tx.before == 100);
+		CHECK(tx.applied == 10);
+		CHECK(tx.overflow == 0);
+		CHECK(tx.pre_clamped == 0);
+		CHECK(tx.after == 110);
+		CHECK(tx.disposition == SA::World::GoldDisposition::kApplied);
+		CHECK(tx.correlation == 7);
+		CHECK(p.gold == 110);
+	}
+
+	SUBCASE("触上限 ⇒ 溢出被具名销毁(kClamped,DR-EC4:不留静默销毁)")
+	{
+		SA::Model::Player p = playerWithGold(999995);
+		const SA::World::GoldTx tx = SA::World::addGold(
+		    p, SA::World::GoldReason::kBattleReward, 10, 0, 0, sink);
+		CHECK(tx.before == 999995);
+		CHECK(tx.applied == 5);  // 只装得下 5
+		CHECK(tx.overflow == 5); // ★ 被销毁的 5 有名字,不是静默丢弃
+		CHECK(tx.after == 1000000);
+		CHECK(tx.disposition == SA::World::GoldDisposition::kClamped);
+		CHECK(p.gold == 1000000);
+	}
+
+	SUBCASE("已在上限 ⇒ 全额溢出,余额不动")
+	{
+		SA::Model::Player p = playerWithGold(1000000);
+		const SA::World::GoldTx tx = SA::World::addGold(
+		    p, SA::World::GoldReason::kBattleReward, 10, 0, 0, sink);
+		CHECK(tx.applied == 0);
+		CHECK(tx.overflow == 10);
+		CHECK(tx.after == 1000000);
+		CHECK(tx.disposition == SA::World::GoldDisposition::kClamped);
+	}
+
+	SUBCASE("超上限存量先被 ① 钳回上限(源码 :3232 的预钳,可观察语义)")
+	{
+		// 8.0 里玩家石币能被推过上限(`NPC_AcceptDel` 不看上限,12 §3.2),
+		// 下一次变更时**先拉回上限** —— 那段 500,000 不能悄悄消失:记在 pre_clamped。
+		SA::Model::Player p = playerWithGold(1500000);
+		const SA::World::GoldTx tx = SA::World::addGold(
+		    p, SA::World::GoldReason::kBattleReward, 10, 0, 0, sink);
+		CHECK(tx.before == 1000000);     // ① 之后的余额(不是 1,500,000)
+		CHECK(tx.pre_clamped == 500000); // 存量被剪掉的量有名字
+		CHECK(tx.overflow == 10);        // ② 里 10 又全溢出
+		CHECK(tx.after == 1000000);
+		CHECK(tx.disposition == SA::World::GoldDisposition::kClamped);
+	}
+}
+
+TEST_CASE("EC:随身上限 = 1,000,000 + 转生×1,800,000(char_base.c:3212;8.0 线性)")
+{
+	// ★ 8.0 与 8.5 的上限公式**不同**:8.0 线性、8.5 阶梯,且兜底常量差 100 倍
+	//   (`08` §2.1)。照抄 8.5 会把 8.0 的经济压力整个抹掉 ⇒ 逐值钉死。
+	CHECK(SA::World::maxHaveGold(0) == 1000000);
+	CHECK(SA::World::maxHaveGold(1) == 2800000);
+	CHECK(SA::World::maxHaveGold(2) == 4600000);
+	CHECK(SA::World::maxHaveGold(5) == 10000000);
+	// ★ 交叉印证(`12` C11):五转上限恰好等于「千万石币」道具的 argument(10,000,000)
+	//   ⇒ 这三件道具是照着这条线性公式设计的,不是随手填的数。
+	CHECK(SA::World::maxHaveGold(5) == 10000000);
+	// 负转生数(防御):钳到 0 转档 —— 源码没有这个态,本实现不许它把上限压到 100 万以下。
+	CHECK(SA::World::maxHaveGold(-3) == 1000000);
+}
+
+TEST_CASE("EC:扣账 —— 余额不足拒绝(DR-EC3)/ 请求量先钳到上限(源码 :3270 怪癖)")
+{
+	CapturingAuditSink sink;
+
+	SUBCASE("余额不足 ⇒ kRejected,一个字节都没动")
+	{
+		SA::Model::Player p = playerWithGold(100);
+		const SA::World::GoldTx tx = SA::World::delGold(
+		    p, SA::World::GoldReason::kBattleReward, 200, 0, 0, sink);
+		CHECK(tx.disposition == SA::World::GoldDisposition::kRejected);
+		CHECK(tx.applied == 0);
+		CHECK(tx.after == 100);
+		CHECK(p.gold == 100); // ★ DR-EC3:拒绝,不是原版另两处的"没钱全没收"
+	}
+
+	SUBCASE("正常扣账")
+	{
+		SA::Model::Player p = playerWithGold(500);
+		const SA::World::GoldTx tx = SA::World::delGold(
+		    p, SA::World::GoldReason::kBattleReward, 200, 0, 0, sink);
+		CHECK(tx.disposition == SA::World::GoldDisposition::kApplied);
+		CHECK(tx.before == 500);
+		CHECK(tx.after == 300);
+		CHECK(p.gold == 300);
+	}
+
+	SUBCASE("请求量先钳到上限 ⇒ 恰好扣空(照抄 :3270,不'修')")
+	{
+		// 余额 = 上限、请求量 > 上限:不钳会被判"余额不足",钳了则扣成 0。
+		// ★ 这条差异只在边界上出现,是照抄来的语义 ⇒ 用例钉住它,免得后人"顺手修正"。
+		SA::Model::Player p = playerWithGold(1000000);
+		const SA::World::GoldTx tx = SA::World::delGold(
+		    p, SA::World::GoldReason::kBattleReward, 2000000, 0, 0, sink);
+		CHECK(tx.disposition == SA::World::GoldDisposition::kApplied);
+		CHECK(tx.applied == 1000000);
+		CHECK(tx.after == 0);
+		CHECK(p.gold == 0);
+	}
+}
+
+TEST_CASE("EC:第 ③ 步无条件 —— 每次账务一条审计,被拒绝也留痕")
+{
+	// ★ 三步不可拆的**可断言形态**:sink 被调用的次数 == 账务次数 ——
+	//   成功 / 钳位 / 拒绝三种结局一条都不能少(DR-EC4「不留静默销毁」的另一半:
+	//   被销毁的溢出要留痕,被拒绝的操作也要能追)。
+	CapturingAuditSink sink;
+	SA::Model::Player p = playerWithGold(999995);
+	(void)SA::World::addGold(p, SA::World::GoldReason::kBattleReward, 10, 0, 11, sink);      // clamped
+	(void)SA::World::addGold(p, SA::World::GoldReason::kBattleReward, 10, 0, 12, sink);      // clamped(已满)
+	(void)SA::World::delGold(p, SA::World::GoldReason::kBattleReward, 5000000, 0, 13, sink); // applied
+	(void)SA::World::delGold(p, SA::World::GoldReason::kBattleReward, 1, 0, 14, sink);       // rejected(已扣空)
+
+	REQUIRE(sink.txs.size() == 4);
+	CHECK(sink.txs[0].disposition == SA::World::GoldDisposition::kClamped);
+	CHECK(sink.txs[1].disposition == SA::World::GoldDisposition::kClamped);
+	CHECK(sink.txs[2].disposition == SA::World::GoldDisposition::kApplied);
+	CHECK(sink.txs[3].disposition == SA::World::GoldDisposition::kRejected);
+	// 每条都带前后余额与关联系(审计三缺口 ① 的最小兑现,12 §8.3 C33)。
+	CHECK(sink.txs[0].before == 999995);
+	CHECK(sink.txs[0].after == 1000000);
+	CHECK(sink.txs[3].before == 0);
+	CHECK(sink.txs[3].after == 0);
+	CHECK(sink.txs[2].correlation == 13);
+}
+
+// 一场"只站玩家"的战斗:敌方一侧全空 ⇒ 首次结算即判敌方全灭 ⇒ finished。
+// ★ 用它验的是**结算链**本身(不需要敌人表/掉落),战果结算点见 World.cpp finished 段。
+// ⚠️ 完成判据 = `stats(battle)->finished`(战斗收场后 field 观察面仍保留快照,
+//    `battleField != nullptr` 不是"已收场"的判据)。
+namespace
+{
+bool battleFinished(const World &world, BattleId battle)
+{
+	const SA::World::BattleStats *st = world.stats(battle);
+	return st != nullptr && st->finished;
+}
+
+void finishSoloBattle(Fixture &f, SA::Net::ConnectionId id)
+{
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = 100000;
+	me.max_hp = 100000;
+	me.attack = 10;
+	me.defense = 10000;
+	me.quick = 200;
+	me.luck = 10;
+	const BattleId battle = f.world.startBattle(pf);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+
+	for (int i = 0; i < 10; ++i)
+	{
+		if (battleFinished(f.world, battle))
+			break;
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = fld->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+		f.world.onBattleCommand(id, cmd);
+		f.clock.advance(2000);
+		f.world.tick();
+	}
+	REQUIRE(battleFinished(f.world, battle));
+}
+} // namespace
+
+TEST_CASE("经济:端到端 —— 战斗结算给钱 +10,经 GoldLedger 落到实体(playerGold)")
+{
+	// ★★ 证据边界(不许读成"原版公式"):数值 +10 = `csa8.0/gmsv/setup.cf:67` 的
+	//    `BATTLEGOLD=10`(B80 有 getBattleGold 符号、SSRC80 全树无);实现形态取
+	//    SSRC85 `battle/battle.c:3851-3860`(每场固定,不乘等级)⇒ DR-EC6 的既有选择。
+	//    ⚠️ 8.0 真实公式不可判定(`00` §10.2)—— 本用例钉的是**这个已裁定取值**,
+	//       不是"原版行为"。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+	REQUIRE(f.world.playerGold(id) == 0); // 入场时 0
+
+	finishSoloBattle(f, id);
+
+	CHECK(f.world.playerGold(id) == SA::World::kBattleGold);
+	CHECK(f.world.playerGold(id) == 10);
+}
+
+TEST_CASE("经济:每场一次 —— 打完不退,再来一场再加 10")
+{
+	// ★ "每场 +10"的"每场"要有牙齿:结算段只在 finished 时走一遍、随即 retire,
+	//   所以第二场是**新的一场**(不是同一场重复结算)。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	finishSoloBattle(f, id);
+	CHECK(f.world.playerGold(id) == 10);
+	finishSoloBattle(f, id);
+	CHECK(f.world.playerGold(id) == 20);
+}
+
+TEST_CASE("经济:决斗点怪不给金(BATTLE_GetProfit 的 dpbattle 分支,:3540-3546)")
+{
+	// ★ 源码 `BATTLE_GetProfit`:`dpbattle == 1` ⇒ 走 `BATTLE_GetDuelPoint`,
+	//   **不**走 `BATTLE_GetExpGold` ⇒ 没有 `getBattleGold` 那一段 ⇒ 不给钱。
+	//   本实现的 dp 判据 = 刷怪时敌人 `duelpoint > 0`(`World.cpp` spawnEnemyToField),
+	//   与战果经验那条 dp 门同源。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = 100000;
+	me.max_hp = 100000;
+	me.attack = 100000; // 秒杀
+	me.defense = 10000;
+	me.quick = 500;
+	me.luck = 10;
+	const BattleId battle = f.world.startBattle(pf);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+
+	EnemyEncounter enc = makeWuliEncounterFixedLv1();
+	enc.duelpoint = 100; // ★ 决斗点怪(判定树 ⇒ exp 0,且战斗标记 dp_battle)
+	REQUIRE(f.world.spawnEnemyToField(battle, SA::Rules::kSideOffset, makeWuliTemplate(), enc, 10));
+
+	for (int i = 0; i < 30; ++i)
+	{
+		if (battleFinished(f.world, battle))
+			break;
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = fld->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd.command.attack.target = static_cast<std::uint32_t>(SA::Rules::kSideOffset);
+		f.world.onBattleCommand(id, cmd);
+		f.clock.advance(2000);
+		f.world.tick();
+	}
+	REQUIRE(battleFinished(f.world, battle)); // 打完了
+
+	CHECK(f.world.playerGold(id) == 0); // ★ dp 战斗不给金
+	CHECK(f.world.playerExp(id) == 0);  // 同源的 dp 经验门(既有断言,此处并列钉住)
+}
+
+TEST_CASE("经济:战死者没有战利品(ISDIE 门,源码 :4252)")
+{
+	// ★ `BATTLE_GetExpGold` 开头:`CHAR_ISDIE == TRUE` ⇒ 提前 return 0 ——
+	//   死了连金带经验都没有。本实现的对应门 = 结算段 `field.at(slot).dead`。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 1;
+	me.hp = 1; // 一碰就死
+	me.max_hp = 1;
+	me.attack = 1;
+	me.defense = 0;
+	me.quick = 1; // 后手 ⇒ 敌人先动
+	me.luck = 0;
+	SA::Rules::Combatant &foe = pf.at(SA::Rules::kSideOffset);
+	foe.occupied = true;
+	foe.kind = SA::Rules::CombatantKind::kEnemy;
+	foe.slot = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+	foe.level = 20;
+	foe.hp = 5000;
+	foe.max_hp = 5000;
+	foe.attack = 500;
+	foe.defense = 50;
+	foe.quick = 300; // 先手
+	foe.luck = 10;
+
+	const BattleId battle = f.world.startBattle(pf);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	for (int i = 0; i < 10; ++i)
+	{
+		if (battleFinished(f.world, battle))
+			break;
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = fld->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+		f.world.onBattleCommand(id, cmd);
+		f.clock.advance(2000);
+		f.world.tick();
+	}
+	REQUIRE(battleFinished(f.world, battle)); // 玩家侧全灭 ⇒ 收场
+
+	CHECK(f.world.playerGold(id) == 0); // ★ 战死没有 +10
+	CHECK(f.world.playerExp(id) == 0);
+}
+
+TEST_CASE("经济:审计事件真的进了日志通道(kGoldChanged,第 ③ 步的生产出口)")
+{
+	// ★ 上面几条验的是账本语义(sink 捕获);这条验**生产接线**:
+	//   World::Impl 实现 GoldAuditSink ⇒ 转 `Platform::Logger` 的 kGoldChanged。
+	//   ⚠️ 用 `emitted()`(Logger 自带的测试观察面)在**收场那一 tick** 上取差:
+	//   该 tick 在 info 级只有两条 —— `battle_finished` + `gold_changed`;
+	//   回合结算日志是 debug 级、被 info 门槛滤掉 ⇒ 差恰为 2。
+	//   (若将来往收场路径加 info 日志,这条会红 —— 那正是要人回来看一眼的地方。)
+	SA::Platform::ServerConfig config = SA::Platform::parseConfig(
+	                                        R"({"protocol_version": 1, "log_level": "info",
+	        "tempo": { "tick_hz": 100, "battle_turn_interval_ms": 1000 }})")
+	                                        .config;
+	SA::Platform::ManualClock clock{0};
+	SA::Platform::Logger logger{SA::Platform::LogLevel::kInfo};
+	SA::Platform::RandomSource random{0xABCDEF};
+	SA::Net::LoopbackTransport transport{};
+	World world{config, clock, logger, random, transport};
+
+	const SA::Net::ConnectionId id = transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(config.protocol_version);
+	transport.deliver(id, hs.data(), hs.size());
+	world.tick();
+
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = 100000;
+	me.max_hp = 100000;
+	me.attack = 10;
+	me.defense = 10000;
+	me.quick = 200;
+	me.luck = 10;
+	const BattleId battle = world.startBattle(pf);
+	REQUIRE(world.joinBattle(battle, id, 0));
+
+	const std::uint64_t before_finish = logger.emitted();
+	for (int i = 0; i < 10; ++i)
+	{
+		if (battleFinished(world, battle))
+			break;
+		const SA::Rules::BattleField *fld = world.battleField(battle);
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = fld->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+		world.onBattleCommand(id, cmd);
+		clock.advance(2000);
+		world.tick();
+	}
+	REQUIRE(battleFinished(world, battle));
+
+	// 收场 tick 的两条 info 日志:battle_finished + gold_changed。
+	CHECK(logger.emitted() == before_finish + 2);
+	CHECK(world.playerGold(id) == 10);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  捕获扣道具(道具域第二批,DR-BT10「全删」+ 前置门 CaptureItemCheck)
 // ═══════════════════════════════════════════════════════════════════════════
 //

@@ -1,4 +1,4 @@
-// shared/model/Player.h —— Player 族实体(L2 领域模型,批次 M.1)
+﻿// shared/model/Player.h —— Player 族实体(L2 领域模型,批次 M.1)
 //
 // ★ 本批只建**捕获链路真正要读写**的那一小块:宠物槽 + 捕获计数 + 名字。
 //   Player 的完整字段面是 03 §11 欠债 1(693 字段逐条含义,5–8 天)与 §4 的
@@ -116,6 +116,15 @@ struct Player
 	std::int32_t wind = 0;
 	std::int32_t image = 0;
 	std::int32_t face_image = 0;
+	// ── 随身石币(原 `CHAR_GOLD`,`char_base.h:397`;批次「经济地基」接上写者)──────
+	//
+	// ★★ **全仓唯一的合法写入口是 `GoldLedger`**(`src/world/GoldLedger.cpp`,声明在 `world/Api.h` 的 GoldLedger 节):
+	//    钳位 → 溢出处置 → 审计,三步不可拆(`00` §8.4.3;DR-EC1 不合并 5 载体,
+	//    本字段只是随身载体 —— 银行 / 宝箱 / 公款是另外的字段,各自带独立上限)。
+	//    ⚠️ **任何别处的直写都会被 `tools/check_gold_writes.py` 报红** ——
+	//    原版 96 个写点里 62.5% 绕过唯一带校验的 API 且不写日志(`12` §2.3),
+	//    这条守卫挡的就是那个形态在新实现里重演。
+	//    只读观察面 = `World::playerGold`(存档快照走 `copyPlayerData`,不算写点)。
 	std::int32_t gold = 0;
 
 	// ── 位置(批次 W.1。原 CHAR_FLOOR / CHAR_X / CHAR_Y / CHAR_DIR)──────────
@@ -216,8 +225,11 @@ struct Player
 //    也没建(Pet.h 卷首已记:它会撞出一条 cdkey 长度上限的新决策,留到落盘时登记)。
 //
 // ② 石币 ⇒ ★★ 03 §7:石币在 8.0 是 **5 个并存载体 + 4 个独立上限**,
-//    「玩家有多少钱」没有单一真值 ⇒ 必须走 `GoldLedger` 单入口(08 §3),
-//    而那挂在阶段 2 的 2.2 审计事件模型上。**捕获链路不需要钱** ⇒ 不在本批。
+//    「玩家有多少钱」没有单一真值 ⇒ 必须走 `GoldLedger` 单入口(08 §3)。
+//    ✅ **2026-09-15 经济地基批已接**:随身载体 `gold` 字段 + `GoldLedger` 唯一写入口
+//    (`src/world/GoldLedger.cpp`,声明在 `world/Api.h`);战斗产币为第一个真实源(DR-EC6)。
+//    其余 4 个载体(银行 / 宝箱 / 拍卖 / 公款)仍未建 —— DR-EC1 要求**不合并**,
+//    各载体属各自域批次。
 //
 // ③ `addressBook[80]` ⇒ 03 §3.2 已裁定**移出实体做成独立聚合**(占 sizeof(Char) 的
 //    39% 却是纯社交数据,且 17 §5.5 已证它参与删角 Saga)。

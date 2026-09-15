@@ -25,6 +25,7 @@
 #include "model/Enemy.h"
 #include "model/Item.h"
 #include "model/Pet.h"
+#include "model/Player.h" // GoldLedger(add/delGold)以 Player 为记账主体(经济地基批)
 #include "net/Api.h"
 #include "platform/Api.h"
 #include "rules/Battle.h"
@@ -831,6 +832,15 @@ class World final : public SA::Net::TransportEvents,
 	//   × 等级差衰减比 —— 没有它,「打赢涨经验」这条闭环无从证明(同欠债 20 / 25 那族)。
 	int playerExp(SA::Net::SessionId session) const;
 
+	// 某会话背后 Player 的随身石币(原 `CHAR_GOLD`,经济地基批)。
+	// -1 = 会话无 L2 实体(同 `playerExp`;石币非负 ⇒ -1 无歧义)。
+	//
+	// ★★ **只读观察面** —— 石币的唯一写入口是 `GoldLedger`(`00` §8.4.3 三步不变式),
+	//    World 的公开面**刻意不提供任何"加钱 / 扣钱"方法**:那等于在唯一入口旁边
+	//    再开一扇门(同 `12` §2.3 那 62.5% 绕过点的反面)。要改余额,走账本;
+	//    要验余额,走这里。`tools/check_gold_writes.py` 守的是同一件事的源码面。
+	int playerGold(SA::Net::SessionId session) const;
+
 	// 某会话背后 Player 的位置(批次 W.1)。valid == false ⇒ 该会话无 L2 实体。
 	//   ★ 移动用例的观察面:走一步坐标变化 / 撞墙不变 / 转身只改 dir。
 	struct PlayerPos
@@ -1127,6 +1137,178 @@ SA::Model::Enemy spawnEnemy(const EnemyTemplate &tmpl, const EnemyEncounter &enc
 //      ⚠️ 现在不做也没有可观察后果:`spawnEnemy` 保证 `hp == max_hp`。
 bool enterEnemyToField(SA::Rules::BattleField &field, int field_slot,
                        const SA::Model::Enemy &enemy);
+
+// ═════════════════════════════════════════════════════════════════════════
+//  GoldLedger —— 石币的唯一入口(经济地基批,计划项 A4;实现在 GoldLedger.cpp)
+// ═════════════════════════════════════════════════════════════════════════
+//
+// ★★ 本文件存在的理由只有一条,它是 `00` §8.4.3 的原文:
+//
+//     「任何石币变更只经**唯一入口**,且入口必须原子地完成
+//       **钳位 → 溢出处置 → 写审计事件**三步。」
+//
+//   背景数字(取证见 `12-economy.md` §2.1–§2.3 / `08-economy.md` §3.1):
+//     · 石币在 8.0 是 **5 个并存载体 + 4 个独立上限**,「玩家有多少钱」没有单一真值;
+//     · 96 个写点里 **60 处(62.5%)绕过** 唯一带校验的 API(`CHAR_AddGold`/`DelGold`)
+//       直接 `CHAR_setInt` 裸写 ⇒ 上限、溢出、审计三件事靠 60 个调用点自觉;
+//     · 那 60 处里 18 处是**凭空增发**(§5.2),一条日志都不写。
+//   ⇒ 新实现必须让「绕过」在**边界检查**上不可能(守卫 `tools/check_gold_writes.py`,
+//     ctest 名 `gold_writes`;它也是「src/ 与 shared/ 里唯一允许写 `Player::gold`
+//     的文件是 GoldLedger.cpp」这条纪律的执行者)。
+//
+// ⚠️★ 落点:账本在**世界侧**(不是 `shared/`)—— D2 要求 `shared/` 无 I/O 与时间,
+//    而第 ③ 步「写审计事件」是 I/O ⇒ 账本只能落这一侧;审计走**现有**日志通道
+//    (`Platform::Logger` + `LogEvent::kGoldChanged`),不另开一条。
+//
+// ⚠️★ 形状上与本文件既有的自由函数(`enterPetToField` 族)同款:声明在这里(模块
+//    恰好一个对外头,check_module_boundaries 守着),实现单独成文件。
+//
+// ⚠️ 本批**只接线随身载体**(`CHAR_GOLD`)。DR-EC1 已裁定 5 载体**不合并**
+//    (语义不同:随身 / 银行 / 宝箱 / 公款)⇒ 另外 4 个载体(`CHAR_BANKGOLD` /
+//    `CHAR_PERSONAGOLD` / `CHAR_AUCGOLD` / `CHAR_FMBANKGOLD`,源码
+//    `include/char_base.h:504/553/562/583`)与它们的源汇、4 个上限的合并决策
+//    都**不在本批**(银行 / 寄售 / 商店等其余载体与源汇已显式划出)。
+
+// ── 载体(DR-EC1:不合并)──────────────────────────────────────────────
+//
+// ★ 只声明本批**接线**的那一个。⚠️ 刻意不预先声明另外 4 个:它们各自带一个
+//   独立上限,而「4 个上限怎么合并」是 DR-EC1 明确要求**先决定**的事
+//   (`00` §8.4.3 尾注:直接相加得 1.6 亿,远超 8.0 任何单一上限)。
+//   ⇒ 空枚举值会让「合并」看起来已经想过,而其实没有。
+enum class GoldCarrier : std::uint8_t
+{
+	kGold, // `CHAR_GOLD`(随身上限 `CHAR_getMaxHaveGold()`)
+};
+
+// ── 事由(★ 同时决定溢出处置策略)────────────────────────────────────
+//
+// ⚠️★ 8.0 里「同一件事」有**三种上限语义**(`12` §3.2:任务给钱=转宝箱 / 静默销毁 /
+//    不检查)⇒ 新实现把它们收成**显式的枚举值**,而不是三段各自为政的代码。
+enum class GoldReason : std::uint8_t
+{
+	// 战斗产币(DR-EC6)。处置 = 钳位(超出上限的部分销毁,但**有名字、有审计**)。
+	//
+	// ★★ 证据边界(**不许读成「原版公式」**):数值 +10 的证据是
+	//    `csa8.0/gmsv/setup.cf:67` 的 `BATTLEGOLD=10`(B80 有 `getBattleGold` 符号,
+	//    而 SSRC80 全树**没有**这个函数、也不认识这个键 —— `12` §3.4 C9)。
+	//    实现形态取 SSRC85 `battle/battle.c:3851-3860`(每场固定 `+getBattleGold()`,
+	//    不乘等级)。⚠️ 8.0 的**真实公式不可判定**(`00` §10.2;`12` C35):setup.cf 的
+	//    注释写「人物等级的倍数」而 8.5 实现是固定值,注释与实现不符。
+	//    ⇒ DR-EC6 的既有选择就是「接受每场固定 +10」,本批照此落地,**不写成原版公式**。
+	kBattleReward,
+};
+
+// ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
+enum class GoldDisposition : std::uint8_t
+{
+	kApplied,  // 全额入账,没有触发处置
+	kClamped,  // 触及上限 ⇒ 超出部分被**具名销毁**(不是静默:审计事件带着 overflow)
+	kRejected, // 扣账余额不足(DR-EC3:拒绝,不清零)⇒ 一个字节都没动
+};
+
+// 一次账务的结果。★ 第 ③ 步的审计事件**就是**这个结构(不是另拼一份字符串)。
+struct GoldTx
+{
+	GoldCarrier carrier = GoldCarrier::kGold;
+	GoldReason reason = GoldReason::kBattleReward;
+	std::int32_t delta = 0;       // 调用方请求的变更量(入账为正,扣账为正数传入)
+	std::int32_t before = 0;      // ★ 变更前余额(处置前)
+	std::int32_t pre_clamped = 0; // ① 钳位一步从存量上剪掉的量(存量已超上限时 > 0)
+	std::int32_t applied = 0;     // 实际生效的变更量(钳位后)
+	std::int32_t overflow = 0;    // 被处置掉的量(kClamped 时 > 0)
+	std::int32_t after = 0;       // ★ 变更后余额 —— 与 before 一起满足「审计带前后余额」
+	GoldDisposition disposition = GoldDisposition::kApplied;
+
+	// 关联系标识(审计三缺口 ① 的落点:`12` §8.3 C33)。本批唯一源是战斗 ⇒ 填 `battle_id`;
+	// 完整的 correlation id 模型挂阶段 2 的 2.2 审计事件模型(`World.cpp` 捕获第 3 步同处)。
+	std::uint64_t correlation = 0;
+};
+
+// ── 审计出口 ──────────────────────────────────────────────────────────
+//
+// ★ 账本**不自己写日志**:通道由世界侧注入(`World::Impl` 实现它、转 `Logger`)。
+//   ⇒ 三步里的第 ③ 步是「调用 sink」而不是「账本里有一行 logger.log」——
+//     这样账本本身仍然是可单测的纯记账(用例可注入捕获式 sink 断言 disposition /
+//     overflow),而生产路径上第 ③ 步**不可能被忘掉**(add/del 无条件调它)。
+class GoldAuditSink
+{
+  public:
+	virtual ~GoldAuditSink() = default;
+	virtual void onGoldTx(const GoldTx &tx) const = 0;
+};
+
+// ── 上限公式(源码 `char/char_base.c:3212-3222`)───────────────────────
+//
+//     MaxGold = 1000000 + trans * 1800000;      /* _FIX_MAX_GOLD,线性 */
+//
+// ★ `_FIX_MAX_GOLD` 在 8.0 明确开(`include/version.h:295` 的 `#define`,
+//   `macros_80.json` 同)⇒ 取线性式;**不要照抄 8.5 的阶梯式**(100 万 / 200 万 /
+//   500 万 / 1000 万 / 5000 万 / 1 亿,`08` §2.1)—— 那会把 8.0 的经济压力整个抹掉。
+// ⚠️ 兜底常量 `CHAR_MAXGOLDHAVE` 8.0 = `(100*10000)` = 100 万(`include/char_base.h:16`),
+//   两代差 100 倍。
+//
+// ⚠️★ `trans` = `CHAR_TRANSMIGRATION`(转生数)。**本批玩家实体没有这个字段**
+//    (转生系统未移植)⇒ 调用方一律传 0 ⇒ 上限 = 100 万。★ 这是**如实登记**的边界,
+//    不是"公式简化":转生域落地时把字段传进来即可,公式本身已按源码写全。
+inline std::int32_t maxHaveGold(std::int32_t trans) noexcept
+{
+	if (trans < 0)
+		trans = 0;
+	return 1000000 + trans * 1800000;
+}
+
+// ── 入账(源):① 钳位 → ② 溢出处置 → ③ 审计 ───────────────────────────
+//
+// ① 先把**当前**余额钳到上限(源码 `char_base.c:3232`: `MyGold = (MyGold>MaxGold)?MaxGold:MyGold;`
+//    —— 原版 API 与 8.5 的战斗产币**都**先做这一步,所以「已经超上限的余额」会被拉回上限);
+// ② 再入账,超出部分按 `reason` 处置(本批唯一 reason = 钳位销毁,但**具名 + 审计**);
+// ③ 无条件写审计(含 kClamped —— DR-EC4「不留静默销毁」)。
+GoldTx addGold(SA::Model::Player &player, GoldReason reason, std::int32_t delta,
+               std::int32_t trans, std::uint64_t correlation, const GoldAuditSink &audit) noexcept;
+
+// ── 扣账(汇):① 钳位 → ② 余额不足**拒绝** → ③ 审计 ───────────────────
+//
+// ★ 与源码 `_CHAR_DelGold`(`char/char_base.c:3263-3283`)逐条对齐:
+//   · 请求量先被钳到上限(`:3270` `gold = (gold>MaxGold)?MaxGold:gold;`)—— 照抄这条怪癖,
+//     它在上限边界上有可观察差异(见用例);
+//   · `MyGold < gold` ⇒ **拒绝**(返回 0)且**不改状态**(`:3273-3278`);
+//   · 扣完不低于 0(`:3281`)。
+// ⚠️★ DR-EC3:余额不足是**拒绝**不是清零 —— 原版另有两处「没钱就全没收」
+//   (`npc_quiz.c:1242` / `npc_roomadminnew.c:293`),无任何合理解释,**不复刻**。
+// ⚠️ 本批**没有汇的调用点**(不做商店 / 银行 / 交易);本函数先落地 + 用例钉住语义,
+//   第一个真实汇的批次直接接它,不许再出现第二份实现。
+GoldTx delGold(SA::Model::Player &player, GoldReason reason, std::int32_t delta,
+               std::int32_t trans, std::uint64_t correlation, const GoldAuditSink &audit) noexcept;
+
+// 战斗产币量(DR-EC6)。★ 数据: `csa8.0/gmsv/setup.cf:67` `BATTLEGOLD=10`;
+//   getter 夹取 [0,100](8.5 `configfile.c:3378-3389` 的 `getBattleGold` 形状)。
+//   ⚠️ 这里写成常量而不是配置项:配置化属 D 线运营旋钮批次,本批只接**最小源**。
+inline constexpr std::int32_t kBattleGold = 10;
+
+// 审计字段的名字形态(日志是给外部工具消费的,枚举值落盘前先有稳定名字)。
+inline const char *goldReasonName(GoldReason r) noexcept
+{
+	switch (r)
+	{
+	case GoldReason::kBattleReward:
+		return "battle_reward";
+	}
+	return "unknown";
+}
+
+inline const char *goldDispositionName(GoldDisposition d) noexcept
+{
+	switch (d)
+	{
+	case GoldDisposition::kApplied:
+		return "applied";
+	case GoldDisposition::kClamped:
+		return "clamped";
+	case GoldDisposition::kRejected:
+		return "rejected";
+	}
+	return "unknown";
+}
 
 } // namespace SA::World
 
