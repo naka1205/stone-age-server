@@ -2864,6 +2864,41 @@ BattleId startHurtPlayerBattle(Fixture &f, SA::Net::ConnectionId id, std::int32_
 	REQUIRE(f.world.joinBattle(battle, id, 0));
 	return battle;
 }
+
+// 开一场「玩家残血 + 打不死人也死不了的敌人」的持久战:I| 入口校验系列用 ——
+//   ★ 敌方侧必须有活人:空敌方侧会被 sideWipedOut 判成终局,第二回合起就不再结算,
+//     「降级 WAIT 仍就绪 ⇒ 回合照常推进」的断言就失去了跨回合的区分力。
+//   ★ 敌人 attack=0 ⇒ 残血玩家不会被误杀,血量只由用药决定。
+BattleId startSurvivableDuelBattle(Fixture &f, SA::Net::ConnectionId id, std::int32_t hp,
+                                   std::int32_t max_hp)
+{
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = hp;
+	me.max_hp = max_hp;
+	me.attack = 100;
+	me.defense = 100;
+	me.quick = 500;
+	me.luck = 10;
+	SA::Rules::Combatant &foe = pf.at(SA::Rules::kSideOffset);
+	foe.occupied = true;
+	foe.kind = SA::Rules::CombatantKind::kEnemy;
+	foe.slot = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+	foe.level = 1;
+	foe.hp = 100000;
+	foe.max_hp = 100000;
+	foe.attack = 0;
+	foe.defense = 1;
+	foe.quick = 1;
+	foe.luck = 1;
+	const BattleId battle = f.world.startBattle(pf);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	return battle;
+}
 } // namespace
 
 TEST_CASE("捕获扣道具:抓表内怪 ⇒ 条件道具被全删,非条件道具留下(DR-BT10)")
@@ -3354,6 +3389,148 @@ TEST_CASE("使用道具★:掉落进背包的道具可以直接喝(掉落回填�
 
 	CHECK(f.world.battleField(battle)->at(0).hp >= 500 + 90);
 	CHECK(f.world.itemCount() == 0); // 喝光 ⇒ 清槽 + 释放
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  I| 入口校验(A 批次余项·道具指令 —— BATTLE_COM_ITEM 指令链路收口)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 原版在**指令接收时**(BattleCommandDispach 的 "I|" 分支)就校验道具指令:
+//   - 持有:`itemindex = CHAR_getItemIndex(charaindex, iNum)`,
+//     `!ITEM_CHECKINDEX(itemindex) ⇒ valid=-1`(battle_command.c:407-408)。
+//     槽下标合法域 [0, CHAR_MAXITEMHAVE),**含装备位段**(`CHAR_CHECKITEMINDEX`
+//     char_base.c:987-991)。
+//   - 目标:`ITEM_isTargetValid(charaindex, itemindex, ToNo)`(battle_command.c:409;
+//     item.c:2091-2112):单体 0..0x13 **恒过**(连 itemtarget 都不看);0x14/0x15/0x16
+//     (我方全体/敌方全体/全场)按道具表 `ITEM_TARGET` 与本方侧别判;其余 -1。
+//   - 两处任一不过 ⇒ 指令**降级为 WAIT**(`BATTLE_COM_WAIT` + C_OK,
+//     battle_command.c:410-414)—— 不是丢包:单位照样就绪,回合不等一个永远不来的指令。
+// 真数据核对(csa8.0/gmsv/data/itemset6.txt,GBK):恢复药 `ITEM_TARGET=1`(OTHER,
+// 如小块肉 1234)⇒ 原版对它们同样拒 20/21/22;区域道具(结婚蛋糕 1232,ALLMYSIDE)
+// 需要效果表尚未承载的 itemtarget 列(D 线)⇒ 本批一律按无效降级,未决已登记。
+
+TEST_CASE("I| 入口:合法持有与单体目标 ⇒ 放行,正常使用与消耗")
+{
+	// 反向锚:入口校验若**过严**(把合法持有也降级 WAIT),本条以「不回血 / 不扣」转红。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	f.world.loadItemEffects({{/*item_id=*/1001, /*heal_power=*/100}});
+
+	const BattleId battle = startHurtPlayerBattle(f, id, /*hp=*/500, /*max_hp=*/100000);
+	const int slot = f.world.giveItemToPlayer(id, makeItem(1001, /*pile=*/2));
+	REQUIRE(slot >= 0);
+
+	useItemTurn(f, id, battle, slot, /*target_slot=*/0);
+
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	// 回血落在原版 RAND(0.9p,1.1p) 区间(battle_magic.c:419),pile 2 → 1。
+	CHECK(fld->at(0).hp >= 500 + 90);
+	CHECK(fld->at(0).hp <= 500 + 110);
+	CHECK(f.world.playerItemPile(id, slot) == 1);
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+	CHECK(f.world.stats(battle)->turns_resolved == 1);
+}
+
+TEST_CASE("I| 入口:无持有(空槽/负槽/越界槽)⇒ 降级待机,不执行不扣,回合照常推进")
+{
+	// battle_command.c:407-414:`!ITEM_CHECKINDEX ⇒ valid=-1 ⇒ COM1=BATTLE_COM_WAIT`。
+	// ★ 降级不是丢包:present 保持 true ⇒ readyMask 齐 ⇒ 本 tick 回合就推进。
+	//   若实现成「丢弃指令」,回合要等 120s 超时 ⇒ turns_resolved 不增,本条转红。
+	// ⚠️ 诚实登记:「降级 WAIT」与「存着但 L3 跳过(power=0)」在世界观察面上同形
+	//   (都不回血、不扣、不摇 rng)—— 区分力只在 present/回合推进这一条;
+	//   指令形态本身当前不可观察,见 journal 批次记录。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	f.world.loadItemEffects({{/*item_id=*/1001, /*heal_power=*/100}});
+
+	const BattleId battle = startSurvivableDuelBattle(f, id, /*hp=*/500, /*max_hp=*/100000);
+	const int slot = f.world.giveItemToPlayer(id, makeItem(1001, /*pile=*/3));
+	REQUIRE(slot >= 0);
+	REQUIRE(slot + 1 < static_cast<int>(SA::Model::kMaxItemHave));
+
+	// ① 空槽 · ② -1(存成 uint32 大值 —— 原版 sscanf 失败 → iNum=-1 的同形)·
+	// ③ kMaxItemHave(越界;CHAR_CHECKITEMINDEX char_base.c:989 的上界)。
+	for (const int bad : {slot + 1, -1, static_cast<int>(SA::Model::kMaxItemHave)})
+	{
+		const std::uint32_t resolved_before = f.world.stats(battle)->turns_resolved;
+		useItemTurn(f, id, battle, bad, 0);
+		CHECK(f.world.battleField(battle)->at(0).hp == 500);
+		CHECK(f.world.playerItemPile(id, slot) == 3);
+		CHECK(f.world.itemCount() == 1);
+		// 降级 WAIT 仍算已就绪 ⇒ 回合照常结算。
+		CHECK(f.world.stats(battle)->turns_resolved == resolved_before + 1);
+	}
+}
+
+TEST_CASE("I| 入口 × L4:麻痹到期回合指令被清 ⇒ 用药不执行、不扣(判据取递减前状态)")
+{
+	// 原版:`BATTLE_StatusSeq` 顶部的 `BATTLE_CanMoveCheck == FALSE` 在**状态递减之前**
+	//   就把 COM1 清成 `BATTLE_COM_NONE`(battle.c:5434/5443-5445);行动主循环里
+	//   StatusSeq 于指令派发前调用(battle.c:7074),结算侧再清一道(:7100-7103)。
+	// ⇒ status_turns=1 的麻痹单位:本轮把最后 1 回合递减掉(状态解除)但**指令已先被清**
+	//   ⇒ 本轮仍不能动。重制侧 tick_one 以「递减前状态」为判据(status_cmd_cleared),
+	//   世界按 ActionEffects.command_cleared 把 USE_ITEM 转回 WAIT,不执行 ⇒ 不扣。
+	// ★ 与 F07(麻痹仍在持续,turns=3)互补:本条钉「到期解除的那一回合也不能动」。
+	Fixture f;
+	const auto id = f.transport.connect();
+	const auto hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	f.world.loadItemEffects({{/*item_id=*/1001, /*heal_power=*/100}});
+
+	auto field = makeFieldEnemyStrong();
+	field.at(0).hp = 500;
+	field.at(0).status =
+	    static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_PARALYSIS);
+	field.at(0).status_turns = 1; // ★ 本轮到期
+	field.at(10).attack = 0;      // 敌方不打 ⇒ 血量只由用药决定
+
+	const auto battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	const int slot = f.world.giveItemToPlayer(id, makeItem(1001, /*pile=*/2));
+	REQUIRE(slot >= 0);
+	useItemTurn(f, id, battle, slot, 0);
+
+	CHECK(f.world.battleField(battle)->at(0).hp == 500); // 没回血
+	CHECK(f.world.playerItemPile(id, slot) == 2);        // 没扣
+	// 状态已到期解除( tick 递减照常发生,清的是指令不是状态推进)。
+	CHECK(f.world.battleField(battle)->at(0).status == 0);
+	CHECK(f.world.battleField(battle)->at(0).status_turns == 0);
+}
+
+TEST_CASE("I| 入口:目标非法(全体侧/排段/超大值)⇒ 整批拒绝为待机,不执行不扣")
+{
+	// item.c:2091-2112:单体 0..0x13 恒过;0x14(20 我方全体)/0x15(21 敌方全体)/
+	// 0x16(22 全场)要按 itemtarget+侧别判 —— 效果表无该列 ⇒ 本批一律无效(见卷首);
+	// 0x17..(23..27 排段/贯穿段,当前效果数据也不该出现)与超大值 ⇒ :2113 return -1。
+	// battle_command.c:409-414:valid<0 ⇒ COM1=BATTLE_COM_WAIT(整批拒绝,不是部分执行)。
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	f.world.loadItemEffects({{/*item_id=*/1001, /*heal_power=*/100}});
+
+	const BattleId battle = startSurvivableDuelBattle(f, id, /*hp=*/500, /*max_hp=*/100000);
+	const int slot = f.world.giveItemToPlayer(id, makeItem(1001, /*pile=*/3));
+	REQUIRE(slot >= 0);
+
+	for (const std::uint32_t target : {20u, 21u, 22u, 25u, 27u, 0x40000000u})
+	{
+		const std::uint32_t resolved_before = f.world.stats(battle)->turns_resolved;
+		useItemTurn(f, id, battle, slot, static_cast<int>(target));
+		CHECK(f.world.battleField(battle)->at(0).hp == 500);
+		CHECK(f.world.playerItemPile(id, slot) == 3);
+		CHECK(f.world.stats(battle)->turns_resolved == resolved_before + 1);
+	}
+	CHECK(f.world.itemCount() == 1);
 }
 
 // ── L4.1 状态异常:世界侧写回 ───────────────────────────────────────────────

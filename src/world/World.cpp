@@ -3255,7 +3255,41 @@ void World::onBattleCommand(SA::Net::SessionId id,
 	if (slot >= SA::Rules::kSlotCount || b.stats.finished || !b.field.at(slot).occupied || b.field.at(slot).dead)
 		return;
 
-	b.commands.commands[slot] = cmd;
+	// ── I| 入口校验(原版 BattleCommandDispach 的 "I|" 分支,battle_command.c:395-422)──
+	//
+	// 原版在**指令接收时**就校验道具指令,不过的两处都把指令**降级为 WAIT**(:410-414,
+	// BATTLE_COM_WAIT + C_OK)—— 不是丢包:单位照样就绪,回合不会等一个永远不来的指令。
+	//   ① 持有(:408 `ITEM_CHECKINDEX`):槽下标空间 [0, kMaxItemHave) **含装备位**
+	//      (`CHAR_CHECKITEMINDEX` char_base.c:987-991)且道具实体在池(悬空句柄同空槽)。
+	//   ② 目标(:409 `ITEM_isTargetValid`,item.c:2091-2112):0..19 单体**恒过**
+	//      (原版对单体目标连 itemtarget 都不看);20/21/22(全体侧/全场)要按道具表
+	//      `ITEM_TARGET` 与本方侧别判 —— 效果表没有该列(区域道具属 D 线导入,见下)⇒
+	//      本实现一律判无效。★ 已核实 itemset6.txt 的恢复药 itemtarget=OTHER
+	//      (如小块肉 1234)⇒ 原版对它们同样拒 20/21/22 ⇒ 该降级对全部现有可用药一致;
+	//      其余目标值(含 23..27 排段)原版即拒(:2113 return -1)。
+	// ⚠️ 无效⇒降级 WAIT、**不产事件、不摇 rng、不扣道具**:L3 的 USE_ITEM 分支本就
+	//    会跳过 power<=0(I.4),这里只是把「不执行」提前到指令语义层,行为并集不变。
+	SA::Domain::BattleCommand stored = cmd;
+	if (stored.command_kind == SA::Domain::BattleCommand::CommandKind::USE_ITEM)
+	{
+		bool valid = false;
+		if (SA::Model::Player *owner = s.players.resolve(b.player_of_slot[slot]); owner != nullptr)
+		{
+			const std::uint32_t item_slot = stored.command.use_item.item_slot;
+			const std::uint32_t target = stored.command.use_item.target;
+			// ① 持有:槽下标空间含装备位;越界 / 空槽 / 悬空句柄都算不持有。
+			if (item_slot < SA::Model::kMaxItemHave &&
+			    s.items.resolve(owner->items[item_slot]) != nullptr)
+			{
+				// ② 目标:单体 0..19;20/21/22 与其余一律无效(见上 ② 的登记)。
+				valid = target < static_cast<std::uint32_t>(SA::Rules::kSlotCount);
+			}
+		}
+		if (!valid)
+			stored.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+	}
+
+	b.commands.commands[slot] = stored;
 	b.commands.present[slot] = true;
 	if (b.command_deadline_sec == 0)
 		b.command_deadline_sec = s.now_ms / 1000 + 120; // 首个 C_OK 后才启动，严格超时退出而非自动防御。

@@ -180,3 +180,49 @@ C 清槽不 release ⇒ `world_tick` 2 例红;D 投影挪到 resolveTurn 后 ⇒
 `ITEM_OTHER`/`ITEM_DISH` ⇒ 走穿装备(`CHAR_moveEquipItem`)那条门(装备域)· ⑤ `power == -1`
 全满恢复(需道具表真数据)· ⑥ `CanCureFlg` 不可治疗门(L4 状态系统)· ⑦ 道具效果表真数据
 (D 线导入 `itemset6.txt` 的 `usefunc`/`ITEM_ARGUMENT` 两列)· ⑧ 客户端表现(用药动画/飘字)。
+
+### 9.0.57 ★★ 批次 I| —— 战斗指令入口校验:指令接收时的持有与目标门(A 批次余项·道具指令收口,2026-09-15)
+
+承接 2026-09-12 [实施计划](../12-implementation-roadmap.md)后的下一批(用户 09-15 批准按计划实施,
+开发环境已迁 Windows 11 + VS 18 BuildTools)。范围:原版在**指令接收时**对道具指令的入口校验
+(`BattleCommandDispach` 的 "I|" 分支),不是新玩法。shared/ 与 IDL 零改动 ⇒ 锁定 ref 不前推。
+
+## 源码依据
+
+行号均指 `StoneAge/gmsv/src/`(SSRC80):
+
+| 锚点 | 事实及落地 |
+|---|---|
+| `battle/battle_command.c:395-422` | "I|" 分支在**接收时**校验:① 持有 `!ITEM_CHECKINDEX(itemindex) ⇒ valid=-1`(:407-408);② 目标 `ITEM_isTargetValid(charaindex, itemindex, ToNo)`(:409)。**任一不过 ⇒ 指令降级 `BATTLE_COM_WAIT` + `BATTLE_CHARMODE_C_OK`**(:410-414)—— 不是丢包:单位照样就绪,回合不等一个永远不来的指令 |
+| `char/char_base.c:987-991` | `CHAR_CHECKITEMINDEX`:合法域 `[0, CHAR_MAXITEMHAVE)`,即槽下标空间**含装备位段**(与 I.2 捕获门同口径) |
+| `item/item.c:2091-2116` | `ITEM_isTargetValid`:单体 `0..0x13` **恒过**(连 itemtarget 都不看);`0x14/0x15/0x16`(我方全体/敌方全体/全场)按道具表 `ITEM_TARGET` 与本方侧别判;其余 `return -1`(:2116) |
+
+**真数据核对**:`csa8.0/gmsv/data/itemset6.txt` 行内自带 ID 字段,恢复药「小块肉」行内 ID=1234、
+usefunc=`ITEM_useRecovery`;★ AutoCoder 独立复核仅到行内 ID=1234 一格,`itemtarget=OTHER`
+一格因该文件无表头且名称列含逗号、列级拆分不可靠而**未能独立核验**(ZCode 首报声称的核对,降级为
+部分核验)。该格不影响本批行为(见下),区域道具缺口照旧登记。
+
+## 实现
+
+- `src/world/World.cpp` `onBattleCommand`:USE_ITEM 指令在入队前做两道门
+  (① 槽下标 `< kMaxItemHave` 且道具实体在池——悬空句柄同空槽;② 目标 `< kSlotCount`),
+  任一不过 ⇒ 整批降级 WAIT,不产事件、不摇 rng、不扣道具。
+- **行为并集声明**(已在代码注释与用例卷首写明):解算期(I.4)本就拒绝不可用目标 ⇒ 入口校验
+  在当前效果数据(仅单体恢复药)下与解算期拒绝**行为并集等价**;它的忠实性价值在**校验位置**
+  (原版语义:接收时就降级、单位照样就绪),不在当前数据下的可观察差异。
+
+## 验证
+
+| 项 | 结果 |
+|---|---|
+| 服务端 MSVC 构建(VS 18,增量) | 0 告警;ctest **20/20**(`world_tick` 115 例 / 2,189 断言,含新增 4 例) |
+| 新增用例 ×4 | 合法放行(反向锚:过严⇒不回血/不扣转红)· 无持有(空/越界/悬空)· 麻痹清指令(判据取递减前)· 目标非法(20/21/22/25/27/超大值,整批拒绝) |
+| 反向验证(AutoCoder 独立执行) | ① 入口目标门失效 ⇒ **0 条转红**(与行为并集声明一致,非缺陷);② 持有门失效 ⇒ **0 条转红**(同上);③ **入口过严(恒拒)⇒ 5 例 / 12 断言精确转红**(合法使用被降级,不回血/不扣)⇒ 用例的主判据有区分力 |
+| mtime 陷阱(AutoCoder 亲历) | 反向验证恢复时用 `Copy-Item` 还原 ⇒ 保留旧 LastWriteTime ⇒ MSBuild 跳过重编译 ⇒ 跑的还是注入二进制(§9.0.14③/§9.0.39 同族第 7 形态);mtime 刷新后 20/20 恢复。**教训:还原文件后必须 bump mtime 或删重建** |
+| 环境迁移配套 | `win_validate.ps1` 11/11 全绿(exit 0,含三处可移植修复:嵌入式 Python `_pth` 布局 sys.path、ctest 无注册测试防假绿灯(§9.0.9 ② 同款)、PROTOC 检测口径与 `saidl_gen.py` 对齐);clang-format 钉 21.1.8(pip 隔离安装,SA_CLANG_FORMAT 指定);本批三处源码锚点由 AutoCoder 独立复核逐一通过 |
+
+**登记残缺**(有据划出,非遗漏):① 区域道具(20/21/22)依赖效果表 `ITEM_TARGET` 列(D 线
+`itemset6.txt` 导入),现一律按原版 `ITEM_isTargetValid` 对无该列数据的一致结果拒绝;②
+`itemtarget=OTHER` 数据格未独立核验(见上);③ 客户端 UI(战斗内道具按钮)未做,协议通路已备;
+④ 完整发布流程(tag/双远端/三平台 CI)随本批代码提交后按推送窗口惯例另行执行——shared/ 零改动,
+无需前推锁定 ref。
