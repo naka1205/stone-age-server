@@ -93,6 +93,7 @@
 | §9.0.61 | 批次 B1 —— 直攻系宠技:RENZOKU / GBREAK(2) / MIGHTY / POWERBALANCE | 2026-09-15 | [`18-petskill.md`](18-petskill.md) |
 | §9.0.62 | 推送窗口执行记录 —— shared-v0.28.0(批次 B1) | 2026-09-15 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.63 | 批次 B2 —— 宠技槽(B2a)+ CHARGE 集气(B2b);宠技列校正 c25..c31 | 2026-09-15 | [`18-petskill.md`](18-petskill.md) |
+| §9.0.64 | 推送窗口执行记录 —— shared-v0.29.0(批次 B2) | 2026-09-15 | [`90-push-windows.md`](90-push-windows.md) |
 
 ---
 
