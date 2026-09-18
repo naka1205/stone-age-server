@@ -13,17 +13,18 @@
 | [`02-infra-d2-crosscompile.md`](02-infra-d2-crosscompile.md) | D2 两端编译实证 · 跨编译器出清 · Windows 验证 · CI 覆盖 GCC/MSVC | 5 |
 | [`03-infra-ci-guards.md`](03-infra-ci-guards.md) | CI 挂载 · 五个守卫脚本的立案与它们抓到的真问题 | 6 |
 | [`04-infra-naming.md`](04-infra-naming.md) | 项目定位澄清 · SA/SG 前缀 · P0–P6 命名改造 | 2 |
-| [`10-battle-core.md`](10-battle-core.md) | L3 战斗:批次 0.5 调度 · A.1 逃跑 · A.2 捕获 · A.3 暴击 · A.4 打飞 · A-β d1 尾摇 | 6 |
+| [`10-battle-core.md`](10-battle-core.md) | L3 战斗:批次 0.5 调度 · A.1 逃跑 · A.2 捕获 · A.3 暴击 · A.4 打飞 · A-β d1 尾摇 · A-β d2 目标判定族与忠犬守护 | 7 |
 | [`11-model-attr.md`](11-model-attr.md) | L2 实体池与实体族 · M.1–M.4b 属性推导与四维公式 · 换宠 | 7 |
 | [`12-encounter.md`](12-encounter.md) | M.5 敌人表 · R.1 随机源 · M.6/M.7 遇敌链 · 战果结算 · A-α 战果总装 | 6 |
 | [`13-world.md`](13-world.md) | W.1 移动视野 · W.2/W.3 刷怪游荡 · W.4 暗雷 · W.5 明雷 | 4 |
-| [`14-item.md`](14-item.md) | 道具域 I.1 背包 · I.2 扣道具 · I.3 掉落 · I.4 使用 | 4 |
+| [`14-item.md`](14-item.md) | 道具域 I.1 背包 · I.2 扣道具 · I.3 掉落 · I.4 使用 · I\| 指令入口校验 | 5 |
 | [`15-status.md`](15-status.md) | L4.1 状态异常系统 | 1 |
 | [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
 | [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
-| [`90-push-windows.md`](90-push-windows.md) | 十次 `shared-v0.x.0` 推送窗口的闭合核实 | 10 |
+| [`18-petskill.md`](18-petskill.md) | 宠技三连发:B1 直攻系 · B2 宠技槽 + CHARGE · B3 状态系 + 铁壁 | 3 |
+| [`90-push-windows.md`](90-push-windows.md) | 十五次 `shared-v0.x.0` 推送窗口的闭合核实 | 15 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **63** |
+| **合计** | | **72** |
 
 ## 全量映射表(按编号)
 
@@ -100,6 +101,7 @@
 | §9.0.68 | 批次 A-β d1 —— AttackSeq 尾补摇忠实重排 + GBREAK 清零回归包装层 + 尾摇钉 | 2026-09-16 | [`10-battle-core.md`](10-battle-core.md) |
 | §9.0.69 | 批次 A-β d2 —— 目标判定族 + 忠犬守护全链(MultiList 有意划外;RV-5 负结果登记) | 2026-09-17 | [`10-battle-core.md`](10-battle-core.md) |
 | §9.0.69b | 推送窗口执行记录 —— `shared-v0.31.0`(批次 A-β d1;补记) | 2026-09-16 | [`90-push-windows.md`](90-push-windows.md) |
+| §9.0.69c | 推送窗口执行记录 —— `shared-v0.32.0`(批次 A-β d2;注释里复述值必然烂) | 2026-09-18 | [`90-push-windows.md`](90-push-windows.md) |
 
 ---
 
