@@ -493,3 +493,31 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 | client CI(workercrew) | run **completed/success**(`8685a8d`,D2 闸门三平台,发布态 fetch 锁定 ref = v0.30.0) |
 | 本机独立发布态复验 | 干净克隆(无同级服务端)`ci_verify --expect-mode fetch`:**8 项全过**(fetch · v0.30.0 · 与源码一致 · 7 条全部注册 · ctest 7/7 · **134 用例 / 2,919 断言**) |
 | server 本机 ci_verify | **6 项全过**(22 条全部注册 · ctest 22/22) |
+### 9.0.69b ★ 推送窗口执行记录 —— `shared-v0.31.0`(2026-09-16,补记于 2026-09-17)
+
+> **一个窗口、一个 tag 盖一笔**:批次 A-β d1 AttackSeq 尾补摇忠实重排(§9.0.68)。
+>
+> ⚠️★ **本条是补记**:窗口本身在 09-16 就已闭合(见 ①),但当时只更新了 roadmap 与 journal 索引,
+> **漏了本文件的记录** —— 于是 roadmap 上留了一句「推送窗口待执行(gitee 凭据侧阻塞)」,
+> 而远端实际上早就有了。⇒ 见 ② 的教训。
+
+#### ① 结果(2026-09-17 逐项 `ls-remote` 复核)
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `fa979e0` · `shared-v0.31.0`(**附注** tag,subject「A-beta d1: AttackSeq tail shake faithful reorder + GBREAK wrapper zeroing (9.0.68)」)—— gitee + github(workercrew)`ls-remote` 核实一致 |
+| client master | `6f68f4b`(pin v0.30.0 → **v0.31.0**,`cmake/SaShared.cmake:119`)—— 双远端一致 |
+| 服务端工作树 | 干净(本批 A-β d2 的改动尚未提交,见 §9.0.69 ⑥) |
+
+⚠️ **本表只记「远端状态」,不记 CI 结论** —— 该窗口的 CI 运行号未在本次复核中取证,
+**不臆造**。若需补齐,应在 workercrew 侧按上述两个 commit 查 run 状态后回填。
+
+#### ② 教训(本批最值钱的一条:文档状态会**独立于代码**腐烂)
+
+「推送窗口待执行」这句话在 roadmap 上挂了整整一天,而两个远端**都已经有 v0.31.0**。
+成因不是谁偷懒,而是**窗口执行只更新了两处文档(roadmap 指针 + journal 索引),
+漏了第三处(`90-push-windows.md`)** —— 三处里漏一处,状态就分叉了。
+
+★ **这与 §9.0.68 ① 的教训同族**:那里是"测试转红 = 位置判据",这里是"文档说没做 = 待核实项,
+不是事实"。⇒ **执行推送窗口时,`ls-remote` 的结果才是真源**;roadmap 的措辞是**待办标记**,
+不能当作状态。本次复核即按此纪律做的(四个 `ls-remote` 逐条打表,未引用 roadmap 自己的说法)。

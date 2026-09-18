@@ -469,6 +469,19 @@ struct Combatant
 	//      同一分工;①② 因依赖未移植子系统而显式推迟,不猜一个"看起来对"的行动剥夺模型。
 	std::int32_t ultimate_accumulator = 0;
 
+	// ★ 忠犬守护链接(批次 A-β d2;原 `BATTLE_ENTRY.guardian`)—— **本槽被谁守护**:
+	//   值 = 守护者的槽号,−1 = 无守护。
+	//
+	// ⚠️★ 与 `escape_count` / `ultimate_accumulator` 同族:**调用方所有的持久态,
+	//    不是 L3 的快照输入语义**。写入者是宠技「忠犬」(`PETSKILL_Guardian`,
+	//    `pet_skill.c:699-770`:写的是 `Side[side].Entry[ownerpos].guardian = pos`
+	//    —— **写在被守护者的 Entry 上、值为守护者的槽号**,方向与字段名相反,勿读反);
+	//    读取者是 L3 的 `guardianCheck`(原 `BATTLE_GuardianCheck`,`battle_event.c:1431`)。
+	// ★ **每回合开头整体清空**:原 `BATTLE_PreCommandSeq`(`battle.c:3578-3600`)遍历
+	//    两 side 全部 Entry 置 `guardian = -1` 并清 `CHAR_BATTLEFLG_GUARDIAN`
+	//    ⇒ 守护**只持续一个指令回合**,不是常驻。落点在 World 的回合起点。
+	std::int32_t guardian = -1;
+
 	// ── 骑宠 ──
 	//
 	// 有骑宠时攻击力按 kRideMelee* / kRideThrow* 合成(§3.1 第 1 步),

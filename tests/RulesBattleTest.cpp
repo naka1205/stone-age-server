@@ -4169,3 +4169,489 @@ TEST_CASE("宠技B3★:铁壁的消费面 —— super_wall + OTHERSTATUSNUMS �
 	CHECK(walled.damage < plain.damage);    // 防御被抬高 ⇒ 伤害下降
 	CHECK(walled.calls == plain.calls + 1); // (30 + rand()%20)/100 那一次取数
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  A-β d2 —— 目标判定族 + 忠犬守护
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 来源:`battle.c:6740-6797`(TargetCheck / TargetCheckDead / TargetAdjust)、
+//       `battle.c:4770-4814`(DefaultAttacker)、`battle.c:4852-4885`(CountAlive)、
+//       `battle_event.c:7851-7881`(CheckSameSide)、
+//       `battle_event.c:1431-1511`(GuardianCheck)。
+//
+// ⚠️ 这些函数是**纯判定**,没有事件面 ⇒ 断言直接打在返回值上。守护接管那条链
+//    是**有事件面**的,断言打在 `Damage.target` 与 `hp_delta` 上(见本节末几条)。
+
+namespace
+{
+
+// 造一个「一侧 n 人」的场:槽 `base+0..base+n-1` 全部占位且满血。
+// ⚠️ `kind` 默认 kPlayer:CountAlive 要排除宠物,所以宠物必须能单独指定。
+void fillSide(BattleField &f, int base, int n, CombatantKind kind = CombatantKind::kPlayer)
+{
+	for (int i = 0; i < n; ++i)
+	{
+		Combatant &c = f.at(base + i);
+		c = Combatant{};
+		c.occupied = true;
+		c.kind = kind;
+		c.slot = static_cast<std::uint8_t>(base + i);
+		c.hp = c.max_hp = 1000;
+		c.attack = 100;
+		c.defense = 10;
+	}
+}
+
+} // namespace
+
+TEST_CASE("A-β d2★:targetCheck 六道判据(battle.c:6740-6756)")
+{
+	BattleField f = makeField();
+	fillSide(f, 0, 1);
+	fillSide(f, 10, 1);
+
+	CHECK(targetCheck(f, nullptr, 0));
+	CHECK(targetCheck(f, nullptr, 10));
+
+	// 越界 ⇒ false(源码靠 No2Index 返回 -1 落到 CHECKINDEX 那道)。
+	CHECK_FALSE(targetCheck(f, nullptr, -1));
+	CHECK_FALSE(targetCheck(f, nullptr, kSlotCount));
+
+	// 空槽 ⇒ false(CHECKINDEX / WORKBATTLEMODE==0 两道)。
+	CHECK_FALSE(targetCheck(f, nullptr, 1));
+
+	// ISDIE ⇒ false。
+	f.at(0).dead = true;
+	CHECK_FALSE(targetCheck(f, nullptr, 0));
+	f.at(0).dead = false;
+
+	// HP <= 0 ⇒ false(独立于 ISDIE 的第二道)。
+	f.at(0).hp = 0;
+	CHECK_FALSE(targetCheck(f, nullptr, 0));
+	f.at(0).hp = 1000;
+
+	// ★ 存活镜像优先:快照说活着、镜像说死了 ⇒ false(同回合内刚被打死的人)。
+	bool mirror[kSlotCount] = {};
+	mirror[0] = true;
+	CHECK_FALSE(targetCheck(f, mirror, 0));
+	// ⚠️ 镜像对**别的槽**为 false ⇒ 该槽照常判真(证明上面那条是镜像生效、不是整体短路)。
+	CHECK(targetCheck(f, mirror, 10));
+}
+
+TEST_CASE("A-β d2★:targetCheckDead 与 targetCheck 互补(battle.c:6759-6784)")
+{
+	BattleField f = makeField();
+	fillSide(f, 0, 1);
+
+	// 活着 ⇒ 本函数 false、targetCheck true(互补)。
+	CHECK_FALSE(targetCheckDead(f, 0));
+	CHECK(targetCheck(f, nullptr, 0));
+
+	f.at(0).dead = true;
+	CHECK(targetCheckDead(f, 0));
+	CHECK_FALSE(targetCheck(f, nullptr, 0));
+
+	// ⚠️ 两者**都不认**空槽:空槽对两个函数都是 false(不是"取反")。
+	CHECK_FALSE(targetCheckDead(f, 1));
+	CHECK_FALSE(targetCheck(f, nullptr, 1));
+
+	// ⚠️ 源码的 TargetCheckDead **不判 HP**(只判 ISDIE)⇒ hp=0 但 dead=false 仍 false。
+	f.at(0).dead = false;
+	f.at(0).hp = 0;
+	CHECK_FALSE(targetCheckDead(f, 0));
+
+	CHECK_FALSE(targetCheckDead(f, -1));
+	CHECK_FALSE(targetCheckDead(f, kSlotCount));
+}
+
+TEST_CASE("A-β d2★★:countAlive 排除宠物、只判死亡标志(battle.c:4852-4885)")
+{
+	BattleField f = makeField();
+	// 己方:两个玩家 + 一只宠物(占槽 2)。
+	fillSide(f, 0, 2);
+	Combatant &pet = f.at(2);
+	pet = Combatant{};
+	pet.occupied = true;
+	pet.kind = CombatantKind::kPet;
+	pet.slot = 2;
+	pet.hp = pet.max_hp = 100;
+
+	// ★ 宠物不计入 ⇒ 2 而不是 3(`:4875` 的 CHAR_TYPEPET ⇒ continue)。
+	CHECK(countAlive(f, 0) == 2);
+	CHECK(countAlive(f, 1) == 0);
+
+	// 死一个玩家 ⇒ 1。
+	f.at(0).dead = true;
+	CHECK(countAlive(f, 0) == 1);
+
+	// ⚠️★ 判据是 `!dead` 而**不是** `hp > 0`:把 hp 归 0 但不动 dead ⇒ **仍计入**。
+	//   这是源码口径(只读 ISDIE),本仓照抄 —— 与 World 侧的 sideWipedOut
+	//   (读 `!dead && hp > 0`、且不排除宠物)是**两套判据**,不要混用。
+	f.at(1).hp = 0;
+	CHECK(countAlive(f, 0) == 1);
+
+	// 非法 side ⇒ 0(源码 `BATTLE_CHECKSIDE` 返回 -BATTLE_ERR_PARAM)。
+	CHECK(countAlive(f, 2) == 0);
+	CHECK(countAlive(f, -1) == 0);
+}
+
+TEST_CASE("A-β d2★★:defaultAttacker 收集序=槽号升序、无人可选时不摇 rng"
+          "(battle.c:4770-4814)")
+{
+	BattleField f = makeField();
+	// 敌方侧:只有槽 12 与 15 可用。
+	fillSide(f, 12, 1);
+	fillSide(f, 15, 1);
+
+	// ★ 候选集 = {12, 15},`RAND(0, cnt-1)` = RAND(0,1) ⇒ 脚本给 0 选 12、给 1 选 15。
+	{
+		ScriptedRandom rng({0});
+		CHECK(defaultAttacker(f, nullptr, 1, rng) == 12);
+		CHECK(rng.calls() == 1);
+	}
+	{
+		ScriptedRandom rng({1});
+		CHECK(defaultAttacker(f, nullptr, 1, rng) == 15);
+		CHECK(rng.calls() == 1);
+	}
+
+	// ★★ 无人可选 ⇒ 返回 −1 且**不摇 rng**(源码 `if(cnt==0) return -1;` 在 RAND 之前)。
+	{
+		ScriptedRandom rng({0});
+		CHECK(defaultAttacker(f, nullptr, 0, rng) == -1);
+		CHECK(rng.calls() == 0);
+	}
+
+	// 非法 side ⇒ −1、不摇。
+	{
+		ScriptedRandom rng({0});
+		CHECK(defaultAttacker(f, nullptr, 2, rng) == -1);
+		CHECK(rng.calls() == 0);
+	}
+
+	// ★ 存活镜像参与筛选:把 12 标死 ⇒ 只剩 15,`RAND(0,0)` 照摇一次(退化区间也取数)。
+	{
+		bool mirror[kSlotCount] = {};
+		mirror[12] = true;
+		ScriptedRandom rng({0});
+		CHECK(defaultAttacker(f, mirror, 1, rng) == 15);
+		CHECK(rng.calls() == 1);
+	}
+}
+
+TEST_CASE("A-β d2★:checkSameSide 返回 1/0、不可判定返回 0(battle_event.c:7851-7881)")
+{
+	BattleField f = makeField();
+	fillSide(f, 0, 2);
+	fillSide(f, 10, 2);
+
+	// ★ 返回值是 1 / 0(不是 bool 真值对)。
+	CHECK(checkSameSide(f, 0, 1) == 1);
+	CHECK(checkSameSide(f, 10, 11) == 1);
+	CHECK(checkSameSide(f, 0, 10) == 0);
+
+	// 攻击者自身:同侧 ⇒ 1。
+	CHECK(checkSameSide(f, 0, 0) == 1);
+
+	// 攻击者不在场 / 越界 ⇒ 0。
+	CHECK(checkSameSide(f, 2, 0) == 0);
+	CHECK(checkSameSide(f, -1, 0) == 0);
+	CHECK(checkSameSide(f, kSlotCount, 0) == 0);
+
+	// 目标不在场 ⇒ 0。
+	CHECK(checkSameSide(f, 0, 2) == 0);
+
+	// ★ 多目标码位(>= 20)本仓不适用 ⇒ 恒 0(源码那一支对空表也返回 0)。
+	CHECK(checkSameSide(f, 0, 20) == 0);
+	CHECK(checkSameSide(f, 0, 22) == 0);
+}
+
+TEST_CASE("A-β d2★★:targetAdjust 目标可用⇒原样返回不摇;不可用⇒换对面默认攻击者")
+{
+	BattleField f = makeField();
+	fillSide(f, 0, 1);  // 攻方在 0
+	fillSide(f, 10, 2); // 对面 10/11
+
+	// ★ 目标可用 ⇒ 原样返回、**不摇 rng**。
+	{
+		ScriptedRandom rng({0});
+		CHECK(targetAdjust(f, nullptr, 0, 10, /*myside=*/0, rng) == 10);
+		CHECK(rng.calls() == 0);
+	}
+
+	// ★ 目标已死 ⇒ 换 `defaultAttacker(1 - myside)` = 对面(1),摇一次。
+	{
+		bool mirror[kSlotCount] = {};
+		mirror[10] = true;
+		ScriptedRandom rng({1}); // 候选只剩 {11}
+		CHECK(targetAdjust(f, mirror, 0, 10, /*myside=*/0, rng) == 11);
+		CHECK(rng.calls() == 1);
+	}
+
+	// 目标越界 ⇒ 同样换人。
+	{
+		ScriptedRandom rng({0});
+		CHECK(targetAdjust(f, nullptr, 0, 99, /*myside=*/0, rng) == 10);
+		CHECK(rng.calls() == 1);
+	}
+
+	// ★ 对面全灭 ⇒ defaultAttacker 返回 −1 ⇒ 本函数返回 −1(源码 `defNo < 0` 由调用方挡)。
+	{
+		bool mirror[kSlotCount] = {};
+		mirror[10] = true;
+		mirror[11] = true;
+		ScriptedRandom rng({0});
+		CHECK(targetAdjust(f, mirror, 0, 10, /*myside=*/0, rng) == -1);
+		CHECK(rng.calls() == 0);
+	}
+}
+
+// ── 守护接管的有事件面链路 ────────────────────────────────────────────────
+//
+// 场:slot0 = 攻击方(玩家,攻 1000),slot10 = 被守护者(敌),slot11 = 守护者(敌)。
+namespace
+{
+
+// 让 11 号守护 10 号(`guardian` 写在**被守护者**身上,值 = 守护者槽号)。
+Duel makeGuardianDuel(int guardian_hp = 1000000)
+{
+	Duel d;
+	d.field.at(0) = makeCombatant(CombatantKind::kPlayer, 1000, 100);
+	d.field.at(0).slot = 0;
+	d.field.at(0).mods.no_duck = true;
+	d.field.at(0).mods.immune_critical = true;
+	d.field.at(10) = makeCombatant(CombatantKind::kEnemy, 100, 10);
+	d.field.at(10).slot = 10;
+	d.field.at(10).hp = d.field.at(10).max_hp = 1000;
+	d.field.at(10).mods.no_duck = true;
+	d.field.at(10).mods.immune_critical = true;
+	d.field.at(11) = makeCombatant(CombatantKind::kEnemy, 100, 10);
+	d.field.at(11).slot = 11;
+	d.field.at(11).hp = d.field.at(11).max_hp = guardian_hp;
+	d.field.at(11).mods.no_duck = true;
+	d.field.at(11).mods.immune_critical = true;
+	d.field.at(10).guardian = 11;
+	setAttack(d.cmds, 0, 10);
+	return d;
+}
+
+} // namespace
+
+TEST_CASE("A-β d2★★:守护接管 —— 伤害落在守护者身上、原目标毫发无伤"
+          "(battle_event.c:1566-1572)")
+{
+	Duel d = makeGuardianDuel();
+	SA::Domain::BattleEvents ev{};
+	MaxRandom rng;
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	const std::vector<std::int32_t> deltas = damageDeltas(ev);
+	REQUIRE(deltas.size() == 1);
+
+	// ★ Damage.target 必须是**守护者**(11),不是原目标(10)。
+	const SA::Domain::Damage *dmg = nullptr;
+	for (const auto &e : ev.events)
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+			dmg = &e.body.damage;
+	REQUIRE(dmg != nullptr);
+	CHECK(dmg->target == 11u);
+	CHECK(dmg->hp_delta < 0);
+	// ★ 判 NORMAL(源码把 iRet 从 MISS 改回 NORMAL,`:1772-1774`),不是 GUARD。
+	CHECK((dmg->flags & static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_GUARD)) == 0u);
+}
+
+TEST_CASE("A-β d2★★:守护接管的伤害下限 = 1(==0 处理,:1770-1778)")
+{
+	// 把守方防拉满 ⇒ 伤害算出来必为 0(再经尾摇)⇒ 接管把它抬成 1。
+	Duel d = makeGuardianDuel();
+	d.field.at(0).attack = 1;
+	d.field.at(11).defense = 100000;
+	SA::Domain::BattleEvents ev{};
+	// 尾摇 RAND(0,1) 给 0 ⇒ 不改判;脚本尾部重复最后一个值。
+	ScriptedRandom rng({0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	const std::vector<std::int32_t> deltas = damageDeltas(ev);
+	REQUIRE(deltas.size() == 1);
+	// ★ 接管 ⇒ 至少 1 点(不是 0 —— 0 会被当成 MISS)。
+	CHECK(deltas[0] == -1);
+}
+
+TEST_CASE("A-β d2★:守护接管的七道否决(逐条)")
+{
+	const auto redirected = [](void (*setup)(Duel &))
+	{
+		Duel d = makeGuardianDuel();
+		if (setup != nullptr)
+			setup(d);
+		SA::Domain::BattleEvents ev{};
+		MaxRandom rng;
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+		for (const auto &e : ev.events)
+			if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+				return e.body.damage.target == 11u;
+		return false;
+	};
+
+	// 基线:接管发生。
+	CHECK(redirected(nullptr));
+
+	// ① 无守护者 ⇒ 不接管。
+	CHECK_FALSE(redirected([](Duel &d)
+	                       { d.field.at(10).guardian = -1; }));
+
+	// ② 守护者是它自己 ⇒ 不接管(值 = 被守护者自己的槽号)。
+	CHECK_FALSE(redirected([](Duel &d)
+	                       { d.field.at(10).guardian = 10; }));
+
+	// ③ 守护者不在场 ⇒ 不接管。
+	CHECK_FALSE(redirected([](Duel &d)
+	                       { d.field.at(11).occupied = false; }));
+
+	// ④ 守护者已阵亡 ⇒ 不接管。
+	CHECK_FALSE(redirected([](Duel &d)
+	                       { d.field.at(11).dead = true; }));
+
+	// ⑥ 守护者自身不可接管(逐个状态)。
+	CHECK_FALSE(redirected([](Duel &d)
+	                       {
+		                      d.field.at(11).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_SLEEP);
+		                      d.field.at(11).status_turns = 3; }));
+	CHECK_FALSE(redirected([](Duel &d)
+	                       {
+		                      d.field.at(11).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_CONFUSION);
+		                      d.field.at(11).status_turns = 3; }));
+	CHECK_FALSE(redirected([](Duel &d)
+	                       {
+		                      d.field.at(11).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_PARALYSIS);
+		                      d.field.at(11).status_turns = 3; }));
+	CHECK_FALSE(redirected([](Duel &d)
+	                       {
+		                      d.field.at(11).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_STONE);
+		                      d.field.at(11).status_turns = 3; }));
+	CHECK_FALSE(redirected([](Duel &d)
+	                       {
+		                      d.field.at(11).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_BARRIER);
+		                      d.field.at(11).status_turns = 3; }));
+	CHECK_FALSE(redirected([](Duel &d)
+	                       {
+		                      d.field.at(11).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_DIZZY);
+		                      d.field.at(11).status_turns = 3; }));
+	CHECK_FALSE(redirected([](Duel &d)
+	                       {
+		                      d.field.at(11).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_DRAGNET);
+		                      d.field.at(11).status_turns = 3; }));
+	CHECK_FALSE(redirected([](Duel &d)
+	                       {
+		                      d.field.at(11).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_INSTIGATE);
+		                      d.field.at(11).status_turns = 3; }));
+
+	// ⚠️ 状态**计数为 0** ⇒ 不挡(判据是"计数 > 0",与 isAsleep 同款)。
+	CHECK(redirected([](Duel &d)
+	                 {
+		                 d.field.at(11).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_SLEEP);
+		                 d.field.at(11).status_turns = 0; }));
+
+	// ⑦ 攻击者持投掷/弓 ⇒ 不接管。
+	CHECK_FALSE(redirected([](Duel &d)
+	                       { d.field.at(0).mods.wielding_bow = true; }));
+	CHECK_FALSE(redirected([](Duel &d)
+	                       { d.field.at(0).mods.weapon = WeaponClass::kThrow; }));
+	// ⚠️ 非投掷类武器照常接管。
+	CHECK(redirected([](Duel &d)
+	                 { d.field.at(0).mods.weapon = WeaponClass::kAxe; }));
+}
+
+TEST_CASE("A-β d2★★:闪避先于守护接管 —— 原目标闪掉的一击守护者不接手"
+          "(battle_event.c:1549 先于 :1566)")
+{
+	// 原目标回避率拉满(no_duck=false + quick 抬高),守护者必中(no_duck=true)。
+	// ⇒ 若接管发生在闪避**之前**,守方会换成守护者、重判闪避后必中 ⇒ 事件里会出现
+	//   target==11 的 Damage。源码序是"先对原目标判闪避" ⇒ 原目标闪掉 ⇒ 无伤害事件。
+	Duel d = makeGuardianDuel();
+	d.field.at(10).mods.no_duck = false;
+	d.field.at(10).quick = 100000;
+	d.field.at(10).fix_dex = 100000;
+	d.field.at(11).mods.no_duck = true;
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	// 原目标闪掉 ⇒ 守护者**不该**成为伤害目标。
+	for (const auto &e : ev.events)
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+			CHECK(e.body.damage.target != 11u);
+}
+
+TEST_CASE("A-β d2★:守护者的 GUARD 指令不改判伤害标志(NORMAL 优先于 GUARD)")
+{
+	// 守护者自己本回合选了 GUARD ⇒ 源码那条 `else if(守方防御)` 在 Guardian 分支
+	// 命中后不会再判 ⇒ 事件带 NORMAL,不带 GUARD(battle_event.c:1772-1776)。
+	Duel d = makeGuardianDuel();
+	setKind(d.cmds, 11, SA::Domain::BattleCommand::CommandKind::GUARD);
+	SA::Domain::BattleEvents ev{};
+	MaxRandom rng;
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	const SA::Domain::Damage *dmg = nullptr;
+	for (const auto &e : ev.events)
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+			dmg = &e.body.damage;
+	REQUIRE(dmg != nullptr);
+	CHECK(dmg->target == 11u);
+	CHECK((dmg->flags & static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_GUARD)) == 0u);
+}
+
+TEST_CASE("A-β d2★★:同回合先死的守护者不再保护 —— 后续攻击落回原目标")
+{
+	// ★★ 这一条钉的是**回合内时序**:slot0 先打死守护者(11),slot1 随后攻击被守护者(10)
+	//    ⇒ 第二击**不该**再被 11 接管(它已经死了)。
+	//    ⚠️ 判据读的是**本回合的存活镜像**(`dead[]`),不是快照 —— 见 guardianCheck ④。
+	//    原版对应 `CHAR_ISDEGuardianIndex`(`:1458`),而原版的死亡是**当场写实体**的,
+	//    本仓的死亡在回合内走局部镜像 ⇒ 必须用镜像读,否则会"让死人接管"。
+	Duel d;
+	// slot0:主攻手,秒得掉守护者。
+	d.field.at(0) = makeCombatant(CombatantKind::kPlayer, 100000, 100);
+	d.field.at(0).slot = 0;
+	d.field.at(0).mods.no_duck = true;
+	d.field.at(0).mods.immune_critical = true;
+	d.field.at(0).mods.sequence = 200; // 先手
+	// slot1:补刀手,打被守护者。
+	d.field.at(1) = makeCombatant(CombatantKind::kPlayer, 500, 100);
+	d.field.at(1).slot = 1;
+	d.field.at(1).mods.no_duck = true;
+	d.field.at(1).mods.immune_critical = true;
+	d.field.at(1).mods.sequence = 100; // 后手
+	// slot10:被守护者(血厚,活得下来)。
+	d.field.at(10) = makeCombatant(CombatantKind::kEnemy, 1, 10);
+	d.field.at(10).slot = 10;
+	d.field.at(10).hp = d.field.at(10).max_hp = 1000000;
+	d.field.at(10).mods.no_duck = true;
+	d.field.at(10).mods.immune_critical = true;
+	d.field.at(10).guardian = 11;
+	// slot11:守护者(血薄,第一击就死)。
+	d.field.at(11) = makeCombatant(CombatantKind::kEnemy, 1, 10);
+	d.field.at(11).slot = 11;
+	d.field.at(11).hp = d.field.at(11).max_hp = 10;
+	d.field.at(11).mods.no_duck = true;
+	d.field.at(11).mods.immune_critical = true;
+
+	setAttack(d.cmds, 0, 11); // 主攻手打**守护者**本人
+	setAttack(d.cmds, 1, 10); // 补刀手打**被守护者**
+
+	SA::Domain::BattleEvents ev{};
+	MaxRandom rng;
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	// 收集伤害事件(按顺序)。
+	std::vector<std::pair<std::uint32_t, std::int32_t>> hits;
+	for (const auto &e : ev.events)
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+			hits.push_back({e.body.damage.target, e.body.damage.hp_delta});
+	REQUIRE(hits.size() == 2);
+
+	// 第一击:打守护者 ⇒ 落 11。
+	CHECK(hits[0].first == 11u);
+	// ★★ 第二击:守护者已死 ⇒ **不再接管** ⇒ 落原目标 10(而不是又落 11)。
+	CHECK(hits[1].first == 10u);
+}

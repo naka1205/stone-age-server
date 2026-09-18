@@ -1161,6 +1161,69 @@ void applyMagicStatusPetSkill(BattleInstance &b, int actor,
 	st.nums = e->magic_nums;
 }
 
+// 忠犬守护的**链接建立**(批次 A-β d2;`PETSKILL_Guardian`,pet_skill.c:699-770)。
+//
+// ★★ **调用时机 = 指令接收时**(`onBattleCommand` 存下指令之后),**不是行动位**。
+//   回源码复核(battle_command.c:361):原版在 `BattleCommandDispach` 的 `W|` 分支里
+//   当场调 `PETSKILL_Use` → `PETSKILL_Guardian` 建立链接;清除发生在**下一回合**的
+//   `BATTLE_PreCommandSeq`(battle.c:3596-3598)。⇒ 链接自"交指令"起活到本回合结算
+//   结束,**整回合有效** —— 主人在宠物行动位**之前**挨打,守护照样接管。
+//   ⚠️★ 因此这里**没有** `command_cleared` 那道门(第一版照铁壁抄了那道门,错):
+//     原版指令中途被状态清掉**不会**撤销已建立的链接;中途被睡/被麻痹由
+//     `guardianCheck` 的第 ⑤ 条在接管**当场**挡(这正是那条判据存在的理由)。
+//
+// ★★ **写的是被守护者的 `guardian` 字段、值 = 守护者的槽号**(pet_skill.c:744-766),
+//    方向与字段名相反 —— 读的时候是"这一槽被谁守护",写的时候写在**被守护者**身上。
+//
+// ★ 槽号换算:原版 `pos = BATTLE_Index2No(...)` 取的是**宠物**的槽号,主人槽 = `pos - 5`
+//   (pet_skill.c:757 的 `ownerpos = pos - 5;`,再减 `side*SIDE_OFFSET`)。
+//   本仓宠物恒占 `主人槽 + kBattlePlayerMax`(见 `exitPetFromField`),且 PET_SKILL 指令
+//   落在**主人槽**(B1 的槽位一体模型)⇒ `actor` 就是主人槽、宠物槽 = `actor + 5`。
+//   ⚠️★ 这正是本函数第一版的错处:把 `actor` 当宠物槽去反解主人槽,得负数 ⇒
+//      **恒越界、从不建立链接**(而当时没有用例能看见它 —— 见 journal §9.0.69)。
+//
+// ★ 两条分支(逐行照源码):
+//     ① option 含 `COM:` + `防御` ⇒ 写**指令目标槽**:`Entry[toNo].guardian = pos`
+//        (pet_skill.c:744-753;那里的 `side` 由 `toNo` 反推 ⇒ 落点就是全局槽 `toNo`)。
+//        ⚠️ 这一支同时把宠物自己的 COM1 改成 `BATTLE_COM_GUARD`(原地防御)—— 那条
+//        **指令改写**本仓不复刻(PET_SKILL 指令不就地改写),登记为已知差异。
+//     ② 否则 ⇒ 写**主人槽**(pet_skill.c:755-766)。★ 投产数据走这一支:
+//        petskill2.txt 的忠犬行 option 是 `攻%-20  COM:攻击`(实测,`COM:` 后是"攻击")。
+//
+// ⚠️★ **不摇 rng、不产事件**:原版这一步是静默的(表现由宠技动画承担,本批无表现面)。
+// ⚠️ 宠物**不在场** ⇒ 不写:原版 `BATTLE_Index2No` 对不在战斗中的宠物返回 -1,
+//    `ownerpos = pos - 5 - side*SIDE_OFFSET` 随即越界 ⇒ 落进那个空 else(:760-761)。
+void applyGuardianPetSkill(BattleInstance &b, int actor,
+                           const std::vector<PetSkillEffect> &effects)
+{
+	if (actor < 0 || actor >= SA::Rules::kSlotCount || !b.commands.present[actor])
+		return;
+	const SA::Domain::BattleCommand &cmd = b.commands.commands[actor];
+	if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::PET_SKILL)
+		return;
+	const PetSkillEffect *e = findPetSkillEffect(effects, cmd.command.pet_skill.skill_id);
+	if (e == nullptr || e->guardian_mode == 0)
+		return; // 非守护技 ⇒ 什么都不做(L3 也已把它当表外跳过)
+
+	// 宠物槽 = 主人槽 + kBattlePlayerMax;不在场 ⇒ 原版 pos == -1 ⇒ 不写。
+	const int pet_slot = actor + SA::Rules::kBattlePlayerMax;
+	if (pet_slot >= SA::Rules::kSlotCount || !b.field.at(pet_slot).occupied)
+		return;
+
+	if (e->guardian_mode == 2)
+	{
+		// ① `COM:` + `防御` ⇒ 写**指令目标槽**(pet_skill.c:744-753)。
+		const int tgt = static_cast<int>(cmd.command.pet_skill.target);
+		if (tgt < 0 || tgt >= SA::Rules::kSlotCount)
+			return;
+		b.field.at(tgt).guardian = pet_slot;
+		return;
+	}
+
+	// ② 守护主人:写主人槽、值 = 宠物槽号(pet_skill.c:755-766)。
+	b.field.at(actor).guardian = pet_slot;
+}
+
 // F07: 只在 resolveAction 返回 item_used 后提交一次。
 void consumeUsedItem(BattleInstance &b, int slot, PlayerPool &players, ItemPool &items)
 {
@@ -2821,6 +2884,14 @@ void World::tick()
 			b.commands = SA::Rules::TurnCommands{};
 			b.command_deadline_sec = 0;
 			++b.field.turn;
+			// ★ 守护链接**每回合整体清空**(批次 A-β d2;原 `BATTLE_PreCommandSeq`,
+			//   battle.c:3578-3600:遍历两 side 全部 Entry 置 `guardian = -1`)。
+			//   ⇒ 守护只持续**一个指令回合**;要续必须下回合重新用忠犬。
+			//   ⚠️ 位置在 `++turn` 之后、下一回合的指令收集之前 —— 与源码在
+			//     「指令收集期开始前」清空同相位(源码在 PreCommandSeq 里清,
+			//     该函数正在建立指令等待态 `BATTLE_AllCharaCWaitSet`)。
+			for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+				b.field.at(slot).guardian = -1;
 			b.next_turn_at_ms =
 			    s.now_ms + static_cast<SA::Platform::Millis>(
 			                   s.config.tempo.battle_turn_interval_ms);
@@ -3980,6 +4051,15 @@ void World::onBattleCommand(SA::Net::SessionId id,
 
 	b.commands.commands[slot] = stored;
 	b.commands.present[slot] = true;
+	// ── 忠犬守护的链接建立(批次 A-β d2)────────────────────────────────
+	// ★★ **在这里,不在行动位** —— 原版在指令派发当场调 `PETSKILL_Use` →
+	//    `PETSKILL_Guardian`(battle_command.c:361)建立链接,清除要等**下一回合**的
+	//    `BATTLE_PreCommandSeq`(battle.c:3596-3598)⇒ 链接整回合有效,主人在宠物
+	//    行动位**之前**挨打也照样被接管。见 `applyGuardianPetSkill` 卷首。
+	// ⚠️ 只对**通过校验后真正存下**的指令建立(降级成 WAIT 的走不到这里,同源码:
+	//    `PETSKILL_Use` 返回 FALSE 时原版根本不调它)。
+	// ⚠️ 不摇 rng、不产事件 ⇒ 放在指令面不破坏"结算面只由 resolveAction 产事件"。
+	applyGuardianPetSkill(b, static_cast<int>(slot), s.pet_skill_effects);
 	if (b.command_deadline_sec == 0)
 		b.command_deadline_sec = s.now_ms / 1000 + 120; // 首个 C_OK 后才启动，严格超时退出而非自动防御。
 	SA::Domain::BattleTurnBegin ready{};

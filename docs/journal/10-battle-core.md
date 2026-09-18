@@ -326,3 +326,47 @@ shared-v0.8.0 + 客户端 `d2-only` 复验**,两仓 × 两远端一起推 tag(§
 
 ① **shared/rules 有实质改动 ⇒ 须打 tag 前推 + 客户端换 pin**(与 A-α 合窗口执行);② **反击链资格残留**:GBREAK-vs-plain(MISS) 现管线理论上仍可进 counter 链(`continue_counter` 在清零前计算),而原版 `case BATTLE_COM_S_GBREAK`(battle.c:8486)无 counter 循环 —— 属 B1 既有建模结构、无用例钉它(B1 plain 组守方无指令,链在 `!present` 断),留待后续批连登记一起裁定;③ MultiList/Guardian/CheckSameSide/CountAlive 为 A-β d2 主体(诊断规格已备,见 roadmap A-β 行);④ `build/rv_a1b` 与 `build/msvc_rv` 留在 build/(gitignore 覆盖)可随手删。
 
+
+### 9.0.69 ★★ 批次 A-β d2 —— 目标判定族 + 忠犬守护(批次 A 余项第二子批第二步,2026-09-17)
+
+**为什么是它**:roadmap 的滚动指针写着「A-β d2 = Guardian + MultiList + CheckSameSide(诊断规格已备)」。本批按**可观察面**重划了范围(见 ④),落地其中的**目标判定族**与**忠犬守护全链**;`MultiList` 多目标展开经复核后**有意不移植**,理由见 ④①。
+
+#### ① 过程教训(本批最值钱的一条:同一个 bug 被两种方式抓住,而抓住它的不是 L3 用例)
+
+忠犬守护的**链接建立**第一版写错了三处,且**当时 146 例 L3 用例全绿**:
+
+1. **槽号反解错**:本仓 `PET_SKILL` 指令落在**主人槽**(B1 的槽位一体模型),而第一版把 `actor` 当**宠物槽**去反解主人槽(`actor - 5 - side*10`)⇒ 得负数 ⇒ **恒越界、从不建链**。
+2. **时机错**:第一版照铁壁(`applyMagicStatusPetSkill`)抄,把建链放在**行动位**。回源码复核发现原版在 `BattleCommandDispach` 的 `W|` 分支里**当场**调 `PETSKILL_Use` → `PETSKILL_Guardian`(`battle_command.c:361`),清除要等**下一回合**的 `BATTLE_PreCommandSeq`(`battle.c:3596-3598`)⇒ **链接自交指令起整回合有效** —— 主人在宠物行动位**之前**挨打,守护照样接管。
+3. **多抄了一道门**:第一版给建链加了 `!command_cleared` 门(照铁壁)。**原版没有这道门**:指令中途被状态清掉**不撤销**已建立的链接;中途被睡/被麻痹由 `guardianCheck` 的第 ⑥ 条在接管**当场**挡 —— 那条判据存在正是为了这个。
+
+★ **为什么 L3 用例抓不住**:`RulesBattleTest` 的守护用例是**直接注入 `guardian` 字段**的,验的是 L3 的接管逻辑;而"World 侧有没有把链接建起来"在那一层**没有观察面**。这正是 `13-d8-coverage.md` §1.3 规则 1 点名的那族「**地基绿而运行时不接**」(欠债 20/25)。
+
+★ **RV-3 把这个缝量化了**:把 World 侧的槽号反解还原成 bug 版 ⇒ `world_tick` 恰 4 断言转红,而 `rules_battle`(L3)**全绿**(独立复跑确认)。⇒ 本批为此补了 `WorldTickTest` 的**世界侧全链**三条,把这条缝钉死。
+
+#### ② 交付
+
+- `shared/rules/Combatant.h`:`guardian` 字段(值 = 守护者槽号,−1 = 无;**每回合开头整体清空**)。
+- `shared/rules/Battle.{h,cpp}`:**目标判定族** `targetCheck` / `targetCheckDead` / `countAlive` / `defaultAttacker` / `checkSameSide` / `targetAdjust` + **`guardianCheck`**(七道否决,顺序照源码)。`slots` 入参 = 本回合存活镜像。
+- `shared/rules/Battle.cpp` strike 管线:守护接管**在闪避之后、暴击之前**(`:1549` → `:1566`);`==0` 处理里 `guardian_slot >= 0 ⇒ damage = 1`(`:1770-1778`);伤害标志在接管时判 **NORMAL 而非 GUARD**。
+- `src/world/include/world/Api.h`:`PetSkillEffect::guardian_mode`(0 = 非守护技 / 1 = 守护主人 / 2 = 守护指令目标)。
+- `src/world/World.cpp`:`applyGuardianPetSkill` —— **在 `onBattleCommand` 存下指令之后调用**(指令接收时建链,不在行动位);每回合 `++turn` 之后整体清空 `guardian`。
+- 用例:`RulesBattleTest` **+12 例**(目标判定族 6 + 守护链 6,含"闪避先于接管"与"同回合先死的守护者不再接管");`WorldTickTest` **+3 例**(世界侧全链 / 每回合清空 / 表外 id 不建链)。
+
+#### ③ 复验(全部 MSVC / VS 18 BuildTools,SA_WERROR=ON)
+
+| 项 | 结果 |
+|---|---|
+| ctest 全量 | **22/22** |
+| 用例计数 | `rules_battle` 135 例/2,930 → **147 例/3,035 断言**;`world_tick` 139 例/2,504 → **142 例/2,542 断言**;既有断言**零改动** |
+| 反向验证(全新构建目录 `build/rv_d2`) | ①删接管重定向 ⇒ `rules_battle`+`world_tick` 转红(`Damage.target` 11→10,**预测命中**);②删 `==0` 下限 ⇒ 恰 1 断言红(`deltas[0]` −1→0,**预测命中**);③World 槽号反解还原 bug 版 ⇒ `world_tick` 4 断言红而 `rules_battle` **全绿**(量化了 §① 那条缝);④接管提到闪避之前 ⇒ 恰 1 断言红(target 11==11,**预测命中**);各还原后复绿 |
+| 残留检查 | `RV_INJECT` grep **0**;`Battle.cpp`/`World.cpp` 与 pristine 备份一致 |
+| 格式 | `clang-format -i` 后 code_format 绿 |
+
+#### ④ 登记(含一处**负结果**与一处**有意划外**)
+
+① **`MultiList` 多目标展开:有意不移植**。原 `BATTLE_MultiList`(`battle.c:265-560`,`_ATTACK_MAGIC` 开)含整侧/全体/前后排三族展开与 `SortLoc` 排序,其**唯一消费者**是多目标指令与咒术(攻击魔法/职业魔法/宠技的 `全` 系)—— 它们**全部**未移植(S19 在覆盖台账里是 `⬜`)。⇒ 现在移植只有"代码在、无人调用"一种结果,正是 §① 那族形态。已登记在 `Battle.h` 的「多目标展开:有意不移植」小节。
+② ★★ **负结果:RV-5 未转红,且这是对的**。`guardianCheck` 的第 ④ 条(守护者已阵亡)第一版读快照 `field.at(g).dead`;我据"同回合内死亡只在局部镜像里"改成了读 `slots` 镜像。**RV-5(把镜像读改回快照读)预期转红,实测全绿**。回源码查明原因:`resolveOrdered` 的 `field` 是**按值**参数,且两处死亡写点(`:1543` 状态跳、`:2175` 打击)**都当场把 `dead[]` 写回 `field`** ⇒ 在回合内的任何 `strike` 调用点上,快照的 `dead` **已经是当前的**。⇒ **镜像读当前是冗余的**,两种写法等价。保留镜像读(它与 `resolveOrdered` 内部其余 8 处 `dead[]` 读法同族),但**如实记下它当前无区分力** —— 若将来死亡改为"回合末统一写回",这一条会立刻变成真判据,RV-5 即是它的现成注入器。
+③ **反击段不做守护接管**:原版 `BATTLE_Counter`(`:3633`)把 `Guardian` 传进 `AttackSeq`(于是暴击/伤害对着守护者算),但**之后从不读它** —— `DamageSub` 用的仍是原 `defindex` ⇒ 反击段落点仍是原目标。那是原版的**内部不一致**(`if(Guardian >= 0)` 那行只在 `BATTLE_Attack` 里写了)。本仓不复制这个半吊子重定向(它需要把"算"与"落"拆成两个目标),⇒ 反击段不接管,登记为**已知行为差**。
+④ **`COM:防御` 分支的指令改写未复刻**:原版该支还会把宠物自己的 COM1 改成 `BATTLE_COM_GUARD`(原地防御,`pet_skill.c:746`)。本仓 PET_SKILL 指令不就地改写指令种类 ⇒ 只建链、不改行动方式。⚠️ **投产数据不触发该分支**(实测 `petskill2.txt` 全表只有第 9 行带 `COM:`,值为"攻击")⇒ 无可观察差异;若将来导入带 `COM:防御` 的行,这里会变成真实差异。
+⑤ `countAlive` 与 World 侧 `sideWipedOut` 是**两套判据**(前者排除宠物且只读死亡标志,后者读 `hp > 0` 且不排除宠物)—— 前者 1:1 照 `BATTLE_CountAlive`,后者是既有的终局判定。**本批不改 `sideWipedOut`**(它不在本批锚点内),但已在 `countAlive` 处记明差异,避免后续批次误当同义。
+⑥ **shared/rules 有实质改动 ⇒ 须打 tag 前推 + 客户端换 pin**(与 A-β 后续子批合窗口执行)。

@@ -143,6 +143,173 @@ SA::Domain::CannotActReason checkCanAct(const Combatant &c) noexcept
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  目标判定族(批次 A-β d2)
+// ═══════════════════════════════════════════════════════════════════
+//
+// 移植来源与三处无对应项的处置见 battle.h 的同名小节(不在此重复)。
+// ⚠️ 本族**全部不摇 rng**,唯一的例外是 `defaultAttacker` 的那一抽。
+
+namespace
+{
+// 本回合的死亡判定:优先用调用方给的存活镜像(回合内刚打死的单位 `field` 上还没落地),
+// 传 nullptr 才回落到快照。
+inline bool isDeadAt(const BattleField &field, const bool *slots, int slot) noexcept
+{
+	return slots != nullptr ? slots[slot] : field.at(slot).dead;
+}
+} // namespace
+
+bool targetCheck(const BattleField &field, const bool *slots, int no) noexcept
+{
+	if (no < 0 || no >= kSlotCount)
+		return false;
+	const Combatant &c = field.at(no);
+	// 源码 `BATTLE_TargetCheck`(`battle.c:6740-6756`)的六道,映射见 battle.h:
+	//   CHAR_CHECKINDEX / WORKBATTLEMODE == 0  → !occupied
+	//   ISDIE / HP <= 0                        → dead / hp <= 0
+	//   ISATTACKED == FALSE / CHARMODE_RESCUE  → 恒不成立(未移植)
+	return c.occupied && !isDeadAt(field, slots, no) && c.hp > 0;
+}
+
+bool targetCheckDead(const BattleField &field, int no) noexcept
+{
+	if (no < 0 || no >= kSlotCount)
+		return false;
+	const Combatant &c = field.at(no);
+	// `battle.c:6759-6784`:**要求已阵亡**,且不认 hp(源码只判 ISDIE)。
+	// ⚠️ 与 targetCheck 互补:两者都要求 occupied。
+	return c.occupied && c.dead;
+}
+
+int countAlive(const BattleField &field, int side) noexcept
+{
+	if (side != 0 && side != 1)
+		return 0;
+	const int base = side * kSideOffset;
+	int cnt = 0;
+	for (int i = base; i < base + kSideOffset; ++i)
+	{
+		const Combatant &c = field.at(i);
+		if (!c.occupied)
+			continue;
+		// ★ 宠物不计入(`battle.c:4875` `CHAR_WHICHTYPE == CHAR_TYPEPET ⇒ continue`)。
+		if (c.kind == CombatantKind::kPet)
+			continue;
+		// ⚠️ 判据是 `!ISDIE`,不是 `HP > 0`(源码只读死亡标志)。
+		if (!c.dead)
+			++cnt;
+	}
+	return cnt;
+}
+
+int defaultAttacker(const BattleField &field, const bool *slots, int side,
+                    Random &rng) noexcept
+{
+	if (side != 0 && side != 1)
+		return -1;
+	const int base = side * kSideOffset;
+	int table[kSideOffset];
+	int cnt = 0;
+	// 源码 `battle.c:4779-4808`:槽号升序收集**可选目标**。
+	// ⚠️ `CHARMODE_RESCUE` 那道 continue 在本仓恒不成立(援护未移植)⇒ 不写。
+	for (int i = base; i < base + kSideOffset; ++i)
+	{
+		if (!targetCheck(field, slots, i))
+			continue;
+		table[cnt++] = i;
+	}
+	// ★ `if(cnt == 0) return -1;` 在 `RAND` **之前** ⇒ 无人可选时**不摇 rng**。
+	if (cnt == 0)
+		return -1;
+	return table[rng.rand(0, cnt - 1)];
+}
+
+int checkSameSide(const BattleField &field, int actor_slot, int to_no) noexcept
+{
+	if (actor_slot < 0 || actor_slot >= kSlotCount)
+		return 0;
+	if (!field.at(actor_slot).occupied)
+		return 0;
+	// ★ 源码 `battle_event.c:7851-7881`:返回值是 **1 / 0**(不是 bool 真值对),
+	//   且 `toNo >= 20` 走 MultiList 展开 —— 那一支本仓不适用(见 battle.h),
+	//   传入时返回 0(源码对空表同样返回 0)。
+	if (to_no < 0 || to_no >= kSlotCount)
+		return 0;
+	if (!field.at(to_no).occupied)
+		return 0;
+	return BattleField::sameSide(actor_slot, to_no) ? 1 : 0;
+}
+
+int targetAdjust(const BattleField &field, const bool *slots, int actor_slot,
+                 int to_no, int myside, Random &rng) noexcept
+{
+	// ⚠️ 原版的 `charaindex` 只用来**读/写** `CHAR_WORKBATTLECOM2`(指令载荷):
+	//   读出来的那个值就是本函数的 `to_no`,写回是调用方的事(见 battle.h)。
+	//   ⇒ 本函数体用不到 `actor_slot`;保留形参只为与源码签名对位(防位置错位)。
+	(void)actor_slot;
+
+	// `battle.c:6786-6797`:目标可用 ⇒ 原样返回(**不摇 rng**);
+	// 不可用 ⇒ 换成对面的默认攻击者(那一抽才摇)。
+	if (targetCheck(field, slots, to_no))
+		return to_no;
+	return defaultAttacker(field, slots, 1 - myside, rng);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  忠犬守护 —— `BATTLE_GuardianCheck`(`battle_event.c:1431-1511`)
+// ═══════════════════════════════════════════════════════════════════
+//
+// 返回守护者的槽号;无守护 / 守护者不可接管 ⇒ −1。七道否决的顺序照源码
+// (顺序不可换:它决定哪一条先返回,而调用方只看 −1 / 非 −1)。
+int guardianCheck(const BattleField &field, const bool *slots, int attack_slot,
+                  int def_slot) noexcept
+{
+	if (attack_slot < 0 || attack_slot >= kSlotCount)
+		return -1;
+	if (def_slot < 0 || def_slot >= kSlotCount)
+		return -1;
+
+	const int guardian = field.at(def_slot).guardian;
+	// ① 无守护者(`:1448`)。⚠️ 兼作 `CHAR_BATTLEFLG_GUARDIAN` 那一道(见 battle.h)。
+	if (guardian < 0)
+		return -1;
+	// ② 守护者是它自己(`:1452`,Terry 的修复)。
+	if (guardian == def_slot)
+		return -1;
+	// ③ 守护者不在场(`:1456` `CHAR_CHECKINDEX == FALSE`)。
+	if (guardian >= kSlotCount || !field.at(guardian).occupied)
+		return -1;
+	// ④ 守护者已阵亡(`:1458` `CHAR_ISDIE`)。
+	//    ⚠️ 用**本回合的存活镜像**:同回合里先被打死的守护者不能再接管。
+	if (isDeadAt(field, slots, guardian))
+		return -1;
+
+	const Combatant &g = field.at(guardian);
+	const auto st = static_cast<SA::Domain::BattleStatus>(g.status);
+	const bool statused = g.status_turns > 0;
+	// ⑤ 守护者自身不可接管(`:1465-1479`,状态族 + 自己就是攻击者)。
+	//    ⚠️ 判据用「单槽状态 + 回合数 > 0」,与 `isAsleep` 同款(L4.1 的取舍,见 battle.h)。
+	if ((statused && (st == SA::Domain::BattleStatus::BATTLE_ST_SLEEP ||
+	                  st == SA::Domain::BattleStatus::BATTLE_ST_CONFUSION ||
+	                  st == SA::Domain::BattleStatus::BATTLE_ST_PARALYSIS ||
+	                  st == SA::Domain::BattleStatus::BATTLE_ST_STONE ||
+	                  st == SA::Domain::BattleStatus::BATTLE_ST_BARRIER ||
+	                  st == SA::Domain::BattleStatus::BATTLE_ST_DIZZY ||
+	                  st == SA::Domain::BattleStatus::BATTLE_ST_DRAGNET ||
+	                  st == SA::Domain::BattleStatus::BATTLE_ST_INSTIGATE)) ||
+	    guardian == attack_slot)
+		return -1;
+
+	// ⑥ 攻击者持投掷类武器 ⇒ 不接管(`:1490-1500`)。
+	//    判据与 `rollCounter` 的 ranged 同源(bow / kThrow 都算)。
+	if (field.at(attack_slot).mods.wielding_bow ||
+	    field.at(attack_slot).mods.weapon == WeaponClass::kThrow)
+		return -1;
+
+	return guardian;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  四属性相克
 // ═══════════════════════════════════════════════════════════════════
 //
@@ -1747,16 +1914,54 @@ static bool resolveOrdered(BattleField field,
 		const auto strike = [&](int from, int to, bool counter) -> StrikeResult
 		{
 			const Combatant &striker = field.at(from);
+			// ★★ **闪避对着原目标判**(源码序:`BATTLE_DuckCheck(attackindex, defindex)`
+			//   在 `:1549`,**先于** `:1566` 的守护接管)⇒ 原目标自己闪掉的那一击,
+			//   守护者不接手、也不为守护者摇任何数。
+			//   ⚠️ 因此下面 `guarding_cmd` / `guarding` / `dodge` 三处用的都是**原目标**;
+			//     接管发生**之后**再按守护者重算一遍(见接管块)。
+			const Combatant &victim_orig = field.at(to);
+			const bool guarding_cmd_orig =
+			    commands.present[to] && isGuarding(commands.commands[to]);
+			const bool guarding_orig = guarding_cmd_orig &&
+			                           (victim_orig.status != static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION) || victim_orig.status_turns <= 0);
+			const bool can_chain = !guarding_orig && striker.damage_react <= 0 &&
+			                       victim_orig.damage_react <= 0;
+			const bool dodge = rollDodge(striker, victim_orig, guarding_orig,
+			                             isCastingSpell(commands, to), config, rng);
+			// ── 忠犬守护接管(批次 A-β d2;`battle_event.c:1566-1572`)────────────
+			//
+			// ★ 源码在**闪避之后、暴击之前**:
+			//     `if( *pGuardian == -1 ){ *pGuardian = BATTLE_GuardianCheck( attackindex,
+			//      defindex ); if( *pGuardian != -1 ){ GuardianIndex = BATTLE_No2Index(...);
+			//      defindex = GuardianIndex; } }`
+			//   ⇒ 接管之后**余下链路全对着守护者**:暴击、伤害公式、防御减伤、
+			//     S_GBreak 清零的判据(`guarding_cmd`)、落伤、状态施加
+			//     (`statusDefNo = Guardian`,`:2685-2691`)、唤醒(`DamageWakeUp`)。
+			//     原守方**毫发无伤**,连伤害公式都不为它算。
+			//   ⚠️★ 为什么把 `to` 就地换掉:AttackSeq 内的 `defindex` 是**局部**变量,
+			//     出不了函数 ⇒ 调用方靠 `*pGuardian` 出参知道"该打谁"
+			//     (`BATTLE_Attack:2639-2641` 的 `if( Guardian >= 0 ) defindex = ...`)。
+			//     本仓把"算"与"落"放在一处 ⇒ 直接换 `to` 是同一语义的等价写法。
+			//   ⚠️★ **仅非反击段**:原版 `BATTLE_Counter`(`:3633`)虽然把 `Guardian` 传进
+			//     AttackSeq(于是暴击/伤害对着守护者算),但**之后从不读它** ——
+			//     `DamageSub` 用的仍是原 `defindex` ⇒ 反击段的落点仍是原目标。那是原版的
+			//     内部不一致(`if(Guardian >= 0)` 那行只在 BATTLE_Attack 里写了)。
+			//     本仓不复制这个半吊子重定向(它需要把"算"与"落"拆成两个目标),
+			//     ⇒ **反击段不做守护接管**,登记为已知行为差(见 journal §9.0.69 ④)。
+			int guardian_slot = -1;
+			if (!counter && !dodge)
+			{
+				guardian_slot = guardianCheck(field, dead, from, to);
+				if (guardian_slot >= 0)
+					to = guardian_slot;
+			}
 			const Combatant &victim = field.at(to);
-			// 守方「指令 = GUARD」的**裸判定**(B1:GBREAK2 的 ×1.3/×0.7 只看它,
-			//   不含混乱判定 —— battle_event.c:1699 原样)。
+			// 接管后按**守护者**重算防御系判据(`:1695` 的 GBREAK2 与 `:1717` 的
+			//   GuardAdjust 读的都是替换后的 `defindex` 的 COM1)。
 			const bool guarding_cmd =
 			    commands.present[to] && isGuarding(commands.commands[to]);
-			// 守方「真防御」= 裸判定 + 未混乱:防御减伤与 GBREAK 的落伤门都认这个。
 			const bool guarding = guarding_cmd &&
 			                      (victim.status != static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION) || victim.status_turns <= 0);
-			const bool can_chain = !guarding && striker.damage_react <= 0 && victim.damage_react <= 0;
-			const bool dodge = rollDodge(striker, victim, guarding, isCastingSpell(commands, to), config, rng);
 			bool critical = false;
 			int damage = 0;
 			if (!dodge)
@@ -1809,15 +2014,24 @@ static bool resolveOrdered(BattleField field,
 				if (!counter && damage < 1)
 					damage = rng.rand(0, 1);
 				damage = std::max(0, damage);
-				// ── ==0 处理(SSRC80 battle_event.c:1770-1778;语义锚,本批不改行为)──
+				// ── ==0 处理(SSRC80 battle_event.c:1770-1778;批次 A-β d2 补齐守护分支)──
 				//
 				// ★ 源码:`if((*pDamage) == 0){ iRet = BATTLE_RET_MISS; 有守护者(Guardian)⇒
 				//   NORMAL + (*pDamage)=1; else if(守方真防御) iRet = ALLGUARD; }`。
 				//   本管线沿用既有 miss 路径:**不新增事件**,damage==0 照常发 Damage、
 				//   hp_delta=0(下游按「未落伤」消费);守方真防御 ⇒ 事件带
 				//   DAMAGE_FLAG_GUARD(= ALLGUARD 的语义位),否则带 DAMAGE_FLAG_NORMAL
-				//   (= MISS 的表达位)。守护者接管(NORMAL + damage=1)本批未做 Guardian
-				//   ⇒ 注释预留:Guardian 批落地时在此处补 `damage = 1`。
+				//   (= MISS 的表达位)。
+				// ★★ **守护接管 ⇒ 至少吃 1 点**(`:1772-1774`):伤害被削到 0 时,若这一击
+				//   由守护者接管,则**不当 MISS**、改判 NORMAL 并把伤害抬到 1。
+				//   ⚠️★ 位置在**尾摇之后**(源码序:GuardAdjust → 尾摇 :1722 → ==0 处理 :1770):
+				//     即"尾摇摇了 0"也照样被抬成 1 ⇒ 守护者接管的这一击**必定落 1 点伤害**。
+				//     这正是 A-β d1 把那支尾摇排在 GuardAdjust 之后的原因之一 —— 若顺序反过来,
+				//     守护者接管的伤害会先被抬成 1、再被尾摇覆盖,行为不同。
+				//   ⚠️ 只在**接管发生**时抬(guardian_slot >= 0),不是"守方有守护者就抬"。
+				//   ⚠️ 反击段不接管(见上)⇒ 这里的条件在反击段恒 false。
+				if (damage == 0 && guardian_slot >= 0)
+					damage = 1;
 				// ── MIGHTY 伤害倍率(battle_event.c:1786,AttackSeq 末行,无条件乘)──
 				//
 				// ★ 源码序:==0 处理(:1770-1778)**之后**、RENZOKU 分摊**之前**
@@ -1890,7 +2104,10 @@ static bool resolveOrdered(BattleField field,
 			}
 			if (critical)
 				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_CRITICAL);
-			if (guarding)
+			// ★ 守护接管 ⇒ 判 NORMAL(`battle_event.c:1772-1774` 把 iRet 从 MISS 改回 NORMAL)。
+			//   ⚠️ 优先级在 `guarding` **之前**:接管者自己也可能在防御,但源码那条 `else if`
+			//     在 Guardian 分支命中后就不会再判 ALLGUARD ⇒ 事件带 NORMAL 而不是 GUARD。
+			if (guarding && guardian_slot < 0)
 				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_GUARD);
 			else if (!critical && !counter)
 				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);

@@ -51,7 +51,7 @@
 
 每个锚点都是**本次实读**到的 `§9.0.x` 编号或文件路径,**没有从任务提示词的编号列表里抄引**
 (提示词里的编号只用于导航)。§9.0.x 编号 → 文件的总映射见 [`journal/README.md`](journal/README.md)
-(实测覆盖 §9.0.1–§9.0.66)。
+(实测覆盖 §9.0.1–§9.0.69)。
 
 ---
 
@@ -77,7 +77,7 @@
 | 16 | S16 交易 | 非 NPC | 1749 | 核心 | ⬜ | — | 未启动;`delGold` 暂无生产调用点(`§9.0.58` 残缺②) |
 | 17 | S17 角色道具栏 | 非 NPC | 2296 | 核心 | 🔄 | `§9.0.48`(I.1 背包槽 54 = 装备位 9 + 背包 45) · `§9.0.57`(I\| 槽下标域/持有门) | 装备穿戴 / 装备加成(装备域未移植,`§9.0.50` 残缺①)· 栏位协议与客户端面 |
 | 18 | S18 道具系统 | 非 NPC | 9100 | 核心 | 🔄 | `§9.0.48`/`§9.0.50`/`§9.0.51`/`§9.0.53`(I.1–I.4:扣/掉/用三链全通) · `§9.0.57`(I\| 入口校验) | 其余 usefunc 族(MP/状态药/变身/传送等,`backlog/01` #32 残缺①)· 道具效果表真数据(D 线 `itemset6.txt`,`backlog/02` §3)· 合成/镶嵌/场景内使用 |
-| 19 | S19 魔法/精灵术 | 非 NPC | 1403 | 核心 | ⬜ | — | 未启动;等 `__ATTACK_MAGIC` 咒术管线裁定(`12-implementation-roadmap.md` A-ε 子批)+ 技能表(`backlog/02` §1) |
+| 19 | S19 魔法/精灵术 | 非 NPC | 1403 | 核心 | ⬜ | — | 未启动;等 `__ATTACK_MAGIC` 咒术管线裁定(`12-implementation-roadmap.md` A-ε 子批)+ 技能表(`backlog/02` §1)。⚠️★ **本行是多目标展开(`BATTLE_MultiList`)的唯一消费者** —— A-β d2 复核后据「唯一消费者为 `⬜` ⇒ 现在移植只产生死代码」把它**有意划外**,裁定与理由见 `§9.0.69` ④① 与 `shared/rules/Battle.h` 的「多目标展开:有意不移植」小节 |
 | 20 | S20 地图运行时 | 非 NPC | 2476 | 核心 | 🔄 | `§9.0.42`(W.1:`Map` + `mapWalkable` + 529 格视野广播) · P2 真实地图切片(赛伊那斯 floor 100,通行性取服务端 LS2MAP)[`audits/2026-09-12-playable-loop.md`](audits/2026-09-12-playable-loop.md) | LS2MAP 全量 / 多 floor / 真实刷怪点(D 线,`backlog/02` §3)· 传送点对象(`§9.0.46` ⑤)· 昼夜变化(P2 边界) |
 | 21 | S21 协议分派 | 非 NPC | 5130 | 核心 | 🔄 | `§9.0.15`(`shared/wire/` 成帧 + 信封双端共编) · `§9.0.16`(会话装配/握手) · `§9.0.42`/`§9.0.46`(走路 0x0301 / EV 0x0305-0306 通路) · `§9.0.57`/`§9.0.61`–`§9.0.65`(战斗指令/宠技通路) | 原版 68 个下行协议**大部分未建**(`00` §9 阶段 0 表:「151 + 123 条清单作语义参考,不是兼容目标」)· 10 个「无业务调用」协议须单独裁定(`16` §3.6) |
 | 22 | S22 saac 客户端 | 非 NPC | 3449 | 核心 | ⬜ | — | 未启动;saac 侧 3 个 8.0 独有子系统须单独裁定(`00` §7) |
@@ -210,7 +210,7 @@
 | 类别 | 实读 |
 |---|---|
 | 底表 | `stoneage-plan/tools/subsystems.json`(`Q12.逐行`,Python 解析)· `stoneage-plan/docs/16-subsystem-inventory.md` §9(裁决规则 §9.1 / 弃用证据 §9.2 / 核心 NPC §9.5 / 8.0-8.5 差异 §10 / 参考 §13) |
-| 流程账 | [`journal/README.md`](journal/README.md)(全量映射表 §9.0.1–§9.0.66)· `journal/10-battle-core.md` · `11-model-attr.md` · `12-encounter.md` · `13-world.md` · `14-item.md` · `15-status.md` · `16-counterattack.md` · `17-economy.md` · `18-petskill.md` |
+| 流程账 | [`journal/README.md`](journal/README.md)(全量映射表 §9.0.1–§9.0.69)· `journal/10-battle-core.md` · `11-model-attr.md` · `12-encounter.md` · `13-world.md` · `14-item.md` · `15-status.md` · `16-counterattack.md` · `17-economy.md` · `18-petskill.md` |
 | 架构/计划 | `00-architecture.md` §7(D8 范围裁定)/ §8(技术栈)/ §9(阶段计划 + 逐阶段表)· [`12-implementation-roadmap.md`](12-implementation-roadmap.md)(P0–P3 + 2026-09-16 批次 A 余项子批简报 + A7 勘误并入) |
 | 遗留 | `backlog/01-debts.md`(欠债 33 条,含闭合方式)· `backlog/02-deferred-scope.md`(按「在等什么」归类,§1–§7) |
 | 实现度量 | `tools/rescope_battle_port.json` 的「★ 批次表」(0/A/B/C/D 五批:24+76+74+64+102 函数) |

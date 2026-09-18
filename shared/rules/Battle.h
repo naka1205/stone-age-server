@@ -96,6 +96,154 @@ bool resolveAction(const BattleField &field, const TurnCommands &commands,
 // 返回 CANNOT_ACT_NONE 表示可行动。
 SA::Domain::CannotActReason checkCanAct(const Combatant &c) noexcept;
 
+// ── 目标判定族(批次 A-β d2)────────────────────────────────────
+//
+// 1:1 移植原版的目标可用性判定与几个派生选择器。★ 本族是**纯判定**:
+//   读快照、不写世界、不摇 rng(唯一例外见 `targetAdjust` 的注释 —— 它也不摇)。
+//
+// ⚠️★ 原版这些函数读的是 `CHAR_*` 活实体字段(`WORKBATTLEMODE` / `ISDIE` /
+//    `ISATTACKED` / `HP`)。本仓 L3 只有快照,对应关系如下(**逐条已回源码核过**):
+//      `CHAR_CHECKINDEX(...) == FALSE`  → `!c.occupied`
+//      `CHAR_WORKBATTLEMODE == 0`       → `!c.occupied`(见下)
+//      `CHAR_ISDIE` / `HP <= 0`         → `c.dead` / `c.hp <= 0`
+//      `CHAR_ISATTACKED == FALSE`       → 无对应(见下,恒视为 TRUE)
+//      `CHARMODE_RESCUE`                → 无对应(援护入场未移植 ⇒ 恒不成立)
+//
+// ⚠️★ **三处无对应项的处置(不猜,逐条记明)**:
+//   ① `WORKBATTLEMODE == 0`(「不在战斗中」)—— 本仓 `occupied` 就是"这个槽有单位且
+//      在场上"的判据,且战斗实例只含在场者 ⇒ 与 `occupied` 同义,**合并进 `occupied`**。
+//      ⚠️ 不新开一个恒为真的 `work_mode` 字段:那会让每个消费点都读一个永远相等的比较。
+//   ② `CHAR_ISATTACKED` —— 原版由 `BATTLE_Entry` 置 1(`battle.c:1153`)、
+//      `CHAR_playerresurrect` 置 1、战死(`char_event.c:501`)与
+//      `BATTLE_S_EarthRoundHide`(`battle_event.c:5602`)置 0。它是「本回合是否参与
+//      这一场战斗」的标志,**在本仓的入口面上恒为真**(能进 `field` 的槽都已入场;
+//      复活 / 土遁两处写入者都未移植)⇒ 判定里**恒视为 TRUE**,不建模。
+//      ⚠️★ 后果:若将来移植复活或土遁,必须回来补这一位,否则守护/选目标会多算一个
+//      已离场单位 —— 在实现处就地立此记。
+//   ③ `CHARMODE_RESCUE`(援护状态入场)—— 援护入场未移植 ⇒ 恒不成立,不建模。
+//
+// ★ 位次换算 `indexToNo` / `noToIndex` 在原版是 `BATTLE_Index2No` / `BATTLE_No2Index`
+//   (`battle.c:954` / `:894`),靠**实体下标**在两半场里线性找。本仓的槽号**就是**
+//   位次(`Combatant::slot`,0..9 己方 / 10..19 敌方)⇒ 两条换算退化成同一件事:
+//   校验槽号并回读 `Combatant::slot`。保留这两个名字是为了让移植点对得上源码,
+//   ⚠️ 不是为了模拟一层本仓不存在的间接。
+//
+// 入参 `slots` 是**本回合的存活镜像**(与 `resolveOrdered` 内部的 `dead[]` 同源)。
+// ⚠️ 为什么不用 `field.at(i).dead`:同一回合里前面的攻击刚打死的单位,`field` 上
+//    还没落地(HP/死亡走局部镜像,回合末才由调用方写回)⇒ 用 `field` 会选到刚死的人。
+//    传 `nullptr` 表示"以 `field` 的 dead 为准"(供回合外调用)。
+bool targetCheck(const BattleField &field, const bool *slots, int no) noexcept;
+
+// 目标是否**已阵亡且仍在场**(原 `BATTLE_TargetCheckDead`,`battle.c:6759`)。
+// ⚠️ 与 `targetCheck` 是**互补而非取反**:本函数要求 `dead == true`,而
+//    `targetCheck` 要求 `dead == false`;两者都不认 `!occupied`。
+bool targetCheckDead(const BattleField &field, int no) noexcept;
+
+// 一侧的**存活人数**(原 `BATTLE_CountAlive`,`battle.c:4852`)。
+// ★ 宠物不计入(`CHAR_TYPEPET` 直接 continue,`:4875`)—— 数的是"人",不是"单位"。
+// ⚠️★ 判据是 `!ISDIE`,**不是** `HP > 0`:原版这里只看死亡标志。本仓 `dead` 与
+//    `hp <= 0` 在结算路径上同步维护(见 `resolveOrdered`),但**离场**(`occupied=false`)
+//    不计入 —— 与源码"Entry 还在就数"一致(捕获离场会把 occupied 置 false,
+//    那一路原版走的是 `BATTLE_Exit` 且 Entry 仍在;本仓记此差异)。
+int countAlive(const BattleField &field, int side) noexcept;
+
+// 默认攻击者(原 `BATTLE_DefaultAttacker`,`battle.c:4770`):在 `side` 一侧的
+// **可选目标**里**等概率**抽一个,返回槽号;一个都没有 ⇒ −1。
+// ★ **消耗一次 rng**(`RAND(0, cnt-1)`,`:4813`),且是**先收集后抽** ——
+//   收集顺序 = 槽号升序,候选集与 rng 消耗都与源码逐位一致。
+// ⚠️ 返回 −1 时**不摇 rng**(源码 `if(cnt == 0) return -1;` 在 `RAND` 之前)。
+int defaultAttacker(const BattleField &field, const bool *slots, int side,
+                    Random &rng) noexcept;
+
+// 目标是否与 `actor_slot` 同侧(原 `BATTLE_CheckSameSide`,`battle_event.c:7851`)。
+// ★ 返回值语义照源码:**1 = 同侧 / 0 = 不同侧或无法判定**(不是 bool 的真/假对)。
+// ⚠️★ 多目标分支(`toNo >= 20`,走 `MultiList` 展开后逐个判)在本仓**不适用**:
+//    多目标展开(`BATTLE_MultiList`)未移植,见 `multiList` 的登记。传入 `toNo >= 20`
+//    恒返回 0(源码那一支对空表也返回 0),调用方一律传单体槽号。
+int checkSameSide(const BattleField &field, int actor_slot, int to_no) noexcept;
+
+// 攻击目标的**调整**(原 `BATTLE_TargetAdjust`,`battle.c:6786`):
+// 指令里的 `toNo` 不可用 ⇒ 换成 `defaultAttacker(1 - myside)`;返回调整后的槽号。
+// ★ 原版顺带把结果**写回** `CHAR_WORKBATTLECOM2`(指令载荷)—— 那是世界写,
+//   本仓不在此做:返回值即结果,回写由调用方决定(当前 L3 不需要回写,
+//   因为目标在每次行动时重新读指令载荷)。
+// ⚠️ 目标可用时**原样返回、不摇 rng**;不可用时才走 `defaultAttacker`(摇一次)。
+int targetAdjust(const BattleField &field, const bool *slots, int actor_slot,
+                 int to_no, int myside, Random &rng) noexcept;
+
+// ── 忠犬守护(批次 A-β d2)──────────────────────────────────────
+//
+// 1:1 移植 `BATTLE_GuardianCheck`(`battle_event.c:1431-1511`)。
+// 返回**守护者的槽号**;无守护或守护者不可用 ⇒ −1。
+//
+// ★ 语义:攻击方 `attack_slot` 打向 `def_slot` 时,若 `def_slot` 被某单位守护
+//   且该守护者此刻**能接管**,则这一击**改由守护者承受**(`AttackSeq` 把 `defindex`
+//   换成守护者,`:1567-1572`)。接管后原守方毫发无伤 —— 包括**不进入回避/暴击判定**
+//   (判定读的是替换后的 defindex)。
+//
+// ★★ **七道否决(逐条照源码,顺序也照)** —— 顺序不可换:它决定哪一条先返回,
+//    而调用方只看 −1 / 非 −1 这一个结果。
+//     ① 该槽没有守护者(`Entry[i].guardian == -1`,`:1448`)⇒ −1;
+//     ② **守护者是它自己**(`Guardian == DefNo`,`:1452`,Terry 的修复)⇒ −1;
+//        ⚠️ 这条挡的是"技能对自己用"时客户端表现异常,不是逻辑必需;
+//     ③ 守护者不在场(实体下标无效,`:1456`)⇒ −1;
+//     ④ 守护者已阵亡(`CHAR_ISDIE`,`:1458`)⇒ −1;
+//     ⑤ 守护者**没有守护标志**(`CHAR_BATTLEFLG_GUARDIAN` 位,`:1460`)⇒ −1;
+//     ⑥ 守护者**自身处于不可接管的状态**(`:1465-1479`):睡眠 / 混乱 / 麻痹 / 石化 /
+//        魔障 / 晕眩 / 天罗地网 / 挑拨 / 世界末日集气 / **守护者就是攻击者本人** ⇒ −1;
+//     ⑦ 攻击者**持投掷类武器**(`BATTLE_IsThrowWepon`,`:1490`)⇒ −1
+//        (回旋镖/弓/投掷武器越过守护者)。判据 = `mods.wielding_bow ||
+//        mods.weapon == kThrow`(与 `rollCounter` 的 ranged 判据同源)。
+//
+// ⚠️★ 本仓**不建模 `CHAR_BATTLEFLG_GUARDIAN` 标志位** —— 但这不是"它恒与字段同步",
+//    而是"**在本仓已移植的写入面上**同步"(核实于 2026-09-17):
+//      · `PETSKILL_Guardian`(pet_skill.c:735)置位 —— 与写 `guardian` 字段同一函数,
+//        本仓在 `applyGuardianPetSkill` 里一次做完两件事;
+//      · `BATTLE_PreCommandSeq`(battle.c:3599)清位 —— 与清 `guardian` 字段同循环,
+//        本仓在同一处清;
+//      · ⚠️★ **第三个写入者不在这个同步面上**:宠物 AI 的 `PETAI_MODE_RANDOMACT`
+//        (`battle.c:8480`)只清标志、**不动 `guardian` 字段**。那一支属宠物 AI
+//        (`BATTLE_ai_all`),本仓未移植(叫出的宠无指令即不动,见 WorldTickTest
+//        的 fixture 注记)⇒ 在当前可观察面上两者仍等价。
+//        ⚠️ 若将来移植宠物 AI,必须回来把这一位补上 —— 否则"AI 随机行动过的守护者"
+//        会继续接管,而原版此时已经不接管了。在实现处就地立此记。
+//
+// ★ 第 ⑥ 条的**状态判据用的是"计数 > 0"而不是 `Combatant::status` 槽**:
+//   原版读的是 `WORKSLEEP`/`WORKCONFUSION`/... 这一族**独立 work 计数**,而本仓
+//    把状态收敛成单槽 `status` + `status_turns`(L4.1,见 Status.h 卷首的取舍)。
+//    ⇒ 判据 = `status` 命中该状态**且** `status_turns > 0`(与 `isAsleep` 同款)。
+//    ⚠️ 天罗地网 / 挑拨 / 世界末日集气在单槽模型下分别是 `ENTWINE`(缠绕)/
+//       `INSTIGATE` / `BARRIER` 的对应位;`DOOMTIME` 无对应槽 ⇒ **不建模**
+//       (职业追加技未移植,恒不成立)。
+//
+// ⚠️★ 第 ④ 条(守护者已阵亡)读的是**本回合的存活镜像** `slots`,不是快照的 `dead`:
+//    同回合里先被打死的守护者**不能再接管**(快照上还没落地)。传 nullptr 才回落快照。
+int guardianCheck(const BattleField &field, const bool *slots, int attack_slot,
+                  int def_slot) noexcept;
+
+// ── 多目标展开:**有意不移植**,登记于此(批次 A-β d2)────────────
+//
+// 原 `BATTLE_MultiList`(`battle.c:265-560`)在 `_ATTACK_MAGIC` **开**时的完整分支含
+// 三族能力:① 单体(0..19)② **整侧/全体**(`TARGET_SIDE_0/1`、`TARGET_ALL`)
+// ③ **前后排**(`TARGET_SIDE_*_B_ROW/F_ROW`、`TARGER_THROUGH`),外加
+// `SortLoc` 的位次排序与"目标不可用则随机改打活人"的 `while` 重摇。
+//
+// ⚠️★ **本批不移植,理由是可观察面而非工作量**:多目标展开的**唯一消费者**是
+//    多目标指令与咒术(攻击魔法/职业魔法/宠技的 `全` 系),它们**全部**未移植
+//    (S19 魔法/精灵术在覆盖台账里是 `⬜`;`__ATTACK_MAGIC` 咒术管线裁定见 roadmap A-ε)。
+//    ⇒ 现在移植只有"代码在、无人调用"一种结果 —— 正是欠债 20/25 那族
+//      「地基绿而运行时不接,ctest 一样全过」的形态。
+// ★ 本仓当前对单体目标的做法是**内联**在 `resolveOrdered` 里的一行
+//   (`target_slot` 范围 + `occupied`/`dead` 检查),它**等价于** `MultiList` 在
+//   `toNo ∈ [0,19]` 时的净核(源码 `:239-263`:`ToList[0]=toNo; ToList[1]=-1; cnt=1`),
+//   即"恒产单体表"。**本批把这个等价关系显式化**为 `targetCheck` 供各处复用,
+//   并把上面那段"哪些分支没移植、为什么"记在此处。
+// ⚠️★ **目标不可用时的 `while((toNo = nLifeArea[rand()%10]) == -1);` 有意不复刻**
+//    (`battle.c:257`):它**消耗不定次数 rng**,且全死时原版 `return -1` 而调用方
+//    `BATTLE_MultiRecovery` 不检查返回值、照样遍历未初始化的 `ToList`(原版 UB)。
+//    ⇒ 本仓"目标不可用即什么都不发生、不摇 rng"(DR 已登记为已知行为差,
+//    见 11-decision-register.md 的 MultiList 条)。照抄它会让 rng 序列不可回放。
+
 // ── 回合结算 ──────────────────────────────────────────────────
 //
 // `out` 由调用方提供并被完全覆写。

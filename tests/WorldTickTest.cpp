@@ -5544,3 +5544,258 @@ TEST_CASE("宠技B2★:模板带技的敌人仍只普攻(敌人宠技属后续�
 	CHECK(fld->at(0).hp < 1000); // 敌人出手了(普攻)
 	CHECK(fld->at(SA::Rules::kSideOffset).hp == fld->at(SA::Rules::kSideOffset).max_hp);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  A-β d2 —— 忠犬守护的**世界侧全链**(指令 → 链接 → 接管 → 落伤)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ★★ **本节存在的理由**:上面 RulesBattleTest 的守护用例是**直接注入 `guardian` 字段**
+//    的 —— 它们验的是 L3 的接管逻辑,而**看不见 World 侧有没有把链接建起来**。
+//    第一版 `applyGuardianPetSkill` 恰好就在那一层错了(把主人槽当宠物槽反解 ⇒
+//    恒越界、从不建链),而当时的 L3 用例**全绿**。这正是 `13-d8-coverage.md` §1.3
+//    规则 1 点名的那族「地基绿而运行时不接」⇒ 本节把那条缝钉死。
+//
+// 链路(逐段都有断言面):
+//   ① 主人发 PET_SKILL(忠犬)指令 ⇒ **指令接收时**建立链接(原版 BattleCommandDispach
+//      → PETSKILL_Guardian;清除要等下一回合 PreCommandSeq)
+//   ② 敌方的普攻打向主人 ⇒ L3 的 `guardianCheck` 接管 ⇒ 伤害落在**宠物**身上
+//   ③ 主人毫发无伤
+
+namespace
+{
+
+// 造一只带指定宠技槽的宠物并叫出(同 `giveSkillPetAndCallOut`,但这里要在
+// **开战前**布好场,所以单独写一份带血量参数的)。
+// ⚠️ 宠物的 hp 决定"能不能扛住一击"—— 守护用例要让宠扛得住才看得见差别。
+void giveGuardianPet(Fixture &f, SA::Net::ConnectionId id, BattleId battle,
+                     std::int32_t pet_hp, std::int32_t guardian_skill_id)
+{
+	SA::Model::Pet pet{};
+	pet.hp = pet_hp;
+	pet.vital = pet.str = pet.tough = pet.dex = 10;
+	pet.pet_skills[0] = guardian_skill_id;
+	REQUIRE(pet.name.assign("忠犬"));
+	const int pet_slot = f.world.givePetToPlayer(id, pet);
+	REQUIRE(pet_slot >= 0);
+
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = f.world.battleField(battle)->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::PET_OUT;
+	cmd.command.pet_out.pet_slot = static_cast<std::uint32_t>(pet_slot);
+	f.world.onBattleCommand(id, cmd);
+	f.clock.advance(2000);
+	f.world.tick();
+	REQUIRE(f.world.playerDefaultPet(id) == pet_slot);
+}
+
+// 一场「玩家 0 号 vs 敌人 10 号」且敌人血厚、攻击力可控的对局。
+// ★ 敌人 quick 给 0、玩家 quick 给满 ⇒ 玩家**恒先手**(避免回合内时序掷硬币)。
+BattleId startGuardianBattle(Fixture &f, SA::Net::ConnectionId id,
+                             std::int32_t foe_hp, std::int32_t foe_attack)
+{
+	SA::Rules::BattleField pf{};
+	SA::Rules::Combatant &me = pf.at(0);
+	me.occupied = true;
+	me.kind = SA::Rules::CombatantKind::kPlayer;
+	me.slot = 0;
+	me.level = 20;
+	me.hp = me.max_hp = 1000000; // 主人血厚:验的是"有没有掉血",不是"会不会死"
+	me.attack = 1;               // 主人这一回合发宠技、不普攻
+	me.str = 100;
+	me.tough = 100;
+	me.defense = 100;
+	me.quick = 0;
+	me.fix_dex = 0;
+	// ★★ 先手靠 `mods.sequence`(装备先攻的投影位),**不能**靠抬高 `quick`:
+	//    `quick` 同时是回避公式的 `df_dex` 输入(rollDodge)→ 抬高它会让主人吃满
+	//    75% 回避硬上限;而**原目标闪掉的一击守护者不接手**(源码序:闪避在接管之前)
+	//    ⇒ 用例会退化成"75% 概率绿"的掷硬币。
+	me.mods.sequence = 100000;
+	// ★★ 主人必中(不闪):同一条理由 —— 主人闪掉时宠物根本不掉血,
+	//    "谁掉了血"这条断言就不再确定。
+	me.mods.no_duck = true;
+	me.mods.unarmed = false;
+	me.mods.attack_num_min = 1;
+	me.mods.attack_num_max = 1;
+
+	SA::Rules::Combatant &foe = pf.at(SA::Rules::kSideOffset);
+	foe.occupied = true;
+	foe.kind = SA::Rules::CombatantKind::kEnemy;
+	foe.slot = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+	foe.level = 20;
+	foe.hp = foe.max_hp = foe_hp;
+	foe.attack = foe_attack;
+	foe.str = 100;
+	foe.tough = 100;
+	foe.defense = 100;
+	foe.quick = 0;
+	foe.fix_dex = 0;
+	foe.mods.unarmed = false;
+	foe.mods.attack_num_min = 1;
+	foe.mods.attack_num_max = 1;
+
+	const BattleId battle = f.world.startBattle(pf);
+	REQUIRE(f.world.joinBattle(battle, id, 0));
+	return battle;
+}
+
+} // namespace
+
+TEST_CASE("A-β d2★★:世界侧全链 —— 忠犬指令 ⇒ 敌人的普攻改落宠物身上")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	// 敌人血厚到打不死(它只是"沙包"),攻击力给足以便一击可见。
+	const BattleId battle = startGuardianBattle(f, id, /*foe_hp=*/1000000, /*foe_attack=*/500);
+	// 宠血 2000:够扛一击(敌方攻 500 ⇒ 落伤数百),但**远低于**主人那 100 万
+	//   ⇒ "谁掉了血"在两侧都清晰可读。
+	giveGuardianPet(f, id, battle, /*pet_hp=*/2000, /*guardian_skill_id=*/20);
+
+	// 注入忠犬行(petskill2.txt 第 9 行:id 20,`攻%-20 COM:攻击` ⇒ 守护主人)。
+	f.world.loadPetSkillEffects({
+	    {/*skill_id=*/20, /*renzoku_hits=*/0, /*damage_mult_percent=*/100,
+	     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/-20, /*defense_percent=*/0,
+	     /*charge_turns=*/0, /*charge_attack_percent=*/0,
+	     /*apply_status=*/0, /*status_turns=*/0,
+	     /*magic_status=*/0, /*magic_turns=*/0, /*magic_nums=*/0,
+	     /*guardian_mode=*/1},
+	});
+
+	const SA::Rules::BattleField *before = f.world.battleField(battle);
+	REQUIRE(before != nullptr);
+	const std::int32_t owner_hp0 = before->at(0).hp;
+	const std::int32_t pet_hp0 = before->at(SA::Rules::kBattlePlayerMax).hp;
+	REQUIRE(pet_hp0 == 2000);
+	REQUIRE(before->at(SA::Rules::kBattlePlayerMax).occupied);
+
+	// ① 主人发忠犬指令。★ 链接在**指令接收时**就建立(不在行动位)。
+	{
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = before->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::PET_SKILL;
+		cmd.command.pet_skill.skill_id = 20;
+		cmd.command.pet_skill.target = SA::Rules::kSideOffset;
+		f.world.onBattleCommand(id, cmd);
+	}
+
+	// ★★ 关键断言:指令一收下,主人槽上就已经有守护链接了(宠物槽号 = 0 + 5 = 5)。
+	//    第一版的 bug 在这里就会红:那时 applyGuardianPetSkill 在行动位才跑、且
+	//    槽号反解错 ⇒ `guardian` 恒为 −1。
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		CHECK(fld->at(0).guardian == SA::Rules::kBattlePlayerMax);
+	}
+
+	f.clock.advance(2000);
+	f.world.tick();
+
+	// ② 敌方普攻打向主人 ⇒ 被宠物接管 ⇒ 主人**一点没掉**、宠物掉血。
+	const SA::Rules::BattleField *after = f.world.battleField(battle);
+	REQUIRE(after != nullptr);
+	CHECK(after->at(0).hp == owner_hp0);
+	CHECK(after->at(SA::Rules::kBattlePlayerMax).hp < pet_hp0);
+}
+
+TEST_CASE("A-β d2★★:守护链接每回合清空 —— 不重发指令则下回合不再守护")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	const BattleId battle = startGuardianBattle(f, id, /*foe_hp=*/1000000, /*foe_attack=*/500);
+	giveGuardianPet(f, id, battle, /*pet_hp=*/100000, /*guardian_skill_id=*/20);
+	f.world.loadPetSkillEffects({
+	    {/*skill_id=*/20, /*renzoku_hits=*/0, /*damage_mult_percent=*/100,
+	     /*duck_bonus=*/0, /*guard_break=*/0, /*attack_percent=*/-20, /*defense_percent=*/0,
+	     /*charge_turns=*/0, /*charge_attack_percent=*/0,
+	     /*apply_status=*/0, /*status_turns=*/0,
+	     /*magic_status=*/0, /*magic_turns=*/0, /*magic_nums=*/0,
+	     /*guardian_mode=*/1},
+	});
+
+	// 第一回合:发忠犬。★ 链接在**指令接收时**建立 ⇒ 推进回合**之前**就能断言。
+	//   ⚠️ 不能先 tick 再看:回合末正是清空点(下一回合的 PreCommandSeq 相位),
+	//      拿那之后的快照去验"建链"必然读到 −1。
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		REQUIRE(fld != nullptr);
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = fld->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::PET_SKILL;
+		cmd.command.pet_skill.skill_id = 20;
+		cmd.command.pet_skill.target = SA::Rules::kSideOffset;
+		f.world.onBattleCommand(id, cmd);
+		const SA::Rules::BattleField *armed = f.world.battleField(battle);
+		REQUIRE(armed != nullptr);
+		CHECK(armed->at(0).guardian == SA::Rules::kBattlePlayerMax);
+	}
+	f.clock.advance(2000);
+	f.world.tick();
+
+	// ★★ 回合已结束 ⇒ 链接**必须已清空**(原版清空点 = 下一回合的
+	//    `BATTLE_PreCommandSeq`,battle.c:3596-3598)。这一条钉的是"守护只持续
+	//    一个指令回合",不是"能一直挂着"。
+	{
+		const SA::Rules::BattleField *cleared = f.world.battleField(battle);
+		REQUIRE(cleared != nullptr);
+		CHECK(cleared->at(0).guardian == -1);
+	}
+
+	// 第二回合:发 WAIT(不重发忠犬)⇒ 没有守护者 ⇒ 主人**自己**吃伤。
+	{
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = f.world.battleField(battle)->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+		f.world.onBattleCommand(id, cmd);
+	}
+	f.clock.advance(2000);
+	f.world.tick();
+
+	const SA::Rules::BattleField *after = f.world.battleField(battle);
+	REQUIRE(after != nullptr);
+	CHECK(after->at(0).hp < after->at(0).max_hp);
+}
+
+TEST_CASE("A-β d2★:表外宠技 id 不建立守护链接(表外 ⇒ 整次跳过)")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	const BattleId battle = startGuardianBattle(f, id, /*foe_hp=*/1000000, /*foe_attack=*/0);
+	// ★ 宠物七槽里放的是 20,但**效果表不注入那一行** ⇒ 表外。
+	giveGuardianPet(f, id, battle, /*pet_hp=*/2000, /*guardian_skill_id=*/20);
+
+	SA::Rules::BattleField *fld_mut = nullptr;
+	(void)fld_mut;
+	{
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = f.world.battleField(battle)->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::PET_SKILL;
+		cmd.command.pet_skill.skill_id = 20;
+		cmd.command.pet_skill.target = SA::Rules::kSideOffset;
+		f.world.onBattleCommand(id, cmd);
+	}
+
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	// 空表 ⇒ findPetSkillEffect 返回 nullptr ⇒ 不建链。
+	CHECK(fld->at(0).guardian == -1);
+}

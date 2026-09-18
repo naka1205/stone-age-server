@@ -21,7 +21,7 @@
 | [`15-status.md`](15-status.md) | L4.1 状态异常系统 | 1 |
 | [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
 | [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
-| [`90-push-windows.md`](90-push-windows.md) | 九次 `shared-v0.x.0` 推送窗口的闭合核实 | 9 |
+| [`90-push-windows.md`](90-push-windows.md) | 十次 `shared-v0.x.0` 推送窗口的闭合核实 | 10 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
 | **合计** | | **63** |
 
@@ -98,6 +98,8 @@
 | §9.0.66 | 推送窗口执行记录 —— shared-v0.30.0(批次 B3) | 2026-09-15 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.67 | 批次 A-α —— 战果总装:AddProfit 对账 + expForKill 纯函数化 + ISDIE 门 finished 落点钉 | 2026-09-16 | [`12-encounter.md`](12-encounter.md) |
 | §9.0.68 | 批次 A-β d1 —— AttackSeq 尾补摇忠实重排 + GBREAK 清零回归包装层 + 尾摇钉 | 2026-09-16 | [`10-battle-core.md`](10-battle-core.md) |
+| §9.0.69 | 批次 A-β d2 —— 目标判定族 + 忠犬守护全链(MultiList 有意划外;RV-5 负结果登记) | 2026-09-17 | [`10-battle-core.md`](10-battle-core.md) |
+| §9.0.69b | 推送窗口执行记录 —— `shared-v0.31.0`(批次 A-β d1;补记) | 2026-09-16 | [`90-push-windows.md`](90-push-windows.md) |
 
 ---
 

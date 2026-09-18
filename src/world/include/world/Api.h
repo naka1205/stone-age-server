@@ -701,6 +701,26 @@ struct PetSkillEffect
 	std::int32_t magic_status = 0;
 	std::int32_t magic_turns = 0; // option 第 2 列(MAGICSUPERWALL 的持续回合)
 	std::int32_t magic_nums = 0;  // option 第 3 列(OTHERSTATUSNUMS,防御加成基数)
+	// ── 忠犬守护(批次 A-β d2;`PETSKILL_Guardian`,pet_skill.c:699-770)──
+	//
+	// ★ option 形如 `攻%-20  COM:攻击`(petskill2.txt 第 9 行,id 20)。两半:
+	//   ① `攻%-20` —— 守护者**自身**的有效攻击替换为 `FIXSTR + FIXSTR×(-20)%`
+	//      (pet_skill.c:715-721,与 POWERBALANCE 同款替换式)⇒ 复用 `attack_percent` 列;
+	//   ② 链接建立 —— 把**被守护者**的 `Entry.guardian` 写成守护者的槽号
+	//      (pet_skill.c:744-766),被守护者由 option 里的 `COM:` 关键字决定:
+	//        · `COM:` 后是"防御" ⇒ **指令目标槽**(`toNo`);
+	//        · 其他(如 `COM:攻击`)⇒ **主人**(`ownerpos = pos - 5 - side*SIDE_OFFSET`)。
+	//      ⚠️★ 数据里**只有 `COM:攻击` 一种**(全表仅第 9 行带 `COM:`,值即"攻击")
+	//      ⇒ 投产数据走"守护主人"那一支;`COM:防御` 分支保留但不被任何行触发。
+	// ★ 0 = 非守护技。1 = 守护主人(`COM:` 非"防御");2 = 守护指令目标(`COM:防御`)。
+	//   ⚠️ 用 1/2 而不是 bool:两条分支的落点不同(主人槽 vs 指令目标槽),
+	//      且**都**要置守护者的 `CHAR_BATTLEFLG_GUARDIAN`(本仓不建模该位,见 Battle.h)。
+	// ⚠️★ **`COM:防御` 那一支在原版还会把宠物自己的 COM1 改写成 `BATTLE_COM_GUARD`**
+	//    (pet_skill.c:746,即"原地防御"而非攻击)。那条**指令改写**本仓不复刻
+	//    (PET_SKILL 指令不就地改写指令种类)⇒ 该分支在本仓只建立链接、不改行动方式。
+	//    投产数据不触发该分支(见上),故无可观察差异;若将来导入带 `COM:防御` 的行,
+	//    这里会变成一处真实差异 —— 在实现处立此记。
+	std::int32_t guardian_mode = 0;
 };
 
 class World final : public SA::Net::TransportEvents,
