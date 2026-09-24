@@ -936,3 +936,302 @@ TEST_CASE("W.5:明雷开战后刷怪点补齐世界敌人(维持 count;精确复
 	CHECK(f.world.worldEnemyCount() == 1);
 	// ⚠️ 立即补齐(非死后 REVIVALTIME 延迟):刷怪点维持 count 只;精确复活时机随状态系统划出。
 }
+
+// ══ 批次 W.6: WARP 传送点(NPC 最小切片其一,移植 npc_warp.c)══════════════════
+
+TEST_CASE("W.6:踩上Warp点瞬移到目标坐标并清空后续步数")
+{
+	MoveFixture f;
+	const auto id = f.spawn();
+	const auto p0 = f.world.playerPos(id);
+	REQUIRE(p0.x == 32);
+	REQUIRE(p0.y == 32);
+
+	// 注入 Warp 点: (33, 32) -> (45, 45)
+	std::vector<WarpPoint> warps;
+	WarpPoint wp{};
+	wp.src_floor = 0;
+	wp.src_x = 33;
+	wp.src_y = 32;
+	wp.dst_floor = 0;
+	wp.dst_x = 45;
+	wp.dst_y = 45;
+	warps.push_back(wp);
+	f.world.loadWarpPoints(warps);
+	CHECK(f.world.warpPointCount() == 1);
+
+	// 发送三步向东: 32 -> 33 (触发传送) -> 剩余两步应被清空
+	f.sendWalk(id, "ccc");
+	f.world.tick();
+
+	const auto p1 = f.world.playerPos(id);
+	CHECK(p1.x == 45);
+	CHECK(p1.y == 45);
+
+	// 步数被清空 ⇒ 时钟推进后再次 tick 仍留在 (45, 45)
+	f.clock.advance(250);
+	f.world.tick();
+	const auto p2 = f.world.playerPos(id);
+	CHECK(p2.x == 45);
+	CHECK(p2.y == 45);
+
+	// 客户端收到自己坐标同步的 CharMove
+	VisMirror m;
+	m.feed(f.transport.sent(id));
+	bool got_self_move = false;
+	for (const auto &mv : m.move_msgs)
+	{
+		if (mv.entity_id == id && mv.x == 45 && mv.y == 45)
+			got_self_move = true;
+	}
+	CHECK(got_self_move);
+}
+
+TEST_CASE("W.6:Warp传送双向视野增删(旧视野Disappear,新视野Appear)")
+{
+	MoveFixture f;
+	const auto a = f.spawn(); // A 出生在 (32, 32)
+	const auto b = f.spawn(); // B 出生在 (32, 32)，与 A 互在视野
+	const auto c = f.spawn(); // C 出生在 (32, 32)
+	// 将 C 手动移到 (55, 55)，远离 A 和 B
+	f.sendWalk(c, std::string(23, 'c').c_str()); // 移远
+	for (int i = 0; i < 25; ++i)
+	{
+		f.world.tick();
+		f.clock.advance(250);
+	}
+	f.sendWalk(c, std::string(23, 'e').c_str()); // 移南到 y=55
+	for (int i = 0; i < 25; ++i)
+	{
+		f.world.tick();
+		f.clock.advance(250);
+	}
+	REQUIRE(f.world.playerPos(c).x == 55);
+	REQUIRE(f.world.playerPos(c).y == 55);
+
+	// 注入 Warp 点: (33, 32) -> (54, 55)
+	WarpPoint wp{};
+	wp.src_floor = 0;
+	wp.src_x = 33;
+	wp.src_y = 32;
+	wp.dst_floor = 0;
+	wp.dst_x = 54;
+	wp.dst_y = 55;
+	f.world.loadWarpPoints({wp});
+
+	// 清理当前累积的 sent 缓冲区
+	VisMirror ma, mb, mc;
+	f.world.tick();
+	ma.feed(f.transport.sent(a));
+	mb.feed(f.transport.sent(b));
+	mc.feed(f.transport.sent(c));
+	ma.disappears.clear();
+	ma.appears.clear();
+	mb.disappears.clear();
+	mb.appears.clear();
+	mc.disappears.clear();
+	mc.appears.clear();
+
+	// A 踩入 (33, 32) 触发传送到 (54, 55)
+	f.sendWalk(a, "c");
+	f.world.tick();
+
+	REQUIRE(f.world.playerPos(a).x == 54);
+	REQUIRE(f.world.playerPos(a).y == 55);
+
+	ma.feed(f.transport.sent(a));
+	mb.feed(f.transport.sent(b));
+	mc.feed(f.transport.sent(c));
+
+	// B 看到 A 离开 (Disappear)
+	CHECK(countId(mb.disappears, a) >= 1);
+	// A 看到 B 离开 (Disappear)
+	CHECK(countId(ma.disappears, b) >= 1);
+
+	// C 看到 A 出现 (Appear)
+	CHECK(countId(mc.appears, a) >= 1);
+	// A 看到 C 出现 (Appear)
+	CHECK(countId(ma.appears, c) >= 1);
+}
+
+TEST_CASE("W.6:目标点不可通行或越界时忽略传送(原版MAP_IsValidCoordinate)")
+{
+	MoveFixture f;
+	const auto id = f.spawn();
+	// 目标坐标越界 (-5, 100)
+	WarpPoint wp{};
+	wp.src_floor = 0;
+	wp.src_x = 33;
+	wp.src_y = 32;
+	wp.dst_floor = 0;
+	wp.dst_x = -5;
+	wp.dst_y = 100;
+	f.world.loadWarpPoints({wp});
+
+	f.sendWalk(id, "c");
+	f.world.tick();
+
+	// 目标点非法 ⇒ 忽略传送，正常走到 (33, 32)
+	const auto p = f.world.playerPos(id);
+	CHECK(p.x == 33);
+	CHECK(p.y == 32);
+}
+
+// ══ 批次 W.7: NPC 实体框架与 Healer 恢复员(移植 npc_healer.c)══════════════
+
+TEST_CASE("W.7:撞NPC实体退回原格(CHAR_ISOVERED=0 阻挡不可穿透)")
+{
+	MoveFixture f;
+	const auto id = f.spawn();
+	NpcEntity npc{};
+	npc.id = 1001;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.image = 100200;
+	f.world.loadNpcEntities({npc});
+	CHECK(f.world.npcCount() == 1);
+
+	// 玩家在 (32, 32)，试图走向东邻 NPC 格 (33, 32)
+	f.sendWalk(id, "c");
+	f.world.tick();
+
+	// 撞 NPC 退回 ⇒ 坐标仍为 (32, 32)，朝向变为 2(东)
+	const auto p = f.world.playerPos(id);
+	CHECK(p.x == 32);
+	CHECK(p.y == 32);
+	CHECK(p.dir == 2);
+}
+
+TEST_CASE("W.7:进图与移动后收到NPC实体的CharAppear")
+{
+	MoveFixture f;
+	NpcEntity npc{};
+	npc.id = 8888;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.image = 100300;
+	f.world.loadNpcEntities({npc});
+
+	const auto id = f.spawn();
+	f.world.tick();
+
+	VisMirror m;
+	m.feed(f.transport.sent(id));
+
+	bool saw_npc = false;
+	for (const auto &ap : m.appear_msgs)
+	{
+		if (ap.entity_id == 8888 &&
+		    ap.entity_type == static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC) &&
+		    ap.image == 100300)
+		{
+			saw_npc = true;
+		}
+	}
+	CHECK(saw_npc);
+}
+
+TEST_CASE("W.7:面向Healer免费恢复自身与宠物满HP满MP")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f); // 带完整会话
+
+	NpcEntity npc{};
+	npc.id = 2001;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kHealer;
+	npc.cost = 0; // 免费
+	f.world.loadNpcEntities({npc});
+
+	// 设置玩家属性: vital=1000, str=200, tough=200, dex=200 ⇒ max_hp = 46
+	REQUIRE(f.world.setPlayerStatsForTest(id, /*hp=*/10, /*mp=*/5, /*vital=*/1000,
+	                                      /*str=*/200, /*tough=*/200, /*dex=*/200));
+	CHECK(f.world.playerHp(id) == 10);
+	CHECK(f.world.playerMp(id) == 5);
+
+	// 给玩家一只宠物: vital=500, str=100, tough=100, dex=100 ⇒ max_hp = 23
+	SA::Model::Pet pet{};
+	pet.vital = 500;
+	pet.str = 100;
+	pet.tough = 100;
+	pet.dex = 100;
+	pet.hp = 2;
+	pet.mp = 3;
+	pet.max_mp = 60;
+	const int slot = f.world.givePetToPlayer(id, pet);
+	REQUIRE(slot >= 0);
+	REQUIRE(f.world.playerPetAt(id, slot)->hp == 2);
+	REQUIRE(f.world.playerPetAt(id, slot)->mp == 3);
+
+	// 玩家面向东(dir=2, 面前格为 33, 32 上的 Healer)发起 EV
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 101;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	// 回执 ok == true
+	CHECK(eventResultOk(f.transport.sent(id), 101));
+
+	// 自身满血满蓝
+	CHECK(f.world.playerHp(id) == 46);
+	CHECK(f.world.playerMp(id) == 100);
+
+	// 宠物满血满蓝
+	CHECK(f.world.playerPetAt(id, slot)->hp == 23);
+	CHECK(f.world.playerPetAt(id, slot)->mp == 60);
+}
+
+TEST_CASE("W.7:面向Healer收费扣除石币(经GoldLedger),余额不足拒绝")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	NpcEntity npc{};
+	npc.id = 2002;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kHealer;
+	npc.cost = 50; // 收费 50 石币
+	f.world.loadNpcEntities({npc});
+
+	// 玩家受伤且无石币
+	REQUIRE(f.world.setPlayerStatsForTest(id, /*hp=*/10, /*mp=*/5, /*vital=*/1000,
+	                                      /*str=*/200, /*tough=*/200, /*dex=*/200));
+	REQUIRE(f.world.playerGold(id) == 0);
+
+	// 余额不足发起 EV ⇒ 拒绝, ok == false
+	SA::Domain::EventRequest ev1{};
+	ev1.dir = 2;
+	ev1.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev1.seqno = 201;
+	f.world.onEvent(id, ev1);
+	f.world.tick();
+
+	CHECK_FALSE(eventResultOk(f.transport.sent(id), 201));
+	CHECK(f.world.playerHp(id) == 10); // 未恢复
+	CHECK(f.world.playerGold(id) == 0);
+
+	// 经 GoldLedger 充入 100 石币
+	REQUIRE(f.world.giveGoldToPlayerForTest(id, 100));
+	CHECK(f.world.playerGold(id) == 100);
+
+	// 再次发起 EV ⇒ 成功扣除 50 石币并满恢复
+	SA::Domain::EventRequest ev2{};
+	ev2.dir = 2;
+	ev2.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev2.seqno = 202;
+	f.world.onEvent(id, ev2);
+	f.world.tick();
+
+	CHECK(eventResultOk(f.transport.sent(id), 202));
+	CHECK(f.world.playerGold(id) == 50); // 扣 50
+	CHECK(f.world.playerHp(id) == 46);   // 满血
+	CHECK(f.world.playerMp(id) == 100);  // 满蓝
+}

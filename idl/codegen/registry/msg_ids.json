@@ -158,6 +158,7 @@
     },
     "sa.domain.EntityType": {
       "ENTITY_ENEMY": 1,
+      "ENTITY_NPC": 2,
       "ENTITY_PLAYER": 0
     },
     "sa.domain.MenuFlag": {

@@ -15,6 +15,7 @@ namespace Domain {
 enum class EntityType : std::uint32_t {
   ENTITY_PLAYER = 0,
   ENTITY_ENEMY = 1,
+  ENTITY_NPC = 2,
 };
 
 struct WalkRequest {

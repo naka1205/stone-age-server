@@ -39,10 +39,11 @@ message WalkRequest {
 //   ⚠️ 视野**方向不再对称**(批次 W.3 起):玩家 ⟺ 玩家仍对称(CHAR_sendCToArroundCharacter:4100),
 //      但**敌人无会话**、不接收下行 ⇒ 敌人 appear/move/disappear 是**单向发给周围玩家**。
 
-// 对象族(批次 W.3)。★ 值与将来 kNpc / kPet 的扩展留出空间,现只用到前两个。
+// 对象族(批次 W.3 / W.7)。★ 现支持玩家、敌人与 NPC。
 enum EntityType {
   ENTITY_PLAYER = 0; // 玩家(entity_id = 会话 ConnectionId)
   ENTITY_ENEMY  = 1; // 世界态敌人(entity_id = 敌人 EntityHandle 编码)
+  ENTITY_NPC    = 2; // 世界态 NPC(entity_id = NPC id)
 }
 
 // 角色进入视野(原版 lssproto_C_send,char_walk.c:1019 / char.c:4151)。

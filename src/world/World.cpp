@@ -2113,6 +2113,35 @@ struct World::Impl : GoldAuditSink
 	//     不摇 rng),现有用例不受影响。由 `loadPetSkillEffects` 注入。按 skill_id 线性查。
 	std::vector<PetSkillEffect> pet_skill_effects{};
 
+	// ── WARP 传送点表(批次 W.6)─────────────────────────────────────────
+	std::vector<WarpPoint> warp_points{};
+	const WarpPoint *findWarpPoint(std::int32_t floor, std::int32_t x,
+	                               std::int32_t y) const noexcept
+	{
+		for (const auto &wp : warp_points)
+		{
+			if (wp.src_floor == floor && wp.src_x == x && wp.src_y == y)
+				return &wp;
+		}
+		return nullptr;
+	}
+
+	// ── 世界 NPC 实体(批次 W.7)─────────────────────────────────────────
+	std::vector<NpcEntity> npc_entities{};
+	std::size_t npcAt(std::int32_t floor, std::int32_t x,
+	                  std::int32_t y) const noexcept
+	{
+		for (std::size_t i = 0; i < npc_entities.size(); ++i)
+		{
+			if (npc_entities[i].floor == floor && npc_entities[i].x == x &&
+			    npc_entities[i].y == y)
+				return i;
+		}
+		return npc_entities.size();
+	}
+	void refreshNpcView(SA::Net::ConnectionId viewer, const SA::Model::Player &p,
+	                    std::int32_t ox, std::int32_t oy);
+
 	// ── 世界刷怪点与世界态敌人(批次 W.2 / W.3)──────────────────────────────
 	//   spawn_points:注入的刷怪点(loadSpawnPoints,默认空 ⇒ 世界无常驻怪);
 	//   world_enemies:当前在地图上的敌人。★ 与战斗态敌人**共用 `enemies` 池但分开跟踪** ——
@@ -2500,6 +2529,40 @@ void World::Impl::refreshEnemyView(SA::Net::ConnectionId viewer, const SA::Model
 			SA::Domain::CharDisappear dis{};
 			dis.entity_id = eid;
 			dis.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY);
+			sendTo(viewer, dis);
+		}
+	}
+}
+
+// 玩家从 (ox,oy) 走到 (p.x,p.y) 后,补发世界 NPC 的 appear / disappear(批次 W.7)。
+void World::Impl::refreshNpcView(SA::Net::ConnectionId viewer, const SA::Model::Player &p,
+                                 std::int32_t ox, std::int32_t oy)
+{
+	for (const NpcEntity &npc : npc_entities)
+	{
+		if (npc.floor != p.floor)
+			continue;
+		const bool saw = inSee(ox, oy, npc.x, npc.y);
+		const bool sees = inSee(p.x, p.y, npc.x, npc.y);
+		if (sees == saw)
+			continue;
+		if (sees)
+		{
+			SA::Domain::CharAppear a{};
+			a.entity_id = npc.id;
+			a.floor = npc.floor;
+			a.x = npc.x;
+			a.y = npc.y;
+			a.dir = static_cast<std::uint32_t>(npc.dir);
+			a.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+			a.image = npc.image;
+			sendTo(viewer, a);
+		}
+		else
+		{
+			SA::Domain::CharDisappear dis{};
+			dis.entity_id = npc.id;
+			dis.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
 			sendTo(viewer, dis);
 		}
 	}
@@ -3087,8 +3150,75 @@ void World::tick()
 			moved = false;
 		}
 
-		// 里程碑②:位置变了 ⇒ 更新 olink(旧格摘、新格挂)+ 视野广播(扫格 diff)。
+		// ── W.7:撞 NPC 实体退回(CHAR_ISOVERED=0 阻挡不可穿透)────────────
+		if (moved && s.npcAt(p->floor, p->x, p->y) != s.npc_entities.size())
+		{
+			p->x = ox;
+			p->y = oy;
+			moved = false;
+		}
+
+		// ── W.6: WARP 传送点触发(移植 npc_warp.c / char.c:4594-4675)────────────
+		//   玩家走入新格(moved)若命中 WarpPoint,且目标格合法可通行,则触发瞬移:
+		//   清空剩余路径串 + 旧视野 Disappear + 瞬移新坐标 + 新视野 Appear + 自身 CharMove 同步。
+		bool warped = false;
 		if (moved)
+		{
+			const WarpPoint *wp = s.findWarpPoint(p->floor, p->x, p->y);
+			if (wp != nullptr && s.map.inBounds(wp->dst_x, wp->dst_y) &&
+			    mapWalkable(s.map, s.map_attr, wp->dst_x, wp->dst_y))
+			{
+				warped = true;
+				c.walk_seq.clear(); // 清空剩余未走路径串(CHAR_WORKWALKARRAY, char.c:4671)
+
+				// 1. 从旧格 olink 移除(玩家刚从 ox, oy 走来)
+				if (s.map.inBounds(ox, oy))
+				{
+					auto &oldcell = s.olink[s.map.index(ox, oy)];
+					oldcell.erase(std::remove(oldcell.begin(), oldcell.end(), kv.first),
+					              oldcell.end());
+				}
+
+				// 2. 旧视野广播 Disappear(旧视野内其他玩家看到 kv.first 消失, kv.first 看到旧视野玩家消失)
+				const auto old_vis = s.collectVisible(ox, oy, kv.first);
+				for (const SA::Net::ConnectionId b : old_vis)
+				{
+					SA::Domain::CharDisappear dis{};
+					dis.entity_id = kv.first;
+					dis.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER);
+					s.sendTo(b, dis);
+					SA::Domain::CharDisappear dis2{};
+					dis2.entity_id = b;
+					dis2.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER);
+					s.sendTo(kv.first, dis2);
+				}
+
+				// 3. 更新玩家坐标
+				p->floor = wp->dst_floor;
+				p->x = wp->dst_x;
+				p->y = wp->dst_y;
+
+				// 4. 新格 olink 挂接
+				s.olink[s.map.index(p->x, p->y)].push_back(kv.first);
+
+				// 5. 新视野广播 Appear + 敌人/NPC 视野刷新 (旧出新进 diff)
+				s.broadcastSpawn(kv.first, *p);
+				s.refreshEnemyView(kv.first, *p, ox, oy);
+				s.refreshNpcView(kv.first, *p, ox, oy);
+
+				// 6. 给玩家自身下发坐标同步(CharMove)
+				SA::Domain::CharMove self_mv{};
+				self_mv.entity_id = kv.first;
+				self_mv.x = p->x;
+				self_mv.y = p->y;
+				self_mv.dir = static_cast<std::uint32_t>(p->dir);
+				self_mv.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER);
+				s.sendTo(kv.first, self_mv);
+			}
+		}
+
+		// 里程碑②:位置变了且未传送 ⇒ 更新 olink(旧格摘、新格挂)+ 视野广播(扫格 diff)。
+		if (moved && !warped)
 		{
 			if (s.map.inBounds(ox, oy))
 			{
@@ -3100,6 +3230,8 @@ void World::tick()
 			s.broadcastMove(kv.first, ox, oy, *p);
 			// W.3:玩家移动后补发视野内**世界敌人**的 appear / disappear(玩家看敌人那一半)。
 			s.refreshEnemyView(kv.first, *p, ox, oy);
+			// W.7:玩家移动后补发视野内**世界 NPC** 的 appear / disappear。
+			s.refreshNpcView(kv.first, *p, ox, oy);
 
 			// ── 遇敌判定(批次 W.4。原 char_walk.c:585,展开视图基准)────────────
 			//   ★ 只在真移动(moved)后判:转身 / 撞墙不触发(原版遇敌在 walk_move 成功后)。
@@ -3438,6 +3570,16 @@ void World::loadSpawnPoints(std::vector<SpawnPoint> points)
 	_impl->spawn_points = std::move(points);
 }
 
+void World::loadWarpPoints(std::vector<WarpPoint> points)
+{
+	_impl->warp_points = std::move(points);
+}
+
+void World::loadNpcEntities(std::vector<NpcEntity> npcs)
+{
+	_impl->npc_entities = std::move(npcs);
+}
+
 void World::loadItemEffects(std::vector<ItemEffect> effects)
 {
 	_impl->item_effects = std::move(effects);
@@ -3487,6 +3629,34 @@ int World::givePetToPlayer(SA::Net::SessionId session, const SA::Model::Pet &pet
 	return pet_slot;
 }
 
+bool World::setPlayerStatsForTest(SA::Net::SessionId session, std::int32_t hp,
+                                  std::int32_t mp, std::int32_t vital,
+                                  std::int32_t str, std::int32_t tough,
+                                  std::int32_t dex)
+{
+	SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return false;
+	p->hp = hp;
+	p->mp = mp;
+	p->vital = vital;
+	p->str = str;
+	p->tough = tough;
+	p->dex = dex;
+	return true;
+}
+
+bool World::giveGoldToPlayerForTest(SA::Net::SessionId session, std::int32_t amount)
+{
+	SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr || amount <= 0)
+		return false;
+	const auto tx = addGold(*p, GoldReason::kBattleReward, amount, /*trans=*/0, 0, *_impl);
+	return tx.disposition != GoldDisposition::kRejected;
+}
+
 std::size_t World::battleCount() const noexcept { return _impl->battles.size(); }
 
 std::size_t World::worldEnemyCount() const noexcept { return _impl->world_enemies.size(); }
@@ -3511,6 +3681,16 @@ std::vector<WorldEnemyPos> World::worldEnemies() const
 		out.push_back(p);
 	}
 	return out;
+}
+
+std::size_t World::warpPointCount() const noexcept
+{
+	return _impl->warp_points.size();
+}
+
+std::size_t World::npcCount() const noexcept
+{
+	return _impl->npc_entities.size();
 }
 
 // 遇敌命中后的开战组装(批次 W.4)——移植 `EN_recv`(`callfromcli.c:1249`)清走路串 +
@@ -3869,6 +4049,8 @@ void World::onSessionReady(SA::Net::SessionId id)
 				// 里程碑②:入 olink + 与视野内玩家双向 CharAppear(原版进图 sendCToArround)。
 				s.olink[s.map.index(np->x, np->y)].push_back(id);
 				s.broadcastSpawn(id, *np);
+				s.refreshEnemyView(id, *np, -1000, -1000);
+				s.refreshNpcView(id, *np, -1000, -1000);
 			}
 			// ⚠️★ 名字**留空**:1.5 没有选角 ⇒ 没有名字的来源。
 			//    ★ 不编一个 "player_1" 之类的占位 —— 那会让「名字是哪来的」看起来
@@ -4144,6 +4326,68 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 				ok = triggerNpcEnemyBattle(id, we);
 		}
 	}
+	else if (req.event_type ==
+	         static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC))
+	{
+		const auto it = s.conns.find(id);
+		SA::Model::Player *p = s.players.resolve(s.player_of_session.find(id));
+		if (it != s.conns.end() && p != nullptr && req.dir < 8)
+		{
+			const std::int32_t fx = p->x + kDirDelta[req.dir].dx;
+			const std::int32_t fy = p->y + kDirDelta[req.dir].dy;
+			const std::size_t ni = s.npcAt(p->floor, fx, fy);
+			if (ni != s.npc_entities.size())
+			{
+				const NpcEntity &npc = s.npc_entities[ni];
+				if (npc.type == NpcType::kHealer)
+				{
+					// 1. 检查并扣除费用 (唯一写入口 GoldLedger, DR-EC3 余额不足拒绝)
+					bool can_pay = true;
+					if (npc.cost > 0)
+					{
+						if (p->gold < npc.cost)
+						{
+							can_pay = false;
+						}
+						else
+						{
+							const GoldTx tx = delGold(*p, GoldReason::kHealerFee, npc.cost,
+							                          /*trans=*/0, static_cast<std::uint64_t>(id), s);
+							if (tx.disposition != GoldDisposition::kApplied)
+								can_pay = false;
+						}
+					}
+
+					// 2. 满状态恢复 (原版 NPC_HealerAllHeal, npc_healer.c:109-141)
+					if (can_pay)
+					{
+						// 玩家自身满血满蓝
+						const auto p_stats = SA::Rules::deriveBaseStats(p->vital, p->str,
+						                                                p->tough, p->dex);
+						p->hp = p_stats.max_hp > 0 ? p_stats.max_hp : std::max(p->hp, 1);
+						p->mp = p->max_mp;
+
+						// 随行宠物满血满蓝
+						for (std::size_t i = 0; i < SA::Model::kMaxPetHave; ++i)
+						{
+							if (p->pets[i].valid())
+							{
+								SA::Model::Pet *pet = s.pets.resolve(p->pets[i]);
+								if (pet != nullptr)
+								{
+									const auto pet_stats = SA::Rules::deriveBaseStats(
+									    pet->vital, pet->str, pet->tough, pet->dex);
+									pet->hp = pet_stats.max_hp > 0 ? pet_stats.max_hp : std::max(pet->hp, 1);
+									pet->mp = pet->max_mp;
+								}
+							}
+						}
+						ok = true;
+					}
+				}
+			}
+		}
+	}
 
 	// 回执(原版 lssproto_EV_send(fd, seqno, rc)):seqno 原样带回,ok = 是否命中并开战。
 	//   ★ 靠 seqno 关联(不依赖传输层 corr_id),同原版 EV 的 seqno 机制。
@@ -4255,6 +4499,20 @@ int World::playerGold(SA::Net::SessionId session) const
 	const SA::Model::Player *p =
 	    _impl->players.resolve(_impl->player_of_session.find(session));
 	return p == nullptr ? -1 : static_cast<int>(p->gold);
+}
+
+int World::playerHp(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : static_cast<int>(p->hp);
+}
+
+int World::playerMp(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : static_cast<int>(p->mp);
 }
 
 World::PlayerPos World::playerPos(SA::Net::SessionId session) const
@@ -5290,6 +5548,7 @@ bool World::Impl::install(SA::Net::SessionId id, const SA::Domain::CharacterReco
 	olink[map.index(player->x, player->y)].push_back(id);
 	broadcastSpawn(id, *player);
 	refreshEnemyView(id, *player, -1000, -1000);
+	refreshNpcView(id, *player, -1000, -1000);
 	return true;
 }
 

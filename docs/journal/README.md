@@ -16,7 +16,7 @@
 | [`10-battle-core.md`](10-battle-core.md) | L3 战斗:批次 0.5 调度 · A.1 逃跑 · A.2 捕获 · A.3 暴击 · A.4 打飞 · A-β d1 尾摇 · A-β d2 目标判定族与忠犬守护 | 7 |
 | [`11-model-attr.md`](11-model-attr.md) | L2 实体池与实体族 · M.1–M.4b 属性推导与四维公式 · 换宠 | 7 |
 | [`12-encounter.md`](12-encounter.md) | M.5 敌人表 · R.1 随机源 · M.6/M.7 遇敌链 · 战果结算 · A-α 战果总装 | 6 |
-| [`13-world.md`](13-world.md) | W.1 移动视野 · W.2/W.3 刷怪游荡 · W.4 暗雷 · W.5 明雷 | 4 |
+| [`13-world.md`](13-world.md) | W.1 移动视野 · W.2/W.3 刷怪游荡 · W.4 暗雷 · W.5 明雷 · W.6 传送点 · W.7 NPC实体Healer | 6 |
 | [`14-item.md`](14-item.md) | 道具域 I.1 背包 · I.2 扣道具 · I.3 掉落 · I.4 使用 · I\| 指令入口校验 | 5 |
 | [`15-status.md`](15-status.md) | L4.1 状态异常系统 · A-γ1 混乱重定向 | 2 |
 | [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
@@ -24,7 +24,7 @@
 | [`18-petskill.md`](18-petskill.md) | 宠技三连发:B1 直攻系 · B2 宠技槽 + CHARGE · B3 状态系 + 铁壁 | 3 |
 | [`90-push-windows.md`](90-push-windows.md) | 十五次 `shared-v0.x.0` 推送窗口的闭合核实 | 15 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **73** |
+| **合计** | | **75** |
 
 ## 全量映射表(按编号)
 
@@ -103,6 +103,8 @@
 | §9.0.69b | 推送窗口执行记录 —— `shared-v0.31.0`(批次 A-β d1;补记) | 2026-09-16 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.69c | 推送窗口执行记录 —— `shared-v0.32.0`(批次 A-β d2;注释里复述值必然烂) | 2026-09-18 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.70 | 批次 A-γ1 —— 核心状态序列:混乱目标重定向全链(battle.c:5644-5665) | 2026-09-24 | [`15-status.md`](15-status.md) |
+| §9.0.71 | 批次 W.6 —— 静态事件格与 WARP 传送点(npc_warp.c) | 2026-09-25 | [`13-world.md`](13-world.md) |
+| §9.0.72 | 批次 W.7 —— NPC 实体框架与 Healer 恢复员(npc_healer.c) | 2026-09-25 | [`13-world.md`](13-world.md) |
 
 ---
 

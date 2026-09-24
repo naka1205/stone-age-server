@@ -2,9 +2,9 @@
 
 > **后续勘误（2026-09-12）**：本文件保留当时交付记录。与当前审计有关的数值、时序、接线及验收更正见[修复记录](../audits/2026-09-12-remediation-results.md)，不以旧批次完成状态代替本轮验证。
 
-> **本文件收录**:W.1 移动 + 529 格视野、W.4 暗雷遇敌闭环、W.2+W.3 世界敌人(刷怪 + 条数制摊还 + 游荡 AI)、W.5 明雷触发战斗。
+> **本文件收录**:W.1 移动 + 529 格视野、W.4 暗雷遇敌闭环、W.2+W.3 世界敌人(刷怪 + 条数制摊还 + 游荡 AI)、W.5 明雷触发战斗、W.6 WARP传送点、W.7 NPC实体与Healer恢复员。
 >
-> **批次编号**:§9.0.42 · §9.0.44 · §9.0.45 · §9.0.46(共 4 节,§9.0.42 – §9.0.46 区间内)
+> **批次编号**:§9.0.42 · §9.0.44 · §9.0.45 · §9.0.46 · §9.0.71 · §9.0.72(共 6 节)
 >
 > ★ **编号沿用 `00-architecture.md` 原 §9.0.x 体系,搬家未改号** —— 全仓约 600 处 `§9.0.x` 引用因此继续有效。总映射见 [`README.md`](README.md)。
 >
@@ -274,3 +274,49 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 ★ 只在 Apple clang 21 跑过,GCC/MSVC 交 CI。
 
 ---
+
+### 9.0.71 批次 W.6 —— 静态事件格与 WARP 传送点(2026-09-25)
+
+2026-09-25 交付。世界系统中引入 WARP 传送点(全游戏实例数最多 NPC 类别，原版 4,297 个实例，`npc_warp.c`)。
+
+#### 1. 源码事实与裁定
+
+1. **触发时机与机制**(原版 `npc_warp.c:112`、`char_walk.c:348-367`):
+   - 传送点设置 `CHAR_ISOVERED = 1`，玩家走入格子(walkStep 成功)时触发 `POSTOFUNC` (`NPC_WarpPostOver` → `NPC_WarpWarpCharacter`)。
+   - 参数 `arg`: `floor|x|y`。
+   - 目标合法性检查(`MAP_IsValidCoordinate`): 越界或不可走格忽略传送。
+2. **传送过程(`CHAR_warpToSpecificPoint`, `char.c:4594-4675`)**:
+   - 清空剩余路径串(`CHAR_WORKWALKARRAY`)，立即停止当前巡航。
+   - 旧位置周围广播 `CharDisappear`，玩家自身接收旧位置实体的 `CharDisappear`。
+   - 更新角色坐标到目标点，迁移 `olink` 索引。
+   - 新位置周围广播 `CharAppear`，双向刷新新视野内玩家与世界怪物。
+   - 给玩家自身下发坐标同步 `CharMove`。
+   - 传送落地后不触发该格暗雷遇敌。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 30 增至 34，断言数从 368 增至 412。
+- **反向验证**: 注入条件恒 false ⇒ 2 条用例精准转红; 恢复后回绿。
+
+---
+
+### 9.0.72 批次 W.7 —— NPC 实体框架与 Healer 恢复员(2026-09-25)
+
+2026-09-25 交付。世界系统中落地基础 NPC 实体框架与首个服务型交互 NPC —— Healer 恢复员(`npc_healer.c` / `npc_windowhealer.c`)。
+
+#### 1. 源码事实与裁定
+
+1. **实体与碰撞属性**:
+   - NPC 实体作为不可穿透对象(`CHAR_ISOVERED = 0`)，玩家走路撞上时弹回原格(`moved = false`)，防止与 NPC 格重叠。
+   - NPC 视野单向广播: 玩家进视野收到 `CharAppear(entity_type = ENTITY_NPC, image = npc.image)`，出视野收到 `CharDisappear`。
+2. **交互与恢复(`NPC_HealerAllHeal`, `npc_healer.c:109-141`)**:
+   - 玩家面向 NPC 发起 EV 协议请求(`ENTITY_NPC`)。
+   - 费用扣除: 严格通过 `GoldLedger::delGold` 扣除石币(`GoldReason::kHealerFee`)，成为经济系统汇的第一个真实调用者; 余额不足时拒绝，不扣钱不回复。
+   - 满状态恢复: 玩家自身及其所有随行宠物(`p->pets`)的 HP 与 MP 全部回满(HP 依据 `deriveBaseStats` 推导的 `max_hp`)。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 34 增至 38，断言数从 412 增至 466。
+- **反向验证**: 注入错误 HP 增量 ⇒ 2 条用例精准转红; 恢复后回绿。
+- **架构守卫**: `check_gold_writes.py` 100% 绿灯，无任何旁路直接修改石币。
+

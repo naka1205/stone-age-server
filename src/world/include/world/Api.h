@@ -599,6 +599,44 @@ struct SpawnPoint
 	std::int32_t level = -1;                // 等级;<=0 走敌人表 LV_MIN/MAX 摇号(同 spawnEnemy)
 };
 
+// 传送点表的一行(批次 W.6「WARP 传送点」)—— 踩入某格瞬移到目标格。
+//
+// ⚠️★★ 原版 4,297 个 Warp 实例(全游戏最多,npc_warp.c),参数形如 `floor|x|y`。
+//    踩中即触发 `NPC_WarpPostOver` → `CHAR_warpToSpecificPoint`。
+//    本结构为不阻塞脚本层的最小数据面:源坐标 (src_floor, src_x, src_y)
+//    映射到目标坐标 (dst_floor, dst_x, dst_y)。
+struct WarpPoint
+{
+	std::int32_t src_floor = 0;
+	std::int32_t src_x = 0;
+	std::int32_t src_y = 0;
+	std::int32_t dst_floor = 0;
+	std::int32_t dst_x = 0;
+	std::int32_t dst_y = 0;
+};
+
+// NPC 实体类型(批次 W.7「NPC 实体框架与 Healer」)
+enum class NpcType : std::uint8_t
+{
+	kHealer = 0,
+	kOther = 1,
+};
+
+// 世界 NPC 实体配置/状态(批次 W.7)
+// ⚠️ 原版 npc_healer.c / npc_windowhealer.c
+//   CHAR_WHICHTYPE = CHAR_TYPEHEALER, CHAR_ISOVERED = 0 (不可穿透阻挡)
+struct NpcEntity
+{
+	std::uint64_t id = 0;
+	std::int32_t floor = 0;
+	std::int32_t x = 0;
+	std::int32_t y = 0;
+	std::uint8_t dir = 0;
+	std::int32_t image = 0;
+	NpcType type = NpcType::kHealer;
+	std::int32_t cost = 0; // 治疗所需石币 (0 = 免费)
+};
+
 // 世界态敌人的位置快照(批次 W.2 / W.3 的观察面)。
 //
 // ★ 加它的理由同 `PlayerPos` / `enemyCount`:欠债 20 那族「地基绿而运行时不接,ctest 一样全过」——
@@ -807,6 +845,14 @@ class World final : public SA::Net::TransportEvents,
 	//    那份敌人表 / 模板表 ⇒ **两个 load 都要调**,否则查不到即该点刷不出(落 warn、不崩)。
 	void loadSpawnPoints(std::vector<SpawnPoint> points);
 
+	// 注入 WARP 传送点表(批次 W.6)—— 让玩家踩上事件格时触发地图瞬移。
+	// ⚠️★ 默认空 ⇒ 地图上无传送点。现有移动用例不注入即不受影响。
+	void loadWarpPoints(std::vector<WarpPoint> points);
+
+	// 注入世界 NPC 实体(批次 W.7)—— 让 NPC 常驻地图并支持碰撞与交互。
+	// ⚠️★ 默认空 ⇒ 地图上无 NPC。现有用例不注入即不受影响。
+	void loadNpcEntities(std::vector<NpcEntity> npcs);
+
 	// 注入道具效果表(批次 I.4「使用道具」)—— 按 `item_id` 查「用了恢复多少 HP」。
 	//
 	// ⚠️★ **默认空 ⇒ 任何道具用了都没效果**(power 投影恒 0 ⇒ L3 的 USE_ITEM 分支直接跳过、
@@ -847,6 +893,15 @@ class World final : public SA::Net::TransportEvents,
 	// 成功返回放入的宠物槽下标(∈ [0, kMaxPetHave)),宠物字段按入参整只落池
 	//   (含 `pet_skills` 七槽 —— 模拟"这只宠从模板带技"的那一半)。
 	int givePetToPlayer(SA::Net::SessionId session, const SA::Model::Pet &pet);
+
+	// 设置某会话玩家的生命/法力与四维(批次 W.7 的注入 seam)。
+	bool setPlayerStatsForTest(SA::Net::SessionId session, std::int32_t hp,
+	                           std::int32_t mp, std::int32_t vital = 0,
+	                           std::int32_t str = 0, std::int32_t tough = 0,
+	                           std::int32_t dex = 0);
+
+	// 往某会话玩家增加测试石币(经 GoldLedger,批次 W.7 的注入 seam)。
+	bool giveGoldToPlayerForTest(SA::Net::SessionId session, std::int32_t amount);
 
 	// ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
 	void requestShutdown() noexcept;
@@ -914,6 +969,8 @@ class World final : public SA::Net::TransportEvents,
 	//   ⇒ 用例能分别断言「刷了几只到世界」与「战斗里生成了几只」,两条静默各有探针。
 	std::size_t worldEnemyCount() const noexcept;
 	std::vector<WorldEnemyPos> worldEnemies() const;
+	std::size_t warpPointCount() const noexcept;
+	std::size_t npcCount() const noexcept;
 
 	// 某场战斗某个槽背后的 L2 `Enemy` 实体(只读)。不存在 / 无实体返回 nullptr。
 	//
@@ -974,6 +1031,8 @@ class World final : public SA::Net::TransportEvents,
 	//    再开一扇门(同 `12` §2.3 那 62.5% 绕过点的反面)。要改余额,走账本;
 	//    要验余额,走这里。`tools/check_gold_writes.py` 守的是同一件事的源码面。
 	int playerGold(SA::Net::SessionId session) const;
+	int playerHp(SA::Net::SessionId session) const;
+	int playerMp(SA::Net::SessionId session) const;
 
 	// 某会话背后 Player 的位置(批次 W.1)。valid == false ⇒ 该会话无 L2 实体。
 	//   ★ 移动用例的观察面:走一步坐标变化 / 撞墙不变 / 转身只改 dir。
@@ -1330,6 +1389,8 @@ enum class GoldReason : std::uint8_t
 	//    注释写「人物等级的倍数」而 8.5 实现是固定值,注释与实现不符。
 	//    ⇒ DR-EC6 的既有选择就是「接受每场固定 +10」,本批照此落地,**不写成原版公式**。
 	kBattleReward,
+	// 医院/恢复员服务收费扣除 (汇,批次 W.7)
+	kHealerFee,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -1426,6 +1487,8 @@ inline const char *goldReasonName(GoldReason r) noexcept
 	{
 	case GoldReason::kBattleReward:
 		return "battle_reward";
+	case GoldReason::kHealerFee:
+		return "healer_fee";
 	}
 	return "unknown";
 }
