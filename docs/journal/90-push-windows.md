@@ -628,3 +628,28 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 - **守卫闭环**:
   - 在服务端打附注 tag `shared-v0.33.0` 并将客户端 `SA_SHARED_GIT_TAG` 提升至 `shared-v0.33.0` 后，清空客户端 CACHE 并重跑 `ci_verify.py`，8 项全部转绿。
 
+---
+
+### 9.0.74b ★ 推送窗口执行记录 —— `shared-v0.34.0`(2026-09-25)
+
+> **本窗口前推范围**: 批次 W.9 任务旗标位图与安全边界（§9.0.74）扩展 `shared/model/Player.h`。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `7dbd0c3` · `shared-v0.34.0`(**附注** tag，subject「release: shared-v0.34.0 (batch W.9 task flag bitmaps)」) |
+| client master | pin v0.33.0 → **v0.34.0**(`cmake/SaShared.cmake`) |
+| client 本机 ci_verify | **8 项全过**(清洁构建 · 锁定 ref 与源码一致 · shared/ 与锁定 ref 一致无漂移 · 7 条全部注册 · ctest 7/7 · **149 用例 / 3,048 断言**) |
+| server 本机 ci_verify | **6 项全过**(22 条全部注册 · ctest 22/22 · 断言防线反向验证通过) |
+| 两端用例集一致性 | 客户端黄金用例集复现的 **149 / 3,048** 与服务端 `rules_battle` 逐位同值 ⇒ D2「一份规则两端编译」本批闭环 |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/model/Player.h`: 扩展任务旗标位图（`now_events` / `end_events`，各 8 槽 256 位空间）与边界安全的位操作方法（`hasNowEvent`, `setNowEvent`, `clearNowEvent`, `hasEndEvent`, `setEndEvent`, `clearEndEvent`）。
+  - 该改动落在客户端通过 FetchContent/local 编译的路径上，直接触发客户端配置期漂移检查 `❌ ★ shared/ 与锁定 ref 一致`。
+- **守卫闭环**:
+  - 服务端打附注 tag `shared-v0.34.0` 推送 GitHub，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.34.0`，消除 D2 漂移告警，恢复 8/8 全绿。
+
+
