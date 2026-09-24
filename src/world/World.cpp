@@ -2379,6 +2379,12 @@ struct World::Impl : GoldAuditSink
 	void refreshNpcView(SA::Net::ConnectionId viewer, const SA::Model::Player &p,
 	                    std::int32_t ox, std::int32_t oy);
 
+	// ── NPC 巡逻与漫游游荡 (批次 W.11) ──────────────────────────────────
+	std::size_t npc_charloop_cursor = 0;
+	void wanderNpcs(std::size_t max_this_tick);
+	void broadcastNpcMove(const NpcEntity &npc, std::int32_t ox, std::int32_t oy);
+	bool isNpcEngagedInDialog(std::uint64_t npc_id) const;
+
 	// ── 世界刷怪点与世界态敌人(批次 W.2 / W.3)──────────────────────────────
 	//   spawn_points:注入的刷怪点(loadSpawnPoints,默认空 ⇒ 世界无常驻怪);
 	//   world_enemies:当前在地图上的敌人。★ 与战斗态敌人**共用 `enemies` 池但分开跟踪** ——
@@ -3178,6 +3184,218 @@ void World::Impl::refreshNpcView(SA::Net::ConnectionId viewer, const SA::Model::
 	}
 }
 
+// 检查是否有在线玩家当前正在与该 NPC 打开窗口对话 (批次 W.11)
+bool World::Impl::isNpcEngagedInDialog(std::uint64_t npc_id) const
+{
+	for (const auto &kv : conns)
+	{
+		if (kv.second.active_window_id > 0 && kv.second.active_window_npc_id == npc_id)
+			return true;
+	}
+	return false;
+}
+
+// NPC 移动一步广播 (批次 W.11, 视野扫格 diff: 一直可见→CharMove / 新进→CharAppear / 离开→CharDisappear)
+void World::Impl::broadcastNpcMove(const NpcEntity &npc, std::int32_t ox, std::int32_t oy)
+{
+	const auto old_vis = collectVisiblePlayers(ox, oy);
+	const auto new_vis = collectVisiblePlayers(npc.x, npc.y);
+
+	SA::Domain::CharMove mv{};
+	mv.entity_id = npc.id;
+	mv.x = npc.x;
+	mv.y = npc.y;
+	mv.dir = static_cast<std::uint32_t>(npc.dir);
+	mv.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+
+	SA::Domain::CharAppear ap{};
+	ap.entity_id = npc.id;
+	ap.floor = npc.floor;
+	ap.x = npc.x;
+	ap.y = npc.y;
+	ap.dir = static_cast<std::uint32_t>(npc.dir);
+	ap.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ap.image = npc.image;
+
+	for (const SA::Net::ConnectionId b : new_vis)
+	{
+		if (visContains(old_vis, b))
+			sendTo(b, mv); // 一直可见 ⇒ 移动或转身
+		else
+			sendTo(b, ap); // 新进入视野 ⇒ 出现
+	}
+	SA::Domain::CharDisappear dis{};
+	dis.entity_id = npc.id;
+	dis.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	for (const SA::Net::ConnectionId b : old_vis)
+	{
+		if (!visContains(new_vis, b))
+			sendTo(b, dis); // 离开视野 ⇒ 消失
+	}
+}
+
+// kCharLoop 非玩家段: 世界 NPC 巡逻与漫游游荡 (条数制摊还, 批次 W.11)
+void World::Impl::wanderNpcs(std::size_t max_this_tick)
+{
+	const std::size_t n = npc_entities.size();
+	if (n == 0 || max_this_tick == 0)
+		return;
+
+	std::size_t moved = 0;
+	std::size_t scanned = 0;
+
+	while (scanned < n && moved < max_this_tick)
+	{
+		if (npc_charloop_cursor >= n)
+			npc_charloop_cursor = 0;
+
+		const std::size_t idx = npc_charloop_cursor++;
+		++scanned;
+
+		NpcEntity &npc = npc_entities[idx];
+		if (npc.wander_interval_ms <= 0)
+			continue;
+		if (now_ms < npc.next_wander_at_ms)
+			continue;
+
+		// 对话锁定: 若有玩家正在与该 NPC 打开窗口对话, 本节拍不移动
+		if (isNpcEngagedInDialog(npc.id))
+		{
+			npc.next_wander_at_ms = now_ms + npc.wander_interval_ms;
+			continue;
+		}
+
+		std::int32_t dir = -1;
+		std::int32_t nx = npc.x;
+		std::int32_t ny = npc.y;
+
+		if (!npc.route.empty())
+		{
+			// ── 模式 1: 巡逻路线模式 (沿着 route 路点逐步行进) ─────────
+			if (npc.route_index >= npc.route.size())
+				npc.route_index = 0;
+
+			const NpcPoint &target = npc.route[npc.route_index];
+			if (npc.x == target.x && npc.y == target.y)
+			{
+				npc.route_index = (npc.route_index + 1) % npc.route.size();
+			}
+
+			const NpcPoint &next_target = npc.route[npc.route_index];
+			std::int32_t difx = next_target.x - npc.x;
+			std::int32_t dify = next_target.y - npc.y;
+			if (difx < 0)
+				difx = -1;
+			else if (difx > 0)
+				difx = 1;
+			if (dify < 0)
+				dify = -1;
+			else if (dify > 0)
+				dify = 1;
+
+			// 移植原版 NPC_Util_getDirFromTwoPoint dirtable[dify+1][difx+1]
+			static constexpr int dirtable[3][3] = {
+			    {7, 0, 1},
+			    {6, -1, 2},
+			    {5, 4, 3},
+			};
+			dir = dirtable[dify + 1][difx + 1];
+			if (dir >= 0)
+			{
+				nx = npc.x + kDirDelta[dir].dx;
+				ny = npc.y + kDirDelta[dir].dy;
+			}
+		}
+		else if (npc.wander_radius > 0)
+		{
+			// ── 模式 2: 自由漫游模式 (以 born_x, born_y 为中心随机游荡) ───
+			dir = static_cast<std::int32_t>(world_rng.randMod(8));
+			nx = npc.x + kDirDelta[dir].dx;
+			ny = npc.y + kDirDelta[dir].dy;
+
+			std::int32_t adx = nx - npc.born_x;
+			adx = adx < 0 ? -adx : adx;
+			std::int32_t ady = ny - npc.born_y;
+			ady = ady < 0 ? -ady : ady;
+
+			if (adx > npc.wander_radius || ady > npc.wander_radius)
+			{
+				// 超出游荡半径，不位移但可转向
+				dir = -1;
+			}
+		}
+
+		if (dir >= 0)
+		{
+			npc.dir = static_cast<std::uint8_t>(dir);
+
+			// ── 通行与碰撞守卫 ───────────────────────────────────────
+			bool blocked = false;
+
+			// ① 地图通行门 (含斜向墙角保护)
+			if (!mapWalkable(map, map_attr, nx, ny))
+			{
+				blocked = true;
+			}
+			else if (kDirDelta[dir].dx != 0 && kDirDelta[dir].dy != 0)
+			{
+				if (!mapWalkable(map, map_attr, npc.x + kDirDelta[dir].dx, npc.y) ||
+				    !mapWalkable(map, map_attr, npc.x, npc.y + kDirDelta[dir].dy))
+				{
+					blocked = true;
+				}
+			}
+
+			// ② 实体碰撞门 1: 撞其他 NPC (CHAR_ISOVERED=0)
+			if (!blocked)
+			{
+				const std::size_t other_npc = npcAt(npc.floor, nx, ny);
+				if (other_npc != npc_entities.size() && other_npc != idx)
+				{
+					blocked = true;
+				}
+			}
+
+			// ③ 实体碰撞门 2: 撞玩家实体 (CHAR_ISOVERED=0)
+			if (!blocked)
+			{
+				for (const auto &kv : conns)
+				{
+					const auto *p = players.resolve(player_of_session.find(kv.first));
+					if (p != nullptr && p->floor == npc.floor && p->x == nx && p->y == ny)
+					{
+						blocked = true;
+						break;
+					}
+				}
+			}
+
+			// ④ 实体碰撞门 3: 撞世界敌人 (明雷)
+			if (!blocked && worldEnemyAt(npc.floor, nx, ny) != world_enemies.size())
+			{
+				blocked = true;
+			}
+
+			if (!blocked)
+			{
+				const std::int32_t ox = npc.x;
+				const std::int32_t oy = npc.y;
+				npc.x = nx;
+				npc.y = ny;
+				broadcastNpcMove(npc, ox, oy);
+			}
+			else
+			{
+				// 阻挡未位移: 原地更新朝向并向视野内广播转身
+				broadcastNpcMove(npc, npc.x, npc.y);
+			}
+		}
+
+		npc.next_wander_at_ms = now_ms + npc.wander_interval_ms;
+		++moved;
+	}
+}
+
 // (floor,x,y) 上的世界敌人在 world_enemies 的下标;无则返回 world_enemies.size()(批次 W.5)。
 //   ★ 撞明雷退回(kCharLoop)与明雷开战(onEvent 面前格)共用这一个「这格有没有明雷」查询。
 std::size_t World::Impl::worldEnemyAt(std::int32_t floor, std::int32_t x, std::int32_t y)
@@ -3891,6 +4109,10 @@ void World::tick()
 	//   ⚠️★ **不是时间预算制** —— 8.0 的 _CHAR_LOOP_TIME 三证实测关(15 §5.2 C18),走 #else 条数制。
 	s.wanderWorldEnemies(s.config.tempo.enemy_move_num);
 
+	// ── 5c. 角色循环 —— 非玩家段:世界 NPC 巡逻与漫游 AI(批次 W.11) ──────────
+	//   ★ 条数制摊还:每 tick 最多游荡 tempo.enemy_move_num 只世界 NPC,游标续跑(wanderNpcs)。
+	s.wanderNpcs(s.config.tempo.enemy_move_num);
+
 	// ── 6. 定时业务 ──   ⬜ 阶段 2
 	// ── 7. 出站聚合 ──   ⬜ 阶段 2(CA/CD 视野聚合;1.5 无视野)
 	//
@@ -4187,6 +4409,18 @@ void World::loadWarpPoints(std::vector<WarpPoint> points)
 
 void World::loadNpcEntities(std::vector<NpcEntity> npcs)
 {
+	for (auto &npc : npcs)
+	{
+		if (npc.born_x == 0 && npc.born_y == 0)
+		{
+			npc.born_x = npc.x;
+			npc.born_y = npc.y;
+		}
+		if (npc.wander_interval_ms > 0 && npc.next_wander_at_ms == 0)
+		{
+			npc.next_wander_at_ms = _impl->now_ms + npc.wander_interval_ms;
+		}
+	}
 	_impl->npc_entities = std::move(npcs);
 }
 

@@ -2293,3 +2293,259 @@ TEST_CASE("W.10: ExChangeMan EVDEL 动态从 EVENT 条件解析扣除道具与�
 	CHECK(count_888 == 0);
 	CHECK(count_999 == 1);
 }
+
+// ══ 批次 W.11: 世界 NPC 巡逻与随机移动漫游 (npc_wanderer / NPC_walk 逻辑移植) ═════════
+
+TEST_CASE("W.11: 自由游荡漫游 (Wanderer 周期性步进, 坐标变更且严格受限于 wander_radius 半径)")
+{
+	MoveFixture f;
+
+	NpcEntity npc{};
+	npc.id = 6001;
+	npc.floor = 0;
+	npc.x = 30;
+	npc.y = 30;
+	npc.dir = 0;
+	npc.image = 10001;
+	npc.type = NpcType::kTownPeople;
+	npc.wander_radius = 2;        // 以 (30, 30) 为中心，范围 [28..32]
+	npc.wander_interval_ms = 100; // 每 100ms 游荡一步
+	f.world.loadNpcEntities({npc});
+
+	const auto *npc_ptr = f.world.findNpc(6001);
+	REQUIRE(npc_ptr != nullptr);
+	CHECK(npc_ptr->x == 30);
+	CHECK(npc_ptr->y == 30);
+
+	// 未到 100ms 时推进 tick ⇒ 保持不动
+	f.clock.advance(50);
+	f.world.tick();
+	CHECK(npc_ptr->x == 30);
+	CHECK(npc_ptr->y == 30);
+
+	// 连续推进 20 步 (每次推进 100ms)
+	bool moved = false;
+	for (int i = 0; i < 20; ++i)
+	{
+		f.clock.advance(100);
+		f.world.tick();
+		if (npc_ptr->x != 30 || npc_ptr->y != 30)
+			moved = true;
+
+		// 严格保证在 wander_radius 半径以内
+		CHECK(std::abs(npc_ptr->x - 30) <= 2);
+		CHECK(std::abs(npc_ptr->y - 30) <= 2);
+		CHECK(npc_ptr->dir < 8);
+	}
+	CHECK(moved);
+}
+
+TEST_CASE("W.11: 固定路点巡逻 (Patrol Route 循序行进并在到达终点后循环回原点)")
+{
+	MoveFixture f;
+
+	NpcEntity npc{};
+	npc.id = 6002;
+	npc.floor = 0;
+	npc.x = 30;
+	npc.y = 30;
+	npc.type = NpcType::kTownPeople;
+	npc.wander_interval_ms = 100;
+	// 巡逻三角形路线: (30, 32) -> (32, 32) -> (30, 30)
+	npc.route = {{30, 32}, {32, 32}, {30, 30}};
+	f.world.loadNpcEntities({npc});
+
+	const auto *npc_ptr = f.world.findNpc(6002);
+	REQUIRE(npc_ptr != nullptr);
+
+	// ── 阶段 1: 朝着 (30, 32) 走 (向南, dir=4) ────────────────────
+	// 步 1: 到 (30, 31)
+	f.clock.advance(100);
+	f.world.tick();
+	CHECK(npc_ptr->x == 30);
+	CHECK(npc_ptr->y == 31);
+	CHECK(npc_ptr->dir == 4);
+
+	// 步 2: 到 (30, 32) (到达第 0 个路点目标)
+	f.clock.advance(100);
+	f.world.tick();
+	CHECK(npc_ptr->x == 30);
+	CHECK(npc_ptr->y == 32);
+	CHECK(npc_ptr->dir == 4);
+
+	// ── 阶段 2: 目标切换为 (32, 32) (向东, dir=2) ──────────────────
+	// 步 3: 到 (31, 32)
+	f.clock.advance(100);
+	f.world.tick();
+	CHECK(npc_ptr->x == 31);
+	CHECK(npc_ptr->y == 32);
+	CHECK(npc_ptr->dir == 2);
+
+	// 步 4: 到 (32, 32) (到达第 1 个路点目标)
+	f.clock.advance(100);
+	f.world.tick();
+	CHECK(npc_ptr->x == 32);
+	CHECK(npc_ptr->y == 32);
+	CHECK(npc_ptr->dir == 2);
+
+	// ── 阶段 3: 目标切换为 (30, 30) (向西北, dir=7) ────────────────
+	// 步 5: 到 (31, 31)
+	f.clock.advance(100);
+	f.world.tick();
+	CHECK(npc_ptr->x == 31);
+	CHECK(npc_ptr->y == 31);
+	CHECK(npc_ptr->dir == 7);
+
+	// 步 6: 回到 (30, 30) (回到起点, 完成一周闭环巡逻)
+	f.clock.advance(100);
+	f.world.tick();
+	CHECK(npc_ptr->x == 30);
+	CHECK(npc_ptr->y == 30);
+	CHECK(npc_ptr->dir == 7);
+
+	// ── 阶段 4: 下一轮循环自动开启 ────────────────────────────────
+	f.clock.advance(100);
+	f.world.tick();
+	CHECK(npc_ptr->x == 30);
+	CHECK(npc_ptr->y == 31);
+	CHECK(npc_ptr->dir == 4);
+}
+
+TEST_CASE("W.11: 实体与地形阻挡不可穿透 (撞墙/撞玩家/撞其他NPC 停在原格但转向)")
+{
+	MoveFixture f;
+	spawnHandshaked(f); // 玩家出生在地图中心 (32, 32)
+
+	// NPC1 在 (32, 31)，试图向南走 (32, 32)，正前方正是玩家！
+	NpcEntity npc1{};
+	npc1.id = 6003;
+	npc1.floor = 0;
+	npc1.x = 32;
+	npc1.y = 31;
+	npc1.wander_interval_ms = 100;
+	npc1.route = {{32, 32}}; // 目标是玩家所在格
+
+	// NPC2 在 (32, 30)，NPC1 背后
+	NpcEntity npc2{};
+	npc2.id = 6004;
+	npc2.floor = 0;
+	npc2.x = 32;
+	npc2.y = 30;
+	npc2.wander_interval_ms = 100;
+	npc2.route = {{32, 31}}; // 目标是 NPC1 所在格
+
+	f.world.loadNpcEntities({npc1, npc2});
+
+	// 1. NPC1 试图走入玩家所在格 (32, 32) ⇒ 阻挡停在 (32, 31)，但转向南 (dir=4)
+	f.clock.advance(100);
+	f.world.tick();
+
+	const auto *n1 = f.world.findNpc(6003);
+	REQUIRE(n1 != nullptr);
+	CHECK(n1->x == 32);
+	CHECK(n1->y == 31);
+	CHECK(n1->dir == 4);
+
+	// 2. NPC2 试图走入 NPC1 所在格 (32, 31) ⇒ 阻挡停在 (32, 30)，转向南 (dir=4)
+	const auto *n2 = f.world.findNpc(6004);
+	REQUIRE(n2 != nullptr);
+	CHECK(n2->x == 32);
+	CHECK(n2->y == 30);
+	CHECK(n2->dir == 4);
+}
+
+TEST_CASE("W.11: 漫游视野广播与单向协议同步 (周围玩家收到 CharMove / 新进 CharAppear)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f); // 玩家在 (32, 32)
+	f.world.tick();
+
+	// 清空历史初始视野包
+	VisMirror m;
+	m.feed(f.transport.sent(id));
+
+	// 配置巡逻 NPC: 从 (32, 30) 走向 (32, 29)
+	NpcEntity npc{};
+	npc.id = 6005;
+	npc.floor = 0;
+	npc.x = 32;
+	npc.y = 30;
+	npc.image = 100555;
+	npc.wander_interval_ms = 100;
+	npc.route = {{32, 29}};
+	f.world.loadNpcEntities({npc});
+
+	// NPC 移动一步到 (32, 29) (仍在玩家 23x23 视距内)
+	f.clock.advance(100);
+	f.world.tick();
+
+	m.feed(f.transport.sent(id));
+	bool saw_move = false;
+	for (const auto &mv : m.move_msgs)
+	{
+		if (mv.entity_id == 6005 &&
+		    mv.entity_type == static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC) &&
+		    mv.x == 32 && mv.y == 29 && mv.dir == 0) // 北
+		{
+			saw_move = true;
+		}
+	}
+	CHECK(saw_move);
+}
+
+TEST_CASE("W.11: 对话打断锁定 (玩家打开窗口交互期间 NPC 暂停漫游, 关闭窗口后恢复)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f); // 玩家在 (32, 32)
+
+	// NPC 在玩家东面 (33, 32)，配置为 TownPeople，且带有巡逻路线
+	NpcEntity npc{};
+	npc.id = 6006;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kTownPeople;
+	npc.message = "你好旅行者！";
+	npc.wander_interval_ms = 100;
+	npc.route = {{33, 35}}; // 向南走
+	f.world.loadNpcEntities({npc});
+
+	// 1. 玩家面向东 (dir=2) 与 NPC 对话打开窗口
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 1101;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "你好旅行者！");
+	const std::uint32_t wid = f.world.playerActiveWindowId(id);
+
+	// 2. 在对话进行中，推进时间 300ms 并 tick 3 次
+	for (int i = 0; i < 3; ++i)
+	{
+		f.clock.advance(100);
+		f.world.tick();
+	}
+
+	// NPC 处于对话锁定态 ⇒ 坐标保持 (33, 32)，未向 (33, 35) 走动
+	const auto *npc_ptr = f.world.findNpc(6006);
+	REQUIRE(npc_ptr != nullptr);
+	CHECK(npc_ptr->x == 33);
+	CHECK(npc_ptr->y == 32);
+
+	// 3. 玩家回复关闭窗口
+	SA::Domain::WindowReply rep{};
+	rep.window_id = wid;
+	rep.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, rep);
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
+
+	// 4. 对话结束后推进时间 ⇒ NPC 恢复走动，走向 (33, 33)
+	f.clock.advance(100);
+	f.world.tick();
+	CHECK(npc_ptr->x == 33);
+	CHECK(npc_ptr->y == 33);
+	CHECK(npc_ptr->dir == 4); // 南
+}

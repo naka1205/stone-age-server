@@ -686,7 +686,14 @@ enum class NpcType : std::uint8_t
 	kOther = 3,
 };
 
-// 世界 NPC 实体配置/状态(批次 W.7/W.8/W.9)
+// NPC 巡逻路点 (批次 W.11)
+struct NpcPoint
+{
+	std::int32_t x = 0;
+	std::int32_t y = 0;
+};
+
+// 世界 NPC 实体配置/状态(批次 W.7/W.8/W.9/W.11)
 // ⚠️ 原版 npc_healer.c / npc_townpeople.c / npc_exchangeman.c
 //   CHAR_WHICHTYPE = CHAR_TYPEHEALER / CHAR_TYPETOWNPEOPLE, CHAR_ISOVERED = 0 (不可穿透阻挡)
 struct NpcEntity
@@ -702,6 +709,15 @@ struct NpcEntity
 	std::string message{};                        // 对白文案 (支持逗号分隔多条候选, 原版 npc_townpeople.c)
 	std::string nomal_main_msg{};                 // ExChangeMan 兜底对白 (支持逗号分隔多条候选)
 	std::vector<ExChangeBlock> exchange_blocks{}; // ExChangeMan 事件块列表 (按顺序匹配)
+
+	// ── 批次 W.11: NPC 巡逻与随机漫游游荡 (移植 npc_wanderer / NPC_walk 逻辑) ──
+	std::int32_t wander_radius = 0;      // 游荡半径 (0 = 原地静止; >0 表示以 born_x, born_y 为中心的最大范围)
+	std::int64_t wander_interval_ms = 0; // 漫游步进节拍 (<=0 表示不移动; >0 对应原版 CHAR_LOOPINTERVAL / CHAR_WALKINTERVAL)
+	std::int32_t born_x = 0;             // 出生/中心点 X (为 0 时在加载时自动初始化为 x)
+	std::int32_t born_y = 0;             // 出生/中心点 Y (为 0 时在加载时自动初始化为 y)
+	std::int64_t next_wander_at_ms = 0;  // 下次漫游时间戳 (毫秒)
+	std::vector<NpcPoint> route{};       // 固定巡逻路点序列 (非空时按巡逻路线行走; 为空时按 wander_radius 自由游荡)
+	std::size_t route_index = 0;         // 当前巡逻目标路点游标
 };
 
 // 世界态敌人的位置快照(批次 W.2 / W.3 的观察面)。

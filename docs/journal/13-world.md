@@ -410,3 +410,34 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证 (RV-2)**: 篡改石币不足检查逻辑（绕过检查）⇒ `W.10: ExChangeMan 石币不足与超限拦截` 测试精准报红（1 失败 / 51 通过）；恢复后回绿。
 - **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py`、22 项 ctest 全量绿灯。
 
+---
+
+### 9.0.76 批次 W.11 —— 世界 NPC 巡逻与随机移动漫游 (2026-09-25)
+
+2026-09-25 交付。世界系统中落地石器 8.0 规范的 NPC 巡逻（Route Patrol）与自由游荡漫游（Random Wanderer）引擎（`char.c:5910-5935`、`npcutil.c:283-302` `NPC_Util_getDirFromTwoPoint`、`npctemplate.c`），实现了静态城镇与野外 NPC 到动态世界实体的转变。
+
+#### 1. 源码事实与裁定
+
+1. **实体模型扩展 (`src/world/include/world/Api.h`)**:
+   - 私有扩展 `NpcPoint` 坐标点与 `NpcEntity` 巡逻/漫游参数：`wander_radius`（游荡半径）、`wander_interval_ms`（步进间隔节拍）、`born_x, born_y`（出生锚点）、`next_wander_at_ms`（下一次移动调度时间戳）、`route`（固定路点序列）与 `route_index`（当前寻路路点索引）；
+   - 裁定保持在 `world/` 内部，纯属服务端私有世界实体，不污染 `shared/`，无需升级共享库 tag。
+2. **循序寻径与 8 方向离散化 (`World.cpp`, `npcutil.c:283-302`)**:
+   - 固定路点循环巡逻：1:1 移植原版 `NPC_Util_getDirFromTwoPoint` 的 `dirtable[3][3]` 离散化映射表 `{ {7,0,1}, {6,-1,2}, {5,4,3} }`，精确将 $\Delta x, \Delta y$ 差分映射为 8 向枚举；到达当前路点时循环切换至下一路点（闭环巡逻）；
+   - 自由游荡漫游：受限于以 `(born_x, born_y)` 为中心的 `wander_radius` 切比雪夫范围，周期性随机选取 8 方向步进。
+3. **双向不可穿透性与阻挡转向 (CHAR_ISOVERED=0)**:
+   - 与 W.7 玩家撞 NPC 阻挡对称，NPC 移动受四重守卫拦截：地图通行门（含斜向墙角保护）、撞其他 NPC 阻挡、撞在线玩家实体阻挡、撞世界明雷阻挡；
+   - 遇阻挡时不产生位移，但依据原版行为转向目标方向并向视野广播转向，保持生动的世界表现。
+4. **视野广播与对话打断锁定**:
+   - 单向广播契约：沿用视野对称差分，向视野重叠区玩家广播 `CharMove`（`ENTITY_NPC`），新进入视野玩家广播 `CharAppear`，离开发 `CharDisappear`；
+   - 对话打断锁（`isNpcEngagedInDialog`）：若有玩家正在与该 NPC 交互（窗口处于打开态），NPC 暂停走动并延后调度节拍，防止交互期间 NPC 擅自离去；窗口关闭后自然恢复巡逻。
+5. **条数制摊还调度纪律 (`_CHAR_LOOP_TIME` 关)**:
+   - 严守石器 8.0 规范，在 `World::tick` 第 5c 步按 `tempo.enemy_move_num` 条数制游标切片摊还，杜绝主循环单 tick 卡顿。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 52 增至 **57**（+5 专项用例），断言数从 1531 增至 **1651**（+120 断言）。
+- **反向验证 (RV-1)**: 篡改阻挡检查逻辑（绕过玩家实体阻挡检查）⇒ `W.11: 实体与地形阻挡不可穿透` 测试精准报红（2 失败 / 55 通过）；恢复后回绿。
+- **反向验证 (RV-2)**: 篡改对话打断逻辑（绕过 `isNpcEngagedInDialog`）⇒ `W.11: 对话打断锁定` 测试精准报红（2 失败 / 56 通过）；恢复后回绿。
+- **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py`、22 项 ctest 全量绿灯。
+
+
