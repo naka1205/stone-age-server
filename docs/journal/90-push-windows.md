@@ -1,4 +1,4 @@
-﻿# journal / 90-push-windows — 推送窗口执行记录
+# journal / 90-push-windows — 推送窗口执行记录
 
 > **本文件收录**:每次 `shared-v0.x.0` 前推的闭合核实:两仓 × 两远端 SHA 与 tag 集合差、CI 三平台、客户端发布态 FetchContent 日志正文。★ 与批次记录分开存放,因为它们答的是**同一个问题的九次重复**。
 >
@@ -601,3 +601,30 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
   修注释时顺手去查表,才发现表本身是错的。⇒ 与 §9.0.69 ① 同族(那个 bug 也是回源码复核才抓住,
   用例全绿):**绿色只证明"已断言的东西没坏",不证明"该断言的都断言了"**。
   一条守卫最危险的状态不是报红,是**它守的东西已经烂了而它恒绿**。
+
+---
+
+### 9.0.72b ★ 推送窗口执行记录 —— `shared-v0.33.0`(2026-09-25)
+
+> **一个窗口、一个 tag 盖两笔**:批次 A-γ1 核心状态序列混乱重定向（§9.0.70）与阶段 2 最小切片 W.6/W.7 NPC 地基与 Healer（§9.0.71/§9.0.72）。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `7e8ef23` · `shared-v0.33.0`(**附注** tag，subject「A-gamma1 confusion redirect + W.6/W.7 NPC foundation (9.0.70-9.0.72)」) |
+| client master | `6daed5a`(pin v0.32.0 → **v0.33.0**，`cmake/SaShared.cmake:129`) |
+| client 本机 ci_verify | **8 项全过**(清洁构建 · 锁定 ref 与源码一致 · shared/ 与锁定 ref 一致无漂移 · 7 条全部注册 · ctest 7/7 · **149 用例 / 3,048 断言**) |
+| server 本机 ci_verify | **6 项全过**(22 条全部注册 · ctest 22/22 · 断言防线反向验证通过) |
+| 两端用例集一致性 | 客户端黄金用例集复现的 **149 / 3,048** 与服务端 `rules_battle` 逐位同值 ⇒ D2「一份规则两端编译」本批闭环 |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/rules/Battle.cpp` & `Battle.h`: A-γ1 混乱重定向 `rollConfusionRedirect`（+61 行）；
+  - `tests/RulesBattleTest.cpp`: 混乱重定向 2 个新用例（+97 行，断言 3,035 → 3,048）；
+  - `idl/generated/cpp/domain/world_map.sa.h`: W.7 扩展 `ENTITY_NPC = 2` 枚举常量；
+  - 以上四处改动均在客户端编译树内，直接触发客户端配置期漂移检查 `❌ ★ shared/ 与锁定 ref 一致`。
+- **守卫闭环**:
+  - 在服务端打附注 tag `shared-v0.33.0` 并将客户端 `SA_SHARED_GIT_TAG` 提升至 `shared-v0.33.0` 后，清空客户端 CACHE 并重跑 `ci_verify.py`，8 项全部转绿。
+

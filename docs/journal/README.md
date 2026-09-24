@@ -22,9 +22,9 @@
 | [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
 | [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
 | [`18-petskill.md`](18-petskill.md) | 宠技三连发:B1 直攻系 · B2 宠技槽 + CHARGE · B3 状态系 + 铁壁 | 3 |
-| [`90-push-windows.md`](90-push-windows.md) | 十五次 `shared-v0.x.0` 推送窗口的闭合核实 | 15 |
+| [`90-push-windows.md`](90-push-windows.md) | 十六次 `shared-v0.x.0` 推送窗口的闭合核实 | 16 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **75** |
+| **合计** | | **76** |
 
 ## 全量映射表(按编号)
 
@@ -105,6 +105,7 @@
 | §9.0.70 | 批次 A-γ1 —— 核心状态序列:混乱目标重定向全链(battle.c:5644-5665) | 2026-09-24 | [`15-status.md`](15-status.md) |
 | §9.0.71 | 批次 W.6 —— 静态事件格与 WARP 传送点(npc_warp.c) | 2026-09-25 | [`13-world.md`](13-world.md) |
 | §9.0.72 | 批次 W.7 —— NPC 实体框架与 Healer 恢复员(npc_healer.c) | 2026-09-25 | [`13-world.md`](13-world.md) |
+| §9.0.72b | 推送窗口执行记录 —— `shared-v0.33.0`(批次 A-γ1 + W.6/W.7;双端 CI 与 D2 消除漂移) | 2026-09-25 | [`90-push-windows.md`](90-push-windows.md) |
 
 ---
 
