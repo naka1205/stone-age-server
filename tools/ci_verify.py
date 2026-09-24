@@ -187,6 +187,8 @@ def main():
     ap.add_argument("--config", default="RelWithDebInfo")
     ap.add_argument("--generator", default=None)
     ap.add_argument("--skip-negative", action="store_true")
+    ap.add_argument("--cmake-arg", action="append", default=[],
+                    help="透传给 cmake 配置的额外参数(可多次指定)")
     args = ap.parse_args()
 
     build = (REPO / args.build_dir).resolve()
@@ -206,6 +208,20 @@ def main():
     #   (cmake/SaWarnings.cmake 卷首有为什么本地默认 OFF 的理由。)
     cfg = ["cmake", "-S", str(REPO), "-B", str(build),
            f"-DCMAKE_BUILD_TYPE={args.config}", "-DSA_WERROR=ON"]
+    if sys.platform == "darwin":
+        osx_sysroot = None
+        try:
+            sdk_out = subprocess.check_output(
+                ["xcrun", "--sdk", "macosx", "--show-sdk-path"],
+                text=True, stderr=subprocess.DEVNULL).strip()
+            if sdk_out and Path(sdk_out).exists():
+                osx_sysroot = sdk_out
+        except Exception:
+            pass
+        if osx_sysroot:
+            cfg.append(f"-DCMAKE_OSX_SYSROOT={osx_sysroot}")
+    if args.cmake_arg:
+        cfg.extend(args.cmake_arg)
     if args.generator:
         cfg += ["-G", args.generator]
     rc, out = run(cfg)

@@ -32,6 +32,8 @@
 #include "rules/Config.h"
 #include "rules/RandomSource.h"
 
+#include <optional>
+
 namespace SA::Rules
 {
 
@@ -170,6 +172,16 @@ int checkSameSide(const BattleField &field, int actor_slot, int to_no) noexcept;
 // ⚠️ 目标可用时**原样返回、不摇 rng**;不可用时才走 `defaultAttacker`(摇一次)。
 int targetAdjust(const BattleField &field, const bool *slots, int actor_slot,
                  int to_no, int myside, Random &rng) noexcept;
+
+// ── 混乱目标重定向(批次 A-γ1)────────────────────────────────────
+//
+// 1:1 移植原版混乱状态目标重定向(`battle.c:5646-5664`)。
+// ★ 80% 概率触发(rand(1, 100) <= 80),在全场两阵营中随机挑选存活目标(可为己方或敌方,排除自己)。
+// 若 20% 未触发,返回 std::nullopt(维持原指令);若触发且找到目标,返回目标槽号;全场无合法目标返回 -1。
+std::optional<int> rollConfusionRedirect(const BattleField &field,
+                                         const bool *slots,
+                                         int actor_slot,
+                                         Random &rng) noexcept;
 
 // ── 忠犬守护(批次 A-β d2)──────────────────────────────────────
 //

@@ -4655,3 +4655,100 @@ TEST_CASE("A-β d2★★:同回合先死的守护者不再保护 —— 后续�
 	// ★★ 第二击:守护者已死 ⇒ **不再接管** ⇒ 落原目标 10(而不是又落 11)。
 	CHECK(hits[1].first == 10u);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  A-γ1 —— 核心状态序列:混乱目标重定向 (battle.c:5644-5665)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("A-γ1★:rollConfusionRedirect 纯函数判定(battle.c:5646-5664)")
+{
+	BattleField f = makeField();
+	fillSide(f, 0, 2);  // slot 0 (actor), slot 1 (teammate)
+	fillSide(f, 10, 1); // slot 10 (enemy)
+
+	// ① rand(1, 100) > 80 ⇒ 不触发(返回 nullopt,只消耗 1 次 rng)
+	{
+		ScriptedRandom rng({85});
+		const auto res = rollConfusionRedirect(f, nullptr, 0, rng);
+		CHECK_FALSE(res.has_value());
+		CHECK(rng.calls() == 1);
+	}
+
+	// ② rand(1, 100) <= 80 ⇒ 触发重定向
+	// 设第一抽 50(<=80), side=0(己方), pos=0 ⇒ (pos+1)%10 = 1 (slot 1)
+	// slot 1 存活且不是 actor(slot 0) ⇒ 返回 1
+	{
+		ScriptedRandom rng({50, 0, 0});
+		const auto res = rollConfusionRedirect(f, nullptr, 0, rng);
+		REQUIRE(res.has_value());
+		CHECK(*res == 1);
+		CHECK(rng.calls() == 3);
+	}
+
+	// ③ 设第一抽 50, side=1(敌方), pos=9 ⇒ (pos+1)%10 = 0 ⇒ defNo=10 (slot 10)
+	// slot 10 存活 ⇒ 返回 10
+	{
+		ScriptedRandom rng({50, 1, 9});
+		const auto res = rollConfusionRedirect(f, nullptr, 0, rng);
+		REQUIRE(res.has_value());
+		CHECK(*res == 10);
+		CHECK(rng.calls() == 3);
+	}
+
+	// ④ 全场除自己外全阵亡 ⇒ 遍历 10 次无合法目标 ⇒ 返回 -1
+	{
+		f.at(1).dead = true;
+		f.at(10).dead = true;
+		ScriptedRandom rng({50, 0, 0});
+		const auto res = rollConfusionRedirect(f, nullptr, 0, rng);
+		REQUIRE(res.has_value());
+		CHECK(*res == -1);
+		CHECK(rng.calls() == 3);
+	}
+}
+
+TEST_CASE("A-γ1★:混乱状态重定向普攻并打伤己方队友(battle.c:5644-5665)")
+{
+	Duel d = makeB1Duel(1000, 100, /*pet_skill=*/false);
+	// 增加己方队友 slot 1
+	d.field.at(1) = makeCombatant(CombatantKind::kPlayer, 10, 10);
+	d.field.at(1).slot = 1;
+	d.field.at(1).hp = d.field.at(1).max_hp = 500;
+	d.field.at(1).mods.no_duck = true;
+
+	// slot 0:攻方处于混乱状态
+	d.field.at(0).status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION);
+	d.field.at(0).status_turns = 2;
+	d.field.at(0).attack = 100;
+	d.field.at(0).mods.no_duck = true;
+
+	// 原指令设为防御 GUARD
+	d.cmds.present[0] = true;
+	d.cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::GUARD;
+
+	d.cmds.present[1] = true;
+	d.cmds.commands[1].command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+
+	d.cmds.present[10] = true;
+	d.cmds.commands[10].command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+
+	// rng 序列:
+	// 1. 混乱重定向: 50 (<=80), side=0 (己方), pos=0 ⇒ (pos+1)%10 = 1 (队友 slot 1)
+	// 2. 普攻回避/暴击/伤害等随机数...
+	ScriptedRandom rng({50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+
+	SA::Domain::BattleEvents ev{};
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	// 断言:产生伤害事件且目标为队友 slot 1(打在己方队友身上!)
+	bool hit_teammate = false;
+	for (const auto &e : ev.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+		{
+			if (e.body.damage.target == 1u && e.body.damage.hp_delta < 0)
+				hit_teammate = true;
+		}
+	}
+	CHECK(hit_teammate);
+}

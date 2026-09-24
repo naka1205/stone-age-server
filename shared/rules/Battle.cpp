@@ -255,6 +255,47 @@ int targetAdjust(const BattleField &field, const bool *slots, int actor_slot,
 	return defaultAttacker(field, slots, 1 - myside, rng);
 }
 
+std::optional<int> rollConfusionRedirect(const BattleField &field,
+                                         const bool *slots,
+                                         int actor_slot,
+                                         Random &rng) noexcept
+{
+	// SSRC80 battle.c:5646-5648
+	// if( RAND( 1, 100 ) > 80 ) break;
+	if (rng.rand(1, 100) > 80)
+		return std::nullopt;
+
+	// SSRC80 battle.c:5650-5651
+	// side = RAND( 0, 1 );
+	// pos = RAND( 0, 9 );
+	const int side = rng.rand(0, 1);
+	int pos = rng.rand(0, 9);
+
+	// SSRC80 battle.c:5652-5660
+	// for( lop = 0; lop < SIDE_OFFSET; lop ++ ){
+	//     if( ++pos >= SIDE_OFFSET )pos = 0;
+	//     defNo = side * SIDE_OFFSET + pos;
+	//     if( defNo == bid ) continue;
+	//     if( BATTLE_TargetCheck( battleindex, defNo ) == TRUE ){
+	//         CHAR_setWorkInt( charaindex, CHAR_WORKBATTLECOM2, defNo );
+	//         break;
+	//     }
+	// }
+	for (int lop = 0; lop < kSideOffset; ++lop)
+	{
+		pos = (pos + 1 >= kSideOffset) ? 0 : (pos + 1);
+		const int def_no = side * kSideOffset + pos;
+		if (def_no == actor_slot)
+			continue;
+		if (targetCheck(field, slots, def_no))
+			return def_no;
+	}
+
+	// SSRC80 battle.c:5661-5663
+	// if( lop >= SIDE_OFFSET ){ CHAR_setWorkInt( charaindex, CHAR_WORKBATTLECOM2, -1 ); }
+	return -1;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  忠犬守护 —— `BATTLE_GuardianCheck`(`battle_event.c:1431-1511`)
 // ═══════════════════════════════════════════════════════════════════
@@ -1617,7 +1658,25 @@ static bool resolveOrdered(BattleField field,
 			effects->charge_strike = true;
 		}
 
-		const SA::Domain::BattleCommand &cmd = commands.commands[actor_slot];
+		SA::Domain::BattleCommand cmd = commands.commands[actor_slot];
+
+		// ── 混乱指令重写(原 SSRC80 battle.c:5644-5665)──────────────
+		//
+		// ★ 混乱中的单位有 80% 概率强行将指令改为普攻,并在全场随机挑选存活目标(可为己方或敌方)。
+		// ⚠️ 发生在指令分发前:若触发重定向,逃跑/防御/使用道具/技能一律被替换为普攻。
+		// 若全场无其他可用目标(返回 -1),则不行动(原版 COM2 = -1)。
+		if (status[actor_slot] == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION) &&
+		    status_turns[actor_slot] > 0)
+		{
+			const std::optional<int> confusion_tgt = rollConfusionRedirect(field, dead, actor_slot, rng);
+			if (confusion_tgt.has_value())
+			{
+				if (*confusion_tgt < 0)
+					continue; // 全场无可用目标,本回合不行动
+				cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+				cmd.command.attack.target = static_cast<std::uint32_t>(*confusion_tgt);
+			}
+		}
 
 		// ── 指令分发 ─────────────────────────────────────────────
 		//
