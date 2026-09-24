@@ -1,4 +1,4 @@
-﻿// shared/model/Player.h —— Player 族实体(L2 领域模型,批次 M.1)
+// shared/model/Player.h —— Player 族实体(L2 领域模型,批次 M.1)
 //
 // ★ 本批只建**捕获链路真正要读写**的那一小块:宠物槽 + 捕获计数 + 名字。
 //   Player 的完整字段面是 03 §11 欠债 1(693 字段逐条含义,5–8 天)与 §4 的
@@ -136,6 +136,78 @@ struct Player
 	std::int32_t x = 0;
 	std::int32_t y = 0;
 	std::uint8_t dir = 0; // 0-7 八方向(CHAR_ctodirmode 的 dir 值域)
+
+	// ── 任务旗标(原 CHAR_NOWEVENT 与 CHAR_ENDEVENT, 批次 W.9) ─────────
+	//
+	// ★ 8.0 权威规格(09 §7.2 C29): 8 槽 × 32 位 = 256 位编号空间(0..255)。
+	//   投产数据实测最大用到 226。
+	// ⚠️ 严格边界检查(C30):
+	//   - flag == -1 表示无旗标/不占旗标(原版惯用写法), 读写均安全返回 false;
+	//   - flag < 0 || flag >= 256 必须严格防御, 防止原版越界写相邻字段的历史漏洞。
+	// ⚠️ 清除语义(C31): 采用 &= ~(1U << shift) 消除原版 XOR 误置位缺陷。
+	static constexpr std::size_t kEventFlagSlots = 8;
+	static constexpr int kMaxEventFlags = 256;
+
+	std::array<std::uint32_t, kEventFlagSlots> now_events{};
+	std::array<std::uint32_t, kEventFlagSlots> end_events{};
+
+	bool hasNowEvent(int flag) const noexcept
+	{
+		if (flag < 0 || flag >= kMaxEventFlags)
+			return false;
+		const std::size_t slot = static_cast<std::size_t>(flag) / 32;
+		const unsigned int shift = static_cast<unsigned int>(flag) % 32;
+		return (now_events[slot] & (1U << shift)) != 0;
+	}
+
+	bool setNowEvent(int flag) noexcept
+	{
+		if (flag < 0 || flag >= kMaxEventFlags)
+			return false;
+		const std::size_t slot = static_cast<std::size_t>(flag) / 32;
+		const unsigned int shift = static_cast<unsigned int>(flag) % 32;
+		now_events[slot] |= (1U << shift);
+		return true;
+	}
+
+	bool clearNowEvent(int flag) noexcept
+	{
+		if (flag < 0 || flag >= kMaxEventFlags)
+			return false;
+		const std::size_t slot = static_cast<std::size_t>(flag) / 32;
+		const unsigned int shift = static_cast<unsigned int>(flag) % 32;
+		now_events[slot] &= ~(1U << shift);
+		return true;
+	}
+
+	bool hasEndEvent(int flag) const noexcept
+	{
+		if (flag < 0 || flag >= kMaxEventFlags)
+			return false;
+		const std::size_t slot = static_cast<std::size_t>(flag) / 32;
+		const unsigned int shift = static_cast<unsigned int>(flag) % 32;
+		return (end_events[slot] & (1U << shift)) != 0;
+	}
+
+	bool setEndEvent(int flag) noexcept
+	{
+		if (flag < 0 || flag >= kMaxEventFlags)
+			return false;
+		const std::size_t slot = static_cast<std::size_t>(flag) / 32;
+		const unsigned int shift = static_cast<unsigned int>(flag) % 32;
+		end_events[slot] |= (1U << shift);
+		return true;
+	}
+
+	bool clearEndEvent(int flag) noexcept
+	{
+		if (flag < 0 || flag >= kMaxEventFlags)
+			return false;
+		const std::size_t slot = static_cast<std::size_t>(flag) / 32;
+		const unsigned int shift = static_cast<unsigned int>(flag) % 32;
+		end_events[slot] &= ~(1U << shift);
+		return true;
+	}
 
 	// ── 宠物槽操作 ────────────────────────────────────────────────
 

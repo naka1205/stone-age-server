@@ -615,16 +615,49 @@ struct WarpPoint
 	std::int32_t dst_y = 0;
 };
 
-// NPC 实体类型(批次 W.7「NPC 实体框架与 Healer」; 批次 W.8「城镇居民 TownPeople」)
+// ── ExChangeMan 任务事件块 (批次 W.9) ──────────────────────────────────
+//
+// 原版 npc_exchangeman.c (全游戏 771 个文件, EventNo 方言唯一消费者, 09 §4/§6.1)
+enum class ExChangeType : std::uint8_t
+{
+	kMessage = 0, // TYPE: MESSAGE (立即执行旗标副作用并下发窗口)
+	kAccept = 1,  // TYPE: ACCEPT (出确认窗, 客户端点 YES 才结算旗标)
+	kRequest = 2, // TYPE: REQUEST (委托型: 已在进行中走进度文案, 否则走接取文案)
+	kClean = 3,   // TYPE: CLEAN (清旗标型)
+};
+
+struct ExChangeBlock
+{
+	int event_no = -1; // 任务旗标号 (-1 = 不占旗标, 可无限触发)
+	ExChangeType type = ExChangeType::kMessage;
+	std::string condition{};        // EVENT: 表达式, 支持逗号 ',' 分支与 '&' 原子
+	std::string nomal_msg{};        // 聊天气泡文案
+	std::string nomal_window_msg{}; // 窗口文案
+	std::string accept_msg{};       // 确认文案 (TYPE: ACCEPT)
+	std::string thanks_msg{};       // 感谢/完成文案
+	std::string end_set_flg{};      // 逗号分隔的完成旗标 (EndSetFlg: 10,11)
+	std::string clean_flg{};        // 逗号分隔的清除旗标 (CleanFlg: 1,2)
+};
+
+// 解析 ExChangeMan 脚本文本 (按 EventEnd 切分块, 提取 EventNo, TYPE, EVENT, 文案与旗标指令)
+// 依据 09 §2.3 C5, §3.1 C9, §4 C20
+std::vector<ExChangeBlock> parseExChangeBlocks(std::string_view argstr);
+
+// 条件表达式求值器 (依据 09 §3.1 C9, §3.3 C11, §3.4 C12, §3.7 C18)
+// 返回命中的 1-based 分支序号 (若条件为空返回 1; 若不满足返回 0)
+int evaluateEventCondition(std::string_view condition, const SA::Model::Player &player);
+
+// NPC 实体类型(批次 W.7「NPC 实体框架与 Healer」; 批次 W.8「城镇居民 TownPeople」; 批次 W.9「任务兑换 ExChangeMan」)
 enum class NpcType : std::uint8_t
 {
 	kHealer = 0,
 	kTownPeople = 1,
-	kOther = 2,
+	kExChangeMan = 2,
+	kOther = 3,
 };
 
-// 世界 NPC 实体配置/状态(批次 W.7/W.8)
-// ⚠️ 原版 npc_healer.c / npc_townpeople.c
+// 世界 NPC 实体配置/状态(批次 W.7/W.8/W.9)
+// ⚠️ 原版 npc_healer.c / npc_townpeople.c / npc_exchangeman.c
 //   CHAR_WHICHTYPE = CHAR_TYPEHEALER / CHAR_TYPETOWNPEOPLE, CHAR_ISOVERED = 0 (不可穿透阻挡)
 struct NpcEntity
 {
@@ -635,8 +668,10 @@ struct NpcEntity
 	std::uint8_t dir = 0;
 	std::int32_t image = 0;
 	NpcType type = NpcType::kHealer;
-	std::int32_t cost = 0; // 治疗所需石币 (0 = 免费)
-	std::string message{}; // 对白文案 (支持逗号分隔多条候选, 原版 npc_townpeople.c)
+	std::int32_t cost = 0;                        // 治疗所需石币 (0 = 免费)
+	std::string message{};                        // 对白文案 (支持逗号分隔多条候选, 原版 npc_townpeople.c)
+	std::string nomal_main_msg{};                 // ExChangeMan 兜底对白 (支持逗号分隔多条候选)
+	std::vector<ExChangeBlock> exchange_blocks{}; // ExChangeMan 事件块列表 (按顺序匹配)
 };
 
 // 世界态敌人的位置快照(批次 W.2 / W.3 的观察面)。
@@ -905,6 +940,9 @@ class World final : public SA::Net::TransportEvents,
 	// 往某会话玩家增加测试石币(经 GoldLedger,批次 W.7 的注入 seam)。
 	bool giveGoldToPlayerForTest(SA::Net::SessionId session, std::int32_t amount);
 
+	// 获取某会话背后的 Player 实体指针 (批次 W.9 测试注入 seam)
+	SA::Model::Player *playerForTest(SA::Net::SessionId session) noexcept;
+
 	// ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
 	void requestShutdown() noexcept;
 	bool stopped() const noexcept;
@@ -979,6 +1017,10 @@ class World final : public SA::Net::TransportEvents,
 	bool playerHasActiveWindow(SA::Net::SessionId id) const noexcept;
 	std::uint32_t playerActiveWindowId(SA::Net::SessionId id) const noexcept;
 	std::string playerLastWindowText(SA::Net::SessionId id) const;
+
+	// ── 任务旗标观察面 (批次 W.9) ──────────────────────────────────
+	bool playerHasNowEvent(SA::Net::SessionId id, int flag) const noexcept;
+	bool playerHasEndEvent(SA::Net::SessionId id, int flag) const noexcept;
 
 	// 某场战斗某个槽背后的 L2 `Enemy` 实体(只读)。不存在 / 无实体返回 nullptr。
 	//

@@ -1961,6 +1961,15 @@ struct World::Impl : GoldAuditSink
 		std::uint32_t active_window_id = 0;
 		std::uint64_t active_window_npc_id = 0;
 		std::string last_window_text{};
+
+		// ── ExChangeMan 待决任务交互 (批次 W.9) ──────────────────────
+		struct PendingExChange
+		{
+			std::uint64_t npc_id = 0;
+			int block_index = -1;
+			int branch_idx = 0;
+		};
+		PendingExChange pending_exchange{};
 	};
 
 	Impl(const SA::Platform::ServerConfig &cfg, SA::Platform::Clock &clk,
@@ -3663,6 +3672,11 @@ bool World::giveGoldToPlayerForTest(SA::Net::SessionId session, std::int32_t amo
 	return tx.disposition != GoldDisposition::kRejected;
 }
 
+SA::Model::Player *World::playerForTest(SA::Net::SessionId session) noexcept
+{
+	return _impl->players.resolve(_impl->player_of_session.find(session));
+}
+
 std::size_t World::battleCount() const noexcept { return _impl->battles.size(); }
 
 std::size_t World::worldEnemyCount() const noexcept { return _impl->world_enemies.size(); }
@@ -3729,6 +3743,22 @@ std::string World::playerLastWindowText(SA::Net::SessionId id) const
 	if (it != _impl->conns.end())
 		return it->second.last_window_text;
 	return {};
+}
+
+bool World::playerHasNowEvent(SA::Net::SessionId id, int flag) const noexcept
+{
+	const SA::Model::Player *p = _impl->players.resolve(_impl->player_of_session.find(id));
+	if (p == nullptr)
+		return false;
+	return p->hasNowEvent(flag);
+}
+
+bool World::playerHasEndEvent(SA::Net::SessionId id, int flag) const noexcept
+{
+	const SA::Model::Player *p = _impl->players.resolve(_impl->player_of_session.find(id));
+	if (p == nullptr)
+		return false;
+	return p->hasEndEvent(flag);
 }
 
 // 遇敌命中后的开战组装(批次 W.4)——移植 `EN_recv`(`callfromcli.c:1249`)清走路串 +
@@ -4502,6 +4532,186 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 					s.sendTo(id, win);
 					ok = true;
 				}
+				else if (npc.type == NpcType::kExChangeMan)
+				{
+					// ExChangeMan 任务事件 NPC (原版 npc_exchangeman.c, 09 §4)
+					int matched_block_idx = -1;
+					int matched_branch_idx = 0;
+
+					for (std::size_t bi = 0; bi < npc.exchange_blocks.size(); ++bi)
+					{
+						const auto &blk = npc.exchange_blocks[bi];
+						// 前置门: 若 event_no != -1 且已完成, 跳过该块 (C21)
+						if (blk.event_no != -1 && p->hasEndEvent(blk.event_no))
+							continue;
+
+						const int branch = evaluateEventCondition(blk.condition, *p);
+						if (branch > 0)
+						{
+							matched_block_idx = static_cast<int>(bi);
+							matched_branch_idx = branch;
+							break;
+						}
+					}
+
+					auto apply_end_set = [&](const std::string &flg_str, int ev_no)
+					{
+						if (!flg_str.empty())
+						{
+							std::size_t start = 0;
+							while (start < flg_str.size())
+							{
+								const std::size_t comma = flg_str.find(',', start);
+								const std::string s = (comma == std::string::npos)
+								                          ? flg_str.substr(start)
+								                          : flg_str.substr(start, comma - start);
+								const int f = std::atoi(s.c_str());
+								p->setEndEvent(f);
+								if (comma == std::string::npos)
+									break;
+								start = comma + 1;
+							}
+						}
+						if (ev_no != -1)
+						{
+							p->clearNowEvent(ev_no);
+						}
+					};
+
+					auto apply_clean = [&](const std::string &flg_str)
+					{
+						if (flg_str.empty())
+							return;
+						std::size_t start = 0;
+						while (start < flg_str.size())
+						{
+							const std::size_t comma = flg_str.find(',', start);
+							const std::string s = (comma == std::string::npos)
+							                          ? flg_str.substr(start)
+							                          : flg_str.substr(start, comma - start);
+							const int f = std::atoi(s.c_str());
+							p->clearNowEvent(f);
+							p->clearEndEvent(f);
+							if (comma == std::string::npos)
+								break;
+							start = comma + 1;
+						}
+					};
+
+					auto send_exchange_window = [&](const std::string &raw_text, std::uint32_t buttons)
+					{
+						SA::Domain::WindowOpen win{};
+						win.window_id = ++s.next_window_id;
+						win.kind = SA::Domain::WindowKind::WINDOW_KIND_MESSAGE;
+						win.buttons = buttons;
+						win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+						win.source.entity_id = static_cast<std::uint32_t>(npc.id);
+						win.body_kind = SA::Domain::WindowOpen::BodyKind::MESSAGE;
+						win.body.message.wide = false;
+
+						std::size_t lstart = 0;
+						while (lstart < raw_text.size() && win.body.message.lines.size() < 16)
+						{
+							const std::size_t nl = raw_text.find('\n', lstart);
+							std::string line = (nl == std::string::npos)
+							                       ? raw_text.substr(lstart)
+							                       : raw_text.substr(lstart, nl - lstart);
+							if (line.size() > 255)
+								line.resize(255);
+							if (auto *slot = win.body.message.lines.push_back())
+								slot->assign(line.data(), line.size());
+							if (nl == std::string::npos)
+								break;
+							lstart = nl + 1;
+						}
+						if (win.body.message.lines.empty())
+						{
+							std::string line = raw_text;
+							if (line.size() > 255)
+								line.resize(255);
+							if (auto *slot = win.body.message.lines.push_back())
+								slot->assign(line.data(), line.size());
+						}
+
+						it->second.active_window_id = win.window_id;
+						it->second.active_window_npc_id = npc.id;
+						it->second.last_window_text = raw_text;
+						s.sendTo(id, win);
+					};
+
+					if (matched_block_idx >= 0)
+					{
+						const auto &blk = npc.exchange_blocks[static_cast<std::size_t>(matched_block_idx)];
+						if (blk.type == ExChangeType::kMessage)
+						{
+							// 立即结算副作用
+							apply_end_set(blk.end_set_flg, blk.event_no);
+							apply_clean(blk.clean_flg);
+							if (blk.event_no != -1 && blk.end_set_flg.empty())
+							{
+								p->setNowEvent(blk.event_no);
+							}
+
+							std::string msg = blk.nomal_window_msg;
+							if (msg.empty())
+								msg = blk.nomal_msg;
+							if (msg.empty())
+								msg = blk.thanks_msg;
+
+							it->second.pending_exchange = {};
+							send_exchange_window(msg, static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+							ok = true;
+						}
+						else if (blk.type == ExChangeType::kAccept)
+						{
+							// 弹出接取/交付确认窗
+							std::string msg = blk.accept_msg;
+							if (msg.empty())
+								msg = blk.nomal_window_msg;
+							if (msg.empty())
+								msg = blk.nomal_msg;
+
+							const std::uint32_t buttons =
+							    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES) |
+							    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO);
+							send_exchange_window(msg, buttons);
+							it->second.pending_exchange = {npc.id, matched_block_idx, matched_branch_idx};
+							ok = true;
+						}
+					}
+					else if (!npc.nomal_main_msg.empty())
+					{
+						// 全部块不满足 ⇒ 随机选择兜底对白
+						std::vector<std::string> candidates;
+						std::size_t start = 0;
+						while (start < npc.nomal_main_msg.size())
+						{
+							const std::size_t comma = npc.nomal_main_msg.find(',', start);
+							if (comma == std::string::npos)
+							{
+								candidates.push_back(npc.nomal_main_msg.substr(start));
+								break;
+							}
+							candidates.push_back(npc.nomal_main_msg.substr(start, comma - start));
+							start = comma + 1;
+						}
+						std::string chosen;
+						if (candidates.size() == 1)
+							chosen = candidates[0];
+						else if (!candidates.empty())
+						{
+							const std::size_t idx = static_cast<std::size_t>(
+							    s.world_rng.randMod(static_cast<int>(candidates.size())));
+							chosen = candidates[idx];
+						}
+						else
+							chosen = npc.nomal_main_msg;
+
+						it->second.pending_exchange = {};
+						send_exchange_window(chosen, static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+						ok = true;
+					}
+				}
 			}
 		}
 	}
@@ -4525,6 +4735,115 @@ void World::onWindowReply(SA::Net::SessionId id, const SA::Domain::WindowReply &
 	// 校验 window_id 是否匹配当前会话开启的活动窗口 (DR-PR3 / DR-PR8)
 	if (it->second.active_window_id != 0 && it->second.active_window_id == reply.window_id)
 	{
+		// 检查是否存在待决 ExChange 上下文 (批次 W.9)
+		if (it->second.pending_exchange.npc_id != 0 &&
+		    it->second.pending_exchange.npc_id == reply.source.entity_id)
+		{
+			const auto pending = it->second.pending_exchange;
+			it->second.pending_exchange = {};
+
+			const NpcEntity *npc = findNpc(pending.npc_id);
+			if (npc != nullptr && pending.block_index >= 0 &&
+			    static_cast<std::size_t>(pending.block_index) < npc->exchange_blocks.size())
+			{
+				const auto &blk = npc->exchange_blocks[static_cast<std::size_t>(pending.block_index)];
+				const bool is_yes = (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES)) != 0 ||
+				                    reply.button == static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+
+				if (is_yes)
+				{
+					// 执行旗标副作用
+					if (!blk.end_set_flg.empty())
+					{
+						std::size_t start = 0;
+						while (start < blk.end_set_flg.size())
+						{
+							const std::size_t comma = blk.end_set_flg.find(',', start);
+							const std::string str = (comma == std::string::npos)
+							                            ? blk.end_set_flg.substr(start)
+							                            : blk.end_set_flg.substr(start, comma - start);
+							const int f = std::atoi(str.c_str());
+							p->setEndEvent(f);
+							if (comma == std::string::npos)
+								break;
+							start = comma + 1;
+						}
+					}
+					if (!blk.clean_flg.empty())
+					{
+						std::size_t start = 0;
+						while (start < blk.clean_flg.size())
+						{
+							const std::size_t comma = blk.clean_flg.find(',', start);
+							const std::string str = (comma == std::string::npos)
+							                            ? blk.clean_flg.substr(start)
+							                            : blk.clean_flg.substr(start, comma - start);
+							const int f = std::atoi(str.c_str());
+							p->clearNowEvent(f);
+							p->clearEndEvent(f);
+							if (comma == std::string::npos)
+								break;
+							start = comma + 1;
+						}
+					}
+					if (blk.event_no != -1)
+					{
+						if (!blk.end_set_flg.empty())
+							p->clearNowEvent(blk.event_no);
+						else
+							p->setNowEvent(blk.event_no);
+					}
+
+					std::string thanks = blk.thanks_msg;
+					if (thanks.empty())
+						thanks = blk.nomal_window_msg;
+
+					if (!thanks.empty())
+					{
+						// 下发感谢窗口
+						SA::Domain::WindowOpen win{};
+						win.window_id = ++s.next_window_id;
+						win.kind = SA::Domain::WindowKind::WINDOW_KIND_MESSAGE;
+						win.buttons = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+						win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+						win.source.entity_id = static_cast<std::uint32_t>(npc->id);
+						win.body_kind = SA::Domain::WindowOpen::BodyKind::MESSAGE;
+						win.body.message.wide = false;
+
+						std::size_t lstart = 0;
+						while (lstart < thanks.size() && win.body.message.lines.size() < 16)
+						{
+							const std::size_t nl = thanks.find('\n', lstart);
+							std::string line = (nl == std::string::npos)
+							                       ? thanks.substr(lstart)
+							                       : thanks.substr(lstart, nl - lstart);
+							if (line.size() > 255)
+								line.resize(255);
+							if (auto *slot = win.body.message.lines.push_back())
+								slot->assign(line.data(), line.size());
+							if (nl == std::string::npos)
+								break;
+							lstart = nl + 1;
+						}
+						if (win.body.message.lines.empty())
+						{
+							std::string line = thanks;
+							if (line.size() > 255)
+								line.resize(255);
+							if (auto *slot = win.body.message.lines.push_back())
+								slot->assign(line.data(), line.size());
+						}
+
+						it->second.active_window_id = win.window_id;
+						it->second.active_window_npc_id = npc->id;
+						it->second.last_window_text = thanks;
+						s.sendTo(id, win);
+						return; // 保持活动新窗口
+					}
+				}
+			}
+		}
+
 		it->second.active_window_id = 0;
 		it->second.active_window_npc_id = 0;
 	}

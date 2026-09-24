@@ -1432,3 +1432,339 @@ TEST_CASE("W.8:未面向 TownPeople 或面前无 NPC ⇒ 拒绝交互(ok=false, 
 	CHECK_FALSE(findLastWindowOpen(f.transport.sent(id)).has_value());
 	CHECK_FALSE(f.world.playerHasActiveWindow(id));
 }
+
+// ══ 批次 W.9: 任务旗标空间与 ExChangeMan 基础事件块解析骨架 ═════════════════
+
+TEST_CASE("W.9: 任务旗标位图与安全边界保护 (256位空间, 严格防御越界)")
+{
+	SA::Model::Player p{};
+
+	// 初始全 0
+	for (int i = 0; i < 256; ++i)
+	{
+		CHECK_FALSE(p.hasNowEvent(i));
+		CHECK_FALSE(p.hasEndEvent(i));
+	}
+
+	// 1. 设置与读取跨 slot 边界 (0, 31, 32, 63, 127, 226, 255)
+	const std::vector<int> test_bits = {0, 31, 32, 63, 127, 226, 255};
+	for (int bit : test_bits)
+	{
+		CHECK(p.setNowEvent(bit));
+		CHECK(p.hasNowEvent(bit));
+		CHECK_FALSE(p.hasEndEvent(bit)); // 独立性
+
+		CHECK(p.setEndEvent(bit));
+		CHECK(p.hasEndEvent(bit));
+	}
+
+	// 清除测试
+	for (int bit : test_bits)
+	{
+		CHECK(p.clearNowEvent(bit));
+		CHECK_FALSE(p.hasNowEvent(bit));
+		CHECK(p.hasEndEvent(bit)); // end_events 保持
+
+		CHECK(p.clearEndEvent(bit));
+		CHECK_FALSE(p.hasEndEvent(bit));
+	}
+
+	// 2. 严格越界防御 (C30: -1 为无旗标约定, < -1 或 >= 256 严禁写入)
+	CHECK_FALSE(p.setNowEvent(-1));
+	CHECK_FALSE(p.hasNowEvent(-1));
+	CHECK_FALSE(p.clearNowEvent(-1));
+
+	CHECK_FALSE(p.setNowEvent(256));
+	CHECK_FALSE(p.hasNowEvent(256));
+	CHECK_FALSE(p.clearNowEvent(256));
+
+	CHECK_FALSE(p.setNowEvent(-2));
+	CHECK_FALSE(p.setNowEvent(999));
+
+	CHECK_FALSE(p.setEndEvent(-1));
+	CHECK_FALSE(p.hasEndEvent(-1));
+	CHECK_FALSE(p.clearEndEvent(-1));
+
+	CHECK_FALSE(p.setEndEvent(256));
+	CHECK_FALSE(p.hasEndEvent(256));
+	CHECK_FALSE(p.clearEndEvent(256));
+
+	// 确保所有槽位仍然为 0
+	for (auto v : p.now_events)
+		CHECK(v == 0);
+	for (auto v : p.end_events)
+		CHECK(v == 0);
+}
+
+TEST_CASE("W.9: ExChangeMan 脚本文本解析 (EventEnd 块划分与键值提取)")
+{
+	const std::string script = R"(
+# 第一个块: 接取任务
+EventNo:10|TYPE:ACCEPT
+EVENT:LV>5&NOWEV!=10
+AcceptMsg:你想接受考验吗？
+ThanksMsg:祝你好运！
+EventEnd
+
+# 第二个块: 完成任务
+EventNo:10|TYPE:MESSAGE
+EVENT:NOWEV=10&LV>5
+EndSetFlg:10,11
+CleanFlg:5
+NomalWindowMsg:你通过了考验！
+EventEnd
+)";
+
+	const auto blocks = parseExChangeBlocks(script);
+	REQUIRE(blocks.size() == 2);
+
+	// Block 0
+	CHECK(blocks[0].event_no == 10);
+	CHECK(blocks[0].type == ExChangeType::kAccept);
+	CHECK(blocks[0].condition == "LV>5&NOWEV!=10");
+	CHECK(blocks[0].accept_msg == "你想接受考验吗？");
+	CHECK(blocks[0].thanks_msg == "祝你好运！");
+
+	// Block 1
+	CHECK(blocks[1].event_no == 10);
+	CHECK(blocks[1].type == ExChangeType::kMessage);
+	CHECK(blocks[1].condition == "NOWEV=10&LV>5");
+	CHECK(blocks[1].end_set_flg == "10,11");
+	CHECK(blocks[1].clean_flg == "5");
+	CHECK(blocks[1].nomal_window_msg == "你通过了考验！");
+}
+
+TEST_CASE("W.9: 条件表达式求值器 (LV, NOWEV, ENDEV 与逗号分支选择)")
+{
+	SA::Model::Player p{};
+	p.level = 10;
+	p.setNowEvent(5);
+	p.setEndEvent(20);
+
+	// 空条件 ⇒ 默认命中分支 1
+	CHECK(evaluateEventCondition("", p) == 1);
+
+	// LV 比较
+	CHECK(evaluateEventCondition("LV>5", p) == 1);
+	CHECK(evaluateEventCondition("LV<5", p) == 0);
+	CHECK(evaluateEventCondition("LV=10", p) == 1);
+	CHECK(evaluateEventCondition("LV!=10", p) == 0);
+
+	// NOWEV / ENDEV 比较
+	CHECK(evaluateEventCondition("NOWEV=5", p) == 1);
+	CHECK(evaluateEventCondition("NOWEV!=5", p) == 0);
+	CHECK(evaluateEventCondition("NOWEV=6", p) == 0);
+	CHECK(evaluateEventCondition("NOWEV!=6", p) == 1);
+
+	CHECK(evaluateEventCondition("ENDEV=20", p) == 1);
+	CHECK(evaluateEventCondition("ENDEV!=20", p) == 0);
+	CHECK(evaluateEventCondition("ENDEV=21", p) == 0);
+
+	// 短路与 '&'
+	CHECK(evaluateEventCondition("LV>5&NOWEV=5&ENDEV=20", p) == 1);
+	CHECK(evaluateEventCondition("LV>5&NOWEV=5&ENDEV=99", p) == 0);
+
+	// 逗号分支选择器 ',' (1-based 序号)
+	// 第 1 分支不满足，第 2 分支满足 ⇒ 返回 2
+	CHECK(evaluateEventCondition("LV>20,LV>5", p) == 2);
+	// 第 1 分支即满足 ⇒ 返回 1
+	CHECK(evaluateEventCondition("LV>5,LV>20", p) == 1);
+	// 全都不满足 ⇒ 返回 0
+	CHECK(evaluateEventCondition("LV>20,LV<5", p) == 0);
+}
+
+TEST_CASE("W.9: ExChangeMan TYPE:MESSAGE 面对交互、条件分支与即时旗标结算")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	// 配置 ExChangeMan NPC: 需要 LV>5, 完成后置 EndSetFlg:15, 清 CleanFlg:3
+	NpcEntity npc{};
+	npc.id = 4001;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kExChangeMan;
+	npc.nomal_main_msg = "等级不足，请提升到6级以上。";
+
+	ExChangeBlock blk{};
+	blk.event_no = 15;
+	blk.type = ExChangeType::kMessage;
+	blk.condition = "LV>5";
+	blk.nomal_window_msg = "恭喜你达到6级，特此颁发先锋勋章！";
+	blk.end_set_flg = "15";
+	blk.clean_flg = "3";
+	npc.exchange_blocks.push_back(blk);
+
+	f.world.loadNpcEntities({npc});
+
+	// 初始状态: 玩家 1 级, 拥有 now_event 3
+	SA::Model::Player *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 1;
+	p->setNowEvent(3);
+	p->setNowEvent(15);
+
+	// 1. 等级不足时交互 ⇒ 块条件不满足，走兜底 nomal_main_msg，旗标未变
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2; // 面向东 (33,32)
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 401;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(eventResultOk(f.transport.sent(id), 401));
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "等级不足，请提升到6级以上。");
+	CHECK(f.world.playerHasNowEvent(id, 3));
+	CHECK_FALSE(f.world.playerHasEndEvent(id, 15));
+
+	// 关闭窗口
+	const std::uint32_t wid1 = f.world.playerActiveWindowId(id);
+	SA::Domain::WindowReply rep1{};
+	rep1.window_id = wid1;
+	rep1.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, rep1);
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
+
+	// 2. 提升玩家等级至 10 级，再次交互 ⇒ 命中块，立即结算旗标并下发窗口
+	p->level = 10;
+	ev.seqno = 402;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(eventResultOk(f.transport.sent(id), 402));
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "恭喜你达到6级，特此颁发先锋勋章！");
+
+	// 验证旗标副作用: EndSetFlg:15 已置位, CleanFlg:3 已清除, 原 now_event:15 已清除
+	CHECK(f.world.playerHasEndEvent(id, 15));
+	CHECK_FALSE(f.world.playerHasNowEvent(id, 3));
+	CHECK_FALSE(f.world.playerHasNowEvent(id, 15));
+
+	// 3. 再次交互 ⇒ 块 0 因已完成 (hasEndEvent(15)) 被前置门跳过，走兜底文案
+	f.world.onWindowReply(id, rep1); // 关闭
+	ev.seqno = 403;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+	CHECK(f.world.playerLastWindowText(id) == "等级不足，请提升到6级以上。");
+}
+
+TEST_CASE("W.9: ExChangeMan TYPE:ACCEPT 接取、取消与结算全生命周期闭环")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	// 配置 ExChangeMan NPC: 包含接取块与进行中块
+	NpcEntity npc{};
+	npc.id = 4002;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kExChangeMan;
+	npc.nomal_main_msg = "欢迎来到萨姆吉尔村。";
+
+	// 块 0: 接取任务
+	ExChangeBlock blk0{};
+	blk0.event_no = 8;
+	blk0.type = ExChangeType::kAccept;
+	blk0.condition = "LV>1&NOWEV!=8";
+	blk0.accept_msg = "你想接受村长的委托吗？";
+	blk0.thanks_msg = "祝你旅途顺利！";
+
+	// 块 1: 进行中提醒
+	ExChangeBlock blk1{};
+	blk1.event_no = 8;
+	blk1.type = ExChangeType::kMessage;
+	blk1.condition = "NOWEV=8";
+	blk1.nomal_window_msg = "你正在进行村长的委托，请快去完成。";
+
+	npc.exchange_blocks.push_back(blk0);
+	npc.exchange_blocks.push_back(blk1);
+	f.world.loadNpcEntities({npc});
+
+	SA::Model::Player *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 5;
+
+	// ── 步骤 1: 首次交互，命中块 0，收到 YES/NO 确认窗 ──────────────
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 501;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	const std::uint32_t wid1 = f.world.playerActiveWindowId(id);
+	auto win_opt1 = findLastWindowOpen(f.transport.sent(id));
+	REQUIRE(win_opt1.has_value());
+	CHECK(win_opt1->window_id == wid1);
+	// 验证包含 YES 和 NO 按钮
+	CHECK((win_opt1->buttons & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES)) != 0);
+	CHECK((win_opt1->buttons & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO)) != 0);
+	CHECK(f.world.playerLastWindowText(id) == "你想接受村长的委托吗？");
+
+	// ── 步骤 2: 回复 NO 取消 ⇒ 任务未接取，旗标不变 ────────────────
+	SA::Domain::WindowReply reply_no{};
+	reply_no.window_id = wid1;
+	reply_no.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+	reply_no.source.entity_id = 4002;
+	reply_no.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO);
+	f.world.onWindowReply(id, reply_no);
+
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
+	CHECK_FALSE(f.world.playerHasNowEvent(id, 8));
+	CHECK_FALSE(f.world.playerHasEndEvent(id, 8));
+
+	// ── 步骤 3: 再次交互，回复 YES 接取任务 ────────────────────────
+	ev.seqno = 502;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	const std::uint32_t wid2 = f.world.playerActiveWindowId(id);
+	REQUIRE(wid2 > 0);
+
+	SA::Domain::WindowReply reply_yes{};
+	reply_yes.window_id = wid2;
+	reply_yes.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+	reply_yes.source.entity_id = 4002;
+	reply_yes.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES);
+	f.world.onWindowReply(id, reply_yes);
+
+	// 接取成功: 置位 now_events[8], 并收到 ThanksMsg 窗口
+	CHECK(f.world.playerHasNowEvent(id, 8));
+	CHECK_FALSE(f.world.playerHasEndEvent(id, 8));
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "祝你旅途顺利！");
+
+	// 关闭 ThanksMsg 窗口
+	const std::uint32_t wid3 = f.world.playerActiveWindowId(id);
+	SA::Domain::WindowReply reply_ok{};
+	reply_ok.window_id = wid3;
+	reply_ok.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, reply_ok);
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
+
+	// ── 步骤 4: 任务进行中再次交互 ⇒ 命中块 1，收到进行中文案 ───────
+	ev.seqno = 503;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "你正在进行村长的委托，请快去完成。");
+
+	// ── 步骤 5: 玩家完成任务 (置 EndSetFlg:8, 清 now_events:8) ───────
+	p->setEndEvent(8);
+	p->clearNowEvent(8);
+	f.world.onWindowReply(id, reply_ok);
+
+	// ── 步骤 6: 任务完成后再次交互 ⇒ 块 0 因 hasEndEvent(8) 被前置门跳过，
+	//    块 1 因 NOWEV=8 不满足跳过 ⇒ 走默认兜底文案
+	ev.seqno = 504;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "欢迎来到萨姆吉尔村。");
+}

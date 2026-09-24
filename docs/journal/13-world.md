@@ -346,4 +346,36 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证 (RV-2)**: 注入禁用 `WindowReply` 窗口关闭逻辑 ⇒ 窗口闭环用例精准转红（1 失败 / 41 通过）；恢复后回绿。
 - **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py` 100% 绿灯。
 
+---
+
+### 9.0.74 批次 W.9 —— 任务旗标空间与 ExChangeMan 基础事件块解析骨架 (2026-09-25)
+
+2026-09-25 交付。世界系统中落地 8.0 规范权威任务旗标位图（`NOWEV` / `ENDEV`，原 `CHAR_NOWEVENT` / `CHAR_ENDEVENT`，`npcutil.c:1277-1377`）与任务核心引擎 ExChangeMan 基础事件块解析与交互闭环（全游戏 771 个文件，EventNo 方言唯一消费者，`npc_exchangeman.c`，`09-npc-event-dsl.md`）。
+
+#### 1. 源码事实与裁定
+
+1. **权威任务旗标空间 (09 §7.1-§7.4, C28-C31)**:
+   - 8.0 权威规格：`NOWEV`（进行中）与 `ENDEV`（已完成）各由 8 槽 × 32 位 = 256 位无符号位图构成（编号范围 0..255），投产数据实测最大用到 226。
+   - 严格边界防御 (C30)：约定 `-1` 旗标号代表无旗标/不占旗标（可无限触发），读写安全返回 `false`；显式判定 `shiftbit < 0 || shiftbit >= 256` 严格防御越界，根除原版无上界检查覆写相邻数据字段的历史漏洞。
+   - 清除语义修复 (C31)：清除采用确定的位操作 `&= ~(1U << shift)`，修复原版清除路径使用 XOR 导致 0 位误被置 1 的缺陷。
+2. **ExChangeMan 脚本解析与前置门 (09 §2.3 C5, §3.1 C9, §4 C20-C21)**:
+   - 块划分与字段提取：按 `EventEnd` 分块，支持 `EventNo`、`TYPE`、`EVENT`、`AcceptMsg`、`ThanksMsg`、`EndSetFlg`、`CleanFlg`、`NomalMsg`、`NomalWindowMsg` 等 key 的解析。
+   - 前置门求值顺序：
+     1. 若 `event_no != -1` 且已完成（`hasEndEvent(event_no)` 为 true），跳过该块；
+     2. 条件表达式求值：支持 `LV`（<, >, !=, =）、`NOWEV`（=, !=）、`ENDEV`（=, !=），短路与 `&`，逗号 `,` 分支选择器（命中分支返回 1-based 序号）；
+     3. 若所有分支均不满足，跳过该块。
+3. **TYPE 分派与窗口会话确认闭环**:
+   - `kMessage`：立即执行旗标副作用（`EndSetFlg` 置完成且清当前，`CleanFlg` 彻底清除，无 EndSetFlg 时标记为当前任务 `setNowEvent`），下发 `WindowOpen`（`BUTTON_FLAG_OK`）；
+   - `kAccept`：弹出接取/确认窗（`BUTTON_FLAG_YES | BUTTON_FLAG_NO`），在连接上记录待决 ExChange 上下文；收到客户端 `WindowReply` 且按键为 YES 时才结算旗标副作用，并下发 `ThanksMsg` 窗口；若按 NO 则取消且不改变任何旗标；
+   - 兜底对白：若所有事件块都不满足，从 `NomalMainMsg` 的逗号候选列表中随机摇选一句下发。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 42 增至 **47**（+5 用例），断言数从 639 增至 **1336**（+697 断言）。
+- **反向验证 (RV-1)**: 篡改任务旗标上界检查（`>= 256` → `> 256`）⇒ 边界保护测试精准转红（1 失败 / 46 通过）；恢复后回绿。
+- **反向验证 (RV-2)**: 篡改条件求值器中的 `NOWEV` 比较逻辑 ⇒ 条件表达式求值测试与全链测试精准转红（2 失败 / 45 通过）；恢复后回绿。
+- **反向验证 (RV-3)**: 篡改 `WindowReply` 处理中 ACCEPT 确认后的 `setNowEvent` 副作用 ⇒ 任务全周期测试精准转红（1 失败 / 46 通过）；恢复后回绿。
+- **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py` 100% 绿灯。
+
+
 
