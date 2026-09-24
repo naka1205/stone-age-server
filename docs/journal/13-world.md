@@ -377,5 +377,36 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证 (RV-3)**: 篡改 `WindowReply` 处理中 ACCEPT 确认后的 `setNowEvent` 副作用 ⇒ 任务全周期测试精准转红（1 失败 / 46 通过）；恢复后回绿。
 - **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py` 100% 绿灯。
 
+---
 
+### 9.0.75 批次 W.10 —— ExChangeMan 道具/宠物交付与奖励结算 (2026-09-25)
+
+2026-09-25 交付。世界系统中落地 ExChangeMan 道具与宠物交付、石币手续费扣除与奖励结算全流程（`npc_exchangeman.c`，`09-npc-event-dsl.md`），实现任务系统与玩家背包（Inventory）、随行宠物槽（PetSlots）、经济账本（GoldLedger）的全面联动。
+
+#### 1. 源码事实与裁定
+
+1. **实体模型扩展 (`shared/model/Pet.h`)**:
+   - `Pet` 结构引入 `std::int32_t pet_id = 0;`（对应原版 `CHAR_PETID`，同时与 `Enemy::pet_id` 对齐），供任务交付与奖励条件判断；保持 POD、`kKind` 编译期常量与零分配契约。
+2. **经济账本唯一入口守卫 (`GoldReason::kQuestReward`, `kQuestFee`)**:
+   - 随身石币写点严格通过 `GoldLedger` 唯一入口（`delGold` 扣除 `DelStone`，`addGold` 给予 `GetStone`）；
+   - 守卫脚本 `check_gold_writes.py`（ctest `gold_writes`）100% 保持通过，杜绝任何裸写与静默旁路。
+3. **DSL 表达式与前置门判断扩展 (`ExChangeMan.cpp`, `09-npc-event-dsl.md` §3-§4)**:
+   - 解析器支持 `GetItem`, `DelItem`, `GetPet`, `DelPet`, `GetStone`, `DelStone`, `ItemFullMsg`, `PetFullMsg`, `StoneLessMsg`, `StoneFullMsg`；
+   - 表达式求值扩展：`PET`（按 petid 与等级/数量判定）、`ITEM`（按 item_id 与数量堆叠判定）、`reITEM`/`rePET`（剩余空位判定）、`GOLD`（石币比较）；
+   - 前置门容量保护：
+     - 石币不足门：`p.gold < del_stone` 时阻断并下发 `StoneLessMsg`；
+     - 石币超限门：`p.gold + get_stone > maxHaveGold(0)` 时阻断并下发 `StoneFullMsg`；
+     - 背包容量门：`free_item_slots + del_item_slots < get_item_slots` 时阻断并下发 `ItemFullMsg`；因考虑 `del_item_slots` 释放格，原生支持“以物易物”的满包置换；
+     - 宠物容量门：`free_pet_slots + del_pet_slots < get_pet_slots` 时阻断并下发 `PetFullMsg`；同样支持满槽换宠。
+4. **副作用结算与 EVDEL 动态解析 (`World.cpp`)**:
+   - 支持 `DelItem: EVDEL` 与 `DelPet: EVDEL` 从命中分支的 `EVENT` 表达式中动态反解需扣除的道具和宠物；
+   - `applyExChangeEffects` 原子执行：扣除/增加石币、扣除/给予道具（落背包与道具池）、扣除/给予宠物（落宠物槽与宠物池）、置位 `EndSetFlg`、清除 `CleanFlg`；
+   - 在 `kMessage` 即时交互与 `kAccept` 确认回执（YES/NO 状态机）双路径中统一闭环。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 47 增至 **52**（+5 专项用例），断言数从 1336 增至 **1531**（+195 断言）。
+- **反向验证 (RV-1)**: 篡改背包满检查逻辑（绕过检查）⇒ `W.10: ExChangeMan 背包满拦截` 测试精准报红（1 失败 / 51 通过）；恢复后回绿。
+- **反向验证 (RV-2)**: 篡改石币不足检查逻辑（绕过检查）⇒ `W.10: ExChangeMan 石币不足与超限拦截` 测试精准报红（1 失败 / 51 通过）；恢复后回绿。
+- **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py`、22 项 ctest 全量绿灯。
 

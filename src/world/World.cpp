@@ -543,6 +543,228 @@ void captureItemDelAll(SA::Model::Player &owner, std::int32_t pet_id, ItemPool &
 	}
 }
 
+// ── 批次 W.10: ExChangeMan 道具与宠物交付/奖励解析辅助 ─────────
+struct ExchangeItemEntry
+{
+	std::int32_t item_id = 0;
+	std::int32_t count = 1;
+};
+
+inline std::vector<ExchangeItemEntry> parseExchangeItems(std::string_view str)
+{
+	std::vector<ExchangeItemEntry> result;
+	std::size_t start = 0;
+	while (start < str.size())
+	{
+		const std::size_t comma = str.find(',', start);
+		std::string_view part =
+		    (comma == std::string_view::npos) ? str.substr(start) : str.substr(start, comma - start);
+		while (!part.empty() && std::isspace(static_cast<unsigned char>(part.front())))
+			part.remove_prefix(1);
+		while (!part.empty() && std::isspace(static_cast<unsigned char>(part.back())))
+			part.remove_suffix(1);
+		if (!part.empty() && part != "EVDEL")
+		{
+			const std::size_t star = part.find('*');
+			if (star != std::string_view::npos)
+			{
+				const int id = std::atoi(std::string(part.substr(0, star)).c_str());
+				const int cnt = std::atoi(std::string(part.substr(star + 1)).c_str());
+				if (id > 0)
+					result.push_back({id, std::max(1, cnt)});
+			}
+			else
+			{
+				const int id = std::atoi(std::string(part).c_str());
+				if (id > 0)
+					result.push_back({id, 1});
+			}
+		}
+		if (comma == std::string_view::npos)
+			break;
+		start = comma + 1;
+	}
+	return result;
+}
+
+struct ExchangePetEntry
+{
+	std::int32_t pet_id = 0;
+	std::int32_t count = 1;
+};
+
+inline std::vector<ExchangePetEntry> parseExchangePets(std::string_view str)
+{
+	std::vector<ExchangePetEntry> result;
+	std::size_t start = 0;
+	while (start < str.size())
+	{
+		const std::size_t comma = str.find(',', start);
+		std::string_view part =
+		    (comma == std::string_view::npos) ? str.substr(start) : str.substr(start, comma - start);
+		while (!part.empty() && std::isspace(static_cast<unsigned char>(part.front())))
+			part.remove_prefix(1);
+		while (!part.empty() && std::isspace(static_cast<unsigned char>(part.back())))
+			part.remove_suffix(1);
+		if (!part.empty() && part != "EVDEL")
+		{
+			const std::size_t star = part.find('*');
+			if (star != std::string_view::npos)
+			{
+				const int id = std::atoi(std::string(part.substr(0, star)).c_str());
+				const int cnt = std::atoi(std::string(part.substr(star + 1)).c_str());
+				if (id > 0)
+					result.push_back({id, std::max(1, cnt)});
+			}
+			else
+			{
+				const int id = std::atoi(std::string(part).c_str());
+				if (id > 0)
+					result.push_back({id, 1});
+			}
+		}
+		if (comma == std::string_view::npos)
+			break;
+		start = comma + 1;
+	}
+	return result;
+}
+
+inline std::vector<ExchangeItemEntry> resolveDelItems(const ExChangeBlock &blk, int branch_idx)
+{
+	auto dels = parseExchangeItems(blk.del_item);
+	const std::string_view cond{blk.condition};
+	if (blk.del_item.find("EVDEL") != std::string_view::npos && !cond.empty())
+	{
+		std::size_t start = 0;
+		int cur_branch = 1;
+		std::string_view matched_branch{};
+		while (start < cond.size())
+		{
+			const std::size_t comma = cond.find(',', start);
+			const std::string_view branch =
+			    (comma == std::string_view::npos) ? cond.substr(start)
+			                                      : cond.substr(start, comma - start);
+			if (cur_branch == branch_idx)
+			{
+				matched_branch = branch;
+				break;
+			}
+			++cur_branch;
+			if (comma == std::string_view::npos)
+				break;
+			start = comma + 1;
+		}
+		if (!matched_branch.empty())
+		{
+			std::size_t astart = 0;
+			while (astart < matched_branch.size())
+			{
+				const std::size_t amp = matched_branch.find('&', astart);
+				const std::string_view atom =
+				    (amp == std::string_view::npos) ? matched_branch.substr(astart)
+				                                    : matched_branch.substr(astart, amp - astart);
+				if (atom.find("ITEM") != std::string_view::npos &&
+				    atom.find('=') != std::string_view::npos)
+				{
+					const std::size_t eq = atom.find('=');
+					const std::string_view val = atom.substr(eq + 1);
+					const std::size_t star = val.find('*');
+					if (star != std::string_view::npos)
+					{
+						const int id = std::atoi(std::string(val.substr(0, star)).c_str());
+						const int cnt = std::atoi(std::string(val.substr(star + 1)).c_str());
+						if (id > 0)
+							dels.push_back({id, std::max(1, cnt)});
+					}
+					else
+					{
+						const int id = std::atoi(std::string(val).c_str());
+						if (id > 0)
+							dels.push_back({id, 1});
+					}
+				}
+				if (amp == std::string_view::npos)
+					break;
+				astart = amp + 1;
+			}
+		}
+	}
+	return dels;
+}
+
+inline std::vector<ExchangePetEntry> resolveDelPets(const ExChangeBlock &blk, int branch_idx)
+{
+	auto dels = parseExchangePets(blk.del_pet);
+	const std::string_view cond{blk.condition};
+	if (blk.del_pet.find("EVDEL") != std::string_view::npos && !cond.empty())
+	{
+		std::size_t start = 0;
+		int cur_branch = 1;
+		std::string_view matched_branch{};
+		while (start < cond.size())
+		{
+			const std::size_t comma = cond.find(',', start);
+			const std::string_view branch =
+			    (comma == std::string_view::npos) ? cond.substr(start)
+			                                      : cond.substr(start, comma - start);
+			if (cur_branch == branch_idx)
+			{
+				matched_branch = branch;
+				break;
+			}
+			++cur_branch;
+			if (comma == std::string_view::npos)
+				break;
+			start = comma + 1;
+		}
+		if (!matched_branch.empty())
+		{
+			std::size_t astart = 0;
+			while (astart < matched_branch.size())
+			{
+				const std::size_t amp = matched_branch.find('&', astart);
+				const std::string_view atom =
+				    (amp == std::string_view::npos) ? matched_branch.substr(astart)
+				                                    : matched_branch.substr(astart, amp - astart);
+				if (atom.find("PET") != std::string_view::npos)
+				{
+					const std::size_t hyphen = atom.find('-');
+					if (hyphen != std::string_view::npos)
+					{
+						const std::string_view right = atom.substr(hyphen + 1);
+						const std::size_t star = right.find('*');
+						if (star != std::string_view::npos)
+						{
+							const int id = std::atoi(std::string(right.substr(0, star)).c_str());
+							const int cnt = std::atoi(std::string(right.substr(star + 1)).c_str());
+							if (id > 0)
+								dels.push_back({id, std::max(1, cnt)});
+						}
+						else
+						{
+							const int id = std::atoi(std::string(right).c_str());
+							if (id > 0)
+								dels.push_back({id, 1});
+						}
+					}
+					else if (atom.find('=') != std::string_view::npos)
+					{
+						const std::size_t eq = atom.find('=');
+						const int id = std::atoi(std::string(atom.substr(eq + 1)).c_str());
+						if (id > 0)
+							dels.push_back({id, 1});
+					}
+				}
+				if (amp == std::string_view::npos)
+					break;
+				astart = amp + 1;
+			}
+		}
+	}
+	return dels;
+}
+
 // 往玩家背包放一件道具(三门:无空槽 / 池满 ⇒ 返回 -1 且不写)。道具域第三批 I.3 抽出,
 // 供掉落灌包(战果结算段)与 `World::giveItemToPlayer`(注入 seam)共用,避免双份实现(DR-BT5)。
 // ★ 与 `spawnEnemyToField` 同性质:三门全过才写 ⇒ 失败不留孤儿。
@@ -2221,6 +2443,16 @@ struct World::Impl : GoldAuditSink
 	//   ★ 这是"玩家看敌人"那一半(broadcastMove 只做了"玩家看玩家")。
 	void refreshEnemyView(SA::Net::ConnectionId viewer, const SA::Model::Player &p,
 	                      std::int32_t ox, std::int32_t oy);
+
+	// ── ExChangeMan 道具与宠物交付/奖励 (批次 W.10) ───────────────────
+	std::int32_t countPlayerItems(const SA::Model::Player &p, std::int32_t item_id) const;
+	std::int32_t countPlayerPets(const SA::Model::Player &p, std::int32_t pet_id, std::int32_t min_lvl) const;
+	std::int32_t countFreeItemSlots(const SA::Model::Player &p) const;
+	std::int32_t countFreePetSlots(const SA::Model::Player &p) const;
+	void sendExChangeWindow(SA::Net::SessionId id, std::uint64_t npc_id,
+	                        const std::string &raw_text, std::uint32_t buttons);
+	bool checkExChangePreconditions(const SA::Model::Player &p, const ExChangeBlock &blk, int branch_idx, std::string &msg_out);
+	void applyExChangeEffects(SA::Net::SessionId id, SA::Model::Player &p, const ExChangeBlock &blk, int branch_idx);
 };
 
 World::World(const SA::Platform::ServerConfig &config,
@@ -2234,6 +2466,369 @@ World::World(const SA::Platform::ServerConfig &config,
 }
 
 World::~World() = default;
+
+std::int32_t World::Impl::countPlayerItems(const SA::Model::Player &p, std::int32_t item_id) const
+{
+	std::int32_t cnt = 0;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		if (p.items[i].valid())
+		{
+			if (const auto *it = items.resolve(p.items[i]))
+			{
+				if (it->item_id == item_id)
+				{
+					cnt += std::max(1, it->current_pile);
+				}
+			}
+		}
+	}
+	return cnt;
+}
+
+std::int32_t World::Impl::countPlayerPets(const SA::Model::Player &p, std::int32_t pet_id,
+                                          std::int32_t min_lvl) const
+{
+	std::int32_t cnt = 0;
+	for (std::size_t i = 0; i < SA::Model::kMaxPetHave; ++i)
+	{
+		if (p.pets[i].valid())
+		{
+			if (const auto *pet = pets.resolve(p.pets[i]))
+			{
+				if (pet->pet_id == pet_id && pet->level >= min_lvl)
+				{
+					++cnt;
+				}
+			}
+		}
+	}
+	return cnt;
+}
+
+std::int32_t World::Impl::countFreeItemSlots(const SA::Model::Player &p) const
+{
+	std::int32_t free_cnt = 0;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		if (!p.items[i].valid())
+			++free_cnt;
+	}
+	return free_cnt;
+}
+
+std::int32_t World::Impl::countFreePetSlots(const SA::Model::Player &p) const
+{
+	std::int32_t free_cnt = 0;
+	for (std::size_t i = 0; i < SA::Model::kMaxPetHave; ++i)
+	{
+		if (!p.pets[i].valid())
+			++free_cnt;
+	}
+	return free_cnt;
+}
+
+void World::Impl::sendExChangeWindow(SA::Net::SessionId id, std::uint64_t npc_id,
+                                     const std::string &raw_text, std::uint32_t buttons)
+{
+	auto it = conns.find(id);
+	if (it == conns.end())
+		return;
+
+	SA::Domain::WindowOpen win{};
+	win.window_id = ++next_window_id;
+	win.kind = SA::Domain::WindowKind::WINDOW_KIND_MESSAGE;
+	win.buttons = buttons;
+	win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+	win.source.entity_id = static_cast<std::uint32_t>(npc_id);
+	win.body_kind = SA::Domain::WindowOpen::BodyKind::MESSAGE;
+	win.body.message.wide = false;
+
+	std::size_t lstart = 0;
+	while (lstart < raw_text.size() && win.body.message.lines.size() < 16)
+	{
+		const std::size_t nl = raw_text.find('\n', lstart);
+		std::string line = (nl == std::string::npos) ? raw_text.substr(lstart)
+		                                             : raw_text.substr(lstart, nl - lstart);
+		if (line.size() > 255)
+			line.resize(255);
+		if (auto *slot = win.body.message.lines.push_back())
+			slot->assign(line.data(), line.size());
+		if (nl == std::string::npos)
+			break;
+		lstart = nl + 1;
+	}
+	if (win.body.message.lines.empty())
+	{
+		std::string line = raw_text;
+		if (line.size() > 255)
+			line.resize(255);
+		if (auto *slot = win.body.message.lines.push_back())
+			slot->assign(line.data(), line.size());
+	}
+
+	it->second.active_window_id = win.window_id;
+	it->second.active_window_npc_id = static_cast<std::uint64_t>(npc_id);
+	it->second.last_window_text = raw_text;
+	sendTo(id, win);
+}
+
+bool World::Impl::checkExChangePreconditions(const SA::Model::Player &p,
+                                             const ExChangeBlock &blk, int branch_idx,
+                                             std::string &msg_out)
+{
+	// 1. 石币不足门 (DelStone vs p.gold)
+	if (blk.del_stone > 0 && p.gold < blk.del_stone)
+	{
+		msg_out = !blk.stone_less_msg.empty() ? blk.stone_less_msg : "石币不足。";
+		return false;
+	}
+
+	// 2. 石币超限门 (GetStone vs maxHaveGold)
+	if (blk.get_stone > 0 && (p.gold + blk.get_stone > maxHaveGold(0)))
+	{
+		if (!blk.stone_full_msg.empty())
+		{
+			msg_out = blk.stone_full_msg;
+			return false;
+		}
+	}
+
+	// 3. 背包容量门 (ItemFullCheck, 09 §4)
+	if (!blk.get_item.empty())
+	{
+		const auto gets = parseExchangeItems(blk.get_item);
+		std::int32_t get_slots = 0;
+		for (const auto &g : gets)
+			get_slots += g.count;
+
+		const auto dels = resolveDelItems(blk, branch_idx);
+		std::int32_t del_slots = 0;
+		for (const auto &d : dels)
+		{
+			std::int32_t rem = d.count;
+			for (std::size_t i = SA::Model::kStartItemArray;
+			     i < SA::Model::kMaxItemHave && rem > 0; ++i)
+			{
+				if (p.items[i].valid())
+				{
+					if (const auto *item = items.resolve(p.items[i]))
+					{
+						if (item->item_id == d.item_id)
+						{
+							++del_slots;
+							--rem;
+						}
+					}
+				}
+			}
+		}
+
+		const std::int32_t free_slots = countFreeItemSlots(p);
+		if (free_slots + del_slots < get_slots)
+		{
+			msg_out = !blk.item_full_msg.empty() ? blk.item_full_msg : "道具栏已满。";
+			return false;
+		}
+	}
+
+	// 4. 宠物槽容量门 (PetFullCheck, 09 §4)
+	if (!blk.get_pet.empty())
+	{
+		const auto gets = parseExchangePets(blk.get_pet);
+		std::int32_t get_pet_slots = 0;
+		for (const auto &g : gets)
+			get_pet_slots += g.count;
+
+		const auto dels = resolveDelPets(blk, branch_idx);
+		std::int32_t del_pet_slots = 0;
+		for (const auto &d : dels)
+		{
+			std::int32_t rem = d.count;
+			for (std::size_t i = 0; i < SA::Model::kMaxPetHave && rem > 0; ++i)
+			{
+				if (p.pets[i].valid())
+				{
+					if (const auto *pet = pets.resolve(p.pets[i]))
+					{
+						if (pet->pet_id == d.pet_id)
+						{
+							++del_pet_slots;
+							--rem;
+						}
+					}
+				}
+			}
+		}
+
+		const std::int32_t free_pet_slots = countFreePetSlots(p);
+		if (free_pet_slots + del_pet_slots < get_pet_slots)
+		{
+			msg_out = !blk.pet_full_msg.empty() ? blk.pet_full_msg : "宠物栏已满。";
+			return false;
+		}
+	}
+
+	return true;
+}
+
+void World::Impl::applyExChangeEffects(SA::Net::SessionId id, SA::Model::Player &p,
+                                       const ExChangeBlock &blk, int branch_idx)
+{
+	// ① 扣除石币 (必须走 delGold, 守卫 check_gold_writes)
+	if (blk.del_stone > 0)
+	{
+		(void)delGold(p, GoldReason::kQuestFee, blk.del_stone, /*trans=*/0, /*corr=*/0, *this);
+	}
+
+	// ② 给予石币 (必须走 addGold, 守卫 check_gold_writes)
+	if (blk.get_stone > 0)
+	{
+		(void)addGold(p, GoldReason::kQuestReward, blk.get_stone, /*trans=*/0, /*corr=*/0, *this);
+	}
+
+	// ③ 扣除道具
+	const auto dels = resolveDelItems(blk, branch_idx);
+	for (const auto &d : dels)
+	{
+		std::int32_t remaining = d.count;
+		for (std::size_t i = SA::Model::kStartItemArray;
+		     i < SA::Model::kMaxItemHave && remaining > 0; ++i)
+		{
+			if (p.items[i].valid())
+			{
+				auto *item = items.resolve(p.items[i]);
+				if (item != nullptr && item->item_id == d.item_id)
+				{
+					if (item->current_pile > remaining)
+					{
+						item->current_pile -= remaining;
+						remaining = 0;
+					}
+					else
+					{
+						remaining -= std::max(1, item->current_pile);
+						const auto h = p.items[i];
+						p.clearItemSlot(static_cast<int>(i));
+						items.release(h);
+					}
+				}
+			}
+		}
+	}
+
+	// ④ 给予道具
+	if (!blk.get_item.empty())
+	{
+		const auto gets = parseExchangeItems(blk.get_item);
+		for (const auto &g : gets)
+		{
+			for (int c = 0; c < g.count; ++c)
+			{
+				SA::Model::Item new_item{};
+				new_item.uid = ++next_window_id;
+				new_item.item_id = g.item_id;
+				new_item.current_pile = 1;
+				new_item.use_pile_nums = 1;
+				(void)giveItemIntoPlayer(p, new_item, items);
+			}
+		}
+	}
+
+	// ⑤ 扣除宠物
+	const auto del_pets = resolveDelPets(blk, branch_idx);
+	for (const auto &d : del_pets)
+	{
+		std::int32_t remaining = d.count;
+		for (std::size_t i = 0; i < SA::Model::kMaxPetHave && remaining > 0; ++i)
+		{
+			if (p.pets[i].valid())
+			{
+				const auto *pet = pets.resolve(p.pets[i]);
+				if (pet != nullptr && pet->pet_id == d.pet_id)
+				{
+					const auto h = p.pets[i];
+					p.clearPetSlot(static_cast<int>(i));
+					pets.release(h);
+					--remaining;
+				}
+			}
+		}
+	}
+
+	// ⑥ 给予宠物
+	if (!blk.get_pet.empty())
+	{
+		const auto gets = parseExchangePets(blk.get_pet);
+		for (const auto &g : gets)
+		{
+			for (int c = 0; c < g.count; ++c)
+			{
+				const int slot = p.findFreePetSlot();
+				if (slot >= 0)
+				{
+					const SA::Model::EntityHandle ph = pets.allocate();
+					if (ph.valid())
+					{
+						if (auto *pet_dst = pets.resolve(ph))
+						{
+							pet_dst->uid = ++next_window_id;
+							pet_dst->pet_id = g.pet_id;
+							pet_dst->level = 1;
+							pet_dst->hp = 100;
+							pet_dst->mp = 100;
+							pet_dst->max_mp = 100;
+							pet_dst->owner = player_of_session.find(id);
+							p.pets[static_cast<std::size_t>(slot)] = ph;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// ⑦ 旗标副作用
+	if (!blk.end_set_flg.empty())
+	{
+		std::size_t start = 0;
+		while (start < blk.end_set_flg.size())
+		{
+			const std::size_t comma = blk.end_set_flg.find(',', start);
+			const std::string s_flag =
+			    (comma == std::string::npos) ? blk.end_set_flg.substr(start)
+			                                 : blk.end_set_flg.substr(start, comma - start);
+			const int f = std::atoi(s_flag.c_str());
+			p.setEndEvent(f);
+			if (comma == std::string::npos)
+				break;
+			start = comma + 1;
+		}
+	}
+	if (!blk.clean_flg.empty())
+	{
+		std::size_t start = 0;
+		while (start < blk.clean_flg.size())
+		{
+			const std::size_t comma = blk.clean_flg.find(',', start);
+			const std::string s_flag =
+			    (comma == std::string::npos) ? blk.clean_flg.substr(start)
+			                                 : blk.clean_flg.substr(start, comma - start);
+			const int f = std::atoi(s_flag.c_str());
+			p.clearNowEvent(f);
+			p.clearEndEvent(f);
+			if (comma == std::string::npos)
+				break;
+			start = comma + 1;
+		}
+	}
+	if (blk.event_no != -1)
+	{
+		if (!blk.end_set_flg.empty())
+			p.clearNowEvent(blk.event_no);
+		else
+			p.setNowEvent(blk.event_no);
+	}
+}
 
 namespace
 {
@@ -4538,6 +5133,31 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 					int matched_block_idx = -1;
 					int matched_branch_idx = 0;
 
+					auto count_item_cb = [](const SA::Model::Player &pl, std::int32_t item_id,
+					                        void *userdata) -> std::int32_t
+					{
+						return static_cast<const World::Impl *>(userdata)->countPlayerItems(
+						    pl, item_id);
+					};
+					auto count_pet_cb = [](const SA::Model::Player &pl, std::int32_t pet_id,
+					                       std::int32_t min_lvl, void *userdata) -> std::int32_t
+					{
+						return static_cast<const World::Impl *>(userdata)->countPlayerPets(
+						    pl, pet_id, min_lvl);
+					};
+					auto count_free_items_cb = [](const SA::Model::Player &pl,
+					                              void *userdata) -> std::int32_t
+					{
+						return static_cast<const World::Impl *>(userdata)->countFreeItemSlots(pl);
+					};
+					auto count_free_pets_cb = [](const SA::Model::Player &pl,
+					                             void *userdata) -> std::int32_t
+					{
+						return static_cast<const World::Impl *>(userdata)->countFreePetSlots(pl);
+					};
+					const EventCheckContext check_ctx{*p, count_item_cb, count_pet_cb,
+					                                  count_free_items_cb, count_free_pets_cb, &s};
+
 					for (std::size_t bi = 0; bi < npc.exchange_blocks.size(); ++bi)
 					{
 						const auto &blk = npc.exchange_blocks[bi];
@@ -4545,7 +5165,7 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 						if (blk.event_no != -1 && p->hasEndEvent(blk.event_no))
 							continue;
 
-						const int branch = evaluateEventCondition(blk.condition, *p);
+						const int branch = evaluateEventCondition(blk.condition, check_ctx);
 						if (branch > 0)
 						{
 							matched_block_idx = static_cast<int>(bi);
@@ -4554,103 +5174,21 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 						}
 					}
 
-					auto apply_end_set = [&](const std::string &flg_str, int ev_no)
-					{
-						if (!flg_str.empty())
-						{
-							std::size_t start = 0;
-							while (start < flg_str.size())
-							{
-								const std::size_t comma = flg_str.find(',', start);
-								const std::string s = (comma == std::string::npos)
-								                          ? flg_str.substr(start)
-								                          : flg_str.substr(start, comma - start);
-								const int f = std::atoi(s.c_str());
-								p->setEndEvent(f);
-								if (comma == std::string::npos)
-									break;
-								start = comma + 1;
-							}
-						}
-						if (ev_no != -1)
-						{
-							p->clearNowEvent(ev_no);
-						}
-					};
-
-					auto apply_clean = [&](const std::string &flg_str)
-					{
-						if (flg_str.empty())
-							return;
-						std::size_t start = 0;
-						while (start < flg_str.size())
-						{
-							const std::size_t comma = flg_str.find(',', start);
-							const std::string s = (comma == std::string::npos)
-							                          ? flg_str.substr(start)
-							                          : flg_str.substr(start, comma - start);
-							const int f = std::atoi(s.c_str());
-							p->clearNowEvent(f);
-							p->clearEndEvent(f);
-							if (comma == std::string::npos)
-								break;
-							start = comma + 1;
-						}
-					};
-
-					auto send_exchange_window = [&](const std::string &raw_text, std::uint32_t buttons)
-					{
-						SA::Domain::WindowOpen win{};
-						win.window_id = ++s.next_window_id;
-						win.kind = SA::Domain::WindowKind::WINDOW_KIND_MESSAGE;
-						win.buttons = buttons;
-						win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
-						win.source.entity_id = static_cast<std::uint32_t>(npc.id);
-						win.body_kind = SA::Domain::WindowOpen::BodyKind::MESSAGE;
-						win.body.message.wide = false;
-
-						std::size_t lstart = 0;
-						while (lstart < raw_text.size() && win.body.message.lines.size() < 16)
-						{
-							const std::size_t nl = raw_text.find('\n', lstart);
-							std::string line = (nl == std::string::npos)
-							                       ? raw_text.substr(lstart)
-							                       : raw_text.substr(lstart, nl - lstart);
-							if (line.size() > 255)
-								line.resize(255);
-							if (auto *slot = win.body.message.lines.push_back())
-								slot->assign(line.data(), line.size());
-							if (nl == std::string::npos)
-								break;
-							lstart = nl + 1;
-						}
-						if (win.body.message.lines.empty())
-						{
-							std::string line = raw_text;
-							if (line.size() > 255)
-								line.resize(255);
-							if (auto *slot = win.body.message.lines.push_back())
-								slot->assign(line.data(), line.size());
-						}
-
-						it->second.active_window_id = win.window_id;
-						it->second.active_window_npc_id = npc.id;
-						it->second.last_window_text = raw_text;
-						s.sendTo(id, win);
-					};
-
 					if (matched_block_idx >= 0)
 					{
 						const auto &blk = npc.exchange_blocks[static_cast<std::size_t>(matched_block_idx)];
-						if (blk.type == ExChangeType::kMessage)
+						std::string door_msg;
+						if (!s.checkExChangePreconditions(*p, blk, matched_branch_idx, door_msg))
 						{
-							// 立即结算副作用
-							apply_end_set(blk.end_set_flg, blk.event_no);
-							apply_clean(blk.clean_flg);
-							if (blk.event_no != -1 && blk.end_set_flg.empty())
-							{
-								p->setNowEvent(blk.event_no);
-							}
+							it->second.pending_exchange = {};
+							s.sendExChangeWindow(id, npc.id, door_msg,
+							                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+							ok = true;
+						}
+						else if (blk.type == ExChangeType::kMessage)
+						{
+							// 立即结算全部副作用 (石币/道具/宠物/旗标)
+							s.applyExChangeEffects(id, *p, blk, matched_branch_idx);
 
 							std::string msg = blk.nomal_window_msg;
 							if (msg.empty())
@@ -4659,7 +5197,8 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 								msg = blk.thanks_msg;
 
 							it->second.pending_exchange = {};
-							send_exchange_window(msg, static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+							s.sendExChangeWindow(id, npc.id, msg,
+							                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
 							ok = true;
 						}
 						else if (blk.type == ExChangeType::kAccept)
@@ -4674,7 +5213,7 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 							const std::uint32_t buttons =
 							    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES) |
 							    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO);
-							send_exchange_window(msg, buttons);
+							s.sendExChangeWindow(id, npc.id, msg, buttons);
 							it->second.pending_exchange = {npc.id, matched_block_idx, matched_branch_idx};
 							ok = true;
 						}
@@ -4708,7 +5247,8 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 							chosen = npc.nomal_main_msg;
 
 						it->second.pending_exchange = {};
-						send_exchange_window(chosen, static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+						s.sendExChangeWindow(id, npc.id, chosen,
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
 						ok = true;
 					}
 				}
@@ -4752,47 +5292,16 @@ void World::onWindowReply(SA::Net::SessionId id, const SA::Domain::WindowReply &
 
 				if (is_yes)
 				{
-					// 执行旗标副作用
-					if (!blk.end_set_flg.empty())
+					std::string door_msg;
+					if (!s.checkExChangePreconditions(*p, blk, pending.branch_idx, door_msg))
 					{
-						std::size_t start = 0;
-						while (start < blk.end_set_flg.size())
-						{
-							const std::size_t comma = blk.end_set_flg.find(',', start);
-							const std::string str = (comma == std::string::npos)
-							                            ? blk.end_set_flg.substr(start)
-							                            : blk.end_set_flg.substr(start, comma - start);
-							const int f = std::atoi(str.c_str());
-							p->setEndEvent(f);
-							if (comma == std::string::npos)
-								break;
-							start = comma + 1;
-						}
+						s.sendExChangeWindow(id, npc->id, door_msg,
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+						return;
 					}
-					if (!blk.clean_flg.empty())
-					{
-						std::size_t start = 0;
-						while (start < blk.clean_flg.size())
-						{
-							const std::size_t comma = blk.clean_flg.find(',', start);
-							const std::string str = (comma == std::string::npos)
-							                            ? blk.clean_flg.substr(start)
-							                            : blk.clean_flg.substr(start, comma - start);
-							const int f = std::atoi(str.c_str());
-							p->clearNowEvent(f);
-							p->clearEndEvent(f);
-							if (comma == std::string::npos)
-								break;
-							start = comma + 1;
-						}
-					}
-					if (blk.event_no != -1)
-					{
-						if (!blk.end_set_flg.empty())
-							p->clearNowEvent(blk.event_no);
-						else
-							p->setNowEvent(blk.event_no);
-					}
+
+					// 执行全部副作用 (石币/道具/宠物/旗标)
+					s.applyExChangeEffects(id, *p, blk, pending.branch_idx);
 
 					std::string thanks = blk.thanks_msg;
 					if (thanks.empty())
@@ -4800,44 +5309,8 @@ void World::onWindowReply(SA::Net::SessionId id, const SA::Domain::WindowReply &
 
 					if (!thanks.empty())
 					{
-						// 下发感谢窗口
-						SA::Domain::WindowOpen win{};
-						win.window_id = ++s.next_window_id;
-						win.kind = SA::Domain::WindowKind::WINDOW_KIND_MESSAGE;
-						win.buttons = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
-						win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
-						win.source.entity_id = static_cast<std::uint32_t>(npc->id);
-						win.body_kind = SA::Domain::WindowOpen::BodyKind::MESSAGE;
-						win.body.message.wide = false;
-
-						std::size_t lstart = 0;
-						while (lstart < thanks.size() && win.body.message.lines.size() < 16)
-						{
-							const std::size_t nl = thanks.find('\n', lstart);
-							std::string line = (nl == std::string::npos)
-							                       ? thanks.substr(lstart)
-							                       : thanks.substr(lstart, nl - lstart);
-							if (line.size() > 255)
-								line.resize(255);
-							if (auto *slot = win.body.message.lines.push_back())
-								slot->assign(line.data(), line.size());
-							if (nl == std::string::npos)
-								break;
-							lstart = nl + 1;
-						}
-						if (win.body.message.lines.empty())
-						{
-							std::string line = thanks;
-							if (line.size() > 255)
-								line.resize(255);
-							if (auto *slot = win.body.message.lines.push_back())
-								slot->assign(line.data(), line.size());
-						}
-
-						it->second.active_window_id = win.window_id;
-						it->second.active_window_npc_id = npc->id;
-						it->second.last_window_text = thanks;
-						s.sendTo(id, win);
+						s.sendExChangeWindow(id, npc->id, thanks,
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
 						return; // 保持活动新窗口
 					}
 				}

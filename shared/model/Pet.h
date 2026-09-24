@@ -47,6 +47,11 @@ struct Pet
 	// ★ 类型与族的对应在编译期可查 —— 和类型的分派不靠运行期 tag 字段(M2)。
 	static constexpr EntityKind kKind = EntityKind::kPet;
 
+	// ── 身份与图鉴 (原 CHAR_PETID / CHAR_PETENEMYID, char_base.h:365, 09 §3.5 C16) ──────
+	// ★ 批次 W.10 引入: 宠物模板/图鉴 ID, 供任务条件 (PET=95 / PET>0-95) 与交付结算
+	//   (GetPet / DelPet) 使用。Enemy 侧对应字段为 Enemy::pet_id。
+	std::int32_t pet_id = 0;
+
 	// ── 主人(源码 :390-395)────────────────────────────────────────
 	//
 	// ★ 原版存三样:`CHAR_WORKPLAYERINDEX`(运行期下标,:390)· `CHAR_OWNERCDKEY`

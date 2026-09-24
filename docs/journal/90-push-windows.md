@@ -652,4 +652,27 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 - **守卫闭环**:
   - 服务端打附注 tag `shared-v0.34.0` 推送 GitHub，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.34.0`，消除 D2 漂移告警，恢复 8/8 全绿。
 
+---
+
+### 9.0.75b ★ 推送窗口执行记录 —— `shared-v0.35.0`(2026-09-25)
+
+> **本窗口前推范围**: 批次 W.10 ExChangeMan 道具/宠物交付与奖励结算（§9.0.75）扩展 `shared/model/Pet.h`（增加 `pet_id`）。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `shared-v0.35.0`(**附注** tag，subject「release: shared-v0.35.0 (batch W.10 pet_id in Pet.h)」) |
+| client master | pin v0.34.0 → **v0.35.0**(`cmake/SaShared.cmake`) |
+| client 本机 ci_verify | **8 项全过**(清洁构建 · 锁定 ref 与源码一致 · shared/ 与锁定 ref 一致无漂移 · 7 条全部注册 · ctest 7/7 · **149 用例 / 3,048 断言**) |
+| server 本机 ci_verify | **6 项全过**(22 条全部注册 · ctest 22/22 · 断言防线反向验证通过) |
+| 两端用例集一致性 | 客户端黄金用例集复现的 **149 / 3,048** 与服务端 `rules_battle` 逐位同值 ⇒ D2「一份规则两端编译」本批闭环 |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/model/Pet.h`: 扩展 `std::int32_t pet_id = 0;`，供任务交付与奖励条件匹配，同时对齐原版 `CHAR_PETID` 与 `Enemy::pet_id`。
+  - 该改动落在客户端通过 FetchContent/local 编译的路径上，直接触发客户端配置期漂移检查 `❌ ★ shared/ 与锁定 ref 一致`。
+- **守卫闭环**:
+  - 服务端打附注 tag `shared-v0.35.0` 推送 GitHub，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.35.0`，消除 D2 漂移告警，恢复 8/8 全绿。
 

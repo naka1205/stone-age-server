@@ -637,15 +637,45 @@ struct ExChangeBlock
 	std::string thanks_msg{};       // 感谢/完成文案
 	std::string end_set_flg{};      // 逗号分隔的完成旗标 (EndSetFlg: 10,11)
 	std::string clean_flg{};        // 逗号分隔的清除旗标 (CleanFlg: 1,2)
+
+	// ── 批次 W.10: 道具、宠物、石币交付与奖励 ───────────────────
+	std::string get_item{};       // 给予道具 (GetItem: 1234 或 1001,1002)
+	std::string del_item{};       // 扣除道具 (DelItem: 1234 或 1234*2 或 1001,1002)
+	std::string get_pet{};        // 给予宠物 (GetPet: 95 或 95*1)
+	std::string del_pet{};        // 扣除宠物 (DelPet: 95 或 95*1)
+	std::int32_t get_stone = 0;   // 给予石币 (GetStone: 1000)
+	std::int32_t del_stone = 0;   // 扣除石币 (DelStone: 500)
+	std::string item_full_msg{};  // 背包满提示 (ItemFullMsg)
+	std::string pet_full_msg{};   // 宠物满提示 (PetFullMsg)
+	std::string stone_less_msg{}; // 石币不足提示 (StoneLessMsg)
+	std::string stone_full_msg{}; // 石币超限提示 (StoneFullMsg)
 };
 
 // 解析 ExChangeMan 脚本文本 (按 EventEnd 切分块, 提取 EventNo, TYPE, EVENT, 文案与旗标指令)
 // 依据 09 §2.3 C5, §3.1 C9, §4 C20
 std::vector<ExChangeBlock> parseExChangeBlocks(std::string_view argstr);
 
+// 条件表达式扩展求值上下文 (批次 W.10)
+struct EventCheckContext
+{
+	const SA::Model::Player &player;
+	// 统计背包内某 item_id 的总数量 (nullptr 时默认 0)
+	std::int32_t (*count_item)(const SA::Model::Player &p, std::int32_t item_id,
+	                           void *userdata) = nullptr;
+	// 统计随行宠物内某 pet_id 的总只数 (nullptr 时默认 0)
+	std::int32_t (*count_pet)(const SA::Model::Player &p, std::int32_t pet_id,
+	                          std::int32_t min_level, void *userdata) = nullptr;
+	// 统计空闲道具格数 (nullptr 时默认统计 Player::items 空槽)
+	std::int32_t (*count_free_item_slots)(const SA::Model::Player &p, void *userdata) = nullptr;
+	// 统计空闲宠物槽数 (nullptr 时默认统计 Player::pets 空槽)
+	std::int32_t (*count_free_pet_slots)(const SA::Model::Player &p, void *userdata) = nullptr;
+	void *userdata = nullptr;
+};
+
 // 条件表达式求值器 (依据 09 §3.1 C9, §3.3 C11, §3.4 C12, §3.7 C18)
 // 返回命中的 1-based 分支序号 (若条件为空返回 1; 若不满足返回 0)
 int evaluateEventCondition(std::string_view condition, const SA::Model::Player &player);
+int evaluateEventCondition(std::string_view condition, const EventCheckContext &ctx);
 
 // NPC 实体类型(批次 W.7「NPC 实体框架与 Healer」; 批次 W.8「城镇居民 TownPeople」; 批次 W.9「任务兑换 ExChangeMan」)
 enum class NpcType : std::uint8_t
@@ -1441,6 +1471,10 @@ enum class GoldReason : std::uint8_t
 	kBattleReward,
 	// 医院/恢复员服务收费扣除 (汇,批次 W.7)
 	kHealerFee,
+	// 任务完成石币奖励 (源,批次 W.10)
+	kQuestReward,
+	// 任务需求/交付石币扣除 (汇,批次 W.10)
+	kQuestFee,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -1539,6 +1573,10 @@ inline const char *goldReasonName(GoldReason r) noexcept
 		return "battle_reward";
 	case GoldReason::kHealerFee:
 		return "healer_fee";
+	case GoldReason::kQuestReward:
+		return "quest_reward";
+	case GoldReason::kQuestFee:
+		return "quest_fee";
 	}
 	return "unknown";
 }

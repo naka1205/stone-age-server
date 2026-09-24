@@ -1768,3 +1768,528 @@ TEST_CASE("W.9: ExChangeMan TYPE:ACCEPT 接取、取消与结算全生命周期�
 	CHECK(f.world.playerHasActiveWindow(id));
 	CHECK(f.world.playerLastWindowText(id) == "欢迎来到萨姆吉尔村。");
 }
+
+// ══ 批次 W.10: ExChangeMan 道具/宠物交付与奖励结算 ══════════════════════════
+
+namespace
+{
+inline SA::Model::Item makeTestItem(std::int32_t item_id, std::int32_t pile = 1)
+{
+	SA::Model::Item it{};
+	it.item_id = item_id;
+	it.current_pile = pile;
+	return it;
+}
+
+inline SA::Model::Pet makeTestPet(std::int32_t pet_id, std::int32_t level = 1)
+{
+	SA::Model::Pet pet{};
+	pet.pet_id = pet_id;
+	pet.level = level;
+	pet.vital = 100;
+	pet.str = 50;
+	pet.tough = 50;
+	pet.dex = 50;
+	pet.hp = 20;
+	pet.mp = 20;
+	pet.max_mp = 50;
+	return pet;
+}
+} // namespace
+
+TEST_CASE("W.10: ExChangeMan 背包满拦截(ItemFullCheck 弹窗阻断, 释放后正常结算)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	NpcEntity npc{};
+	npc.id = 5001;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kExChangeMan;
+	npc.nomal_main_msg = "欢迎光临。";
+
+	// 块 0: 纯获得道具 1001, 需要 1 个空位
+	ExChangeBlock blk1{};
+	blk1.event_no = 21;
+	blk1.type = ExChangeType::kMessage;
+	blk1.condition = "LV>1";
+	blk1.get_item = "1001";
+	blk1.item_full_msg = "你的背包空间不足！";
+	blk1.nomal_window_msg = "给你一个珍贵的道具！";
+	npc.exchange_blocks.push_back(blk1);
+	f.world.loadNpcEntities({npc});
+
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 5;
+
+	// 背包装满 45 个道具 (kMaxItemHave - kStartItemArray = 54 - 9 = 45)
+	int filled = 0;
+	while (f.world.giveItemToPlayer(id, makeTestItem(999)) >= 0)
+	{
+		++filled;
+	}
+	CHECK(filled == 45);
+	CHECK(f.world.playerItemSlotsUsed(id) == 45);
+
+	// 1. 背包满交互 ⇒ 触发 ItemFullMsg 阻断
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2; // 面向东 (33, 32)
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 601;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(eventResultOk(f.transport.sent(id), 601));
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "你的背包空间不足！");
+	// 验证道具池与背包未增加 1001
+	CHECK(f.world.playerItemSlotsUsed(id) == 45);
+	bool has_1001 = false;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		const auto *it = f.world.playerItemAt(id, static_cast<int>(i));
+		if (it != nullptr && it->item_id == 1001)
+			has_1001 = true;
+	}
+	CHECK_FALSE(has_1001);
+
+	// 关闭提示窗口
+	const std::uint32_t wid1 = f.world.playerActiveWindowId(id);
+	SA::Domain::WindowReply rep1{};
+	rep1.window_id = wid1;
+	rep1.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, rep1);
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
+
+	// 2. 置换块测试: 即使背包满(45/45), 但 DelItem 释放格 ≥ GetItem 需求格 ⇒ 允许置换
+	npc.exchange_blocks.clear();
+	ExChangeBlock blk2{};
+	blk2.event_no = 22;
+	blk2.type = ExChangeType::kMessage;
+	blk2.condition = "LV>1";
+	blk2.del_item = "999";
+	blk2.get_item = "1001";
+	blk2.item_full_msg = "你的背包空间不足！";
+	blk2.nomal_window_msg = "置换成功！";
+	npc.exchange_blocks.push_back(blk2);
+	f.world.loadNpcEntities({npc});
+
+	ev.seqno = 602;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(eventResultOk(f.transport.sent(id), 602));
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "置换成功！");
+	CHECK(f.world.playerItemSlotsUsed(id) == 45);
+
+	// 此时背包中应该出现 1001
+	has_1001 = false;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		const auto *it = f.world.playerItemAt(id, static_cast<int>(i));
+		if (it != nullptr && it->item_id == 1001)
+			has_1001 = true;
+	}
+	CHECK(has_1001);
+}
+
+TEST_CASE("W.10: ExChangeMan 宠物槽满拦截(PetFullCheck 弹窗阻断, 置换宠物成功)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	NpcEntity npc{};
+	npc.id = 5002;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kExChangeMan;
+
+	// 块 1: 纯获取宠物 2001
+	ExChangeBlock blk1{};
+	blk1.event_no = 31;
+	blk1.type = ExChangeType::kMessage;
+	blk1.condition = "LV>1";
+	blk1.get_pet = "2001";
+	blk1.pet_full_msg = "你的宠物栏已满！";
+	blk1.nomal_window_msg = "送你一只宠物！";
+	npc.exchange_blocks.push_back(blk1);
+	f.world.loadNpcEntities({npc});
+
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 5;
+
+	// 填满 5 个宠物槽
+	for (int i = 0; i < 5; ++i)
+	{
+		CHECK(f.world.givePetToPlayer(id, makeTestPet(3000 + i)) >= 0);
+	}
+	CHECK(f.world.playerPetSlotsUsed(id) == 5);
+
+	// 1. 宠物槽满交互 ⇒ 触发 PetFullMsg 阻断
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 701;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(eventResultOk(f.transport.sent(id), 701));
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "你的宠物栏已满！");
+	CHECK(f.world.playerPetSlotsUsed(id) == 5);
+
+	// 检查未获得 2001
+	for (int i = 0; i < 5; ++i)
+	{
+		const auto *pet = f.world.playerPetAt(id, i);
+		REQUIRE(pet != nullptr);
+		CHECK(pet->pet_id != 2001);
+	}
+
+	// 关闭提示窗口
+	const std::uint32_t wid1 = f.world.playerActiveWindowId(id);
+	SA::Domain::WindowReply rep1{};
+	rep1.window_id = wid1;
+	rep1.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, rep1);
+
+	// 2. 置换宠物测试: 槽满(5/5), 但 DelPet:3000 释放 1 槽换 GetPet:2001
+	npc.exchange_blocks.clear();
+	ExChangeBlock blk2{};
+	blk2.event_no = 32;
+	blk2.type = ExChangeType::kMessage;
+	blk2.condition = "LV>1";
+	blk2.del_pet = "3000";
+	blk2.get_pet = "2001";
+	blk2.pet_full_msg = "你的宠物栏已满！";
+	blk2.nomal_window_msg = "换宠成功！";
+	npc.exchange_blocks.push_back(blk2);
+	f.world.loadNpcEntities({npc});
+
+	ev.seqno = 702;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(eventResultOk(f.transport.sent(id), 702));
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "换宠成功！");
+	CHECK(f.world.playerPetSlotsUsed(id) == 5);
+
+	// 验证 3000 被置换为 2001
+	bool found_2001 = false;
+	bool found_3000 = false;
+	for (int i = 0; i < 5; ++i)
+	{
+		const auto *pet = f.world.playerPetAt(id, i);
+		REQUIRE(pet != nullptr);
+		if (pet->pet_id == 2001)
+			found_2001 = true;
+		if (pet->pet_id == 3000)
+			found_3000 = true;
+	}
+	CHECK(found_2001);
+	CHECK_FALSE(found_3000);
+}
+
+TEST_CASE("W.10: ExChangeMan 石币不足与超限拦截(经GoldLedger, StoneLessMsg / StoneFullMsg)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	NpcEntity npc{};
+	npc.id = 5003;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kExChangeMan;
+
+	// 块 0: 消耗 500 石币, 获得 1000 石币
+	ExChangeBlock blk0{};
+	blk0.event_no = 41;
+	blk0.type = ExChangeType::kMessage;
+	blk0.condition = "LV>1";
+	blk0.del_stone = 500;
+	blk0.get_stone = 1000;
+	blk0.stone_less_msg = "你的石币不足500！";
+	blk0.nomal_window_msg = "石币翻倍成功！";
+	npc.exchange_blocks.push_back(blk0);
+	f.world.loadNpcEntities({npc});
+
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 5;
+
+	// 玩家初始只有 200 石币
+	REQUIRE(f.world.giveGoldToPlayerForTest(id, 200));
+	CHECK(f.world.playerGold(id) == 200);
+
+	// 1. 石币不足交互 ⇒ 阻断弹 StoneLessMsg
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 801;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(eventResultOk(f.transport.sent(id), 801));
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "你的石币不足500！");
+	CHECK(f.world.playerGold(id) == 200); // 未发生变动
+
+	// 关闭提示窗口
+	const std::uint32_t wid1 = f.world.playerActiveWindowId(id);
+	SA::Domain::WindowReply rep1{};
+	rep1.window_id = wid1;
+	rep1.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, rep1);
+
+	// 2. 补足石币至 600 (增加 400)
+	REQUIRE(f.world.giveGoldToPlayerForTest(id, 400));
+	CHECK(f.world.playerGold(id) == 600);
+
+	// 再次交互 ⇒ 成功扣除 500 并奖励 1000 (净增 500, 最终 1100)
+	ev.seqno = 802;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(eventResultOk(f.transport.sent(id), 802));
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "石币翻倍成功！");
+	CHECK(f.world.playerGold(id) == 1100);
+
+	// 关闭窗口
+	const std::uint32_t wid2 = f.world.playerActiveWindowId(id);
+	rep1.window_id = wid2;
+	f.world.onWindowReply(id, rep1);
+
+	// 3. 石币超限拦截测试: get_stone 导致突破 100 万上限
+	npc.exchange_blocks.clear();
+	ExChangeBlock blk1{};
+	blk1.event_no = 42;
+	blk1.type = ExChangeType::kMessage;
+	blk1.condition = "LV>1";
+	blk1.get_stone = 50000;
+	blk1.stone_full_msg = "你的石币将超出携带上限！";
+	blk1.nomal_window_msg = "巨额奖励发放！";
+	npc.exchange_blocks.push_back(blk1);
+	f.world.loadNpcEntities({npc});
+
+	// 让玩家石币达到 980,000 (增加 978900)
+	REQUIRE(f.world.giveGoldToPlayerForTest(id, 980000 - 1100));
+	CHECK(f.world.playerGold(id) == 980000);
+
+	// 980,000 + 50,000 = 1,030,000 > 1,000,000 ⇒ 阻断
+	ev.seqno = 803;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(eventResultOk(f.transport.sent(id), 803));
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "你的石币将超出携带上限！");
+	CHECK(f.world.playerGold(id) == 980000); // 余额保持不变
+}
+
+TEST_CASE("W.10: ExChangeMan 道具/宠物/石币综合交付与奖励(TYPE:ACCEPT 交互闭环)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	NpcEntity npc{};
+	npc.id = 5004;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kExChangeMan;
+
+	// 配置综合 ACCEPT 委托
+	ExChangeBlock blk{};
+	blk.event_no = 50;
+	blk.type = ExChangeType::kAccept;
+	blk.condition = "NOWEV!=50&ENDEV!=50";
+	blk.accept_msg = "愿意交出信物501和爱宠601并支付100石币完成委托吗？";
+	blk.thanks_msg = "太感谢了，这是给你的丰厚报酬！";
+	blk.del_item = "501";
+	blk.del_pet = "601";
+	blk.del_stone = 100;
+	blk.get_item = "502";
+	blk.get_pet = "602";
+	blk.get_stone = 300;
+	blk.end_set_flg = "50";
+	npc.exchange_blocks.push_back(blk);
+	f.world.loadNpcEntities({npc});
+
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 10;
+
+	// 玩家初始状态: 持有 501, 持有 601, 石币 200
+	REQUIRE(f.world.giveItemToPlayer(id, makeTestItem(501)) >= 0);
+	REQUIRE(f.world.givePetToPlayer(id, makeTestPet(601)) >= 0);
+	REQUIRE(f.world.giveGoldToPlayerForTest(id, 200));
+
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+	CHECK(f.world.playerGold(id) == 200);
+
+	// 1. 发起交互 ⇒ 命中 ACCEPT 块，下发 Accept 弹窗
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 901;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(eventResultOk(f.transport.sent(id), 901));
+	CHECK(f.world.playerHasActiveWindow(id));
+	const std::uint32_t wid = f.world.playerActiveWindowId(id);
+	CHECK(f.world.playerLastWindowText(id) == "愿意交出信物501和爱宠601并支付100石币完成委托吗？");
+
+	// 2. 回复 YES 确认执行结算
+	SA::Domain::WindowReply reply_yes{};
+	reply_yes.window_id = wid;
+	reply_yes.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+	reply_yes.source.entity_id = 5004;
+	reply_yes.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES);
+	f.world.onWindowReply(id, reply_yes);
+
+	// 3. 校验结算副作用
+	// 收到 ThanksMsg 窗口
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "太感谢了，这是给你的丰厚报酬！");
+
+	// 石币: 200 - 100 + 300 = 400
+	CHECK(f.world.playerGold(id) == 400);
+
+	// 道具: 501 被删除, 获得 502
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+	bool found_501 = false;
+	bool found_502 = false;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		const auto *it = f.world.playerItemAt(id, static_cast<int>(i));
+		if (it != nullptr)
+		{
+			if (it->item_id == 501)
+				found_501 = true;
+			if (it->item_id == 502)
+				found_502 = true;
+		}
+	}
+	CHECK_FALSE(found_501);
+	CHECK(found_502);
+
+	// 宠物: 601 被删除, 获得 602
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+	bool found_601 = false;
+	bool found_602 = false;
+	for (int i = 0; i < 5; ++i)
+	{
+		const auto *pet = f.world.playerPetAt(id, i);
+		if (pet != nullptr)
+		{
+			if (pet->pet_id == 601)
+				found_601 = true;
+			if (pet->pet_id == 602)
+				found_602 = true;
+		}
+	}
+	CHECK_FALSE(found_601);
+	CHECK(found_602);
+
+	// 旗标: end_events[50] 已置位
+	CHECK(f.world.playerHasEndEvent(id, 50));
+}
+
+TEST_CASE("W.10: ExChangeMan EVDEL 动态从 EVENT 条件解析扣除道具与宠物")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	NpcEntity npc{};
+	npc.id = 5005;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kExChangeMan;
+
+	// 配置 EVDEL: 从 EVENT 动态提取需要扣除的道具和宠物
+	ExChangeBlock blk{};
+	blk.event_no = 60;
+	blk.type = ExChangeType::kMessage;
+	blk.condition = "ITEM=777*2&PET=888";
+	blk.del_item = "EVDEL";
+	blk.del_pet = "EVDEL";
+	blk.nomal_window_msg = "成功收走2个777和1只888！";
+	npc.exchange_blocks.push_back(blk);
+	f.world.loadNpcEntities({npc});
+
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 10;
+
+	// 玩家准备: 2 个 777, 1 个无关道具 666; 1 只 888, 1 只无关宠物 999
+	REQUIRE(f.world.giveItemToPlayer(id, makeTestItem(777, 1)) >= 0);
+	REQUIRE(f.world.giveItemToPlayer(id, makeTestItem(777, 1)) >= 0);
+	REQUIRE(f.world.giveItemToPlayer(id, makeTestItem(666, 1)) >= 0);
+
+	REQUIRE(f.world.givePetToPlayer(id, makeTestPet(888)) >= 0);
+	REQUIRE(f.world.givePetToPlayer(id, makeTestPet(999)) >= 0);
+
+	CHECK(f.world.playerItemSlotsUsed(id) == 3);
+	CHECK(f.world.playerPetSlotsUsed(id) == 2);
+
+	// 发起交互
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 1001;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(eventResultOk(f.transport.sent(id), 1001));
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "成功收走2个777和1只888！");
+
+	// 校验扣除结果:
+	// 2 个 777 被扣除, 666 仍在背包
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+	int count_777 = 0;
+	int count_666 = 0;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		const auto *it = f.world.playerItemAt(id, static_cast<int>(i));
+		if (it != nullptr)
+		{
+			if (it->item_id == 777)
+				count_777++;
+			if (it->item_id == 666)
+				count_666++;
+		}
+	}
+	CHECK(count_777 == 0);
+	CHECK(count_666 == 1);
+
+	// 1 只 888 被扣除, 999 仍在宠物栏
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+	int count_888 = 0;
+	int count_999 = 0;
+	for (int i = 0; i < 5; ++i)
+	{
+		const auto *pet = f.world.playerPetAt(id, i);
+		if (pet != nullptr)
+		{
+			if (pet->pet_id == 888)
+				count_888++;
+			if (pet->pet_id == 999)
+				count_999++;
+		}
+	}
+	CHECK(count_888 == 0);
+	CHECK(count_999 == 1);
+}
