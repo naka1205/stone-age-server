@@ -1956,6 +1956,11 @@ struct World::Impl : GoldAuditSink
 		std::uint64_t revision = 0;
 		SA::Platform::Millis retry_at = 0;
 		SA::Platform::Millis login_after = 0;
+
+		// ── NPC 对话与窗口会话(批次 W.8。原 lssproto_WN_send / WN_recv)───────────
+		std::uint32_t active_window_id = 0;
+		std::uint64_t active_window_npc_id = 0;
+		std::string last_window_text{};
 	};
 
 	Impl(const SA::Platform::ServerConfig &cfg, SA::Platform::Clock &clk,
@@ -1985,6 +1990,7 @@ struct World::Impl : GoldAuditSink
 	//    使现有战斗的回放种子整体平移(现有用例的 `spawnEnemy` 结果会变)。异或一个盐使它与
 	//    任何战斗种子的序列都不同,同时随 `masterSeed` 确定 ⇒ 遇敌本身也可回放。
 	SA::Rules::SeededRandom world_rng;
+	std::uint32_t next_window_id = 0;
 
 	std::map<SA::Net::ConnectionId, Conn> conns;
 	// 1.5 里 SessionId == ConnectionId(见上)。
@@ -3693,6 +3699,38 @@ std::size_t World::npcCount() const noexcept
 	return _impl->npc_entities.size();
 }
 
+const NpcEntity *World::findNpc(std::uint64_t id) const noexcept
+{
+	for (const auto &npc : _impl->npc_entities)
+	{
+		if (npc.id == id)
+			return &npc;
+	}
+	return nullptr;
+}
+
+bool World::playerHasActiveWindow(SA::Net::SessionId id) const noexcept
+{
+	const auto it = _impl->conns.find(id);
+	return it != _impl->conns.end() && it->second.active_window_id != 0;
+}
+
+std::uint32_t World::playerActiveWindowId(SA::Net::SessionId id) const noexcept
+{
+	const auto it = _impl->conns.find(id);
+	if (it != _impl->conns.end())
+		return it->second.active_window_id;
+	return 0;
+}
+
+std::string World::playerLastWindowText(SA::Net::SessionId id) const
+{
+	const auto it = _impl->conns.find(id);
+	if (it != _impl->conns.end())
+		return it->second.last_window_text;
+	return {};
+}
+
 // 遇敌命中后的开战组装(批次 W.4)——移植 `EN_recv`(`callfromcli.c:1249`)清走路串 +
 //   `BATTLE_CreateVsEnemy(charaindex,0,-1)` 净核(`battle.c:2528`):
 //   遇敌链(`pickEnemyGroup`→`rollEnemyList`)→ 建场 → 玩家入场 → 逐只敌人入场。
@@ -4385,6 +4423,85 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 						ok = true;
 					}
 				}
+				else if (npc.type == NpcType::kTownPeople)
+				{
+					// 城镇居民对话 (原版 npc_townpeople.c:28-52)
+					// 1. 切分逗号分隔的文案候选
+					std::vector<std::string> candidates;
+					std::size_t start = 0;
+					while (start < npc.message.size())
+					{
+						const std::size_t comma = npc.message.find(',', start);
+						if (comma == std::string::npos)
+						{
+							candidates.push_back(npc.message.substr(start));
+							break;
+						}
+						candidates.push_back(npc.message.substr(start, comma - start));
+						start = comma + 1;
+					}
+					if (candidates.empty() && !npc.message.empty())
+						candidates.push_back(npc.message);
+
+					// 2. 选择文案(多条文案按 world_rng 随机摇选，对应原版 rand() % tokennum + 1)
+					std::string chosen;
+					if (!candidates.empty())
+					{
+						if (candidates.size() == 1)
+						{
+							chosen = candidates[0];
+						}
+						else
+						{
+							const std::size_t idx = static_cast<std::size_t>(
+							    s.world_rng.randMod(static_cast<int>(candidates.size())));
+							chosen = candidates[idx];
+						}
+					}
+
+					// 3. 组装并下发 WindowOpen 消息 (kind = MESSAGE, buttons = OK)
+					SA::Domain::WindowOpen win{};
+					win.window_id = ++s.next_window_id;
+					win.kind = SA::Domain::WindowKind::WINDOW_KIND_MESSAGE;
+					win.buttons = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+					win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+					win.source.entity_id = static_cast<std::uint32_t>(npc.id);
+					win.body_kind = SA::Domain::WindowOpen::BodyKind::MESSAGE;
+					win.body.message.wide = false;
+
+					// 按换行符切分为多行 (MessageBody.lines 最多 16 行，每行最大 255 字符)
+					std::size_t lstart = 0;
+					while (lstart < chosen.size() && win.body.message.lines.size() < 16)
+					{
+						const std::size_t nl = chosen.find('\n', lstart);
+						std::string line = (nl == std::string::npos)
+						                       ? chosen.substr(lstart)
+						                       : chosen.substr(lstart, nl - lstart);
+						if (line.size() > 255)
+							line.resize(255);
+						if (auto *slot = win.body.message.lines.push_back())
+							slot->assign(line.data(), line.size());
+						if (nl == std::string::npos)
+							break;
+						lstart = nl + 1;
+					}
+					if (win.body.message.lines.empty())
+					{
+						std::string line = chosen;
+						if (line.size() > 255)
+							line.resize(255);
+						if (auto *slot = win.body.message.lines.push_back())
+							slot->assign(line.data(), line.size());
+					}
+
+					// 记录窗口会话状态 (DR-PR3)
+					it->second.active_window_id = win.window_id;
+					it->second.active_window_npc_id = npc.id;
+					it->second.last_window_text = chosen;
+
+					s.sendTo(id, win);
+					ok = true;
+				}
 			}
 		}
 	}
@@ -4395,6 +4512,22 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 	res.seqno = req.seqno;
 	res.ok = ok;
 	s.sendTo(id, res);
+}
+
+void World::onWindowReply(SA::Net::SessionId id, const SA::Domain::WindowReply &reply)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(id);
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(id));
+	if (it == s.conns.end() || p == nullptr)
+		return;
+
+	// 校验 window_id 是否匹配当前会话开启的活动窗口 (DR-PR3 / DR-PR8)
+	if (it->second.active_window_id != 0 && it->second.active_window_id == reply.window_id)
+	{
+		it->second.active_window_id = 0;
+		it->second.active_window_npc_id = 0;
+	}
 }
 
 void World::onSessionClosed(SA::Net::SessionId id)

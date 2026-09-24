@@ -859,6 +859,40 @@ SA::Domain::EventRequest makeEnemyEvent(std::uint32_t dir, std::uint32_t seqno)
 	return ev;
 }
 
+// 从会话出站字节里提取最后一条 WindowOpen 消息(找不到返回 std::nullopt)。批次 W.8。
+std::optional<SA::Domain::WindowOpen> findLastWindowOpen(const std::vector<std::uint8_t> &sent)
+{
+	if (sent.empty())
+		return std::nullopt;
+	SA::Net::FrameReader reader;
+	if (!reader.push(sent.data(), sent.size()))
+		return std::nullopt;
+	std::optional<SA::Domain::WindowOpen> last_win;
+	for (;;)
+	{
+		const std::uint8_t *p = nullptr;
+		std::uint32_t len = 0;
+		const SA::Net::FrameStatus st = reader.next(&p, &len);
+		if (st == SA::Net::FrameStatus::kNeedMore)
+			break;
+		if (st != SA::Net::FrameStatus::kOk)
+			break;
+		SA::Net::EnvelopeView env;
+		if (SA::Net::decodeEnvelope(p, len, env))
+		{
+			if (static_cast<SA::IDL::MsgId>(env.msg_id) == SA::IDL::MsgId::WindowOpen)
+			{
+				SA::IDL::Reader rd(env.body, env.body_len);
+				SA::Domain::WindowOpen w{};
+				decode(rd, w);
+				last_win = w;
+			}
+		}
+		reader.pop();
+	}
+	return last_win;
+}
+
 } // namespace
 
 TEST_CASE("W.5:撞明雷退回 —— 走向明雷格被弹回,坐标不变、不开战")
@@ -1234,4 +1268,167 @@ TEST_CASE("W.7:面向Healer收费扣除石币(经GoldLedger),余额不足拒绝"
 	CHECK(f.world.playerGold(id) == 50); // 扣 50
 	CHECK(f.world.playerHp(id) == 46);   // 满血
 	CHECK(f.world.playerMp(id) == 100);  // 满蓝
+}
+
+// ══ 批次 W.8:城镇居民 NPC 对话 (TownPeople) 与 对白/窗口骨架 (WindowOpen / WindowReply) ═══════════
+//
+// 原版 npc_townpeople.c:
+//   - 面对 TownPeople 发起 EV 触发 NPC_TownPeopleTalked
+//   - 逗号分隔候选文案随机选择 (randMod)
+//   - 组装下发 WindowOpen 消息 (WINDOW_KIND_MESSAGE, BUTTON_FLAG_OK)
+//   - 客户端确认发送 WindowReply 闭环窗口会话状态机
+
+TEST_CASE("W.8:面向 TownPeople 交互下发 WindowOpen 消息窗口")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	NpcEntity npc{};
+	npc.id = 3001;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.dir = 6;
+	npc.image = 10001;
+	npc.type = NpcType::kTownPeople;
+	npc.message = "欢迎来到玛丽娜丝渔村！";
+	f.world.loadNpcEntities({npc});
+
+	// 玩家在 (32,32), 面向东(dir=2)发起 NPC 事件
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 301;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	// 1. 回执 ok == true
+	CHECK(eventResultOk(f.transport.sent(id), 301));
+
+	// 2. 检查下发的 WindowOpen 消息
+	const auto win_opt = findLastWindowOpen(f.transport.sent(id));
+	REQUIRE(win_opt.has_value());
+	const auto &win = *win_opt;
+	CHECK(win.kind == SA::Domain::WindowKind::WINDOW_KIND_MESSAGE);
+	CHECK(win.buttons == static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+	CHECK(win.source.source == SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY);
+	CHECK(win.source.entity_id == 3001);
+	CHECK(win.body_kind == SA::Domain::WindowOpen::BodyKind::MESSAGE);
+	REQUIRE(win.body.message.lines.size() == 1);
+	CHECK(std::string(win.body.message.lines[0].c_str()) == "欢迎来到玛丽娜丝渔村！");
+
+	// 3. 观察面: 玩家处于活动窗口状态
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerActiveWindowId(id) == win.window_id);
+	CHECK(f.world.playerLastWindowText(id) == "欢迎来到玛丽娜丝渔村！");
+}
+
+TEST_CASE("W.8:TownPeople 多候选文案随机选择(逗号分隔)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	NpcEntity npc{};
+	npc.id = 3002;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.dir = 6;
+	npc.type = NpcType::kTownPeople;
+	npc.message = "台词一,台词二,台词三";
+	f.world.loadNpcEntities({npc});
+
+	const std::vector<std::string> expected = {"台词一", "台词二", "台词三"};
+
+	// 连续交互 6 次
+	for (std::uint32_t i = 1; i <= 6; ++i)
+	{
+		SA::Domain::EventRequest ev{};
+		ev.dir = 2;
+		ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+		ev.seqno = 310 + i;
+		f.world.onEvent(id, ev);
+		f.world.tick();
+
+		CHECK(eventResultOk(f.transport.sent(id), 310 + i));
+		const auto win_opt = findLastWindowOpen(f.transport.sent(id));
+		REQUIRE(win_opt.has_value());
+		REQUIRE(win_opt->body.message.lines.size() == 1);
+		const std::string text = win_opt->body.message.lines[0].c_str();
+
+		// 下发文本必须在候选列表内
+		CHECK(std::find(expected.begin(), expected.end(), text) != expected.end());
+		CHECK(f.world.playerLastWindowText(id) == text);
+	}
+}
+
+TEST_CASE("W.8:窗口回执 WindowReply 闭环会话状态机(匹配关闭, 不匹配保持)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	NpcEntity npc{};
+	npc.id = 3003;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kTownPeople;
+	npc.message = "这是一句测试对话。";
+	f.world.loadNpcEntities({npc});
+
+	// 打开窗口
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 320;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	REQUIRE(f.world.playerHasActiveWindow(id));
+	const std::uint32_t active_wid = f.world.playerActiveWindowId(id);
+	REQUIRE(active_wid > 0);
+
+	// 发送不匹配的 window_id 回执 ⇒ 保持激活
+	SA::Domain::WindowReply wrong_reply{};
+	wrong_reply.window_id = active_wid + 999;
+	wrong_reply.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, wrong_reply);
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerActiveWindowId(id) == active_wid);
+
+	// 发送正确的 window_id 回执 ⇒ 闭环清除
+	SA::Domain::WindowReply correct_reply{};
+	correct_reply.window_id = active_wid;
+	correct_reply.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, correct_reply);
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerActiveWindowId(id) == 0);
+}
+
+TEST_CASE("W.8:未面向 TownPeople 或面前无 NPC ⇒ 拒绝交互(ok=false, 不发窗)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	NpcEntity npc{};
+	npc.id = 3004;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32; // NPC 在东侧
+	npc.type = NpcType::kTownPeople;
+	npc.message = "你听不见我说什么。";
+	f.world.loadNpcEntities({npc});
+
+	// 玩家在 (32,32), 面向北(dir=0, 面前格为 32,31)发起 NPC EV ⇒ 面前无 NPC
+	SA::Domain::EventRequest ev{};
+	ev.dir = 0;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 330;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	// 回执 ok == false, 且无活动窗口
+	CHECK_FALSE(eventResultOk(f.transport.sent(id), 330));
+	CHECK_FALSE(findLastWindowOpen(f.transport.sent(id)).has_value());
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
 }

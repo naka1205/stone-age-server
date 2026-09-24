@@ -99,6 +99,8 @@ bool Session::handleFrame(const std::uint8_t *frame, std::uint32_t len,
 		return handleWalkRequest(env);
 	case SA::IDL::MsgId::EventRequest:
 		return handleEventRequest(env);
+	case SA::IDL::MsgId::WindowReply:
+		return handleWindowReply(env);
 	default:
 		// ⚠️ 未知或方向错的消息 ⇒ 协议违规,关闭连接。
 		//   不"忽略并继续":那会让客户端的 bug 表现为"服务端没反应",
@@ -288,6 +290,26 @@ bool Session::handleEventRequest(const EnvelopeView &env)
 	//   回执 EventResult 由 world 侧经会话下推(靠 seqno 关联,同原版 EV_send),net 不管回执。
 	if (_host != nullptr)
 		_host->onEvent(_id, req);
+	return true;
+}
+
+bool Session::handleWindowReply(const EnvelopeView &env)
+{
+	// ⚠️ 只有在世(kOnline)的会话能响应窗口回执
+	if (_state != SessionState::kOnline)
+	{
+		_lastRejectMsgId = env.msg_id;
+		return false;
+	}
+
+	SA::IDL::Reader r(env.body, env.body_len);
+	SA::Domain::WindowReply reply;
+	decode(r, reply);
+	if (!r.ok())
+		return false;
+
+	if (_host != nullptr)
+		_host->onWindowReply(_id, reply);
 	return true;
 }
 

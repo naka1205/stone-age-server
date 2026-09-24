@@ -615,16 +615,17 @@ struct WarpPoint
 	std::int32_t dst_y = 0;
 };
 
-// NPC 实体类型(批次 W.7「NPC 实体框架与 Healer」)
+// NPC 实体类型(批次 W.7「NPC 实体框架与 Healer」; 批次 W.8「城镇居民 TownPeople」)
 enum class NpcType : std::uint8_t
 {
 	kHealer = 0,
-	kOther = 1,
+	kTownPeople = 1,
+	kOther = 2,
 };
 
-// 世界 NPC 实体配置/状态(批次 W.7)
-// ⚠️ 原版 npc_healer.c / npc_windowhealer.c
-//   CHAR_WHICHTYPE = CHAR_TYPEHEALER, CHAR_ISOVERED = 0 (不可穿透阻挡)
+// 世界 NPC 实体配置/状态(批次 W.7/W.8)
+// ⚠️ 原版 npc_healer.c / npc_townpeople.c
+//   CHAR_WHICHTYPE = CHAR_TYPEHEALER / CHAR_TYPETOWNPEOPLE, CHAR_ISOVERED = 0 (不可穿透阻挡)
 struct NpcEntity
 {
 	std::uint64_t id = 0;
@@ -635,6 +636,7 @@ struct NpcEntity
 	std::int32_t image = 0;
 	NpcType type = NpcType::kHealer;
 	std::int32_t cost = 0; // 治疗所需石币 (0 = 免费)
+	std::string message{}; // 对白文案 (支持逗号分隔多条候选, 原版 npc_townpeople.c)
 };
 
 // 世界态敌人的位置快照(批次 W.2 / W.3 的观察面)。
@@ -917,6 +919,8 @@ class World final : public SA::Net::TransportEvents,
 	void onSessionReady(SA::Net::SessionId id) override;
 	void onWalk(SA::Net::SessionId id, const SA::Domain::WalkRequest &req) override;
 	void onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req) override;
+	void onWindowReply(SA::Net::SessionId id,
+	                   const SA::Domain::WindowReply &reply) override;
 	void onBattleCommand(SA::Net::SessionId id,
 	                     const SA::Domain::BattleCommand &cmd) override;
 	void onSessionClosed(SA::Net::SessionId id) override;
@@ -971,6 +975,10 @@ class World final : public SA::Net::TransportEvents,
 	std::vector<WorldEnemyPos> worldEnemies() const;
 	std::size_t warpPointCount() const noexcept;
 	std::size_t npcCount() const noexcept;
+	const NpcEntity *findNpc(std::uint64_t id) const noexcept;
+	bool playerHasActiveWindow(SA::Net::SessionId id) const noexcept;
+	std::uint32_t playerActiveWindowId(SA::Net::SessionId id) const noexcept;
+	std::string playerLastWindowText(SA::Net::SessionId id) const;
 
 	// 某场战斗某个槽背后的 L2 `Enemy` 实体(只读)。不存在 / 无实体返回 nullptr。
 	//

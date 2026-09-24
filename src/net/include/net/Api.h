@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "domain/battle_events.sa.h"
+#include "domain/window.sa.h"
 #include "domain/world_map.sa.h"
 #include "ids.h"
 #include "transport/envelope.sa.h"
@@ -271,6 +272,8 @@ class SessionHost
 	virtual void onWalk(SessionId id, const SA::Domain::WalkRequest &req) = 0;
 	// 客户端上行的事件触发(0x0305,批次 W.5)。★ 明雷开战:面前格有明雷则开战 —— 世界态判定,归宿主。
 	virtual void onEvent(SessionId id, const SA::Domain::EventRequest &req) = 0;
+	// 客户端上行的窗口回执(0x0602,批次 W.8)。★ 窗口对话/选择回执 —— 归宿主。
+	virtual void onWindowReply(SessionId, const SA::Domain::WindowReply &) {}
 	virtual void onSessionClosed(SessionId id) = 0;
 	virtual void onLogin(SessionId, const SA::Transport::LoginRequest &, std::uint64_t) {}
 	virtual void onCreateCharacter(SessionId, const SA::Transport::CreateCharacterRequest &, std::uint64_t) {}
@@ -338,6 +341,7 @@ class Session
 	bool handleBattleCommand(const EnvelopeView &env);
 	bool handleWalkRequest(const EnvelopeView &env);
 	bool handleEventRequest(const EnvelopeView &env);
+	bool handleWindowReply(const EnvelopeView &env);
 	bool handleLifecycle(const EnvelopeView &env);
 
 	SessionId _id;

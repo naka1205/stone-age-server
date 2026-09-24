@@ -320,3 +320,30 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证**: 注入错误 HP 增量 ⇒ 2 条用例精准转红; 恢复后回绿。
 - **架构守卫**: `check_gold_writes.py` 100% 绿灯，无任何旁路直接修改石币。
 
+---
+
+### 9.0.73 批次 W.8 —— 城镇居民 NPC 对话 (TownPeople) 与 对白/窗口骨架 (2026-09-25)
+
+2026-09-25 交付。世界系统中落地高频城镇居民 NPC 对话机制（全游戏 533 个实例，复用率极高，`npc_townpeople.c`）以及服务端驱动 UI 的窗口消息与回执闭环（`WindowOpen` / `WindowReply`，`lssproto_WN_send` / `WN_recv`，DR-PR3 / DR-PR8）。
+
+#### 1. 源码事实与裁定
+
+1. **面对交互与多文案随机选择 (`npc_townpeople.c:28-52`)**:
+   - 玩家面向 `NpcType::kTownPeople` 发起 EV 事件请求（`event_type = ENTITY_NPC`）。
+   - NPC 配置支持逗号分隔多条候选文案（例如 `msg1,msg2,msg3`），忠实对应原版 `getStringFromIndexWithDelim(arg, ",", rand()%tokennum+1, token)`。
+   - 使用确定性世界随机源 `world_rng.randMod(candidates.size())` 随机选出一句下发。
+2. **服务端驱动 UI 窗口协议闭环 (`domain/window.proto`, DR-PR3 / DR-PR8)**:
+   - 下行发送 `WindowOpen`（0x0601）：`kind = WINDOW_KIND_MESSAGE`，`buttons = BUTTON_FLAG_OK`，`source = {ENTITY_SOURCE_ENTITY, npc.id}`，消息体 `MessageBody` 支持按 `\n` 切分为多行。
+   - 窗口会话状态机：服务端在会话连接上记录 `active_window_id` 与 `active_window_npc_id`，window_id 保证会话内单调递增。
+   - 上行处理 `WindowReply`（0x0602）：客户端确认后校验 `reply.window_id == active_window_id`，匹配时闭环销毁活动窗口；不匹配时保持激活，抵御越界与陈旧回执。
+3. **碰撞与阻挡**:
+   - TownPeople 作为常规 NPC 实体，同样具备 `CHAR_ISOVERED = 0` 不可穿透碰撞阻挡（继承自 W.7 NPC 框架），玩家无法走进其所在格子。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 38 增至 **42**（+4 用例），断言数从 466 增至 **639**（+173 断言）。
+- **反向验证 (RV-1)**: 注入篡改窗口类型（MESSAGE → LINE_INPUT）⇒ 用例精准转红（1 失败 / 41 通过）；恢复后回绿。
+- **反向验证 (RV-2)**: 注入禁用 `WindowReply` 窗口关闭逻辑 ⇒ 窗口闭环用例精准转红（1 失败 / 41 通过）；恢复后回绿。
+- **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py` 100% 绿灯。
+
+
