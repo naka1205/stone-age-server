@@ -1184,6 +1184,10 @@ void projectPetSkill(BattleInstance &b, const std::vector<PetSkillEffect> &effec
 		atk.mods.pet_skill_charge_percent = 0;
 		atk.mods.pet_skill_apply_status = 0; // 批次 B3a:0 = 非状态技
 		atk.mods.pet_skill_status_turns = 0;
+		atk.mods.pet_skill_special_kind = SA::Rules::PetSkillSpecialKind::kNone;
+		atk.mods.pet_skill_special_param1 = 0;
+		atk.mods.pet_skill_special_param2 = 0;
+		atk.mods.pet_skill_special_param3 = 0;
 
 		if (!b.commands.present[slot])
 			continue;
@@ -1196,12 +1200,17 @@ void projectPetSkill(BattleInstance &b, const std::vector<PetSkillEffect> &effec
 		if (e == nullptr)
 			continue; // 表外技能 / 空表 ⇒ 保持"无技能"⇒ L3 跳过(不退化成普攻)
 
-		// ⚠️ 蓄力行与魔法状态行(铁壁)**都不是**直攻系:第一拍由 L3 的集气分支接管
-		//   (先于"表外 ⇒ 跳过"判定);铁壁在原版是独立 case(battle.c:8410,
-		//   不落 :7512 的普攻执行组)⇒ L3 整次行动跳过(不摇 rng、不产事件),
-		//   施加由世界侧在行动位做(applyMagicStatusPetSkill)。
-		if (e->charge_turns == 0 && e->magic_status == 0)
+		// ⚠️ 蓄力行、魔法状态行(铁壁)与非直攻特殊宠技**都不是**直攻系
+		if (e->charge_turns == 0 && e->magic_status == 0 &&
+		    (e->special_kind == SA::Rules::PetSkillSpecialKind::kNone ||
+		     e->special_kind == SA::Rules::PetSkillSpecialKind::kFallGround ||
+		     e->special_kind == SA::Rules::PetSkillSpecialKind::kSelfExplode))
 			atk.mods.pet_skill_direct = true;
+
+		atk.mods.pet_skill_special_kind = e->special_kind;
+		atk.mods.pet_skill_special_param1 = e->special_param1;
+		atk.mods.pet_skill_special_param2 = e->special_param2;
+		atk.mods.pet_skill_special_param3 = e->special_param3;
 		// ① RENZOKU 段数归一:`if(N < 1 || N > 10) N = 1;`(pet_skill.c:605-606)——
 		//   ★ 越界**归 1,不是夹到边界**,也不是归"无技能":原版此时仍是 RENZOKU
 		//     (COM1 = S_RENZOKU、gDamageDiv = 1)⇒ 依然跳过段数那笔 rng。
@@ -7275,6 +7284,7 @@ bool enterPetToField(SA::Rules::BattleField &field, int owner_field_slot,
 	dst.occupied = true;
 	dst.kind = SA::Rules::CombatantKind::kPet;
 	dst.slot = static_cast<std::uint8_t>(pet_field_slot);
+	dst.pet_id = pet.pet_id;
 	dst.level = pet.level;
 	dst.hp = pet.hp;
 	dst.mp = pet.mp;
@@ -8066,6 +8076,7 @@ bool enterEnemyToField(SA::Rules::BattleField &field, int field_slot,
 	dst.occupied = true;
 	dst.kind = SA::Rules::CombatantKind::kEnemy;
 	dst.slot = static_cast<std::uint8_t>(field_slot);
+	dst.pet_id = enemy.pet_id;
 	dst.level = enemy.level;
 	dst.hp = enemy.hp;
 	dst.mp = enemy.mp;

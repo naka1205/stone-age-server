@@ -34,6 +34,7 @@
 #include "rules/Battle.h"
 #include "rules/Combatant.h"
 #include "rules/Config.h"
+#include "rules/PetSkill.h"
 #include "rules/Progression.h"
 #include "rules/RandomSource.h"
 #include "session_storage/Api.h"
@@ -944,6 +945,11 @@ struct PetSkillEffect
 	//    投产数据不触发该分支(见上),故无可观察差异;若将来导入带 `COM:防御` 的行,
 	//    这里会变成一处真实差异 —— 在实现处立此记。
 	std::int32_t guardian_mode = 0;
+	// ── 特殊宠技 (批次 A-δ) ──
+	SA::Rules::PetSkillSpecialKind special_kind = SA::Rules::PetSkillSpecialKind::kNone;
+	std::int32_t special_param1 = 0;
+	std::int32_t special_param2 = 0;
+	std::int32_t special_param3 = 0;
 };
 
 class World final : public SA::Net::TransportEvents,

@@ -72,6 +72,10 @@ struct ActionEffects
 	//   事件流(客户端要演的)已有 StatusChange(applied=true) 承载"中了"。
 	// ★ -1 = 本行动没有清任何人的指令。
 	int status_cleared_target = -1;
+
+	// ── 特殊宠技回写 (批次 A-δ) ──
+	bool fall_ground = false;      // 守方被击落马
+	bool earth_round_hide = false; // 遁地隐藏态 (第一回合不可被选为目标)
 };
 
 // order 由宿主每回合只生成一次。本接口不再摇行动速度。

@@ -34,6 +34,8 @@
 namespace SA::Rules
 {
 
+enum class PetSkillSpecialKind : std::uint8_t;
+
 // ── 实体族(M2 的判别键)──────────────────────────────────────
 //
 // ★ 为什么必须区分而不是一个 bool:回避公式的类型修正是**四条互斥分支**
@@ -288,6 +290,12 @@ struct CombatModifiers
 	int pet_skill_apply_status = 0; // 目标状态号 1..11(COME3 low);0 = 非状态技
 	int pet_skill_status_turns = 0; // 声明回合(COM3 high,option `turn N` 的 N)
 
+	// ── 宠技·特殊指令与状态释放 (批次 A-δ) ────────────────────
+	PetSkillSpecialKind pet_skill_special_kind = static_cast<PetSkillSpecialKind>(0);
+	std::int32_t pet_skill_special_param1 = 0;
+	std::int32_t pet_skill_special_param2 = 0;
+	std::int32_t pet_skill_special_param3 = 0;
+
 	// ── 职技·直攻系 (批次 A-γ2) ──────────────────────────────
 	//
 	// ★★ 本组字段为本回合 PROF_SKILL 指令的参数投影:
@@ -354,7 +362,8 @@ struct Combatant
 	// ── 身份 ──
 	bool occupied = false; // 该槽是否有单位;false 时其余字段无意义
 	CombatantKind kind = CombatantKind::kEnemy;
-	std::uint8_t slot = 0; // 0..9 己方 / 10..19 敌方(kSideOffset)
+	std::uint8_t slot = 0;   // 0..9 己方 / 10..19 敌方(kSideOffset)
+	std::int32_t pet_id = 0; // 宠/敌模板ID(如大吼判定)
 
 	// ★ 等级 —— 参与两处:空手连击的 `lv < 10` 门槛(§3.9)、
 	//   暴击伤害的 `LV攻 / LV守`(§3.3,批次 A.3 已实现)。
@@ -453,6 +462,7 @@ struct Combatant
 	//   >0 = 本行动是**蓄力拍**(NoAction:不摇攻击 rng、不产事件,拍后世界侧减一);
 	//   =0 = 本行动是**完成击**(World 同时投影 charge_ready + 攻%替换,见上)。
 	std::int32_t pet_charge_beats = -1;
+	bool hidden = false; // 地球一周遁地隐藏态 (不可被选为目标)
 
 	// 原 StatusTbl 把酒醉/混乱直接映射到各自的 WORK 计数（battle_event.c:90）。
 	// 当前单槽覆盖内只由 status/status_turns 表达，不维护第二份无人同步的值。

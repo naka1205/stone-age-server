@@ -781,6 +781,29 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 - **守卫闭环**:
   - 服务端打附注 tag `shared-v0.39.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.39.0`，消除 D2 漂移告警，保持双端 CI 100% 绿灯。
 
+---
 
+### 9.0.86b ★ 推送窗口执行记录 —— `shared-v0.40.0`(2026-09-26)
 
+> **本窗口前推范围**: 战斗子批 A-δ 宠技战斗侧与特殊指令（§9.0.86），涉及 `shared/rules/PetSkill.{h,cpp}`, `shared/rules/Combatant.h`, `shared/rules/Battle.{h,cpp}`, `shared/CMakeLists.txt`。
 
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `shared-v0.40.0`(**附注** tag，subject「release: shared-v0.40.0 (batch A-delta pet battle skills & special commands)」) |
+| client master | pin v0.39.0 → **v0.40.0**(`cmake/SaShared.cmake`) |
+| client 本机 ci_verify | **8 项全过**(清洁构建 · 锁定 ref 与源码一致 · shared/ 与锁定 ref 一致无漂移 · 7 条全部注册 · ctest 7/7) |
+| server 本机 ci_verify | **6 项全过**(22 条全部注册 · ctest 22/22 · 断言防线反向验证通过) |
+| 两端用例集一致性 | D2「一份规则两端编译」本批闭环 |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/rules/PetSkill.h` / `PetSkill.cpp`: 声明并实现 `PetSkillSpecialKind`、`SacrificeResult`、`computeSacrifice`、`computeSelfExplodeDamage`、`rollFallGround`、`applyAttributeReverse`、`isRoarTarget` 纯函数。
+  - `shared/rules/Combatant.h`: `CombatModifiers` 增补 `pet_skill_special_kind`, `pet_skill_special_param1/2/3`；`Combatant` 增补 `pet_id`, `hidden`。
+  - `shared/rules/Battle.h` / `Battle.cpp`: `targetCheck` 拦截 `hidden` 单位；`resolveOrdered` 行动位解除 `hidden`；指令分发支持 `kSacrifice`, `kRoar`, `kStatusMagic`, `kStatusRefresh`, `kAttReverse`, `kSetMagicPet`, `kSetDuck`, `kEarthRoundHide`；`strike` 接入 `kSelfExplode` 与 `kFallGround`。
+  - `shared/CMakeLists.txt`: 引入 `rules/PetSkill.cpp` 编译入 `sa_shared`。
+  - `tests/RulesBattleTest.cpp`: 增补 A-δ 用例，覆盖率 164 用例 / 3226 断言。
+- **守卫闭环**:
+  - 服务端打附注 tag `shared-v0.40.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.40.0`，消除 D2 漂移告警，保持双端 CI 100% 绿灯。

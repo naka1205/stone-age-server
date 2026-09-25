@@ -27,6 +27,7 @@
 #include <doctest/doctest.h>
 
 #include "rules/Battle.h"
+#include "rules/PetSkill.h"
 #include "rules/ProfessionSkill.h"
 #include "rules/Status.h"
 #include "support/ScriptedRandom.h"
@@ -5254,5 +5255,327 @@ TEST_CASE("A-γ1:职业被动在场生效(武器专精/回避/格挡反击)管�
 		attacker.mods.prof_deflect_bonus = 15;
 		rollCounter(attacker, defender, rng, &per_bonus);
 		CHECK(per_bonus == per_base + 15);
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  战斗子批 A-δ: 宠技战斗侧与特殊指令 (纯函数与管线集成)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("A-δ纯函数:救援/自爆/落马/属性反转/大吼/状态纯函数覆盖")
+{
+	SUBCASE("computeSacrifice: 扣减50% HP并治愈目标")
+	{
+		auto r1 = computeSacrifice(100, 50, 200);
+		CHECK(r1.user_loss == 50);
+		CHECK(r1.target_heal == 50);
+
+		auto r2 = computeSacrifice(100, 180, 200);
+		CHECK(r2.user_loss == 50);
+		CHECK(r2.target_heal == 20);
+
+		auto r3 = computeSacrifice(2, 50, 200);
+		CHECK(r3.user_loss == 1);
+		CHECK(r3.target_heal == 1);
+
+		auto r4 = computeSacrifice(1, 50, 200);
+		CHECK(r4.user_loss == 0);
+		CHECK(r4.target_heal == 0);
+
+		auto r5 = computeSacrifice(100, 0, 200);
+		CHECK(r5.user_loss == 0);
+		CHECK(r5.target_heal == 0);
+	}
+
+	SUBCASE("computeSelfExplodeDamage: 守方半血伤害")
+	{
+		CHECK(computeSelfExplodeDamage(100) == 50);
+		CHECK(computeSelfExplodeDamage(101) == 50);
+		CHECK(computeSelfExplodeDamage(1) == 0);
+		CHECK(computeSelfExplodeDamage(0) == 0);
+		CHECK(computeSelfExplodeDamage(-10) == 0);
+	}
+
+	SUBCASE("rollFallGround: 骑乘落马判定 (RAND(1, 100) > 50 + resist)")
+	{
+		ScriptedRandom rng({50, 51, 60, 61});
+		CHECK_FALSE(rollFallGround(false, rng, 0));
+		CHECK(rng.calls() == 0);
+
+		CHECK_FALSE(rollFallGround(true, rng, 0));
+		CHECK(rollFallGround(true, rng, 0));
+
+		CHECK_FALSE(rollFallGround(true, rng, 10));
+		CHECK(rollFallGround(true, rng, 10));
+	}
+
+	SUBCASE("applyAttributeReverse: 四属性反转")
+	{
+		Combatant c{};
+		c.elements[0] = 30; // 地
+		c.elements[1] = 20; // 水
+		c.elements[2] = 40; // 火
+		c.elements[3] = 10; // 风
+
+		applyAttributeReverse(c);
+
+		CHECK(c.elements[0] == 40); // 地与火互换
+		CHECK(c.elements[2] == 30);
+		CHECK(c.elements[1] == 10); // 水与风互换
+		CHECK(c.elements[3] == 20);
+	}
+
+	SUBCASE("isRoarTarget: 年兽与指定宠物列表匹配")
+	{
+		int roar_ids[] = {964, 965, 966};
+		CHECK(isRoarTarget(964, roar_ids, 3));
+		CHECK(isRoarTarget(966, roar_ids, 3));
+		CHECK_FALSE(isRoarTarget(100, roar_ids, 3));
+		CHECK_FALSE(isRoarTarget(0, roar_ids, 3));
+		CHECK_FALSE(isRoarTarget(964, nullptr, 0));
+	}
+
+	SUBCASE("rollPetStatusSkill 与 isStatusCuredByRefresh")
+	{
+		ScriptedRandom rng({30, 31});
+		CHECK(rollPetStatusSkill(30, rng));       // 30 <= 30
+		CHECK_FALSE(rollPetStatusSkill(30, rng)); // 31 > 30
+		CHECK_FALSE(rollPetStatusSkill(0, rng));  // 0% 恒假不摇
+		CHECK(rollPetStatusSkill(100, rng));      // 100% 恒真不摇
+
+		CHECK(isStatusCuredByRefresh(1, 0));
+		CHECK(isStatusCuredByRefresh(5, 0));
+		CHECK(isStatusCuredByRefresh(2, 2));
+		CHECK_FALSE(isStatusCuredByRefresh(2, 3));
+		CHECK_FALSE(isStatusCuredByRefresh(0, 0));
+	}
+}
+
+TEST_CASE("A-δ指令集成:救援 (PETSKILL_Sacrifice) 扣除攻方HP并回复己方目标")
+{
+	Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	d.cmds.commands[0].command.pet_skill.skill_id = 200; // 救援
+	d.cmds.commands[0].command.pet_skill.target = 1;     // 友方 slot 1
+	d.field.at(0).hp = 500;
+	d.field.at(0).max_hp = 1000;
+	d.field.at(0).mods.pet_skill_special_kind = PetSkillSpecialKind::kSacrifice;
+
+	d.field.at(1) = makeCombatant(CombatantKind::kPlayer, 100, 100);
+	d.field.at(1).slot = 1;
+	d.field.at(1).hp = 200;
+	d.field.at(1).max_hp = 800;
+
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({100});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	bool found_user_damage = false;
+	bool found_target_heal = false;
+	for (const auto &e : ev.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+		{
+			if (e.body.damage.target == 0u && e.body.damage.hp_delta == -250)
+				found_user_damage = true;
+			if (e.body.damage.target == 1u && e.body.damage.hp_delta == 250)
+				found_target_heal = true;
+		}
+	}
+	CHECK(found_user_damage);
+	CHECK(found_target_heal);
+}
+
+TEST_CASE("A-δ指令集成:自爆 (PETSKILL_SelfExplodeAttack) 目标扣除半血且自身生命归1")
+{
+	Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	d.cmds.commands[0].command.pet_skill.skill_id = 201; // 自爆
+	d.cmds.commands[0].command.pet_skill.target = 10;
+	d.field.at(0).hp = 600;
+	d.field.at(0).max_hp = 600;
+	d.field.at(0).mods.pet_skill_direct = true;
+	d.field.at(0).mods.pet_skill_special_kind = PetSkillSpecialKind::kSelfExplode;
+
+	d.field.at(10).hp = 400;
+	d.field.at(10).max_hp = 400;
+
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({0, 10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	bool found_explode = false;
+	for (const auto &e : ev.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE && e.body.damage.target == 10u)
+		{
+			if ((e.body.damage.flags & static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_EXPLODE)) != 0 &&
+			    e.body.damage.hp_delta == -200)
+				found_explode = true;
+		}
+	}
+	CHECK(found_explode);
+}
+
+TEST_CASE("A-δ指令集成:落马术 (PETSKILL_FallGround) 命中且造成伤害时击落骑乘")
+{
+	Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	d.cmds.commands[0].command.pet_skill.skill_id = 202; // 落马术
+	d.cmds.commands[0].command.pet_skill.target = 10;
+	d.field.at(0).mods.pet_skill_direct = true;
+	d.field.at(0).mods.pet_skill_special_kind = PetSkillSpecialKind::kFallGround;
+
+	d.field.at(10).has_ride = true;
+	d.field.at(10).ride_hp = 500;
+	d.field.at(10).ride_max_hp = 500;
+	d.field.at(10).ride_defense = 50;
+
+	SA::Domain::BattleEvents ev{};
+	ActionEffects effects{};
+	// 序列: rollDodge (10000) -> rollCritical (10000) -> computeDamage randMod (0) -> computeDamage randReal (0) -> rollFallGround (100)
+	ScriptedRandom rng({10000, 10000, 0, 0, 100});
+	REQUIRE(resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, ev, effects));
+
+	CHECK(effects.fall_ground);
+
+	bool found_fall_flag = false;
+	for (const auto &e : ev.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE && e.body.damage.target == 10u)
+		{
+			if ((e.body.damage.flags & static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_FALL)) != 0)
+				found_fall_flag = true;
+		}
+	}
+	CHECK(found_fall_flag);
+}
+
+TEST_CASE("A-δ指令集成:大吼 (PETSKILL_Roar) 匹配年兽驱离战场")
+{
+	Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	d.cmds.commands[0].command.pet_skill.skill_id = 203; // 大吼
+	d.cmds.commands[0].command.pet_skill.target = 10;
+	d.field.at(0).mods.pet_skill_special_kind = PetSkillSpecialKind::kRoar;
+	d.field.at(0).mods.pet_skill_special_param1 = 964; // 年兽ID
+
+	d.field.at(10).kind = CombatantKind::kEnemy;
+	d.field.at(10).pet_id = 964; // 匹配
+
+	SA::Domain::BattleEvents ev{};
+	ScriptedRandom rng({0});
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	bool found_roar_damage = false;
+	bool found_quit = false;
+	for (const auto &e : ev.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE && e.body.damage.target == 10u)
+		{
+			if ((e.body.damage.flags & static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ROAR)) != 0)
+				found_roar_damage = true;
+		}
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::QUIT && e.body.quit.actor == 10u)
+			found_quit = true;
+	}
+	CHECK(found_roar_damage);
+	CHECK(found_quit);
+}
+
+TEST_CASE("A-δ指令集成:状态释放 (魔障/沉默/虚弱/剧毒) 与状态回复 (PETSKILL_Refresh)")
+{
+	SUBCASE("魔障释放成功并清空目标指令")
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+		d.cmds.commands[0].command.pet_skill.skill_id = 204;
+		d.cmds.commands[0].command.pet_skill.target = 10;
+		d.field.at(0).mods.pet_skill_special_kind = PetSkillSpecialKind::kStatusMagic;
+		d.field.at(0).mods.pet_skill_special_param1 = static_cast<int>(BattleStatus::BATTLE_ST_BARRIER);
+		d.field.at(0).mods.pet_skill_special_param2 = 100; // 100% 必中
+		d.field.at(0).mods.pet_skill_special_param3 = 3;   // 3 回合
+
+		SA::Domain::BattleEvents ev{};
+		ActionEffects effects{};
+		ScriptedRandom rng({1}); // roll <= 80
+		REQUIRE(resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, ev, effects));
+
+		CHECK(effects.status_cleared_target == 10);
+		bool found_barrier = false;
+		for (const auto &e : ev.events)
+		{
+			if (e.body_kind == SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE &&
+			    e.body.status_change.target == 10u &&
+			    e.body.status_change.status == BattleStatus::BATTLE_ST_BARRIER &&
+			    e.body.status_change.applied)
+				found_barrier = true;
+		}
+		CHECK(found_barrier);
+	}
+
+	SUBCASE("状态回复 (PETSKILL_Refresh) 解除目标异常状态")
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+		d.cmds.commands[0].command.pet_skill.skill_id = 205;
+		d.cmds.commands[0].command.pet_skill.target = 10;
+		d.field.at(0).mods.pet_skill_special_kind = PetSkillSpecialKind::kStatusRefresh;
+		d.field.at(0).mods.pet_skill_special_param1 = 0; // 0 = 全状态解除
+
+		d.field.at(10).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_POISON);
+		d.field.at(10).status_turns = 3;
+
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({0});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+		bool found_cleared = false;
+		for (const auto &e : ev.events)
+		{
+			if (e.body_kind == SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE &&
+			    e.body.status_change.target == 10u && !e.body.status_change.applied)
+				found_cleared = true;
+		}
+		CHECK(found_cleared);
+	}
+}
+
+TEST_CASE("A-δ指令集成:属性反转与地球一周遁地不可被选")
+{
+	SUBCASE("属性反转产出 REVERSE 事件并置换四属")
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+		d.cmds.commands[0].command.pet_skill.skill_id = 206;
+		d.cmds.commands[0].command.pet_skill.target = 10;
+		d.field.at(0).mods.pet_skill_special_kind = PetSkillSpecialKind::kAttReverse;
+
+		d.field.at(10).elements[0] = 50; // 地
+		d.field.at(10).elements[2] = 0;  // 火
+
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({0});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+		bool found_reverse = false;
+		for (const auto &e : ev.events)
+		{
+			if (e.body_kind == SA::Domain::BattleEvent::BodyKind::REVERSE && e.body.reverse.actor == 10u)
+				found_reverse = true;
+		}
+		CHECK(found_reverse);
+	}
+
+	SUBCASE("地球一周遁地第一回合置 hidden 且 targetCheck 否决选择")
+	{
+		Duel d = makeB1Duel(1000, 10, /*pet_skill=*/true);
+		d.cmds.commands[0].command.pet_skill.skill_id = 207;
+		d.field.at(0).mods.pet_skill_special_kind = PetSkillSpecialKind::kEarthRoundHide;
+
+		SA::Domain::BattleEvents ev{};
+		ActionEffects effects{};
+		ScriptedRandom rng({0});
+		REQUIRE(resolveAction(d.field, d.cmds, RulesConfig{}, rng, 0, ev, effects));
+
+		CHECK(effects.earth_round_hide);
+
+		// 验证 targetCheck 否决 hidden 单位
+		BattleField f = d.field;
+		f.at(0).hidden = true;
+		CHECK_FALSE(targetCheck(f, nullptr, 0));
 	}
 }

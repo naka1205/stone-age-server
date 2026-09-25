@@ -70,13 +70,61 @@
 
 ---
 
+### 9.0.86 ★★ 战斗子批 A-δ —— 宠技战斗侧与特殊指令 (2026-09-26)
+
+**为什么是它**:
+A-γ1 与 A-γ2 闭环后，战斗域进入特殊技能与特殊指令收口（A-δ）。原版 8.0 `battle_event.c` 中散落在 `PETSKILL_*` 与 `BATTLE_S_*` 的特殊指令链路（救援/舍身、自爆、落马术、大吼驱离、状态释放魔障/沉默/虚弱/剧毒、状态回复、属性反转、地球一周遁地隐身、增益/回血）是宠技与战斗系统的关键交互支柱。
+
+**交付**:
+- `shared/rules/PetSkill.h` / `PetSkill.cpp`:
+  - 声明与实现特殊宠技类型枚举 `PetSkillSpecialKind`（`kNone`, `kSacrifice`, `kSelfExplode`, `kFallGround`, `kRoar`, `kStatusMagic`, `kStatusRefresh`, `kAttReverse`, `kSetMagicPet`, `kSetDuck`, `kEarthRoundHide`）；
+  - 纯函数 `computeSacrifice`：攻方扣除 50% 当前 HP，给己方目标回复同等 HP（不超过目标生命上限）；
+  - 纯函数 `computeSelfExplodeDamage`：守方承受自身当前 HP / 2 伤害；
+  - 纯函数 `rollFallGround`：命中守方且处于骑乘态时，判定 `roll(1..100) > 50 + resist` 解除骑乘（`fall_ground = true`）；
+  - 纯函数 `applyAttributeReverse`：地(0)与火(2)互换，水(1)与风(3)互换；
+  - 纯函数 `isRoarTarget`：判定目标年兽/宠物 ID 是否在驱离匹配列表中。
+- `shared/rules/Combatant.h`:
+  - `CombatModifiers` 增补特殊宠技字段：`pet_skill_special_kind`, `pet_skill_special_param1`, `pet_skill_special_param2`, `pet_skill_special_param3`；
+  - `Combatant` 增补 `pet_id`（宠物模板 ID）、`hidden`（遁地隐身不可被选态）。
+- `shared/rules/Battle.h` / `Battle.cpp`:
+  - `targetCheck` 严守 `!c.hidden` 门禁（遁地单位不可被选为目标）；
+  - `resolveOrdered` 行动位接入：轮到自己行动时解除遁地隐身态（`field.at(actor_slot).hidden = false`）；
+  - 指令分发循环接入特殊非直攻管线：
+    - `kSacrifice`: 扣减自身 HP，恢复友方目标 HP，发 DAMAGE 事件；
+    - `kRoar`: 驱离年兽/目标宠物（`dead=true, hp=0`），发 `QUIT` 与 `DAMAGE_FLAG_ROAR`；
+    - `kStatusMagic`: 判定施加魔障/沉默/虚弱/剧毒，走 `rollStatusAttack(range=30, bai=1.0)`，发 `STATUS_CHANGE`，命中需清指令时设置 `effects.status_cleared_target`；
+    - `kStatusRefresh`: 解除目标异常状态，发 `STATUS_CHANGE(applied=false)`；
+    - `kAttReverse`: 目标四属性反转，发 `REVERSE` 事件；
+    - `kSetMagicPet` / `kSetDuck`: 团队 HP 回复与回避加成；
+    - `kEarthRoundHide`: 第一回合置 `hidden = true` 且设置 `effects.earth_round_hide = true`；
+  - `strike` 管线接入直攻型特殊宠技：
+    - `kSelfExplode`: 目标承受当前生命 50% 伤害，带 `DAMAGE_FLAG_EXPLODE`，自身生命扣至 1；
+    - `kFallGround`: 有效命中且守方骑乘时，概率解除骑乘（`field.at(to).has_ride = false`），带 `DAMAGE_FLAG_FALL` 并回写 `effects.fall_ground = true`。
+- `src/world/World.cpp` / `world/Api.h`:
+  - `PetSkillEffect` 扩展 `special_kind`, `special_param1/2/3`；
+  - `projectPetSkill` 投影特殊宠技字段并重置脏态；
+  - `enterPetToField` 与 `enterEnemyToField` 拷贝 `pet_id`。
+- `tests/RulesBattleTest.cpp`:
+  - 增补全部 A-δ 纯函数用例与 8 类特殊指令的集成用例；用例数由 157 增至 164，断言数由 3,166 增至 3,226。
+
+**复验**:
+- `sa_rules_battle_test`: 164 用例 / 3226 断言 100% 全部通过。
+- `python3 tools/ci_verify.py`: 全部 6 项通过，22/22 CTest 100% 通过。
+- ★ **双向反向验证 (RV)**:
+  - RV-1: 篡改 `computeSelfExplodeDamage` 公式由 `/ 2` 改为 `/ 3`，单元测试与指令集成测试精准红灯（33 == 50 与 found_explode 为 false）；复原回绿。
+  - RV-2: 篡改 `targetCheck` 移除 `!c.hidden` 判定，地球一周用例精准红灯（`CHECK_FALSE(targetCheck)` 失败）；复原回绿。
+
+---
+
 ## 宠技域覆盖总览(截至本批)
 
 | 类别 | 数据行 | 状态 |
 |---|---|---|
 | 直攻系(RENZOKU/CHARGE/MIGHTY/POWERBALANCE/GBREAK 系) | 17+60 | ✅ B1+B2 |
 | 状态系(毒/石/乱/醉/眠)+ 铁壁 | 7 | ✅ B3 |
-| 普攻/防御/守护(NormalAttack/NormalGuard/Guardian) | ~4 | 部分随 B1 表可表达,守卫 Guardian 未做 |
-| 攻击魔法系(AttackMagic/Combined/SetMagicPet) | 36 | ⬜ 等 `__ATTACK_MAGIC` 咒术管线 |
-| 状态 12..43 依赖 / 特殊 / 变身 / 召唤 / 偷窃等 | ~24 | ⬜ 各绑未移植子系统 |
+| 特殊指令系(舍身/自爆/落马/大吼/状态释放/状态回复/属性反转/地球一周/增益回血) | ~15 | ✅ A-δ |
+| 普攻/防御/守护(NormalAttack/NormalGuard/Guardian) | ~4 | 部分随 B1 表可表达,守卫 Guardian 随 A-β 完成 |
+| 攻击魔法系(AttackMagic/Combined/SetMagicPet) | 36 | ⬜ 等 `__ATTACK_MAGIC` 咒术管线 / A-ε |
+| 状态 12..43 依赖 / 特殊 / 变身 / 召唤 / 偷窃等 | ~24 | ⬜ 各绑未移植子系统 / A-ε |
 | 敌方 AI 用技(ENEMYSKILL_* / _PRO_BATTLEENEMYSKILL) | 3 | ⬜ 模板槽已备,`fillEnemyCommands` 待扩展 |
+

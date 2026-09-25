@@ -52,8 +52,8 @@ P2/P3 的完成以真实客户端操作和重启后的持久化结果为准；�
 | 09-25 | **阶段 2 四大村庄多地图与全量 NPC 管线 D.2**（§9.0.81：四大村庄 1000/2000/3000/4000 地图构建与装载 · 跨图视野完全隔离与双向传送闭环 · 164 Warp + 254 NPC 属性抽取 · `world_map` 74→75 例/1896→1952 断言 · RV-1/RV-2 精准通过） | 阶段 2 角色与宠物成长闭环（经验升级体系与装备穿戴加成） |
 | 09-25 | **批次 P.1 成长与装备体系**（§9.0.82：经验门限与玩家/宠物升级结算 · 装备槽位穿戴与战斗三围加成 · 锁定 ref `shared-v0.36.0` 闭环 · 双端 CI 全过） | 阶段 2 属性点分配系统 P.2 |
 | 09-25 | **批次 P.2 属性点分配系统**（§9.0.83：SkillUp 消费与四维加点换算 · 非战斗非阵亡门禁 · 战斗三围即时重算 · 锁定 ref `shared-v0.37.0` 闭环 · 双端 CI 全过） | 战斗子批 A-γ2 职业宿主与 64 职技映射 |
-| 09-25 | **战斗子批 A-γ2 职业宿主与 64 职技映射**（§9.0.84：三职属性上限门禁 · 猎人非战斗遇敌率纯函数与世界挂接 · 权威 64 职技全表 · 直攻系纯函数与战斗宿主执行 · 锁定 ref `shared-v0.38.0` 闭环 · 双端 CI 全过） | 战斗子批 A-δ 宠技战斗侧与特殊指令 / A-γ1 状态推进与解除收口 |
 | 09-25 | **战斗子批 A-γ1 核心状态推进与职业被动联动**（§9.0.85：挑拨/附身重定向与取消防御 · 火附体每回合结算 · 9大状态逆境回复生命 · 职业被动在场生效：回避/专精/格挡/熟练度 · 锁定 ref `shared-v0.39.0` 闭环 · 双端 CI 全过） | 战斗子批 A-δ 宠技战斗侧与特殊指令 / A-ε 攻击魔法与杂项 |
+| 09-26 | **战斗子批 A-δ 宠技战斗侧与特殊指令**（§9.0.86：舍身/自爆/落马/大吼/魔障沉默虚弱剧毒释放/状态回复/属性反转/地球一周遁地隐身/增益回血 · 锁定 ref `shared-v0.40.0` 闭环 · 双端 CI 全过） | 战斗子批 A-ε 攻击魔法与杂项 |
 
 **环境事实**（A1 复验结论）：09-15 10:54 的 `civ.log` 失败发生在 12:53 探测修复（`fde500d`，§9.0.59）**之前**，为历史证据非现存故障；09-16 02:19 在 `c213060`/shared-v0.30.0 上复跑 win_validate **11/11 全绿**（服务端 ctest 22/22、0 告警、OpenSSL 4.0.2 探测命中、断言防线反向验证通过）。
 
@@ -85,7 +85,7 @@ P2/P3 的完成以真实客户端操作和重启后的持久化结果为准；�
 | **A-β 目标选择与守护** | `BATTLE_MultiList`（228）· `TargetListSet`（85）· `TargetAdjust/TargetCheck/Index2No/No2Index/DefaultAttacker/CountAlive/CheckSameSide/CanMoveCheck`（≈269）· `BattleModel`（139）· `Guard`（20）· 小工具 `GetWepon/talkToCli/TargetAdjust` 收尾 | 真状态 ~8 · 串 ~5 · rng ~5，多为纯函数——黄金用例最友好 | 无；B3 铁壁「全」不展开的机制在 `MultiList` | 位次换算黄金用例组；`MultiList` 全体/单体展开断言；**A5 守卫 Guardian 指令在本子批落地**（含 B1 表 `Guardian` 行消费） |
 | **A-γ1 状态序列收口** | ✅ 已于 §9.0.70 & §9.0.85 收口完成：混乱/挑拨/附身重定向全链 · 火附体每回合结算 · 9大异常状态逆境回复纯函数与结算 · 四职被动纯函数与管线接入（回避/专精/格挡/熟练度） | 真状态 58 · 串 48 · rng 8 | L4.1 地基在；状态 12..43 的**施加者**仍属宠技/职技域（本批只落推进与解除面） | `rules_battle` 157 用例/3,166 断言全绿；RV-1/RV-2 双向反向验证通过 |
 | **A-γ2 职业宿主** | `battle_profession_attack_fun`（490）· `battle_profession_status_chang_fun`（778）· `battle_profession_assist_fun`（306）· `PROFESSION_BATTLE_StatusAttackCheck`（40）· `attack_magic_fun`（29） | 真状态 ~74 · 串 ~76 · rng ~4——C 批次 64 函数的运行时宿主（净移植量 = 2 函数 + 1 张表的判据在此复核） | 职技效果表 fixture（手工构造，D 线不写运行时加载器） | C 表接线用例（53 同构薄包装走映射表）；`PROFESSION_escape/track` 两真实现逐行对照 |
-| **A-δ 宠技战斗侧 + 特殊指令** | `BATTLE_S_Barrier/Nocast/Roar/Weaken/Deeppoison/Refresh/Sacrifice/Explode/FallGround`（≈683）· `PETSKILL_SetMagicPet/SetDuckChange/SetStrength_Battle`（129）· `BATTLE_S_PetOut`（45）· `AttReverse/NoAction/EarthRoundHide`（69） | 真状态 ~45 · 串 ~30 · rng ~8 | ⚠️ **A7 勘误适用**：`S_PetOut` = 技能驱动强制换宠（`_PETOUT_PETSKILL` 8.0 其实有），勿按旧记载跳过 | 每技能独立用例（fixture 用真数据行）；反验注入先问「改变哪个可观察值」（§9.0.62 教训） |
+| **A-δ 宠技战斗侧 + 特殊指令** | ✅ 已于 §9.0.86 收口完成：`BATTLE_S_Barrier/Nocast/Roar/Weaken/Deeppoison/Refresh/Sacrifice/Explode/FallGround` · `PETSKILL_SetMagicPet/SetDuck` · `AttReverse/EarthRoundHide` · 锁定 ref `shared-v0.40.0` 闭环 | 真状态 ~45 · 串 ~30 · rng ~8 | 纯函数计算 + 战斗宿主指令执行 | `rules_battle` 164 用例/3,226 断言全绿；RV-1/RV-2 双向反向验证通过 |
 | **A-ε 攻击魔法与杂项** | `MultiAttMagic_Fire`（208）· `Attack_FIREKILL`（346）· `Abduct`（112）· `Steal/StealMoney`（235）· `Combo` 三件（353）· `DivideAttack`（88）· `E_ENEMYHELP/REFILE/REHP`（149）· `LostEscape`（63）· `PetLoyalCheck`（147）· `MultiRessurect` + OFFLINE（134）· `S_GBreak/GBreak2` 宿主核对（334） | 真状态 ~40 · 串 ~70 · rng ~20 | 攻击魔法部分依赖 `__ATTACK_MAGIC` 管线裁定（宠技表 36 行魔法系同源）——若管线未裁，本子批先落 steal/combo/divide/enemy 三事件 | combo 连锁用例、偷窃金币/道具双路径、DivideAttack 分摊；GBreak 宿主与 B1 消费端语义逐位对齐断言 |
 
 ### 执行纪律（全部沿用既有守则，此处只为免查）

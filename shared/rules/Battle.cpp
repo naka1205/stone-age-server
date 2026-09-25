@@ -35,6 +35,7 @@
 
 #include "rules/Battle.h"
 
+#include "rules/PetSkill.h" // 批次 A-δ:宠技特殊指令与纯函数
 #include "rules/ProfessionSkill.h"
 #include "rules/Status.h" // 批次 L4.1:状态施加 / 每回合推进
 
@@ -168,8 +169,8 @@ bool targetCheck(const BattleField &field, const bool *slots, int no) noexcept
 	// 源码 `BATTLE_TargetCheck`(`battle.c:6740-6756`)的六道,映射见 battle.h:
 	//   CHAR_CHECKINDEX / WORKBATTLEMODE == 0  → !occupied
 	//   ISDIE / HP <= 0                        → dead / hp <= 0
-	//   ISATTACKED == FALSE / CHARMODE_RESCUE  → 恒不成立(未移植)
-	return c.occupied && !isDeadAt(field, slots, no) && c.hp > 0;
+	//   CHARMODE_RESCUE                        → 恒不成立(未移植)
+	return c.occupied && !isDeadAt(field, slots, no) && c.hp > 0 && !c.hidden;
 }
 
 bool targetCheckDead(const BattleField &field, int no) noexcept
@@ -1720,6 +1721,11 @@ static bool resolveOrdered(BattleField field,
 			effects->charge_strike = true;
 		}
 
+		if (field.at(actor_slot).hidden)
+		{
+			field.at(actor_slot).hidden = false;
+		}
+
 		SA::Domain::BattleCommand cmd = commands.commands[actor_slot];
 
 		// ── 混乱与附身指令重写(原 SSRC80 battle.c:5644-5665, 5667-5689)──────────────
@@ -1971,6 +1977,258 @@ static bool resolveOrdered(BattleField field,
 			if (sink.overflowed())
 				break;
 			continue;
+		}
+
+		// ── 宠技·特殊非直攻指令 (批次 A-δ) ──────────────────────
+		if (cmd.command_kind == SA::Domain::BattleCommand::CommandKind::PET_SKILL &&
+		    actor.mods.pet_skill_special_kind != PetSkillSpecialKind::kNone &&
+		    actor.mods.pet_skill_special_kind != PetSkillSpecialKind::kFallGround &&
+		    actor.mods.pet_skill_special_kind != PetSkillSpecialKind::kSelfExplode)
+		{
+			const auto skind = actor.mods.pet_skill_special_kind;
+			if (skind == PetSkillSpecialKind::kEarthRoundHide)
+			{
+				field.at(actor_slot).hidden = true;
+				if (effects != nullptr)
+					effects->earth_round_hide = true;
+				continue;
+			}
+
+			const int target_slot = static_cast<int>(cmd.command.pet_skill.target);
+			if (target_slot < 0 || target_slot >= kSlotCount || !targetCheck(field, dead, target_slot))
+				continue;
+
+			if (skind == PetSkillSpecialKind::kSacrifice)
+			{
+				auto *hit = sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
+				if (hit != nullptr)
+				{
+					hit->body.hit.attacker = static_cast<std::uint32_t>(actor_slot);
+					hit->body.hit.kind = SA::Domain::AttackKind::ATTACK_KIND_SPELL;
+					hit->body.hit.skill_id = cmd.command.pet_skill.skill_id;
+					hit->body.hit.target_count = 1;
+				}
+				const SacrificeResult res =
+				    computeSacrifice(hp[actor_slot], hp[target_slot], field.at(target_slot).max_hp);
+				if (res.user_loss > 0)
+				{
+					hp[actor_slot] = std::max(1, hp[actor_slot] - res.user_loss);
+					field.at(actor_slot).hp = hp[actor_slot];
+					auto *d_user = sink.push(SA::Domain::BattleEvent::BodyKind::DAMAGE);
+					if (d_user != nullptr)
+					{
+						d_user->body.damage.target = static_cast<std::uint32_t>(actor_slot);
+						d_user->body.damage.hp_delta = -res.user_loss;
+						d_user->body.damage.flags =
+						    static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);
+					}
+				}
+				if (res.target_heal > 0)
+				{
+					hp[target_slot] =
+					    std::min(field.at(target_slot).max_hp, hp[target_slot] + res.target_heal);
+					field.at(target_slot).hp = hp[target_slot];
+					auto *d_tgt = sink.push(SA::Domain::BattleEvent::BodyKind::DAMAGE);
+					if (d_tgt != nullptr)
+					{
+						d_tgt->body.damage.target = static_cast<std::uint32_t>(target_slot);
+						d_tgt->body.damage.hp_delta = res.target_heal;
+						d_tgt->body.damage.flags =
+						    static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);
+					}
+				}
+				continue;
+			}
+			else if (skind == PetSkillSpecialKind::kRoar)
+			{
+				auto *hit = sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
+				if (hit != nullptr)
+				{
+					hit->body.hit.attacker = static_cast<std::uint32_t>(actor_slot);
+					hit->body.hit.kind = SA::Domain::AttackKind::ATTACK_KIND_SPELL;
+					hit->body.hit.skill_id = cmd.command.pet_skill.skill_id;
+					hit->body.hit.target_count = 1;
+				}
+				const Combatant &target = field.at(target_slot);
+				const int roar_ids[2] = {actor.mods.pet_skill_special_param1,
+				                         actor.mods.pet_skill_special_param2};
+				const std::size_t roar_count = (actor.mods.pet_skill_special_param2 > 0)
+				                                   ? 2
+				                                   : ((actor.mods.pet_skill_special_param1 > 0) ? 1 : 0);
+				bool matches = false;
+				if (roar_count > 0)
+				{
+					matches = isRoarTarget(target.pet_id, roar_ids, roar_count);
+				}
+				else
+				{
+					matches = (target.kind == CombatantKind::kPet || target.kind == CombatantKind::kEnemy);
+				}
+				if (matches)
+				{
+					hp[target_slot] = 0;
+					dead[target_slot] = true;
+					field.at(target_slot).hp = 0;
+					field.at(target_slot).dead = true;
+					field.at(target_slot).occupied = false;
+					auto *d = sink.push(SA::Domain::BattleEvent::BodyKind::DAMAGE);
+					if (d != nullptr)
+					{
+						d->body.damage.target = static_cast<std::uint32_t>(target_slot);
+						d->body.damage.hp_delta = 0;
+						d->body.damage.flags =
+						    static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_ROAR) |
+						    static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_DEATH);
+					}
+					auto *q = sink.push(SA::Domain::BattleEvent::BodyKind::QUIT);
+					if (q != nullptr)
+					{
+						q->body.quit.actor = static_cast<std::uint32_t>(target_slot);
+					}
+				}
+				continue;
+			}
+			else if (skind == PetSkillSpecialKind::kStatusMagic)
+			{
+				auto *hit = sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
+				if (hit != nullptr)
+				{
+					hit->body.hit.attacker = static_cast<std::uint32_t>(actor_slot);
+					hit->body.hit.kind = SA::Domain::AttackKind::ATTACK_KIND_SPELL;
+					hit->body.hit.skill_id = cmd.command.pet_skill.skill_id;
+					hit->body.hit.target_count = 1;
+				}
+				const int status_id = actor.mods.pet_skill_special_param1;
+				const int success_rate = actor.mods.pet_skill_special_param2;
+				int turns = actor.mods.pet_skill_special_param3 > 0
+				                ? actor.mods.pet_skill_special_param3
+				                : 3;
+				if (status_id == static_cast<int>(SA::Domain::BattleStatus::BATTLE_ST_DEEPPOISON))
+					turns += 2;
+				int per = 0;
+				const bool success = rollStatusAttack(field.is_pvp, actor, field.at(target_slot),
+				                                      status_id, success_rate, 30, 1.0, rng, &per);
+				if (success)
+				{
+					const int actual_turns = statusWorkOnApply(status_id, turns);
+					status[target_slot] = static_cast<std::uint8_t>(status_id);
+					status_turns[target_slot] = actual_turns;
+					field.at(target_slot).status = static_cast<std::uint8_t>(status_id);
+					field.at(target_slot).status_turns = actual_turns;
+					auto *sc = sink.push(SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE);
+					if (sc != nullptr)
+					{
+						sc->body.status_change.target = static_cast<std::uint32_t>(target_slot);
+						sc->body.status_change.status = static_cast<SA::Domain::BattleStatus>(status_id);
+						sc->body.status_change.applied = true;
+					}
+					if (clearsCommandOnApply(status_id))
+					{
+						if (effects != nullptr)
+							effects->status_cleared_target = target_slot;
+					}
+				}
+				else
+				{
+					auto *sc = sink.push(SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE);
+					if (sc != nullptr)
+					{
+						sc->body.status_change.target = static_cast<std::uint32_t>(target_slot);
+						sc->body.status_change.status = static_cast<SA::Domain::BattleStatus>(status_id);
+						sc->body.status_change.applied = false;
+					}
+				}
+				continue;
+			}
+			else if (skind == PetSkillSpecialKind::kStatusRefresh)
+			{
+				auto *hit = sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
+				if (hit != nullptr)
+				{
+					hit->body.hit.attacker = static_cast<std::uint32_t>(actor_slot);
+					hit->body.hit.kind = SA::Domain::AttackKind::ATTACK_KIND_SPELL;
+					hit->body.hit.skill_id = cmd.command.pet_skill.skill_id;
+					hit->body.hit.target_count = 1;
+				}
+				const int target_cure_status = actor.mods.pet_skill_special_param1;
+				const int cur_st = status[target_slot];
+				if (cur_st > 0 && isStatusCuredByRefresh(cur_st, target_cure_status))
+				{
+					status[target_slot] = 0;
+					status_turns[target_slot] = 0;
+					field.at(target_slot).status = 0;
+					field.at(target_slot).status_turns = 0;
+					auto *sc = sink.push(SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE);
+					if (sc != nullptr)
+					{
+						sc->body.status_change.target = static_cast<std::uint32_t>(target_slot);
+						sc->body.status_change.status = static_cast<SA::Domain::BattleStatus>(cur_st);
+						sc->body.status_change.applied = false;
+					}
+				}
+				continue;
+			}
+			else if (skind == PetSkillSpecialKind::kAttReverse)
+			{
+				auto *hit = sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
+				if (hit != nullptr)
+				{
+					hit->body.hit.attacker = static_cast<std::uint32_t>(actor_slot);
+					hit->body.hit.kind = SA::Domain::AttackKind::ATTACK_KIND_SPELL;
+					hit->body.hit.skill_id = cmd.command.pet_skill.skill_id;
+					hit->body.hit.target_count = 1;
+				}
+				applyAttributeReverse(field.at(target_slot));
+				auto *rev = sink.push(SA::Domain::BattleEvent::BodyKind::REVERSE);
+				if (rev != nullptr)
+				{
+					rev->body.reverse.actor = static_cast<std::uint32_t>(target_slot);
+				}
+				continue;
+			}
+			else if (skind == PetSkillSpecialKind::kSetMagicPet)
+			{
+				auto *hit = sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
+				if (hit != nullptr)
+				{
+					hit->body.hit.attacker = static_cast<std::uint32_t>(actor_slot);
+					hit->body.hit.kind = SA::Domain::AttackKind::ATTACK_KIND_SPELL;
+					hit->body.hit.skill_id = cmd.command.pet_skill.skill_id;
+					hit->body.hit.target_count = 1;
+				}
+				const int power = actor.mods.pet_skill_special_param1;
+				const int min_h = static_cast<int>(power * 0.9);
+				const int max_h = static_cast<int>(power * 1.1);
+				const int heal = rng.rand(std::min(min_h, max_h), std::max(min_h, max_h));
+				if (heal > 0)
+				{
+					hp[target_slot] = std::min(field.at(target_slot).max_hp, hp[target_slot] + heal);
+					field.at(target_slot).hp = hp[target_slot];
+					auto *d = sink.push(SA::Domain::BattleEvent::BodyKind::DAMAGE);
+					if (d != nullptr)
+					{
+						d->body.damage.target = static_cast<std::uint32_t>(target_slot);
+						d->body.damage.hp_delta = heal;
+						d->body.damage.flags =
+						    static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);
+					}
+				}
+				continue;
+			}
+			else if (skind == PetSkillSpecialKind::kSetDuck)
+			{
+				auto *hit = sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
+				if (hit != nullptr)
+				{
+					hit->body.hit.attacker = static_cast<std::uint32_t>(actor_slot);
+					hit->body.hit.kind = SA::Domain::AttackKind::ATTACK_KIND_SPELL;
+					hit->body.hit.skill_id = cmd.command.pet_skill.skill_id;
+					hit->body.hit.target_count = 1;
+				}
+				const int duck_bonus = actor.mods.pet_skill_special_param1;
+				field.at(actor_slot).mods.pet_skill_duck_bonus += duck_bonus;
+				continue;
+			}
 		}
 
 		// ── 宠技·直攻系(批次 B1)──────────────────────────────────
@@ -2273,6 +2531,14 @@ static bool resolveOrdered(BattleField field,
 			else if (!critical && !counter)
 				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);
 
+			if (!counter && striker.mods.pet_skill_special_kind == PetSkillSpecialKind::kSelfExplode)
+			{
+				damage = computeSelfExplodeDamage(hp[to]);
+				d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_EXPLODE);
+				hp[from] = 1;
+				field.at(from).hp = 1;
+			}
+
 			int to_player = damage;
 			int to_pet = 0;
 			if (victim.has_ride && pet_hp[to] > 0)
@@ -2282,6 +2548,17 @@ static bool resolveOrdered(BattleField field,
 				const RideSplit split = splitRideDamage(damage, effectiveDefense(victim), victim.ride_defense);
 				to_player = split.player;
 				to_pet = split.pet;
+			}
+			if (!counter && striker.mods.pet_skill_special_kind == PetSkillSpecialKind::kFallGround &&
+			    to_player > 0 && victim.has_ride)
+			{
+				if (rollFallGround(victim.has_ride, rng, victim.mods.general_resist))
+				{
+					field.at(to).has_ride = false;
+					d.flags |= static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_FALL);
+					if (effects != nullptr)
+						effects->fall_ground = true;
+				}
 			}
 			const int overflow = std::max(0, to_player - hp[to]);
 			hp[to] -= to_player;
