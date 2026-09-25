@@ -509,6 +509,40 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证 (RV-2)**: 篡改买宠宠物槽满判定逻辑（绕过 `pet_slot < 0`）⇒ `W.13: 宠物商店购买宠物栏已满拦截` 测试精准报红（2 失败 / 10 通过）；恢复后回绿。
 - **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py`、22 项 ctest 全量绿灯。
 
+---
+
+### 9.0.79 批次 W.14 —— 告示牌与传送员 NPC (2026-09-25)
+
+2026-09-25 交付。世界系统中落地石器 8.0 规范的告示牌与传送员 NPC（`npc_signboard.c`、`npc_warpman.c`、`07-npc-quest.md` §0.1、`13-d8-coverage.md` 行 50、94），实现了从玩家触发告示牌交互展示公告标题与告示对白（`WINDOW_KIND_MESSAGE` + `BUTTON_FLAG_OK`）、传送员单目的地确认弹窗（Yes/No）、多目的地列表选项选择（`WINDOW_KIND_SELECT`，含路费标注与等级/石币置灰）、路费扣除（`kWarpFee`）、等级与通行门禁到双向视野切换与自身瞬移同步的全流程闭环。
+
+#### 1. 源码事实与裁定
+
+1. **实体与协议契约 (`src/world/include/world/Api.h`, `idl/schema/domain/window.proto`)**:
+   - `NpcType::kSignBoard`（6）与 `NpcType::kWarpMan`（7）确立为一等 NPC 类型（对应原版 `npc_signboard.c` 与 `npc_warpman.c`，投产 230 实例与 324 实例）；
+   - 数据结构定义：
+     - `WarpDestination`（传送目的地：`floor`, `x`, `y`, `name`, `cost`, `level`）；
+     - `NpcEntity` 扩展对应配置字段：`sign_title`（告示牌标题，默认 `"＜　看板　＞"`）、`warp_destinations` 目的地列表与 `warp_msg`；
+   - 协议复用：利用已生成的 `WindowOpen` 结构化下发，告示牌下发 `WINDOW_KIND_MESSAGE`（OK 按钮）；传送员单目的地弹出确认 `WINDOW_KIND_MESSAGE`（Yes/No 按钮），多目的地弹出 `WINDOW_KIND_SELECT`（携带目的地名称、路费与可用状态）。
+2. **告示牌对话与交互 (`World.cpp`, `npc_signboard.c:45-80`)**:
+   - 触发时自动拼接 `sign_title` 与告示正文 `message`（以换行符 `\n` 切分为多行），下发 `WINDOW_KIND_MESSAGE`；
+   - 客户端回执 OK 后直接闭环窗口状态机。
+3. **传送员确认、选择与门禁拦截 (`World::warpPlayerByNpc`, `npc_warpman.c:120-450`)**:
+   - 门 1（距离门）：检查玩家与 NPC 距离 $\le 3$ 格；
+   - 门 2（等级门）：`p->level >= dest.level`，等级不足下发 `level_low_msg` 阻断；
+   - 门 3（路费门）：`p->gold >= dest.cost`，石币不足下发 `stone_less_msg` 阻断；
+   - 门 4（通行门）：`map.inBounds(dest.x, dest.y) && mapWalkable(...)`，不可通行阻断；
+   - 传送结算：扣除路费严格经唯一入口 `delGold(*p, GoldReason::kWarpFee, dest.cost, ...)`；
+   - 瞬移执行（`warpPlayer`）：旧格 `olink` 摘除、旧视野双向 `CharDisappear` 广播、坐标更新、新格 `olink` 挂接、新视野 `broadcastSpawn` / 敌人与 NPC 刷新、向自身下发 `CharMove` 坐标同步。
+4. **经济账本纪律 (`check_gold_writes.py`)**:
+   - `GoldReason` 追加 `kWarpFee`（汇），`gold_writes` 门禁 100% 保持通过，绝不旁路裸写石币。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 67 增至 **72**（+5 专项用例），断言数从 1766 增至 **1843**（+77 断言）。
+- **反向验证 (RV-1)**: 篡改传送路费门禁检查逻辑（绕过 `p->gold < dest.cost`）⇒ `W.14: 传送员路费不足拦截` 测试精准报红（1 失败 / 10 通过）；恢复后回绿。
+- **反向验证 (RV-2)**: 篡改传送等级门禁检查逻辑（绕过 `p->level < dest.level`）⇒ `W.14: 传送员等级不足拦截` 测试精准报红（7 失败 / 4 通过）；恢复后回绿。
+- **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py`、22 项 ctest 全量绿灯。
+
 
 
 

@@ -677,7 +677,7 @@ struct EventCheckContext
 int evaluateEventCondition(std::string_view condition, const SA::Model::Player &player);
 int evaluateEventCondition(std::string_view condition, const EventCheckContext &ctx);
 
-// NPC 实体类型(批次 W.7「Healer」; 批次 W.8「TownPeople」; 批次 W.9「ExChangeMan」; 批次 W.12「ShopMan」; 批次 W.13「PetShop / PetSkillShop」)
+// NPC 实体类型(批次 W.7「Healer」; 批次 W.8「TownPeople」; 批次 W.9「ExChangeMan」; 批次 W.12「ShopMan」; 批次 W.13「PetShop / PetSkillShop」; 批次 W.14「SignBoard / WarpMan」)
 enum class NpcType : std::uint8_t
 {
 	kHealer = 0,
@@ -686,7 +686,9 @@ enum class NpcType : std::uint8_t
 	kShop = 3,
 	kPetShop = 4,
 	kPetSkillShop = 5,
-	kOther = 6,
+	kSignBoard = 6,
+	kWarpMan = 7,
+	kOther = 8,
 };
 
 // 商店商品条目 (批次 W.12)
@@ -724,6 +726,17 @@ struct PetSkillProduct
 	std::int32_t level = 1;    // 宠物最低需求等级
 };
 
+// 传送目的地条目 (批次 W.14, 移植 npc_warpman.c)
+struct WarpDestination
+{
+	std::int32_t floor = 0; // 目标地图 floor
+	std::int32_t x = 0;     // 目标 X 坐标
+	std::int32_t y = 0;     // 目标 Y 坐标
+	std::string name{};     // 目的地名称
+	std::int32_t cost = 0;  // 传送路费 (石币)
+	std::int32_t level = 1; // 最低等级要求
+};
+
 // NPC 巡逻路点 (批次 W.11)
 struct NpcPoint
 {
@@ -731,8 +744,8 @@ struct NpcPoint
 	std::int32_t y = 0;
 };
 
-// 世界 NPC 实体配置/状态(批次 W.7/W.8/W.9/W.11/W.12/W.13)
-// ⚠️ 原版 npc_healer.c / npc_townpeople.c / npc_exchangeman.c / npc_itemshop.c / npc_petshop.c / npc_petskillshop.c
+// 世界 NPC 实体配置/状态(批次 W.7/W.8/W.9/W.11/W.12/W.13/W.14)
+// ⚠️ 原版 npc_healer.c / npc_townpeople.c / npc_exchangeman.c / npc_itemshop.c / npc_petshop.c / npc_petskillshop.c / npc_signboard.c / npc_warpman.c
 //   CHAR_WHICHTYPE = CHAR_TYPEHEALER / CHAR_TYPETOWNPEOPLE / CHAR_TYPESHOP, CHAR_ISOVERED = 0 (不可穿透阻挡)
 struct NpcEntity
 {
@@ -743,6 +756,7 @@ struct NpcEntity
 	std::uint8_t dir = 0;
 	std::int32_t image = 0;
 	NpcType type = NpcType::kHealer;
+	std::string name{};                           // NPC 名称 (如 告示牌内容/展示名)
 	std::int32_t cost = 0;                        // 治疗所需石币 (0 = 免费)
 	std::string message{};                        // 对白文案 (支持逗号分隔多条候选, 原版 npc_townpeople.c)
 	std::string nomal_main_msg{};                 // ExChangeMan 兜底对白 (支持逗号分隔多条候选)
@@ -773,6 +787,11 @@ struct NpcEntity
 	std::string pet_full_msg{};                        // 宠物栏已满提示语
 	std::string level_low_msg{};                       // 等级不足提示语
 	std::string skill_full_msg{};                      // 技能栏已满提示语
+
+	// ── 批次 W.14: 告示牌与传送员 NPC (移植 npc_signboard.c / npc_warpman.c) ──
+	std::string sign_title{};                         // 告示牌标题 (默认 "＜　看板　＞")
+	std::vector<WarpDestination> warp_destinations{}; // 传送员目的地列表
+	std::string warp_msg{};                           // 传送提示对白
 };
 
 // 世界态敌人的位置快照(批次 W.2 / W.3 的观察面)。
@@ -1056,6 +1075,9 @@ class World final : public SA::Net::TransportEvents,
 	// 宠物向技能导师 NPC 学习宠物技能 (批次 W.13, 移植 npc_petskillshop.c 逻辑)
 	bool learnPetSkill(SA::Net::SessionId session, std::uint64_t npc_id, int pet_slot,
 	                   std::int32_t skill_id, int skill_slot = -1);
+
+	// 传送员 NPC 触发玩家传送 (批次 W.14, 移植 npc_warpman.c 逻辑)
+	bool warpPlayerByNpc(SA::Net::SessionId session, std::uint64_t npc_id, std::size_t dest_idx = 0);
 
 	// ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
 	void requestShutdown() noexcept;
@@ -1569,6 +1591,8 @@ enum class GoldReason : std::uint8_t
 	kPetShopSell,
 	// 技能导师学习宠物技能扣除石币 (汇, 批次 W.13)
 	kPetSkillFee,
+	// 传送员 NPC 传送路费扣除 (汇, 批次 W.14)
+	kWarpFee,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -1681,6 +1705,8 @@ inline const char *goldReasonName(GoldReason r) noexcept
 		return "pet_shop_sell";
 	case GoldReason::kPetSkillFee:
 		return "pet_skill_fee";
+	case GoldReason::kWarpFee:
+		return "warp_fee";
 	}
 	return "unknown";
 }

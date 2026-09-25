@@ -2213,6 +2213,14 @@ struct World::Impl : GoldAuditSink
 			std::uint64_t npc_id = 0;
 		};
 		PendingPetSkillShop pending_pet_skill_shop{};
+
+		// ── WarpMan 待决传送员交互 (批次 W.14) ───────────────────────
+		struct PendingWarpMan
+		{
+			std::uint64_t npc_id = 0;
+			int dest_idx = -1;
+		};
+		PendingWarpMan pending_warpman{};
 	};
 
 	Impl(const SA::Platform::ServerConfig &cfg, SA::Platform::Clock &clk,
@@ -2480,6 +2488,9 @@ struct World::Impl : GoldAuditSink
 	                        const std::string &raw_text, std::uint32_t buttons);
 	bool checkExChangePreconditions(const SA::Model::Player &p, const ExChangeBlock &blk, int branch_idx, std::string &msg_out);
 	void applyExChangeEffects(SA::Net::SessionId id, SA::Model::Player &p, const ExChangeBlock &blk, int branch_idx);
+
+	// ── 瞬移与传送底层 (批次 W.6 / W.14: 移除旧 olink, 视野广播, 更新坐标, 挂接新 olink) ──
+	void warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y);
 };
 
 World::World(const SA::Platform::ServerConfig &config,
@@ -2598,6 +2609,67 @@ void World::Impl::sendExChangeWindow(SA::Net::SessionId id, std::uint64_t npc_id
 	it->second.active_window_npc_id = static_cast<std::uint64_t>(npc_id);
 	it->second.last_window_text = raw_text;
 	sendTo(id, win);
+}
+
+void World::Impl::warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y)
+{
+	const auto it = conns.find(id);
+	SA::Model::Player *p = players.resolve(player_of_session.find(id));
+	if (it == conns.end() || p == nullptr)
+		return;
+
+	Conn &c = it->second;
+	c.walk_seq.clear(); // 清空剩余未走路径串 (CHAR_WORKWALKARRAY, char.c:4671)
+
+	const std::int32_t ox = p->x;
+	const std::int32_t oy = p->y;
+
+	// 1. 从旧格 olink 移除 (玩家刚从 ox, oy 走来)
+	if (map.inBounds(ox, oy))
+	{
+		auto &oldcell = olink[map.index(ox, oy)];
+		oldcell.erase(std::remove(oldcell.begin(), oldcell.end(), id),
+		              oldcell.end());
+	}
+
+	// 2. 旧视野广播 Disappear (旧视野内其他玩家看到 id 消失, id 看到旧视野玩家消失)
+	const auto old_vis = collectVisible(ox, oy, id);
+	for (const SA::Net::ConnectionId b : old_vis)
+	{
+		SA::Domain::CharDisappear dis{};
+		dis.entity_id = id;
+		dis.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER);
+		sendTo(b, dis);
+		SA::Domain::CharDisappear dis2{};
+		dis2.entity_id = b;
+		dis2.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER);
+		sendTo(id, dis2);
+	}
+
+	// 3. 更新玩家坐标
+	p->floor = dst_floor;
+	p->x = dst_x;
+	p->y = dst_y;
+
+	// 4. 新格 olink 挂接
+	if (map.inBounds(p->x, p->y))
+	{
+		olink[map.index(p->x, p->y)].push_back(id);
+	}
+
+	// 5. 新视野广播 Appear + 敌人/NPC 视野刷新 (旧出新进 diff)
+	broadcastSpawn(id, *p);
+	refreshEnemyView(id, *p, ox, oy);
+	refreshNpcView(id, *p, ox, oy);
+
+	// 6. 给玩家自身下发坐标同步 (CharMove)
+	SA::Domain::CharMove self_mv{};
+	self_mv.entity_id = id;
+	self_mv.x = p->x;
+	self_mv.y = p->y;
+	self_mv.dir = static_cast<std::uint32_t>(p->dir);
+	self_mv.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER);
+	sendTo(id, self_mv);
 }
 
 bool World::Impl::checkExChangePreconditions(const SA::Model::Player &p,
@@ -5669,6 +5741,88 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 					s.sendTo(id, win);
 					ok = true;
 				}
+				else if (npc.type == NpcType::kSignBoard)
+				{
+					// 告示牌 NPC 交互 (批次 W.14, 移植 npc_signboard.c)
+					std::string title = npc.sign_title.empty() ? "＜　看板　＞\n" : (npc.sign_title + "\n");
+					std::string body = npc.message.empty() ? npc.name : npc.message;
+					std::string sign_text = title + body;
+					s.sendExChangeWindow(id, npc.id, sign_text,
+					                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+					ok = true;
+				}
+				else if (npc.type == NpcType::kWarpMan)
+				{
+					// 传送员 NPC 交互 (批次 W.14, 移植 npc_warpman.c)
+					if (npc.warp_destinations.empty())
+					{
+						std::string msg = npc.warp_msg.empty() ? "暂无可以前往的目的地。" : npc.warp_msg;
+						s.sendExChangeWindow(id, npc.id, msg,
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+						ok = true;
+					}
+					else if (npc.warp_destinations.size() == 1)
+					{
+						// 单目的地: 弹出确认窗口 (YES / NO)
+						const auto &dest = npc.warp_destinations[0];
+						std::string msg = npc.warp_msg;
+						if (msg.empty())
+						{
+							msg = "确定要前往 " + dest.name + " 吗？需要花费 " + std::to_string(dest.cost) + " 石币。";
+						}
+						it->second.pending_warpman.npc_id = npc.id;
+						it->second.pending_warpman.dest_idx = 0;
+						s.sendExChangeWindow(id, npc.id, msg,
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES) |
+						                         static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO));
+						ok = true;
+					}
+					else
+					{
+						// 多目的地: 弹出 SELECT 窗口
+						SA::Domain::WindowOpen win{};
+						win.window_id = ++s.next_window_id;
+						win.kind = SA::Domain::WindowKind::WINDOW_KIND_SELECT;
+						win.buttons = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_CANCEL);
+						win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+						win.source.entity_id = static_cast<std::uint32_t>(npc.id);
+						win.body_kind = SA::Domain::WindowOpen::BodyKind::SELECT;
+
+						std::string msg = npc.warp_msg.empty() ? "请选择你想前往的目的地：" : npc.warp_msg;
+						if (msg.size() > 255)
+							msg.resize(255);
+						if (auto *slot = win.body.select.lines.push_back())
+							slot->assign(msg.data(), msg.size());
+
+						const std::size_t limit = std::min<std::size_t>(npc.warp_destinations.size(), 32);
+						for (std::size_t i = 0; i < limit; ++i)
+						{
+							const auto &dest = npc.warp_destinations[i];
+							if (auto *choice = win.body.select.choices.push_back())
+							{
+								choice->choice_id = static_cast<std::uint32_t>(i + 1); // 1-based choice_id
+								std::string item_text = dest.name;
+								if (dest.cost > 0)
+								{
+									item_text += " (" + std::to_string(dest.cost) + "石币)";
+								}
+								if (item_text.size() > 255)
+									item_text.resize(255);
+								choice->text.assign(item_text.data(), item_text.size());
+								choice->enabled = (p->gold >= dest.cost && p->level >= dest.level);
+							}
+						}
+
+						it->second.active_window_id = win.window_id;
+						it->second.active_window_npc_id = npc.id;
+						it->second.last_window_text = msg;
+						it->second.pending_warpman.npc_id = npc.id;
+						it->second.pending_warpman.dest_idx = -1;
+
+						s.sendTo(id, win);
+						ok = true;
+					}
+				}
 			}
 		}
 	}
@@ -5861,6 +6015,46 @@ void World::onWindowReply(SA::Net::SessionId id, const SA::Domain::WindowReply &
 						(void)learnPetSkill(id, shop_npc_id, chosen_pet_slot, prod.skill_id, /*skill_slot=*/-1);
 						return;
 					}
+				}
+			}
+		}
+
+		// 检查是否存在待决 WarpMan 传送员交互 (批次 W.14)
+		if (it->second.pending_warpman.npc_id != 0 &&
+		    it->second.pending_warpman.npc_id == reply.source.entity_id)
+		{
+			const auto pending = it->second.pending_warpman;
+			it->second.pending_warpman = {};
+
+			const bool is_cancel = (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_CANCEL)) != 0 ||
+			                       (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO)) != 0;
+
+			if (!is_cancel)
+			{
+				int target_idx = -1;
+				if (pending.dest_idx >= 0)
+				{
+					// 单目的地 (Yes/No 确认弹窗)
+					const bool is_yes = (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES)) != 0 ||
+					                    reply.button == static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+					if (is_yes)
+					{
+						target_idx = pending.dest_idx;
+					}
+				}
+				else if (reply.result_kind == SA::Domain::WindowReply::ResultKind::CHOICE_ID)
+				{
+					// 多目的地 (SELECT 选项列表)
+					if (reply.result.choice_id >= 1)
+					{
+						target_idx = static_cast<int>(reply.result.choice_id - 1);
+					}
+				}
+
+				if (target_idx >= 0)
+				{
+					(void)warpPlayerByNpc(id, pending.npc_id, static_cast<std::size_t>(target_idx));
+					return;
 				}
 			}
 		}
@@ -6184,6 +6378,75 @@ bool World::learnPetSkill(SA::Net::SessionId id, std::uint64_t npc_id, int pet_s
 
 	s.sendExChangeWindow(id, npc->id, "宠物成功学会了新技能！",
 	                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+	return true;
+}
+
+bool World::warpPlayerByNpc(SA::Net::SessionId id, std::uint64_t npc_id, std::size_t dest_idx)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(id);
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(id));
+	if (it == s.conns.end() || p == nullptr)
+		return false;
+
+	const NpcEntity *npc = findNpc(npc_id);
+	if (npc == nullptr || npc->type != NpcType::kWarpMan)
+		return false;
+
+	// 距离检查: 玩家与 NPC 距离 <= 3 格 (原版 NPC_Util_CharDistance <= 3)
+	if (std::abs(p->x - npc->x) > 3 || std::abs(p->y - npc->y) > 3)
+		return false;
+
+	// 目的地有效性检查
+	if (dest_idx >= npc->warp_destinations.size())
+		return false;
+
+	const auto &dest = npc->warp_destinations[dest_idx];
+
+	// 等级门禁检查 (移植 npc_warpman.c)
+	if (p->level < dest.level)
+	{
+		std::string low_msg = npc->level_low_msg.empty() ? "你的等级不足，无法前往该区域！" : npc->level_low_msg;
+		s.sendExChangeWindow(id, npc->id, low_msg,
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 石币门禁检查 (路费, 移植 npc_warpman.c)
+	if (p->gold < dest.cost)
+	{
+		std::string stone_msg = npc->stone_less_msg.empty() ? "你的石币不足以支付路费！" : npc->stone_less_msg;
+		s.sendExChangeWindow(id, npc->id, stone_msg,
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 目标坐标可通行门禁检查 (移植 npc_warpman.c)
+	if (!s.map.inBounds(dest.x, dest.y) || !mapWalkable(s.map, s.map_attr, dest.x, dest.y))
+	{
+		s.sendExChangeWindow(id, npc->id, "目标地点暂时无法通行！",
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 扣除路费 (走 GoldLedger, 汇 kWarpFee)
+	if (dest.cost > 0)
+	{
+		const GoldTx tx = delGold(*p, GoldReason::kWarpFee, dest.cost, /*trans=*/0,
+		                          static_cast<std::uint64_t>(id), s);
+		if (tx.disposition != GoldDisposition::kApplied)
+		{
+			return false;
+		}
+	}
+
+	// 执行瞬移与视野同步
+	s.warpPlayer(id, dest.floor, dest.x, dest.y);
+
+	it->second.active_window_id = 0;
+	it->second.active_window_npc_id = 0;
+	it->second.pending_warpman = {};
+
 	return true;
 }
 

@@ -3098,3 +3098,292 @@ TEST_CASE("W.13: 宠物商店回收出售宠物成功与石币上限保护 (回�
 	CHECK(p->gold == 999900);
 	CHECK(f.world.playerLastWindowText(id) == "钱包满了，石币放不下了！");
 }
+
+// ══ 批次 W.14: 告示牌与传送员 NPC (SignBoard / WarpMan) ═════════════════════════
+//
+// 依据原版 npc_signboard.c / npc_warpman.c:
+//   - 告示牌 (SignBoard, 投产 230 实例):
+//       展示标题 (sign_title) 与告示文本 (message/name)，下发 WINDOW_KIND_MESSAGE + BUTTON_FLAG_OK。
+//   - 传送员 (WarpMan, 投产 324 实例):
+//       单目的地弹出 Yes/No 确认弹窗；多目的地弹出 SELECT 选项列表 (含地点名与路费，超等级/余额置灰)。
+//       传送执行扣除路费 (走 GoldLedger kWarpFee)，校验等级门禁与坐标通行门禁，执行旧格摘除、视野通知、新格挂接与坐标同步。
+
+TEST_CASE("W.14: 告示牌 NPC 交互展示标题与告示对白 (WINDOW_KIND_MESSAGE, BUTTON_FLAG_OK)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	NpcEntity npc{};
+	npc.id = 8001;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kSignBoard;
+	npc.sign_title = "＜ 玛丽娜丝渔村公告 ＞";
+	npc.message = "前方为村长家，请保持肃静。\n出村往北可前往萨姆吉尔村。";
+	f.world.loadNpcEntities({npc});
+
+	// 面对 (33, 32) 发起 NPC 交互 (dir 2)
+	SA::Domain::EventRequest req{};
+	req.dir = 2;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req.seqno = 4001;
+	f.world.onEvent(id, req);
+	f.world.tick();
+
+	// 1. 回执 ok == true
+	CHECK(eventResultOk(f.transport.sent(id), 4001));
+
+	// 2. 检查下发的 WindowOpen 消息
+	const auto win_opt = findLastWindowOpen(f.transport.sent(id));
+	REQUIRE(win_opt.has_value());
+	const auto &win = *win_opt;
+	CHECK(win.kind == SA::Domain::WindowKind::WINDOW_KIND_MESSAGE);
+	CHECK(win.buttons == static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+	CHECK(win.source.entity_id == 8001);
+	CHECK(win.body_kind == SA::Domain::WindowOpen::BodyKind::MESSAGE);
+	REQUIRE(win.body.message.lines.size() >= 2);
+	CHECK(std::string(win.body.message.lines[0].c_str()) == "＜ 玛丽娜丝渔村公告 ＞");
+	CHECK(std::string(win.body.message.lines[1].c_str()) == "前方为村长家，请保持肃静。");
+
+	// 3. 客户端回执确认 (BUTTON_FLAG_OK)
+	CHECK(f.world.playerHasActiveWindow(id));
+	SA::Domain::WindowReply rep{};
+	rep.window_id = win.window_id;
+	rep.source.entity_id = 8001;
+	rep.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, rep);
+
+	// 4. 窗口关闭
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
+}
+
+TEST_CASE("W.14: 传送员单目的地确认传送成功 (扣除路费、坐标更新、视野双向同步)")
+{
+	MoveFixture f;
+	const auto a = f.spawn();
+	const auto b = f.spawn();
+	auto *pa = f.world.playerForTest(a);
+	REQUIRE(pa != nullptr);
+	pa->gold = 500;
+	pa->level = 10;
+	f.world.tick();
+
+	VisMirror mb;
+	mb.feed(f.transport.sent(b));
+	CHECK(countId(mb.appears, a) >= 1);
+
+	NpcEntity npc{};
+	npc.id = 8002;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kWarpMan;
+	npc.warp_destinations = {
+	    WarpDestination{/*floor=*/0, /*x=*/10, /*y=*/12, "萨姆吉尔村", /*cost=*/150, /*level=*/5}};
+	f.world.loadNpcEntities({npc});
+
+	// a 发起交互
+	SA::Domain::EventRequest req{};
+	req.dir = 2;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req.seqno = 4002;
+	f.world.onEvent(a, req);
+	f.world.tick();
+
+	// 验证弹出单目的地 Yes/No 确认窗口
+	const auto win_opt = findLastWindowOpen(f.transport.sent(a));
+	REQUIRE(win_opt.has_value());
+	const auto &win = *win_opt;
+	CHECK(win.kind == SA::Domain::WindowKind::WINDOW_KIND_MESSAGE);
+	CHECK((win.buttons & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES)) != 0);
+	CHECK((win.buttons & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO)) != 0);
+
+	// 客户端点击 YES 确认传送
+	SA::Domain::WindowReply rep{};
+	rep.window_id = win.window_id;
+	rep.source.entity_id = 8002;
+	rep.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES);
+	f.world.onWindowReply(a, rep);
+	f.world.tick();
+
+	// 结算与视野断言:
+	// - 路费扣除: 500 - 150 = 350
+	// - 坐标瞬移到 (10, 12)
+	// - 观测者 b 收到 a 的 CharDisappear
+	// - a 处于非活动窗口状态
+	CHECK(pa->gold == 350);
+	CHECK(pa->x == 10);
+	CHECK(pa->y == 12);
+	CHECK_FALSE(f.world.playerHasActiveWindow(a));
+
+	mb.feed(f.transport.sent(b));
+	CHECK(countId(mb.disappears, a) >= 1);
+}
+
+TEST_CASE("W.14: 传送员多目的地列表选择传送成功 (SELECT 窗口展示列表、选项回执传送)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->gold = 1000;
+	p->level = 20;
+
+	NpcEntity npc{};
+	npc.id = 8003;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kWarpMan;
+	npc.warp_destinations = {
+	    WarpDestination{0, 10, 12, "萨姆吉尔村", 100, 1},
+	    WarpDestination{0, 20, 22, "达那村", 200, 10},
+	    WarpDestination{0, 30, 30, "加加村", 500, 30}, // 等级 30 > 玩家 20 级 ⇒ enabled 置灰
+	};
+	f.world.loadNpcEntities({npc});
+
+	// 发起交互
+	SA::Domain::EventRequest req{};
+	req.dir = 2;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req.seqno = 4003;
+	f.world.onEvent(id, req);
+	f.world.tick();
+
+	// 验证弹出多目的地 SELECT 窗口
+	const auto win_opt = findLastWindowOpen(f.transport.sent(id));
+	REQUIRE(win_opt.has_value());
+	const auto &win = *win_opt;
+	CHECK(win.kind == SA::Domain::WindowKind::WINDOW_KIND_SELECT);
+	CHECK(win.body_kind == SA::Domain::WindowOpen::BodyKind::SELECT);
+	REQUIRE(win.body.select.choices.size() == 3);
+	CHECK(win.body.select.choices[0].choice_id == 1);
+	CHECK(win.body.select.choices[0].enabled == true);
+	CHECK(win.body.select.choices[1].choice_id == 2);
+	CHECK(win.body.select.choices[1].enabled == true);
+	CHECK(win.body.select.choices[2].choice_id == 3);
+	CHECK(win.body.select.choices[2].enabled == false); // 等级不足置灰
+
+	// 客户端选择第 2 项 (达那村, choice_id = 2)
+	SA::Domain::WindowReply rep{};
+	rep.window_id = win.window_id;
+	rep.source.entity_id = 8003;
+	rep.result_kind = SA::Domain::WindowReply::ResultKind::CHOICE_ID;
+	rep.result.choice_id = 2;
+	f.world.onWindowReply(id, rep);
+	f.world.tick();
+
+	// 结算断言:
+	// - 扣款 200: 1000 - 200 = 800
+	// - 坐标更新为 (20, 22)
+	// - 活动窗口关闭
+	CHECK(p->gold == 800);
+	CHECK(p->x == 20);
+	CHECK(p->y == 22);
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
+}
+
+TEST_CASE("W.14: 传送员路费不足拦截 (零扣费、坐标不变更、下发石币不足提示)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->gold = 50; // 只有 50 石币
+	p->level = 10;
+
+	NpcEntity npc{};
+	npc.id = 8004;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kWarpMan;
+	npc.stone_less_msg = "路费不够可不能让你上车！";
+	npc.warp_destinations = {
+	    WarpDestination{0, 10, 12, "萨姆吉尔村", 100, 1}, // 路费需要 100 石币
+	};
+	f.world.loadNpcEntities({npc});
+
+	// 发起交互并确认传送
+	SA::Domain::EventRequest req{};
+	req.dir = 2;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req.seqno = 4004;
+	f.world.onEvent(id, req);
+	f.world.tick();
+
+	const std::uint32_t wid = f.world.playerActiveWindowId(id);
+	SA::Domain::WindowReply rep{};
+	rep.window_id = wid;
+	rep.source.entity_id = 8004;
+	rep.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES);
+	f.world.onWindowReply(id, rep);
+
+	// 拦截断言:
+	// - 金币保持 50 零扣除
+	// - 坐标保持 (32, 32) 原地未变
+	// - 下发石币不足提示
+	CHECK(p->gold == 50);
+	CHECK(p->x == 32);
+	CHECK(p->y == 32);
+	CHECK(f.world.playerLastWindowText(id) == "路费不够可不能让你上车！");
+
+	// 底层 API 直接调用也被严格拦截
+	CHECK_FALSE(f.world.warpPlayerByNpc(id, 8004, 0));
+	CHECK(p->gold == 50);
+	CHECK(p->x == 32);
+	CHECK(p->y == 32);
+}
+
+TEST_CASE("W.14: 传送员等级不足拦截 (零扣费、坐标不变更、下发等级不足提示)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->gold = 1000;
+	p->level = 5; // 只有 5 级
+
+	NpcEntity npc{};
+	npc.id = 8005;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kWarpMan;
+	npc.level_low_msg = "那里的野兽太凶险了，你的等级还不够去那里！";
+	npc.warp_destinations = {
+	    WarpDestination{0, 10, 12, "萨姆吉尔村", 100, 20}, // 需要 20 级
+	};
+	f.world.loadNpcEntities({npc});
+
+	// 发起交互并确认传送
+	SA::Domain::EventRequest req{};
+	req.dir = 2;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req.seqno = 4005;
+	f.world.onEvent(id, req);
+	f.world.tick();
+
+	const std::uint32_t wid = f.world.playerActiveWindowId(id);
+	SA::Domain::WindowReply rep{};
+	rep.window_id = wid;
+	rep.source.entity_id = 8005;
+	rep.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES);
+	f.world.onWindowReply(id, rep);
+
+	// 拦截断言:
+	// - 金币保持 1000 零扣除
+	// - 坐标保持 (32, 32) 原地未变
+	// - 下发等级不足提示
+	CHECK(p->gold == 1000);
+	CHECK(p->x == 32);
+	CHECK(p->y == 32);
+	CHECK(f.world.playerLastWindowText(id) == "那里的野兽太凶险了，你的等级还不够去那里！");
+
+	// 底层 API 直接调用也被严格拦截
+	CHECK_FALSE(f.world.warpPlayerByNpc(id, 8005, 0));
+	CHECK(p->gold == 1000);
+	CHECK(p->x == 32);
+	CHECK(p->y == 32);
+}
