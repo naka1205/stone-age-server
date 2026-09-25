@@ -35,6 +35,7 @@
 
 #include "rules/Battle.h"
 
+#include "rules/ProfessionSkill.h"
 #include "rules/Status.h" // 批次 L4.1:状态施加 / 每回合推进
 
 #include <algorithm>
@@ -296,6 +297,35 @@ std::optional<int> rollConfusionRedirect(const BattleField &field,
 	return -1;
 }
 
+std::optional<int> rollInstigateRedirect(const BattleField &field,
+                                         const bool *slots,
+                                         int actor_slot,
+                                         Random &rng) noexcept
+{
+	// SSRC80 battle.c:5851
+	// if( RAND( 1, 100 ) > 80 ) break;
+	if (rng.rand(1, 100) > 80)
+		return std::nullopt;
+
+	// SSRC80 battle.c:5855: side 取自身所在半场 (同一 side)
+	const int side = actor_slot / kSideOffset;
+	int pos = rng.rand(0, 9);
+
+	// SSRC80 battle.c:5864-5872
+	for (int lop = 0; lop < kSideOffset; ++lop)
+	{
+		pos = (pos + 1 >= kSideOffset) ? 0 : (pos + 1);
+		const int def_no = side * kSideOffset + pos;
+		if (def_no == actor_slot)
+			continue;
+		if (targetCheck(field, slots, def_no))
+			return def_no;
+	}
+
+	// SSRC80 battle.c:5873-5875
+	return -1;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  忠犬守护 —— `BATTLE_GuardianCheck`(`battle_event.c:1431-1511`)
 // ═══════════════════════════════════════════════════════════════════
@@ -449,9 +479,10 @@ std::int32_t effectiveAttack(const Combatant &c) noexcept
 {
 	const int pet_atk_per = c.mods.pet_skill_attack_percent;
 	const int prof_atk_per = c.mods.prof_skill_attack_percent;
-	if (pet_atk_per == 0 && prof_atk_per == 0)
+	const int weapon_focus_per = c.mods.prof_weapon_focus_attack_percent;
+	if (pet_atk_per == 0 && prof_atk_per == 0 && weapon_focus_per == 0)
 		return c.attack;
-	const int total_per = pet_atk_per + prof_atk_per;
+	const int total_per = pet_atk_per + prof_atk_per + weapon_focus_per;
 	const f32 per = static_cast<f32>(total_per) / 100.0f;
 	return c.str + static_cast<std::int32_t>(static_cast<f32>(c.str) * per);
 }
@@ -723,6 +754,7 @@ bool rollDodge(const Combatant &attacker,
 	//   ★ 读攻方自己的 mods ⇒ 反击段的"攻方"(反击者)指令必为 ATTACK、投影已归零
 	//     ⇒ 反击不受 MIGHTY 影响,与原版反击链前重置 g* 一致(battle.c:7791-7792)。
 	per += attacker.mods.pet_skill_duck_bonus;
+	per += defender.mods.prof_avoid_bonus;
 
 	if (attacker.status == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_DRUNK) && attacker.status_turns > 0)
 		per += rng.rand(20, 30); // ★ 酒醉真正生效处
@@ -909,7 +941,8 @@ bool rollCounter(const Combatant &attacker, const Combatant &defender,
 			return 0;
 		};
 		per = static_cast<float>(base * table[weapon(attacker)][weapon(defender)] * 0.1 +
-		                         attacker.luck + attacker.mods.counter_bonus);
+		                         attacker.luck + attacker.mods.counter_bonus +
+		                         attacker.mods.prof_deflect_bonus);
 		if (out_percent != nullptr)
 			*out_percent = static_cast<int>(per);
 		per *= 100;
@@ -1609,6 +1642,32 @@ static bool resolveOrdered(BattleField field,
 		if (dead[actor_slot])
 			continue;
 
+		// ★ 勇士被动技能: 状态回复/逆境回复 (PROFESSION_REBACK) (原版 battle.c:7087, 9377-9417)
+		// 在行动位结算：处于 9 种异常状态之一时恢复 min(20, skill_level * 2)% 生命值
+		if (actor.mods.prof_reback_level > 0 &&
+		    isAbnormalStatusForReback(status[actor_slot]) &&
+		    status_turns[actor_slot] > 0)
+		{
+			const std::int32_t heal = computeProfessionRebackHeal(
+			    actor.max_hp, hp[actor_slot], actor.mods.prof_reback_level);
+			if (heal > 0)
+			{
+				SA::Domain::BattleEvent *hev =
+				    sink.push(SA::Domain::BattleEvent::BodyKind::DAMAGE);
+				if (hev == nullptr)
+					break;
+				SA::Domain::Damage &hd = hev->body.damage;
+				hd.target = static_cast<std::uint32_t>(actor_slot);
+				hd.hp_delta = heal;
+				hd.pet_hp_delta = 0;
+				hd.mp_delta = 0;
+				hd.flags = static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);
+				hd.status_applied = SA::Domain::BattleStatus::BATTLE_ST_NONE;
+				hp[actor_slot] += heal;
+				field.at(actor_slot).hp = hp[actor_slot];
+			}
+		}
+
 		// ★★ 状态清掉了本回合指令 ⇒ 不行动(原版把 COM 置成 `BATTLE_COM_NONE`)。
 		// ⚠️★ 判据来自**递减之前**的状态(见上方状态预推进段)⇒ **本回合到期解除的
 		//    角色这一趟仍不能动**。★ 它必须在下面那道 `checkCanAct` **之前** ——
@@ -1663,13 +1722,16 @@ static bool resolveOrdered(BattleField field,
 
 		SA::Domain::BattleCommand cmd = commands.commands[actor_slot];
 
-		// ── 混乱指令重写(原 SSRC80 battle.c:5644-5665)──────────────
+		// ── 混乱与附身指令重写(原 SSRC80 battle.c:5644-5665, 5667-5689)──────────────
 		//
-		// ★ 混乱中的单位有 80% 概率强行将指令改为普攻,并在全场随机挑选存活目标(可为己方或敌方)。
+		// ★ 混乱或附身中的单位有 80% 概率强行将指令改为普攻,并在全场随机挑选存活目标(可为己方或敌方)。
 		// ⚠️ 发生在指令分发前:若触发重定向,逃跑/防御/使用道具/技能一律被替换为普攻。
 		// 若全场无其他可用目标(返回 -1),则不行动(原版 COM2 = -1)。
-		if (status[actor_slot] == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION) &&
-		    status_turns[actor_slot] > 0)
+		const bool is_confused =
+		    (status[actor_slot] == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION) ||
+		     status[actor_slot] == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_WORKANNEX)) &&
+		    status_turns[actor_slot] > 0;
+		if (is_confused)
 		{
 			const std::optional<int> confusion_tgt = rollConfusionRedirect(field, dead, actor_slot, rng);
 			if (confusion_tgt.has_value())
@@ -1678,6 +1740,20 @@ static bool resolveOrdered(BattleField field,
 					continue; // 全场无可用目标,本回合不行动
 				cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
 				cmd.command.attack.target = static_cast<std::uint32_t>(*confusion_tgt);
+			}
+		}
+		else if (status[actor_slot] == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_INSTIGATE) &&
+		         status_turns[actor_slot] > 0)
+		{
+			// ── 挑拨指令重写(原 SSRC80 battle.c:5848-5877)──────────────
+			// 挑拨中的单位有 80% 概率攻击己方同侧存活目标
+			const std::optional<int> instigate_tgt = rollInstigateRedirect(field, dead, actor_slot, rng);
+			if (instigate_tgt.has_value())
+			{
+				if (*instigate_tgt < 0)
+					continue; // 己方无可用目标,本回合不行动
+				cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+				cmd.command.attack.target = static_cast<std::uint32_t>(*instigate_tgt);
 			}
 		}
 
@@ -1995,8 +2071,15 @@ static bool resolveOrdered(BattleField field,
 			const Combatant &victim_orig = field.at(to);
 			const bool guarding_cmd_orig =
 			    commands.present[to] && isGuarding(commands.commands[to]);
-			const bool guarding_orig = guarding_cmd_orig &&
-			                           (victim_orig.status != static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION) || victim_orig.status_turns <= 0);
+			const auto is_forced_attack_status = [](const Combatant &c)
+			{
+				const auto st = static_cast<SA::Domain::BattleStatus>(c.status);
+				return (st == SA::Domain::BattleStatus::BATTLE_ST_CONFUSION ||
+				        st == SA::Domain::BattleStatus::BATTLE_ST_WORKANNEX ||
+				        st == SA::Domain::BattleStatus::BATTLE_ST_INSTIGATE) &&
+				       c.status_turns > 0;
+			};
+			const bool guarding_orig = guarding_cmd_orig && !is_forced_attack_status(victim_orig);
 			const bool can_chain = !guarding_orig && striker.damage_react <= 0 &&
 			                       victim_orig.damage_react <= 0;
 			const bool dodge = rollDodge(striker, victim_orig, guarding_orig,
@@ -2033,8 +2116,7 @@ static bool resolveOrdered(BattleField field,
 			//   GuardAdjust 读的都是替换后的 `defindex` 的 COM1)。
 			const bool guarding_cmd =
 			    commands.present[to] && isGuarding(commands.commands[to]);
-			const bool guarding = guarding_cmd &&
-			                      (victim.status != static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION) || victim.status_turns <= 0);
+			const bool guarding = guarding_cmd && !is_forced_attack_status(victim);
 			bool critical = false;
 			int damage = 0;
 			if (!dodge)

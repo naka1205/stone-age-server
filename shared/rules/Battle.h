@@ -183,6 +183,16 @@ std::optional<int> rollConfusionRedirect(const BattleField &field,
                                          int actor_slot,
                                          Random &rng) noexcept;
 
+// ── 挑拨目标重定向(批次 A-γ1)────────────────────────────────────
+//
+// 1:1 移植原版挑拨状态目标重定向(battle.c:5848-5877)。
+// ★ 80% 概率触发(rand(1, 100) <= 80),在己方阵营(同一 side)中随机挑选存活目标(排除自己)。
+// 若 20% 未触发,返回 std::nullopt(维持原指令);若触发且找到目标,返回目标槽号;己方无可用目标返回 -1。
+std::optional<int> rollInstigateRedirect(const BattleField &field,
+                                         const bool *slots,
+                                         int actor_slot,
+                                         Random &rng) noexcept;
+
 // ── 忠犬守护(批次 A-β d2)──────────────────────────────────────
 //
 // 1:1 移植 `BATTLE_GuardianCheck`(`battle_event.c:1431-1511`)。
@@ -424,6 +434,10 @@ std::int32_t applyElementMatrix(const BattleField &field,
 // 保留它是因为「量纲自洽」这条性质(Σatk = Σdef = 100 ⇒ 全无属性时系数 1.0)
 // 值得被独立断言;拿它去算伤害就复活了「同一语义两份实现」这个 bug 类。
 double elementCoefficient(const Combatant &attacker, const Combatant &defender) noexcept;
+
+// 技能/被动修正后的有效攻击力与防御力 (批次 B1/A-γ1)
+std::int32_t effectiveAttack(const Combatant &c) noexcept;
+std::int32_t effectiveDefense(const Combatant &c) noexcept;
 
 // 伤害主公式(§3.1 七步)。
 //

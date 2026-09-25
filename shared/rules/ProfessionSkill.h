@@ -154,6 +154,34 @@ ProfSkillDirectParams computeProfSkillDirectParams(std::uint32_t skill_id,
                                                    CombatantKind target_kind,
                                                    Random &rng) noexcept;
 
+// ── 职业被动纯函数计算 (批次 A-γ1) ──
+
+// 逆境回复 (PROFESSION_REBACK) 针对的 9 种异常状态判定 (原版 battle.c:9331-9339)
+// 包含: 麻痹(2), 睡眠(3), 石化(4), 晕眩(12), 树根缠绕(13), 天罗地网(14), 冰爆术(15), 冰箭(17), 雷附体(23)
+bool isAbnormalStatusForReback(int status) noexcept;
+
+// 勇士被动技能: 状态回复/逆境回复 (PROFESSION_REBACK) 回血量纯函数计算
+// 回血百分比: min(20, skill_level * 2)%，回血上限为最大生命值
+std::int32_t computeProfessionRebackHeal(std::int32_t max_hp,
+                                         std::int32_t current_hp,
+                                         int skill_level) noexcept;
+
+// 猎人被动技能: 职业回避 (PROFESSION_AVOID) 加成百分比 (上限 25%)
+// skill_level <= 5 ? skill_level * 2 : (skill_level - 5) * 3
+int computeProfessionAvoidBonus(int skill_level) noexcept;
+
+// 勇士被动技能: 武器专精 (PROFESSION_WEAPON_FOCUS) 攻击力提升百分比 (上限 25%)
+// skill_level <= 5 ? skill_level * 2 : (skill_level - 5) * 3 + 10
+int computeProfessionWeaponFocusBonus(int skill_level) noexcept;
+
+// 勇士被动技能: 格挡 (PROFESSION_DEFLECT) 反击加成点数
+// skill_level + 10
+int computeProfessionDeflectBonus(int skill_level) noexcept;
+
+// 巫师被动技能: 元素魔法熟练度 (PROFESSION_*_PRACTICE) 加成点数 (上限 25)
+// skill_level >= 6 ? (skill_level - 5) * 3 + 10 : skill_level * 2
+int computeProfessionPracticeBonus(int skill_level) noexcept;
+
 } // namespace SA::Rules
 
 #endif // __SA_ProfessionSkill_H__

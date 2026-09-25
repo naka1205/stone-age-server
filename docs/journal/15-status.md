@@ -4,7 +4,7 @@
 
 > **本文件收录**:L4.1 单槽状态机 + 带毒装备施加 + 每回合推进 + 解除。
 >
-> **批次编号**:§9.0.55 · §9.0.70(共 2 节)
+> **批次编号**:§9.0.55 · §9.0.70 · §9.0.85(共 3 节)
 >
 > ★ **编号沿用 `00-architecture.md` 原 §9.0.x 体系,搬家未改号** —— 全仓约 600 处 `§9.0.x` 引用因此继续有效。总映射见 [`README.md`](README.md)。
 >
@@ -147,4 +147,39 @@ watched 路径变更 ⇒ **锁定 ref 须前推 `shared-v0.22.0`**(推送待用�
 - `rules_battle` 147 → **149 用例 / 3035 → 3048 断言**。
 - **反向验证**:注入 `rng.rand(1, 100) > 0`(恒不触发重定向)⇒ 2 条用例精确转红;恢复后回绿。
 - 服务端 `ci_verify.py` 6/6 全过,清洁构建 0 告警,22 个 CTest 全绿。
+
+---
+
+### 9.0.85 批次 A-γ1 —— 核心状态序列推进与解除收口 / 职业被动在场生效与状态联动(2026-09-25)
+
+2026-09-25 交付。补全核心状态 1..43 的统一推进、挑拨/附身重定向、火附体伤害结算，以及职业被动技能在场生效（回避、武器专精、格挡、熟练度）与逆境回复联动。
+
+### 1. 源码事实与架构裁定
+
+1. **挑拨 (INSTIGATE) 与附身 (WORKANNEX) 重定向** (SSRC80 `battle.c:5848-5877`, `5667-5689`):
+   - **挑拨 (`BATTLE_ST_INSTIGATE`)**: 80% 概率触发普攻重定向至角色所在同侧（`side = actor_slot / 10`）存活友军（排除自身）；若无其他存活友军返回 -1 跳过攻击。取消防御状态（`!is_forced_attack_status`）。
+   - **附身 (`BATTLE_ST_WORKANNEX`)**: 80% 概率触发普攻重定向至全场随机存活目标（排除自身），同样取消防御状态。
+2. **火附体 (`BATTLE_ST_F_ENCLOSE`) 状态结算** (`battle.c:5722-5755`):
+   - 在 `tickStatus` 中每回合产生 `hp_down = 50 * cnt` 伤害，并在归零前完成结算。
+3. **勇士被动技能: 逆境回复 (`PROFESSION_REBACK`) 与状态联动** (`battle.c:7087, 9331-9339, 9377-9417`):
+   - 原版在行动位清空不可行动指令后调用 `BATTLE_ProfessionStatusSeq`；
+   - 对 9 大异常状态（麻痹/睡眠/石化/晕眩/树根缠绕/天罗地网/冰爆术/冰箭/雷附体）触发恢复；
+   - 回复量纯函数 `computeProfessionRebackHeal`: `min(20, skill_level * 2)%` 最大生命值。即使因石化/麻痹等状态无法行动，依然正常触发回复。
+4. **职业被动在场生效纯函数与管线接入**:
+   - 猎人被动回避 `PROFESSION_AVOID`: 上限 25%，接入 `rollDodge` (`defender.mods.prof_avoid_bonus`)；
+   - 勇士被动武器专精 `PROFESSION_WEAPON_FOCUS`: 上限 25%，接入 `effectiveAttack` (`prof_weapon_focus_attack_percent`)；
+   - 勇士被动格挡 `PROFESSION_DEFLECT`: `skill_level + 10`，接入 `rollCounter` (`attacker.mods.prof_deflect_bonus`)；
+   - 巫师元素熟练度 `PROFESSION_*_PRACTICE`: 上限 25 点加成；
+   - `World::projectProfSkill` 在每回合动作前统一投影职业被动加成（对应原版 `BATTLE_ProfessionStatus_init`）。
+
+### 2. 验证与指标
+
+- **rules_battle**: 151 → **157 用例 / 3089 → 3166 断言**（新增 6 组用例、77 个断言全绿）。
+- **反向验证 (双向 RV)**:
+  - **RV-1**: 篡改 `isAbnormalStatusForReback` 去除石化状态判定 ⇒ 纯函数与石化逆境回复两项用例精确转红；还原后回绿。
+  - **RV-2**: 篡改 `rollInstigateRedirect` 概率阈值（80% 改为 40%）⇒ 挑拨目标筛选用例精确转红；还原后回绿。
+- **构建与测试**:
+  - `python3 tools/ci_verify.py` 6/6 全项通过（清洁构建 0 告警，22 个 CTest 全绿）。
+  - `python3 tools/check_format.py` 验证通过。
+
 

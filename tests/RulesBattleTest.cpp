@@ -4936,3 +4936,323 @@ TEST_CASE("A-γ2★:战斗指令 PROF_SKILL 驱动直攻、多段与状态施加
 		CHECK(status_applied);
 	}
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  A-γ1: 核心状态序列推进与解除收口 / 职业被动在场生效与状态联动
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("A-γ1:职业被动与核心状态纯函数计算")
+{
+	SUBCASE("isAbnormalStatusForReback 9 种真状态及表外状态判定(battle.c:9331-9339)")
+	{
+		// 9 种真状态: 麻痹(2), 睡眠(3), 石化(4), 晕眩(12), 树根缠绕(13), 天罗地网(14), 冰爆术(15), 冰箭(17), 雷附体(23)
+		const std::vector<int> valid_statuses = {
+		    static_cast<int>(BattleStatus::BATTLE_ST_PARALYSIS),
+		    static_cast<int>(BattleStatus::BATTLE_ST_SLEEP),
+		    static_cast<int>(BattleStatus::BATTLE_ST_STONE),
+		    static_cast<int>(BattleStatus::BATTLE_ST_DIZZY),
+		    static_cast<int>(BattleStatus::BATTLE_ST_ENTWINE),
+		    static_cast<int>(BattleStatus::BATTLE_ST_DRAGNET),
+		    static_cast<int>(BattleStatus::BATTLE_ST_ICECRACK),
+		    static_cast<int>(BattleStatus::BATTLE_ST_ICEARROW),
+		    static_cast<int>(BattleStatus::BATTLE_ST_T_ENCLOSE),
+		};
+		for (int st : valid_statuses)
+		{
+			CHECK(isAbnormalStatusForReback(st));
+		}
+
+		// 表外状态不触发: 无(0), 毒(1), 酒醉(5), 混乱(6), 虚弱(7), 魔障(9), 挑拨(20), 火附体(21), 附身(33)
+		const std::vector<int> invalid_statuses = {
+		    static_cast<int>(BattleStatus::BATTLE_ST_NONE),
+		    static_cast<int>(BattleStatus::BATTLE_ST_POISON),
+		    static_cast<int>(BattleStatus::BATTLE_ST_DRUNK),
+		    static_cast<int>(BattleStatus::BATTLE_ST_CONFUSION),
+		    static_cast<int>(BattleStatus::BATTLE_ST_WEAKEN),
+		    static_cast<int>(BattleStatus::BATTLE_ST_BARRIER),
+		    static_cast<int>(BattleStatus::BATTLE_ST_INSTIGATE),
+		    static_cast<int>(BattleStatus::BATTLE_ST_F_ENCLOSE),
+		    static_cast<int>(BattleStatus::BATTLE_ST_WORKANNEX),
+		    -1, 100, 999};
+		for (int st : invalid_statuses)
+		{
+			CHECK_FALSE(isAbnormalStatusForReback(st));
+		}
+	}
+
+	SUBCASE("computeProfessionRebackHeal 回复量纯函数计算(battle.c:9377-9417)")
+	{
+		// 非法入参保护
+		CHECK(computeProfessionRebackHeal(1000, 500, 0) == 0);
+		CHECK(computeProfessionRebackHeal(1000, 500, -1) == 0);
+		CHECK(computeProfessionRebackHeal(0, 0, 5) == 0);
+		CHECK(computeProfessionRebackHeal(1000, 0, 5) == 0); // 死亡不回血
+
+		// 正常比例: min(20, skill_level * 2)%
+		// max_hp = 1000, current_hp = 500
+		CHECK(computeProfessionRebackHeal(1000, 500, 1) == 20);   // 2%
+		CHECK(computeProfessionRebackHeal(1000, 500, 5) == 100);  // 10%
+		CHECK(computeProfessionRebackHeal(1000, 500, 10) == 200); // 20%
+		CHECK(computeProfessionRebackHeal(1000, 500, 15) == 200); // 上限 20% 截断
+
+		// 满血与上限保护
+		CHECK(computeProfessionRebackHeal(1000, 1000, 10) == 0); // 满血不回
+		CHECK(computeProfessionRebackHeal(1000, 950, 10) == 50); // 200 溢出截断为 50
+	}
+
+	SUBCASE("被动属性纯函数计算(回避/武器专精/格挡/元素熟练度)")
+	{
+		// 回避加成 computeProfessionAvoidBonus (battle.c:9236-9240)
+		// skill_level <= 5 ? skill_level * 2 : (skill_level - 5) * 3, 上限 25
+		CHECK(computeProfessionAvoidBonus(0) == 0);
+		CHECK(computeProfessionAvoidBonus(1) == 2);
+		CHECK(computeProfessionAvoidBonus(5) == 10);
+		CHECK(computeProfessionAvoidBonus(6) == 3);
+		CHECK(computeProfessionAvoidBonus(10) == 15);
+		CHECK(computeProfessionAvoidBonus(15) == 25); // (15-5)*3 = 30 -> 25 cap
+
+		// 武器专精 computeProfessionWeaponFocusBonus (battle.c:9305-9310)
+		// skill_level <= 5 ? skill_level * 2 : (skill_level - 5) * 3 + 10, 上限 25
+		CHECK(computeProfessionWeaponFocusBonus(0) == 0);
+		CHECK(computeProfessionWeaponFocusBonus(1) == 2);
+		CHECK(computeProfessionWeaponFocusBonus(5) == 10);
+		CHECK(computeProfessionWeaponFocusBonus(6) == 13);
+		CHECK(computeProfessionWeaponFocusBonus(10) == 25);
+		CHECK(computeProfessionWeaponFocusBonus(15) == 25); // cap 25
+
+		// 格挡反击 computeProfessionDeflectBonus (battle.c:9259)
+		// skill_level + 10
+		CHECK(computeProfessionDeflectBonus(0) == 0);
+		CHECK(computeProfessionDeflectBonus(1) == 11);
+		CHECK(computeProfessionDeflectBonus(10) == 20);
+
+		// 元素熟练度 computeProfessionPracticeBonus (battle.c:9175-9177)
+		// skill_level >= 6 ? (skill_level - 5) * 3 + 10 : skill_level * 2, 上限 25
+		CHECK(computeProfessionPracticeBonus(0) == 0);
+		CHECK(computeProfessionPracticeBonus(1) == 2);
+		CHECK(computeProfessionPracticeBonus(5) == 10);
+		CHECK(computeProfessionPracticeBonus(6) == 13);
+		CHECK(computeProfessionPracticeBonus(10) == 25);
+		CHECK(computeProfessionPracticeBonus(15) == 25);
+	}
+}
+
+TEST_CASE("A-γ1:挑拨(INSTIGATE)重定向纯函数与同侧友军筛选(battle.c:5848-5877)")
+{
+	BattleField field{};
+	bool dead[kSlotCount]{};
+	// 初始化 slot 0 为玩家, slot 1 为友军宠物, slot 10 为敌方
+	field.at(0).occupied = true;
+	field.at(0).hp = 1000;
+	field.at(1).occupied = true;
+	field.at(1).hp = 500;
+	field.at(10).occupied = true;
+	field.at(10).hp = 1000;
+
+	// 80% 判定命中: 喂 80 -> 命中
+	// 只有一个同侧存活友军 slot 1, 抽签必定选 slot 1
+	ScriptedRandom rng({80, 0});
+	auto tgt = rollInstigateRedirect(field, dead, 0, rng);
+	REQUIRE(tgt.has_value());
+	CHECK(*tgt == 1);
+
+	// 80% 判定未命中: 喂 81 -> 未命中, 返回 nullopt
+	ScriptedRandom rng_miss({81});
+	auto miss = rollInstigateRedirect(field, dead, 0, rng_miss);
+	CHECK_FALSE(miss.has_value());
+
+	// 己方没有其他存活友军: 只有 slot 0 存活
+	field.at(1).occupied = false;
+	field.at(1).hp = 0;
+	ScriptedRandom rng_alone({50});
+	auto alone = rollInstigateRedirect(field, dead, 0, rng_alone);
+	REQUIRE(alone.has_value());
+	CHECK(*alone == -1); // 孤身一人返回 -1 跳过攻击
+}
+
+TEST_CASE("A-γ1:逆境回复(PROFESSION_REBACK)与火附体(BATTLE_ST_F_ENCLOSE)伤害结算联动")
+{
+	SUBCASE("火附体每回合递减扣血 50 * cnt (battle.c:5722-5755)")
+	{
+		Combatant c = makeCombatant(CombatantKind::kPlayer, 500, 100);
+		c.status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_F_ENCLOSE);
+		// 初始 3 回合: 递减后 cnt = 2, 扣血 50 * 2 = 100
+		c.status_turns = 3;
+		const StatusTickResult r1 = tickStatus(c, 500, 0, false);
+		CHECK(r1.hp_down == 100); // 50 * cnt(2)
+		CHECK(r1.turns == 2);
+		CHECK_FALSE(r1.cleared);
+
+		// 剩余 2 回合: 递减后 cnt = 1, 扣血 50 * 1 = 50, 剩余生命 30 截断为 30
+		c.status_turns = 2;
+		const StatusTickResult r2 = tickStatus(c, 30, 0, false);
+		CHECK(r2.hp_down == 30); // 50 截断为剩余生命 30
+		CHECK(r2.turns == 1);
+		CHECK_FALSE(r2.cleared);
+
+		// 剩余 1 回合: 递减后 cnt = 0, 到期解除, 最后一回合不造成伤害 (battle.c:5475-5501 顺序即语义)
+		c.status_turns = 1;
+		const StatusTickResult r3 = tickStatus(c, 500, 0, false);
+		CHECK(r3.hp_down == 0);
+		CHECK(r3.turns == 0);
+		CHECK(r3.cleared);
+	}
+
+	SUBCASE("逆境回复在石化状态下回复生命值并跳过行动")
+	{
+		Duel d = makeDuel(1000, 100);
+		d.field.at(0).max_hp = 1000;
+		d.field.at(0).hp = 500;
+		d.field.at(0).status = static_cast<std::uint8_t>(BattleStatus::BATTLE_ST_STONE);
+		d.field.at(0).status_turns = 2;
+		d.field.at(0).mods.prof_reback_level = 5; // 10% 回复 = 100 HP
+
+		// 敌方 slot 10 不行动
+		d.cmds.present[10] = false;
+
+		SA::Domain::BattleEvents ev{};
+		MaxRandom rng;
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+		// 验证产生了回复 DAMAGE 事件
+		bool found_heal = false;
+		bool found_attack_hit = false;
+		for (const auto &e : ev.events)
+		{
+			if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+			{
+				if (e.body.damage.target == 0u && e.body.damage.hp_delta == 100)
+					found_heal = true;
+			}
+			if (e.body_kind == SA::Domain::BattleEvent::BodyKind::HIT && e.body.hit.attacker == 0u)
+			{
+				found_attack_hit = true;
+			}
+		}
+		CHECK(found_heal);
+		CHECK_FALSE(found_attack_hit); // 石化不可行动，无攻击 HIT 事件
+	}
+}
+
+TEST_CASE("A-γ1:战斗结算中挑拨(INSTIGATE)强行普攻并打伤己方队友(battle.c:5848-5877)")
+{
+	Duel d = makeB1Duel(1000, 100, /*pet_skill=*/false);
+	// slot 1 为己方队友
+	d.field.at(1) = makeCombatant(CombatantKind::kPlayer, 10, 10);
+	d.field.at(1).slot = 1;
+	d.field.at(1).hp = d.field.at(1).max_hp = 500;
+	d.field.at(1).mods.no_duck = true;
+
+	// slot 0: 攻方处于挑拨状态
+	d.field.at(0).status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_INSTIGATE);
+	d.field.at(0).status_turns = 2;
+	d.field.at(0).attack = 100;
+	d.field.at(0).mods.no_duck = true;
+
+	// 原指令设为防御 GUARD
+	d.cmds.present[0] = true;
+	d.cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::GUARD;
+
+	d.cmds.present[1] = true;
+	d.cmds.commands[1].command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+
+	d.cmds.present[10] = true;
+	d.cmds.commands[10].command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+
+	// rng 序列: 50 (<=80 挑拨触发), 目标抽选 0 (即 slot 1), 其余攻击伤害随机数
+	ScriptedRandom rng({50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+
+	SA::Domain::BattleEvents ev{};
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	bool hit_teammate = false;
+	for (const auto &e : ev.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+		{
+			if (e.body.damage.target == 1u && e.body.damage.hp_delta < 0)
+				hit_teammate = true;
+		}
+	}
+	CHECK(hit_teammate);
+}
+
+TEST_CASE("A-γ1:附身状态(WORKANNEX)重定向普攻并取消防御(battle.c:5667-5689)")
+{
+	Duel d = makeB1Duel(1000, 100, /*pet_skill=*/false);
+	d.field.at(1) = makeCombatant(CombatantKind::kPlayer, 10, 10);
+	d.field.at(1).slot = 1;
+	d.field.at(1).hp = d.field.at(1).max_hp = 500;
+	d.field.at(1).mods.no_duck = true;
+
+	// slot 0: 攻方处于附身状态
+	d.field.at(0).status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_WORKANNEX);
+	d.field.at(0).status_turns = 2;
+	d.field.at(0).attack = 100;
+	d.field.at(0).mods.no_duck = true;
+
+	// 原指令设为防御 GUARD
+	d.cmds.present[0] = true;
+	d.cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::GUARD;
+
+	d.cmds.present[1] = true;
+	d.cmds.commands[1].command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+
+	d.cmds.present[10] = true;
+	d.cmds.commands[10].command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;
+
+	// rng 序列: 50 (<=80 附身触发), 目标抽选 (0 即 slot 1), 其余攻击伤害随机数
+	ScriptedRandom rng({50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+
+	SA::Domain::BattleEvents ev{};
+	REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+	bool hit_target = false;
+	for (const auto &e : ev.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+		{
+			if (e.body.damage.target == 1u && e.body.damage.hp_delta < 0)
+				hit_target = true;
+		}
+	}
+	CHECK(hit_target);
+}
+
+TEST_CASE("A-γ1:职业被动在场生效(武器专精/回避/格挡反击)管线闭环")
+{
+	SUBCASE("武器专精攻击加成有效计入 effectiveAttack")
+	{
+		Combatant c = makeCombatant(CombatantKind::kPlayer, 100, 100);
+		c.str = 100;
+		c.attack = 100;
+		c.mods.prof_weapon_focus_attack_percent = 25; // +25%
+		CHECK(effectiveAttack(c) == 125);
+	}
+
+	SUBCASE("职业回避加成 prof_avoid_bonus 计入 rollDodge")
+	{
+		auto attacker = makeCombatant(CombatantKind::kPlayer, 100, 100, 100);
+		auto defender = makeCombatant(CombatantKind::kPlayer, 100, 100, 100);
+		ScriptedRandom rng1({1000}), rng2({1000});
+		CHECK_FALSE(rollDodge(attacker, defender, false, false, RulesConfig{}, rng1));
+
+		defender.mods.prof_avoid_bonus = 20;
+		CHECK(rollDodge(attacker, defender, false, false, RulesConfig{}, rng2));
+	}
+
+	SUBCASE("职业格挡反击加成 prof_deflect_bonus 计入 rollCounter")
+	{
+		auto attacker = makeCombatant(CombatantKind::kPlayer, 100, 100, 100);
+		auto defender = makeCombatant(CombatantKind::kPlayer, 100, 100, 92);
+		defender.mods.unarmed = false;
+		defender.mods.weapon = WeaponClass::kAxe;
+		int per_base = 0, per_bonus = 0;
+		MaxRandom rng;
+		rollCounter(attacker, defender, rng, &per_base);
+
+		attacker.mods.prof_deflect_bonus = 15;
+		rollCounter(attacker, defender, rng, &per_bonus);
+		CHECK(per_bonus == per_base + 15);
+	}
+}

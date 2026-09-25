@@ -1252,6 +1252,38 @@ void projectProfSkill(BattleInstance &b, const PlayerPool &players)
 		atk.mods.prof_skill_quick_percent = 0;
 		atk.mods.prof_skill_apply_status = 0;
 		atk.mods.prof_skill_status_turns = 0;
+		atk.mods.prof_reback_level = 0;
+		atk.mods.prof_avoid_bonus = 0;
+		atk.mods.prof_deflect_bonus = 0;
+		atk.mods.prof_weapon_focus_attack_percent = 0;
+		atk.mods.prof_magic_proficiency = 0;
+
+		// 投影职业被动加成 (BATTLE_ProfessionStatus_init)
+		if (slot < SA::Rules::kBattlePlayerMax)
+		{
+			const auto ph = b.player_of_slot[static_cast<std::size_t>(slot)];
+			if (ph.valid())
+			{
+				if (const auto *player = players.resolve(ph))
+				{
+					const int p_lvl = player->profession_level > 0 ? player->profession_level : 1;
+					if (player->profession_class == SA::Rules::ProfessionClass::kFighter)
+					{
+						atk.mods.prof_reback_level = p_lvl;
+						atk.mods.prof_deflect_bonus = SA::Rules::computeProfessionDeflectBonus(p_lvl);
+						atk.mods.prof_weapon_focus_attack_percent = SA::Rules::computeProfessionWeaponFocusBonus(p_lvl);
+					}
+					else if (player->profession_class == SA::Rules::ProfessionClass::kHunter)
+					{
+						atk.mods.prof_avoid_bonus = SA::Rules::computeProfessionAvoidBonus(p_lvl);
+					}
+					else if (player->profession_class == SA::Rules::ProfessionClass::kWizard)
+					{
+						atk.mods.prof_magic_proficiency = SA::Rules::computeProfessionPracticeBonus(p_lvl);
+					}
+				}
+			}
+		}
 
 		if (!b.commands.present[slot])
 			continue;

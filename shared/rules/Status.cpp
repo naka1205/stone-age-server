@@ -267,6 +267,14 @@ StatusTickResult tickStatus(const Combatant &c,
 			r.deep_poison_kill = true;
 		break;
 	}
+	case static_cast<int>(BattleStatus::BATTLE_ST_F_ENCLOSE):
+	{
+		// 源码 battle.c:5722-5755: DAMAGE = 50 * cnt
+		r.hp_down = 50 * cnt;
+		if (r.hp_down > hp)
+			r.hp_down = hp;
+		break;
+	}
 	default:
 		// 其余状态本回合无结算后果(麻痹/睡眠/石化只是"不能行动",
 		// 由 checkCanAct 在派发时否决;酒醉/混乱的后果落在回避与目标选择里)。

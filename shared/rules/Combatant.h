@@ -302,6 +302,13 @@ struct CombatModifiers
 	int prof_skill_apply_status = 0;     // 目标状态号 (如混乱)
 	int prof_skill_status_turns = 0;     // 状态回合
 
+	// ── 职业被动加成 (批次 A-γ1) ──
+	int prof_reback_level = 0;                // 勇士被动: 逆境回复等级 (1..10, 每级 2%, 上限 20%)
+	int prof_avoid_bonus = 0;                 // 猎人被动: 职业回避加成 (百分比, 上限 25%)
+	int prof_deflect_bonus = 0;               // 勇士被动: 职业格挡/反击加成 (level + 10)
+	int prof_weapon_focus_attack_percent = 0; // 勇士被动: 武器专精攻击加成 (+%, 上限 25%)
+	int prof_magic_proficiency = 0;           // 巫师被动: 元素魔法熟练度 (2..25)
+
 	// ── 状态异常(§4,批次 L4.1)──────────────────────────────────
 	//
 	// ★★ **攻方「带毒装备」**(原 `CHAR_SUITPOISON`,`_SUIT_ADDPART4` 在 8.0 **开**,

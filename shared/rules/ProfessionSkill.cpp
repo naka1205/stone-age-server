@@ -252,4 +252,65 @@ ProfSkillDirectParams computeProfSkillDirectParams(std::uint32_t skill_id,
 	return params;
 }
 
+bool isAbnormalStatusForReback(int status) noexcept
+{
+	// 源码 SSRC80 battle.c:9331-9339
+	// status_table[9] = { 2(麻痹), 3(睡眠), 4(石化), 12(晕眩), 13(缠绕), 14(天罗), 15(冰暴), 17(冰箭), 23(雷附体) }
+	return status == 2 || status == 3 || status == 4 ||
+	       status == 12 || status == 13 || status == 14 ||
+	       status == 15 || status == 17 || status == 23;
+}
+
+std::int32_t computeProfessionRebackHeal(std::int32_t max_hp,
+                                         std::int32_t current_hp,
+                                         int skill_level) noexcept
+{
+	if (skill_level <= 0 || max_hp <= 0 || current_hp <= 0)
+		return 0;
+	int pct = skill_level * 2;
+	if (pct > 20)
+		pct = 20;
+	std::int32_t heal = (max_hp * pct) / 100;
+	if (current_hp + heal > max_hp)
+		heal = max_hp - current_hp;
+	if (heal < 0)
+		heal = 0;
+	return heal;
+}
+
+int computeProfessionAvoidBonus(int skill_level) noexcept
+{
+	// 源码 battle.c:9236-9240
+	if (skill_level <= 0)
+		return 0;
+	int val = (skill_level <= 5) ? (skill_level * 2) : ((skill_level - 5) * 3);
+	return (val > 25) ? 25 : val;
+}
+
+int computeProfessionWeaponFocusBonus(int skill_level) noexcept
+{
+	// 源码 battle.c:9305-9310
+	if (skill_level <= 0)
+		return 0;
+	int val = (skill_level <= 5) ? (skill_level * 2) : ((skill_level - 5) * 3 + 10);
+	return (val > 25) ? 25 : val;
+}
+
+int computeProfessionDeflectBonus(int skill_level) noexcept
+{
+	// 源码 battle.c:9259
+	if (skill_level <= 0)
+		return 0;
+	return skill_level + 10;
+}
+
+int computeProfessionPracticeBonus(int skill_level) noexcept
+{
+	// 源码 battle.c:9175-9177
+	if (skill_level <= 0)
+		return 0;
+	int val = (skill_level >= 6) ? ((skill_level - 5) * 3 + 10) : (skill_level * 2);
+	return (val > 25) ? 25 : val;
+}
+
 } // namespace SA::Rules

@@ -18,13 +18,13 @@
 | [`12-encounter.md`](12-encounter.md) | M.5 敌人表 · R.1 随机源 · M.6/M.7 遇敌链 · 战果结算 · A-α 战果总装 | 6 |
 | [`13-world.md`](13-world.md) | W.1 移动视野 · W.2/W.3 刷怪游荡 · W.4 暗雷 · W.5 明雷 · W.6 传送点 · W.7 NPC实体Healer · W.8 TownPeople对话与窗口 · W.9 任务旗标与ExChangeMan · W.10 道具宠物交付与奖励结算 · W.11 NPC巡逻与漫游 · W.12 NPC商店与买卖 · W.13 宠物商店与技能导师 · W.14 告示牌与传送员 · D.1 真实地图LS2MAP与萨伊那斯NPC · D.2 四大村庄多地图与NPC/Warp | 15 |
 | [`14-item.md`](14-item.md) | 道具域 I.1 背包 · I.2 扣道具 · I.3 掉落 · I.4 使用 · I\| 指令入口校验 | 5 |
-| [`15-status.md`](15-status.md) | L4.1 状态异常系统 · A-γ1 混乱重定向 | 2 |
+| [`15-status.md`](15-status.md) | L4.1 状态异常系统 · A-γ1 混乱重定向与核心状态推进/职业被动联动 | 3 |
 | [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
 | [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
 | [`18-petskill.md`](18-petskill.md) | 宠技三连发:B1 直攻系 · B2 宠技槽 + CHARGE · B3 状态系 + 铁壁 | 3 |
-| [`90-push-windows.md`](90-push-windows.md) | 二十一次 `shared-v0.x.0` 推送窗口的闭合核实 | 21 |
+| [`90-push-windows.md`](90-push-windows.md) | 二十二次 `shared-v0.x.0` 推送窗口的闭合核实 | 22 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **93** |
+| **合计** | | **95** |
 
 ## 全量映射表(按编号)
 
@@ -123,6 +123,8 @@
 | §9.0.83b | 推送窗口执行记录 —— `shared-v0.37.0`(批次 P.2;Progression 加点纯函数与双端漂移消除) | 2026-09-25 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.84 | 批次 A-γ2 —— 职业宿主与职业属性上限 / 非战斗职技 / 64 职技映射表与直攻宿主执行闭环 | 2026-09-25 | [`10-battle-core.md`](10-battle-core.md) |
 | §9.0.84b | 推送窗口执行记录 —— `shared-v0.38.0`(批次 A-γ2;职业系统与 64 职技映射表 / 双端漂移消除) | 2026-09-25 | [`90-push-windows.md`](90-push-windows.md) |
+| §9.0.85 | 批次 A-γ1 —— 核心状态序列推进与解除收口 / 职业被动在场生效与状态联动 | 2026-09-25 | [`15-status.md`](15-status.md) |
+| §9.0.85b | 推送窗口执行记录 —— `shared-v0.39.0`(批次 A-γ1;核心状态推进/挑拨附身/火附体/职业被动与逆境回复) | 2026-09-25 | [`90-push-windows.md`](90-push-windows.md) |
 
 ---
 
