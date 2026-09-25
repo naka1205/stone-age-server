@@ -7,9 +7,12 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
+#include "content/Bundle.h"
 #include "world/Api.h"
 
 #include <algorithm>
+#include <cstring>
+#include <filesystem>
 #include <string>
 
 using namespace SA::World;
@@ -66,6 +69,110 @@ TEST_CASE("地图通行性:未知图元号按不可走兜底")
 	//   (对应原版 getTileAndObjData 取不到数据 / switch default,:28/:54)。
 	map.obj[map.index(1, 1)] = 99;
 	CHECK_FALSE(mapWalkable(map, attr, 1, 1));
+}
+
+TEST_CASE("原生 LS2MAP 地图解析:防御性校验与大端解码")
+{
+	// 1. 畸变输入校验
+	{
+		std::vector<std::uint8_t> empty{};
+		CHECK_FALSE(parseLs2Map(empty).has_value());
+
+		std::vector<std::uint8_t> short_hdr(43, 0);
+		CHECK_FALSE(parseLs2Map(short_hdr).has_value());
+
+		std::vector<std::uint8_t> bad_magic(44, 0);
+		std::memcpy(bad_magic.data(), "LS1MAP", 6);
+		CHECK_FALSE(parseLs2Map(bad_magic).has_value());
+
+		std::vector<std::uint8_t> zero_dim(44, 0);
+		std::memcpy(zero_dim.data(), "LS2MAP", 6);
+		CHECK_FALSE(parseLs2Map(zero_dim).has_value()); // xsiz=0, ysiz=0
+	}
+
+	// 2. 合法内存缓冲区解析
+	{
+		// 构造 2x2 地图: 44 头 + 2*4 (tile) + 2*4 (obj) = 60 字节
+		std::vector<std::uint8_t> buf(60, 0);
+		std::memcpy(buf.data(), "LS2MAP", 6);
+		// id = 100 (大端: 0x00, 0x64)
+		buf[6] = 0x00;
+		buf[7] = 0x64;
+		// show_name at offset 8: "TestMap"
+		std::memcpy(buf.data() + 8, "TestMap", 7);
+		// xsiz = 2, ysiz = 2
+		buf[40] = 0x00;
+		buf[41] = 0x02;
+		buf[42] = 0x00;
+		buf[43] = 0x02;
+		// tile[4]: 10, 20, 30, 40
+		buf[44] = 0x00;
+		buf[45] = 10;
+		buf[46] = 0x00;
+		buf[47] = 20;
+		buf[48] = 0x00;
+		buf[49] = 30;
+		buf[50] = 0x00;
+		buf[51] = 40;
+		// obj[4]: 100, 200, 300, 400
+		buf[52] = 0x00;
+		buf[53] = 100;
+		buf[54] = 0x00;
+		buf[55] = 200;
+		buf[56] = 0x01;
+		buf[57] = 0x2C; // 300
+		buf[58] = 0x01;
+		buf[59] = 0x90; // 400
+
+		// 数据截断校验 (少 1 字节)
+		CHECK_FALSE(parseLs2Map(std::span<const std::uint8_t>(buf.data(), buf.size() - 1)).has_value());
+
+		const auto info = parseLs2Map(buf);
+		REQUIRE(info.has_value());
+		CHECK_EQ(info->floor_id, 100);
+		CHECK_EQ(info->show_name, "TestMap");
+		CHECK_EQ(info->width, 2);
+		CHECK_EQ(info->height, 2);
+		CHECK_EQ(info->grid.width, 2);
+		CHECK_EQ(info->grid.height, 2);
+		CHECK_EQ(info->grid.tileAt(0, 0), 10);
+		CHECK_EQ(info->grid.tileAt(1, 0), 20);
+		CHECK_EQ(info->grid.tileAt(0, 1), 30);
+		CHECK_EQ(info->grid.tileAt(1, 1), 40);
+		CHECK_EQ(info->grid.objAt(0, 0), 100);
+		CHECK_EQ(info->grid.objAt(1, 0), 200);
+		CHECK_EQ(info->grid.objAt(0, 1), 300);
+		CHECK_EQ(info->grid.objAt(1, 1), 400);
+	}
+
+	// 3. 真实地图文件测试 (若本地存在)
+	{
+		std::string real_path;
+		for (const auto &p : {
+		         "../csa8.0/gmsv/data/map/sainasu/sainasu",
+		         "../../csa8.0/gmsv/data/map/sainasu/sainasu",
+		         "../../../csa8.0/gmsv/data/map/sainasu/sainasu",
+		         "/Users/naka/Game/Stoneage/csa8.0/gmsv/data/map/sainasu/sainasu"})
+		{
+			if (std::filesystem::exists(p))
+			{
+				real_path = p;
+				break;
+			}
+		}
+
+		if (!real_path.empty())
+		{
+			const auto real_map = loadLs2MapFile(real_path);
+			REQUIRE(real_map.has_value());
+			CHECK_EQ(real_map->floor_id, 100);
+			CHECK_EQ(real_map->width, 800);
+			CHECK_EQ(real_map->height, 800);
+			CHECK_EQ(real_map->grid.tile.size(), 800 * 800);
+			CHECK_EQ(real_map->grid.obj.size(), 800 * 800);
+			CHECK(real_map->grid.inBounds(643, 459));
+		}
+	}
 }
 
 // ══ 里程碑①b:玩家移动(onWalk + kCharLoop 玩家段)══════════════════════════
@@ -3386,4 +3493,257 @@ TEST_CASE("W.14: 传送员等级不足拦截 (零扣费、坐标不变更、下�
 	CHECK(p->gold == 1000);
 	CHECK(p->x == 32);
 	CHECK(p->y == 32);
+}
+
+TEST_CASE("真实地图数据接入:萨伊那斯 Floor 100 传送点与 NPC 端到端验证")
+{
+	std::string content_dir;
+	for (const auto &p : {"content/p2-v1", "../content/p2-v1", "../../content/p2-v1"})
+	{
+		if (std::filesystem::exists(std::string(p) + "/manifest.json"))
+		{
+			content_dir = p;
+			break;
+		}
+	}
+
+	if (content_dir.empty())
+		return;
+
+	const auto bundle = SA::Content::load(content_dir, false);
+	CHECK_EQ(bundle.floor, 100);
+	CHECK_EQ(bundle.width, 800);
+	CHECK_EQ(bundle.height, 800);
+
+	const auto *warps_val = bundle.world.find("warp_points");
+	REQUIRE(warps_val != nullptr);
+	REQUIRE(warps_val->isArray());
+	CHECK_EQ(warps_val->asArray().size(), 59);
+
+	const auto *npcs_val = bundle.world.find("npcs");
+	REQUIRE(npcs_val != nullptr);
+	REQUIRE(npcs_val->isArray());
+	CHECK_EQ(npcs_val->asArray().size(), 48);
+
+	// 1. 初始化世界地图
+	SA::Platform::ServerConfig config = makeMoveConfig();
+	SA::Platform::ManualClock clock{0};
+	SA::Platform::Logger logger{SA::Platform::LogLevel::kError};
+	SA::Platform::RandomSource random{0xABCDEF};
+	SA::Net::LoopbackTransport transport{};
+	World world{config, clock, logger, random, transport};
+
+	GridMap map;
+	map.width = bundle.width;
+	map.height = bundle.height;
+	map.tile.assign(bundle.walkable.size(), 1);
+	map.obj.assign(bundle.walkable.begin(), bundle.walkable.end());
+	TileAttrTable attributes;
+	attributes.walkable = {WalkKind::kBlocked, WalkKind::kFree};
+
+	SA::Domain::CharacterRecord defaults{};
+	defaults.schema_ver = 1;
+	defaults.player.level = 1;
+	defaults.player.charm = 60;
+	defaults.player.mp = defaults.player.max_mp = 100;
+	defaults.player.hp = 100;
+	defaults.player.default_pet = -1;
+	defaults.player.floor = 100;
+	defaults.player.x = 643;
+	defaults.player.y = 459;
+	defaults.player.dir = 5;
+	defaults.player.image = 100000;
+
+	world.configurePlayable(std::move(map), std::move(attributes), bundle.version, defaults);
+
+	// 装载 59 个传送点
+	std::vector<WarpPoint> warp_points;
+	for (const auto &item : warps_val->asArray())
+	{
+		WarpPoint wp;
+		if (const auto *sf = item.find("src_floor"))
+			wp.src_floor = SA::Content::integer(*sf);
+		if (const auto *sx = item.find("src_x"))
+			wp.src_x = SA::Content::integer(*sx);
+		if (const auto *sy = item.find("src_y"))
+			wp.src_y = SA::Content::integer(*sy);
+		if (const auto *df = item.find("dst_floor"))
+			wp.dst_floor = SA::Content::integer(*df);
+		if (const auto *dx = item.find("dst_x"))
+			wp.dst_x = SA::Content::integer(*dx);
+		if (const auto *dy = item.find("dst_y"))
+			wp.dst_y = SA::Content::integer(*dy);
+		warp_points.push_back(wp);
+	}
+	world.loadWarpPoints(warp_points);
+	CHECK_EQ(world.warpPointCount(), 59);
+
+	// 装载 48 个 NPC
+	std::vector<NpcEntity> npcs;
+	for (const auto &item : npcs_val->asArray())
+	{
+		NpcEntity npc;
+		if (const auto *id = item.find("id"))
+			npc.id = static_cast<std::uint64_t>(SA::Content::integer(*id));
+		if (const auto *fl = item.find("floor"))
+			npc.floor = SA::Content::integer(*fl);
+		if (const auto *x = item.find("x"))
+			npc.x = SA::Content::integer(*x);
+		if (const auto *y = item.find("y"))
+			npc.y = SA::Content::integer(*y);
+		if (const auto *dir = item.find("dir"))
+			npc.dir = static_cast<std::uint8_t>(SA::Content::integer(*dir));
+		if (const auto *img = item.find("image"))
+			npc.image = SA::Content::integer(*img);
+		if (const auto *nm = item.find("name"))
+			npc.name = SA::Content::text(*nm);
+		if (const auto *msg = item.find("message"))
+			npc.message = SA::Content::text(*msg);
+		if (const auto *cost = item.find("cost"))
+			npc.cost = SA::Content::integer(*cost);
+		if (const auto *st = item.find("sign_title"))
+			npc.sign_title = SA::Content::text(*st);
+		if (const auto *wm = item.find("warp_msg"))
+			npc.warp_msg = SA::Content::text(*wm);
+		if (const auto *mm = item.find("main_msg"))
+			npc.main_msg = SA::Content::text(*mm);
+		if (const auto *br = item.find("buy_rate"); br && br->isNumber())
+			npc.buy_rate = br->asNumber();
+		if (const auto *sr = item.find("sell_rate"); sr && sr->isNumber())
+			npc.sell_rate = sr->asNumber();
+
+		if (const auto *tp = item.find("type"); tp && tp->isString())
+		{
+			const auto &tstr = tp->asString();
+			if (tstr == "healer")
+				npc.type = NpcType::kHealer;
+			else if (tstr == "townpeople")
+				npc.type = NpcType::kTownPeople;
+			else if (tstr == "exchangeman")
+				npc.type = NpcType::kExChangeMan;
+			else if (tstr == "shop")
+				npc.type = NpcType::kShop;
+			else if (tstr == "petshop")
+				npc.type = NpcType::kPetShop;
+			else if (tstr == "petskillshop")
+				npc.type = NpcType::kPetSkillShop;
+			else if (tstr == "signboard")
+				npc.type = NpcType::kSignBoard;
+			else if (tstr == "warpman")
+				npc.type = NpcType::kWarpMan;
+			else
+				npc.type = NpcType::kOther;
+		}
+
+		if (const auto *ex_raw = item.find("exchange_raw"); ex_raw && ex_raw->isString())
+		{
+			npc.exchange_blocks = parseExChangeBlocks(ex_raw->asString());
+		}
+
+		if (const auto *dests = item.find("warp_destinations"); dests && dests->isArray())
+		{
+			for (const auto &d : dests->asArray())
+			{
+				WarpDestination wd;
+				if (const auto *df = d.find("floor"))
+					wd.floor = SA::Content::integer(*df);
+				if (const auto *dx = d.find("x"))
+					wd.x = SA::Content::integer(*dx);
+				if (const auto *dy = d.find("y"))
+					wd.y = SA::Content::integer(*dy);
+				if (const auto *dn = d.find("name"))
+					wd.name = SA::Content::text(*dn);
+				if (const auto *dc = d.find("cost"))
+					wd.cost = SA::Content::integer(*dc);
+				if (const auto *dl = d.find("level"))
+					wd.level = SA::Content::integer(*dl);
+				npc.warp_destinations.push_back(std::move(wd));
+			}
+		}
+
+		if (const auto *prods = item.find("shop_products"); prods && prods->isArray())
+		{
+			for (const auto &p : prods->asArray())
+			{
+				ShopProduct sp;
+				if (const auto *pi = p.find("item_id"))
+					sp.item_id = SA::Content::integer(*pi);
+				if (const auto *pc = p.find("cost"))
+					sp.cost = SA::Content::integer(*pc);
+				if (const auto *pm = p.find("image_id"))
+					sp.image_id = static_cast<std::uint32_t>(SA::Content::integer(*pm));
+				if (const auto *pl = p.find("level"))
+					sp.level = static_cast<std::uint32_t>(SA::Content::integer(*pl));
+				if (const auto *pn = p.find("name"))
+					sp.name = SA::Content::text(*pn);
+				npc.shop_products.push_back(std::move(sp));
+			}
+		}
+
+		npcs.push_back(std::move(npc));
+	}
+	world.loadNpcEntities(npcs);
+	CHECK_EQ(world.npcCount(), 48);
+
+	// 2. 玩家在 (643, 459) 生成，移动至 (637, 491)，向东走一步踩上传送点 (638, 491)
+	const auto id = transport.connect();
+	world.onSessionReady(id);
+	world.tick();
+	const auto init_pos = world.playerPos(id);
+	CHECK_EQ(init_pos.floor, 100);
+	CHECK_EQ(init_pos.x, 643);
+	CHECK_EQ(init_pos.y, 459);
+
+	auto *player = world.playerForTest(id);
+	REQUIRE(player != nullptr);
+	player->x = 637;
+	player->y = 491;
+	player->dir = 2; // 面向东
+
+	// 向东走一步 'c'，踩入 (638, 491)
+	SA::Domain::WalkRequest walk{};
+	walk.x = player->x;
+	walk.y = player->y;
+	REQUIRE(walk.direction.assign("c"));
+	world.onWalk(id, walk);
+	world.tick();
+
+	// 传送点 (638, 491) 目标为 (1000, 50, 116)
+	const auto warped_pos = world.playerPos(id);
+	CHECK_EQ(warped_pos.floor, 1000);
+	CHECK_EQ(warped_pos.x, 50);
+	CHECK_EQ(warped_pos.y, 116);
+
+	// 3. 告示牌 NPC 交互验证: 位于 (728, 501)
+	// 将玩家置于 (728, 500) 面对 (728, 501) (向南 dir 4)
+	player->floor = 100;
+	player->x = 728;
+	player->y = 500;
+	player->dir = 4;
+
+	SA::Domain::EventRequest req{};
+	req.dir = 4;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req.seqno = 5001;
+	world.onEvent(id, req);
+	world.tick();
+
+	// 验证告示牌文案下发到窗口
+	CHECK(world.playerLastWindowText(id).find("第1检查点") != std::string::npos);
+
+	// 4. 恢复员 Healer 交互验证: 位于 (343, 464)
+	player->floor = 100;
+	player->x = 343;
+	player->y = 463;
+	player->dir = 4;
+	REQUIRE(world.setPlayerStatsForTest(id, /*hp=*/10, /*mp=*/5, /*vital=*/1000, /*str=*/200, /*tough=*/200, /*dex=*/200));
+	CHECK_EQ(world.playerHp(id), 10);
+	CHECK_EQ(world.playerMp(id), 5);
+
+	req.seqno = 5002;
+	world.onEvent(id, req);
+	world.tick();
+
+	CHECK_EQ(world.playerHp(id), 46);
+	CHECK_EQ(world.playerMp(id), 100);
 }

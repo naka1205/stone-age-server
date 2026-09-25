@@ -2,6 +2,9 @@
 
 #include "world/Api.h"
 
+#include <cstring>
+#include <fstream>
+
 namespace SA::World
 {
 
@@ -45,6 +48,79 @@ TileAttrTable makeFixtureAttr()
 	// 图元号 → 通行性:0 墙 / 1 需双 / 2 地面。下标即图元号。
 	a.walkable = {WalkKind::kBlocked, WalkKind::kNeedBoth, WalkKind::kFree};
 	return a;
+}
+
+std::optional<Ls2MapInfo> parseLs2Map(std::span<const std::uint8_t> bytes)
+{
+	// 1. 最小头长 44 字节 (10 §3.1)
+	if (bytes.size() < 44)
+		return std::nullopt;
+
+	// 2. 魔数 "LS2MAP"
+	if (std::memcmp(bytes.data(), "LS2MAP", 6) != 0)
+		return std::nullopt;
+
+	const auto readU16BE = [](const std::uint8_t *p) noexcept -> std::uint16_t
+	{
+		return static_cast<std::uint16_t>((static_cast<std::uint16_t>(p[0]) << 8) | p[1]);
+	};
+
+	Ls2MapInfo info;
+	info.floor_id = readU16BE(bytes.data() + 6);
+
+	// showstring: offset 8 长度 32 (GBK/字面, 遇到 \0 截断)
+	const char *name_ptr = reinterpret_cast<const char *>(bytes.data() + 8);
+	std::size_t name_len = 0;
+	while (name_len < 32 && name_ptr[name_len] != '\0')
+		++name_len;
+	info.show_name.assign(name_ptr, name_len);
+
+	const std::uint16_t xsiz = readU16BE(bytes.data() + 40);
+	const std::uint16_t ysiz = readU16BE(bytes.data() + 42);
+	if (xsiz == 0 || ysiz == 0)
+		return std::nullopt;
+
+	info.width = static_cast<std::int32_t>(xsiz);
+	info.height = static_cast<std::int32_t>(ysiz);
+
+	const std::size_t count = static_cast<std::size_t>(xsiz) * static_cast<std::size_t>(ysiz);
+	// 校验数据区长度: 44 + 2 * count (tile) + 2 * count (obj) = 44 + 4 * count
+	if (bytes.size() < 44 + 4 * count)
+		return std::nullopt;
+
+	info.grid.width = info.width;
+	info.grid.height = info.height;
+	info.grid.tile.resize(count);
+	info.grid.obj.resize(count);
+
+	const std::uint8_t *tile_ptr = bytes.data() + 44;
+	const std::uint8_t *obj_ptr = bytes.data() + 44 + 2 * count;
+
+	for (std::size_t i = 0; i < count; ++i)
+	{
+		info.grid.tile[i] = static_cast<TileId>(readU16BE(tile_ptr + 2 * i));
+		info.grid.obj[i] = static_cast<TileId>(readU16BE(obj_ptr + 2 * i));
+	}
+
+	return info;
+}
+
+std::optional<Ls2MapInfo> loadLs2MapFile(const std::string &filepath)
+{
+	std::ifstream input(filepath, std::ios::binary | std::ios::ate);
+	if (!input || input.tellg() < 0)
+		return std::nullopt;
+
+	const auto size = static_cast<std::uint64_t>(input.tellg());
+	if (size < 44 || size > 64u * 1024u * 1024u)
+		return std::nullopt;
+
+	std::vector<std::uint8_t> buffer(static_cast<std::size_t>(size));
+	input.seekg(0, std::ios::beg);
+	if (!input.read(reinterpret_cast<char *>(buffer.data()), static_cast<std::streamsize>(buffer.size())))
+		return std::nullopt;
+
+	return parseLs2Map(buffer);
 }
 
 } // namespace SA::World

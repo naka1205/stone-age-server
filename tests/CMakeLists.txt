@@ -160,7 +160,7 @@ endforeach()
 target_link_libraries(sa_net_framing_test      PRIVATE sa_net sa_doctest)
 target_link_libraries(sa_platform_config_test  PRIVATE sa_platform sa_doctest)
 target_link_libraries(sa_world_tick_test       PRIVATE sa_world sa_doctest)
-target_link_libraries(sa_world_map_test        PRIVATE sa_world sa_doctest)
+target_link_libraries(sa_world_map_test        PRIVATE sa_world sa_content sa_doctest)
 
 # ── ★ TcpTransport 的用例要自己开 socket(2026-09-04)─────────────
 #

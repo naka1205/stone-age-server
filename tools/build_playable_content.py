@@ -66,6 +66,185 @@ def map_bitmap(original, reverse):
     return reverse[original] if original > 99 else 0
 
 
+def parse_npc_blocks(filepath):
+    raw = filepath.read_bytes()
+    try:
+        text = raw.decode('gbk')
+    except Exception:
+        text = raw.decode('gbk', errors='replace')
+    blocks = []
+    current = {}
+    in_block = False
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line == '{':
+            in_block = True
+            current = {}
+        elif line == '}':
+            if in_block and current:
+                blocks.append(current)
+            in_block = False
+            current = {}
+        elif in_block and '=' in line:
+            k, v = line.split('=', 1)
+            current[k.strip().lower()] = v.strip()
+    return blocks
+
+
+def extract_floor_100_npcs(data, used_sources):
+    items = {}
+    item_file = data / 'itemset6.txt'
+    if item_file.exists():
+        used_sources.append(item_file)
+        for line in item_file.read_bytes().decode('gbk', errors='replace').splitlines():
+            parts = line.split(',')
+            if len(parts) > 18 and parts[16].isdigit():
+                iid = int(parts[16])
+                items[iid] = {
+                    'name': parts[0].strip(),
+                    'image': int(parts[17]) if parts[17].isdigit() else 0,
+                    'cost': int(parts[18]) if parts[18].isdigit() else 0
+                }
+
+    npc_dir = data / 'npc'
+    crates = []
+    for p in sorted(npc_dir.rglob('*.create')):
+        file_matched = False
+        for b in parse_npc_blocks(p):
+            if b.get('floorid') == '100':
+                b['_file'] = p
+                crates.append(b)
+                file_matched = True
+        if file_matched:
+            used_sources.append(p)
+
+    warps = []
+    npcs = []
+    npc_id = 100000
+
+    for c in crates:
+        pos_str = c.get('borncorner', c.get('borncenter', ''))
+        coords = [int(v.strip()) for v in pos_str.split(',') if v.strip().lstrip('-').isdigit()]
+        if len(coords) >= 4:
+            x1, y1, x2, y2 = coords[:4]
+        elif len(coords) >= 2:
+            x1, y1 = coords[:2]
+            x2, y2 = x1, y1
+        else:
+            continue
+
+        enemy = c.get('enemy', '')
+        parts = enemy.split('|')
+        kind = parts[0]
+        if kind == 'npcgen_warp':
+            if len(parts) >= 4:
+                dst_floor = int(parts[1])
+                dst_x = int(parts[2])
+                dst_y = int(parts[3])
+                for x in range(min(x1, x2), max(x1, x2) + 1):
+                    for y in range(min(y1, y2), max(y1, y2) + 1):
+                        warps.append({
+                            'src_floor': 100,
+                            'src_x': x,
+                            'src_y': y,
+                            'dst_floor': dst_floor,
+                            'dst_x': dst_x,
+                            'dst_y': dst_y
+                        })
+        else:
+            npc_id += 1
+            arg_text = ''
+            if len(parts) > 1 and parts[1].startswith('file:'):
+                arg_p = npc_dir / parts[1][5:]
+                if arg_p.exists():
+                    used_sources.append(arg_p)
+                    arg_text = arg_p.read_bytes().decode('gbk', errors='replace')
+
+            npc = {
+                'id': npc_id,
+                'floor': 100,
+                'x': x1,
+                'y': y1,
+                'dir': int(c.get('dir', 0)),
+                'image': int(c.get('graphicname', c.get('image', 100000))),
+                'name': c.get('name', '')
+            }
+            if kind == 'npcgen_signboard':
+                npc['type'] = 'signboard'
+                npc['name'] = npc['name'] or '看板'
+                npc['image'] = 20048
+                npc['sign_title'] = '＜　看板　＞'
+                npc['message'] = arg_text.strip()
+            elif kind == 'npcgen_dengon':
+                npc['type'] = 'signboard'
+                npc['name'] = npc['name'] or '留言板'
+                npc['image'] = 20048
+                npc['sign_title'] = '＜　留言板　＞'
+                npc['message'] = arg_text.strip() or '暂无留言。'
+            elif kind == 'npcgen_warpman':
+                npc['type'] = 'warpman'
+                npc['name'] = npc['name'] or '传送员'
+                dests = []
+                warp_msg, nomal_msg = '', ''
+                for line in arg_text.splitlines():
+                    line = line.strip()
+                    if line.startswith('WARP:'):
+                        wp = line[5:].split(',')
+                        if len(wp) >= 3:
+                            dests.append({'floor': int(wp[0]), 'x': int(wp[1]), 'y': int(wp[2]), 'name': '目的地', 'cost': 0, 'level': 1})
+                    elif line.startswith('warp_msg:'):
+                        warp_msg = line[9:]
+                    elif line.startswith('nomal_msg:'):
+                        nomal_msg = line[10:]
+                npc['warp_destinations'] = dests
+                npc['warp_msg'] = warp_msg
+                npc['message'] = nomal_msg
+            elif kind == 'npcgen_shop':
+                npc['type'] = 'shop'
+                npc['name'] = npc['name'] or '道具商店'
+                buy_rate, sell_rate, main_msg, prods = 1.0, 0.5, '欢迎光临！', []
+                for line in arg_text.splitlines():
+                    line = line.strip()
+                    if line.startswith('buy_rate:'): buy_rate = float(line[9:])
+                    elif line.startswith('sell_rate:'): sell_rate = float(line[10:])
+                    elif line.startswith('main_msg:'): main_msg = line[9:]
+                    elif line.startswith('ItemList:'):
+                        r = line[9:]
+                        if '-' in r:
+                            s, e = r.split('-', 1)
+                            for iid in range(int(s), int(e) + 1):
+                                it = items.get(iid, {'name': f'道具{iid}', 'cost': 100, 'image': 20000})
+                                prods.append({'item_id': iid, 'cost': it['cost'], 'image_id': it['image'], 'level': 0, 'name': it['name']})
+                npc['shop_products'] = prods
+                npc['buy_rate'] = buy_rate
+                npc['sell_rate'] = sell_rate
+                npc['main_msg'] = main_msg
+            elif kind == 'npcgen_winhealer':
+                npc['type'] = 'healer'
+                npc['name'] = npc['name'] or '医院恢复员'
+                npc['cost'] = 0
+                npc['message'] = '欢迎来到医院，我已经为你恢复了体力与气力。'
+            elif kind == 'changeevent':
+                npc['type'] = 'exchangeman'
+                npc['name'] = npc['name'] or '任务使者'
+                npc['exchange_raw'] = arg_text
+            elif kind == 'npcgen_man':
+                npc['type'] = 'townpeople'
+                npc['name'] = npc['name'] or '长毛象客运向导'
+                npc['message'] = arg_text.strip()
+            else:
+                npc['type'] = 'other'
+                npc['name'] = npc['name'] or kind
+                if arg_text: npc['message'] = arg_text.strip()
+            npcs.append(npc)
+
+    warps.sort(key=lambda w: (w['src_floor'], w['src_x'], w['src_y'], w['dst_floor'], w['dst_x'], w['dst_y']))
+    npcs.sort(key=lambda n: (n['floor'], n['x'], n['y'], n['id']))
+    return warps, npcs
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-root', type=Path, required=True)
@@ -200,11 +379,13 @@ def main():
     binary = b'SAM1' + struct.pack('<III', 100, width, height)
     binary += struct.pack(f'<{count}I', *(map_bitmap(t, reverse) for t in tiles))
     binary += struct.pack(f'<{count}I', *(map_bitmap(t, reverse) for t in objects)) + walkable
+    warps, npcs = extract_floor_100_npcs(data, used_sources)
     world = {'schema_ver': 1, 'floor': 100, 'name': server[8:40].split(b'\0')[0].decode('gbk'),
              'spawn': list(spawn), 'player_image': 100000, 'areas': areas, 'groups': groups,
-             'encounters': encounters, 'templates': templates}
+             'encounters': encounters, 'templates': templates,
+             'warp_points': warps, 'npcs': npcs}
     world_text = json.dumps(world, ensure_ascii=False, separators=(',', ':'))
-    source_manifest = {str(path.relative_to(root)): digest(path) for path in used_sources}
+    source_manifest = {str(path.relative_to(root)): digest(path) for path in sorted(set(used_sources), key=lambda p: str(p))}
     manifest = {'schema_ver': 1, 'world': 'world.json', 'map': 'map.bin', 'width': width, 'height': height,
                 'bitmaps': bitmaps, 'actors': actors, 'pages': {name: digest(output / name) for name in pages},
                 'sources': source_manifest, 'palette': 'PALET_1.SAP', 'palettes': palette_report,

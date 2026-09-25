@@ -181,6 +181,145 @@ void configureContent(SA::World::World &world, const SA::Content::Bundle &bundle
 		templates.push_back(enemy);
 	}
 	world.loadEncounterTables(std::move(areas), std::move(groups), std::move(encounters), std::move(templates));
+
+	if (const auto *warps_val = bundle.world.find("warp_points"); warps_val && warps_val->isArray())
+	{
+		std::vector<SA::World::WarpPoint> warp_points;
+		for (const auto &item : warps_val->asArray())
+		{
+			if (!item.isObject())
+				continue;
+			SA::World::WarpPoint wp;
+			if (const auto *sf = item.find("src_floor"))
+				wp.src_floor = integer(*sf);
+			if (const auto *sx = item.find("src_x"))
+				wp.src_x = integer(*sx);
+			if (const auto *sy = item.find("src_y"))
+				wp.src_y = integer(*sy);
+			if (const auto *df = item.find("dst_floor"))
+				wp.dst_floor = integer(*df);
+			if (const auto *dx = item.find("dst_x"))
+				wp.dst_x = integer(*dx);
+			if (const auto *dy = item.find("dst_y"))
+				wp.dst_y = integer(*dy);
+			warp_points.push_back(wp);
+		}
+		world.loadWarpPoints(std::move(warp_points));
+	}
+
+	if (const auto *npcs_val = bundle.world.find("npcs"); npcs_val && npcs_val->isArray())
+	{
+		std::vector<SA::World::NpcEntity> npcs;
+		for (const auto &item : npcs_val->asArray())
+		{
+			if (!item.isObject())
+				continue;
+			SA::World::NpcEntity npc;
+			if (const auto *id = item.find("id"))
+				npc.id = static_cast<std::uint64_t>(integer(*id));
+			if (const auto *fl = item.find("floor"))
+				npc.floor = integer(*fl);
+			if (const auto *x = item.find("x"))
+				npc.x = integer(*x);
+			if (const auto *y = item.find("y"))
+				npc.y = integer(*y);
+			if (const auto *dir = item.find("dir"))
+				npc.dir = static_cast<std::uint8_t>(integer(*dir));
+			if (const auto *img = item.find("image"))
+				npc.image = integer(*img);
+			if (const auto *nm = item.find("name"))
+				npc.name = text(*nm);
+			if (const auto *msg = item.find("message"))
+				npc.message = text(*msg);
+			if (const auto *cost = item.find("cost"))
+				npc.cost = integer(*cost);
+			if (const auto *st = item.find("sign_title"))
+				npc.sign_title = text(*st);
+			if (const auto *wm = item.find("warp_msg"))
+				npc.warp_msg = text(*wm);
+			if (const auto *mm = item.find("main_msg"))
+				npc.main_msg = text(*mm);
+			if (const auto *br = item.find("buy_rate"); br && br->isNumber())
+				npc.buy_rate = br->asNumber();
+			if (const auto *sr = item.find("sell_rate"); sr && sr->isNumber())
+				npc.sell_rate = sr->asNumber();
+
+			if (const auto *tp = item.find("type"); tp && tp->isString())
+			{
+				const auto &tstr = tp->asString();
+				if (tstr == "healer")
+					npc.type = SA::World::NpcType::kHealer;
+				else if (tstr == "townpeople")
+					npc.type = SA::World::NpcType::kTownPeople;
+				else if (tstr == "exchangeman")
+					npc.type = SA::World::NpcType::kExChangeMan;
+				else if (tstr == "shop")
+					npc.type = SA::World::NpcType::kShop;
+				else if (tstr == "petshop")
+					npc.type = SA::World::NpcType::kPetShop;
+				else if (tstr == "petskillshop")
+					npc.type = SA::World::NpcType::kPetSkillShop;
+				else if (tstr == "signboard")
+					npc.type = SA::World::NpcType::kSignBoard;
+				else if (tstr == "warpman")
+					npc.type = SA::World::NpcType::kWarpMan;
+				else
+					npc.type = SA::World::NpcType::kOther;
+			}
+
+			if (const auto *ex_raw = item.find("exchange_raw"); ex_raw && ex_raw->isString())
+			{
+				npc.exchange_blocks = SA::World::parseExChangeBlocks(ex_raw->asString());
+			}
+
+			if (const auto *dests = item.find("warp_destinations"); dests && dests->isArray())
+			{
+				for (const auto &d : dests->asArray())
+				{
+					if (!d.isObject())
+						continue;
+					SA::World::WarpDestination wd;
+					if (const auto *df = d.find("floor"))
+						wd.floor = integer(*df);
+					if (const auto *dx = d.find("x"))
+						wd.x = integer(*dx);
+					if (const auto *dy = d.find("y"))
+						wd.y = integer(*dy);
+					if (const auto *dn = d.find("name"))
+						wd.name = text(*dn);
+					if (const auto *dc = d.find("cost"))
+						wd.cost = integer(*dc);
+					if (const auto *dl = d.find("level"))
+						wd.level = integer(*dl);
+					npc.warp_destinations.push_back(std::move(wd));
+				}
+			}
+
+			if (const auto *prods = item.find("shop_products"); prods && prods->isArray())
+			{
+				for (const auto &p : prods->asArray())
+				{
+					if (!p.isObject())
+						continue;
+					SA::World::ShopProduct sp;
+					if (const auto *pi = p.find("item_id"))
+						sp.item_id = integer(*pi);
+					if (const auto *pc = p.find("cost"))
+						sp.cost = integer(*pc);
+					if (const auto *pm = p.find("image_id"))
+						sp.image_id = static_cast<std::uint32_t>(integer(*pm));
+					if (const auto *pl = p.find("level"))
+						sp.level = static_cast<std::uint32_t>(integer(*pl));
+					if (const auto *pn = p.find("name"))
+						sp.name = text(*pn);
+					npc.shop_products.push_back(std::move(sp));
+				}
+			}
+
+			npcs.push_back(std::move(npc));
+		}
+		world.loadNpcEntities(std::move(npcs));
+	}
 }
 
 } // namespace

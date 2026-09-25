@@ -4086,55 +4086,13 @@ void World::tick()
 		if (moved)
 		{
 			const WarpPoint *wp = s.findWarpPoint(p->floor, p->x, p->y);
-			if (wp != nullptr && s.map.inBounds(wp->dst_x, wp->dst_y) &&
-			    mapWalkable(s.map, s.map_attr, wp->dst_x, wp->dst_y))
+			const bool same_floor = (wp != nullptr && wp->dst_floor == p->floor);
+			if (wp != nullptr &&
+			    (!same_floor || (s.map.inBounds(wp->dst_x, wp->dst_y) &&
+			                     mapWalkable(s.map, s.map_attr, wp->dst_x, wp->dst_y))))
 			{
 				warped = true;
-				c.walk_seq.clear(); // 清空剩余未走路径串(CHAR_WORKWALKARRAY, char.c:4671)
-
-				// 1. 从旧格 olink 移除(玩家刚从 ox, oy 走来)
-				if (s.map.inBounds(ox, oy))
-				{
-					auto &oldcell = s.olink[s.map.index(ox, oy)];
-					oldcell.erase(std::remove(oldcell.begin(), oldcell.end(), kv.first),
-					              oldcell.end());
-				}
-
-				// 2. 旧视野广播 Disappear(旧视野内其他玩家看到 kv.first 消失, kv.first 看到旧视野玩家消失)
-				const auto old_vis = s.collectVisible(ox, oy, kv.first);
-				for (const SA::Net::ConnectionId b : old_vis)
-				{
-					SA::Domain::CharDisappear dis{};
-					dis.entity_id = kv.first;
-					dis.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER);
-					s.sendTo(b, dis);
-					SA::Domain::CharDisappear dis2{};
-					dis2.entity_id = b;
-					dis2.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER);
-					s.sendTo(kv.first, dis2);
-				}
-
-				// 3. 更新玩家坐标
-				p->floor = wp->dst_floor;
-				p->x = wp->dst_x;
-				p->y = wp->dst_y;
-
-				// 4. 新格 olink 挂接
-				s.olink[s.map.index(p->x, p->y)].push_back(kv.first);
-
-				// 5. 新视野广播 Appear + 敌人/NPC 视野刷新 (旧出新进 diff)
-				s.broadcastSpawn(kv.first, *p);
-				s.refreshEnemyView(kv.first, *p, ox, oy);
-				s.refreshNpcView(kv.first, *p, ox, oy);
-
-				// 6. 给玩家自身下发坐标同步(CharMove)
-				SA::Domain::CharMove self_mv{};
-				self_mv.entity_id = kv.first;
-				self_mv.x = p->x;
-				self_mv.y = p->y;
-				self_mv.dir = static_cast<std::uint32_t>(p->dir);
-				self_mv.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER);
-				s.sendTo(kv.first, self_mv);
+				s.warpPlayer(kv.first, wp->dst_floor, wp->dst_x, wp->dst_y);
 			}
 		}
 
@@ -5033,9 +4991,23 @@ void World::onSessionReady(SA::Net::SessionId id)
 			//     ⇒ 阶段 2 接选角时由登录点坐标取代(与下面名字留空同期删/换)。
 			if (SA::Model::Player *np = s.players.resolve(ph); np != nullptr)
 			{
-				np->floor = 0;
-				np->x = s.map.width / 2;
-				np->y = s.map.height / 2;
+				if (!s.content_version.empty())
+				{
+					np->floor = s.character_defaults.player.floor;
+					np->x = s.character_defaults.player.x;
+					np->y = s.character_defaults.player.y;
+					np->image = s.character_defaults.player.image;
+					np->level = s.character_defaults.player.level;
+					np->hp = s.character_defaults.player.hp;
+					np->mp = s.character_defaults.player.mp;
+					np->max_mp = s.character_defaults.player.max_mp;
+				}
+				else
+				{
+					np->floor = 0;
+					np->x = s.map.width / 2;
+					np->y = s.map.height / 2;
+				}
 				// 里程碑②:入 olink + 与视野内玩家双向 CharAppear(原版进图 sendCToArround)。
 				s.olink[s.map.index(np->x, np->y)].push_back(id);
 				s.broadcastSpawn(id, *np);
@@ -6421,8 +6393,9 @@ bool World::warpPlayerByNpc(SA::Net::SessionId id, std::uint64_t npc_id, std::si
 		return false;
 	}
 
-	// 目标坐标可通行门禁检查 (移植 npc_warpman.c)
-	if (!s.map.inBounds(dest.x, dest.y) || !mapWalkable(s.map, s.map_attr, dest.x, dest.y))
+	// 目标坐标可通行门禁检查 (同层时校验目标格通行性, 跨层时由目标地图管辖, 移植 npc_warpman.c)
+	const bool same_floor = (dest.floor == p->floor);
+	if (same_floor && (!s.map.inBounds(dest.x, dest.y) || !mapWalkable(s.map, s.map_attr, dest.x, dest.y)))
 	{
 		s.sendExChangeWindow(id, npc->id, "目标地点暂时无法通行！",
 		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
@@ -7609,7 +7582,7 @@ void World::configurePlayable(GridMap map, TileAttrTable attributes, std::string
                               SA::Domain::CharacterRecord defaults)
 {
 	auto &s = *_impl;
-	if (!s.storage || !s.conns.empty() || !s.world_enemies.empty() || map.width <= 0 || map.height <= 0 ||
+	if (!s.conns.empty() || !s.world_enemies.empty() || map.width <= 0 || map.height <= 0 ||
 	    map.width > 2048 || map.height > 2048 ||
 	    map.tile.size() != static_cast<std::size_t>(map.width) * static_cast<std::size_t>(map.height) ||
 	    map.obj.size() != map.tile.size() || !mapWalkable(map, attributes, defaults.player.x, defaults.player.y) ||

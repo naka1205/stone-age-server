@@ -20,6 +20,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
+#include <string>
 #include <vector>
 
 #include "model/Enemy.h"
@@ -101,6 +104,30 @@ bool mapWalkable(const GridMap &map, const TileAttrTable &attr, std::int32_t x,
 // fixture(供联调与用例,真实地图走 D 线)。图元号:0 墙 / 1 需双 / 2 地面;全填地面。
 GridMap makeFixtureMap(std::int32_t width, std::int32_t height);
 TileAttrTable makeFixtureAttr();
+
+// ── 原生 LS2MAP 地图文件解析 (批次 D.1) ──────────────────────────────────
+//
+// 依据 10-world-map.md §3.1:
+//   offset  0: char[6] = "LS2MAP" (大写魔数)
+//   offset  6: uint16_t id (大端, 地图编号)
+//   offset  8: char[32] showstring (地图显示名, GBK 编码或字面)
+//   offset 40: uint16_t xsiz (大端, 宽度)
+//   offset 42: uint16_t ysiz (大端, 高度)
+//   offset 44: uint16_t tile[xsiz * ysiz] (大端, 地表层图元)
+//   offset 44 + 2*(xsiz*ysiz): uint16_t obj[xsiz * ysiz] (大端, 物件层图元)
+//
+// 零拷贝 / 内存安全：校验魔数、最小文件长度与尺寸溢出；大端解码转平台原生整型。
+struct Ls2MapInfo
+{
+	std::uint16_t floor_id = 0;
+	std::string show_name{};
+	std::int32_t width = 0;
+	std::int32_t height = 0;
+	GridMap grid{};
+};
+
+std::optional<Ls2MapInfo> parseLs2Map(std::span<const std::uint8_t> bytes);
+std::optional<Ls2MapInfo> loadLs2MapFile(const std::string &filepath);
 
 // tick 的阶段。★ 顺序**照抄** 01 §3.1,连未实现的四步也占位 ——
 //   原版 mainloop() 的顺序是"整个服务端行为的骨架"(01 §2),

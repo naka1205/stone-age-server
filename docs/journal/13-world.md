@@ -543,6 +543,56 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证 (RV-2)**: 篡改传送等级门禁检查逻辑（绕过 `p->level < dest.level`）⇒ `W.14: 传送员等级不足拦截` 测试精准报红（7 失败 / 4 通过）；恢复后回绿。
 - **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py`、22 项 ctest 全量绿灯。
 
+---
+
+### 9.0.80 批次 D.1 —— 真实地图 LS2MAP 原生解析与萨伊那斯 NPC 数据接入 (2026-09-25)
+
+2026-09-25 交付。开启 D 线（数据与内容管线）进阶工程，实现了石器时代原始地图二进制文件（`LS2MAP`）的原生零拷贝/安全大端解析器，并在离线构建管线 `tools/build_playable_content.py` 中实现了对石器 8.0 真实 NPC 数据（`csa8.0/gmsv/data/npc/`）的完整扫描与实例化抽取。成功将 100 号地图（萨伊那斯大地图）全部 59 个真实 Warp 传送点与 48 个世界 NPC 实体（含 19 个告示牌/留言板、10 个 ExChangeMan 任务事件、3 个 WarpMan 传送员、3 个客运向导/村民、2 个医院恢复员、1 个采石权利书商店等）导入版本化内容资产 `content/p2-v1/world.json`，在服务端入口 `src/main.cpp` 中完成原子化装载，并通过了端到端实景交互验证。
+
+#### 1. 源码事实与裁定
+
+1. **原生 LS2MAP 解析器 (`src/world/include/world/Api.h`, `src/world/Map.cpp`)**:
+   - 依据 `10-world-map.md` §3.1 二进制规约：
+     - `+0` char[6] = `"LS2MAP"` 魔数；
+     - `+6` u16 BE `id`（地图 Floor 编号）；
+     - `+8` char[32] `showstring`（地图显示名，GBK 编码或字面，截取至 `\0`）；
+     - `+40` u16 BE `xsiz`、`+42` u16 BE `ysiz`（宽度与高度）；
+     - `+44` u16 BE `tile[xsiz * ysiz]`（地表层图元）；
+     - `+44 + 2 * count` u16 BE `obj[xsiz * ysiz]`（物件层图元）；
+   - 提供 `parseLs2Map(std::span<const uint8_t>)` 与 `loadLs2MapFile(const std::string &)`；
+   - 包含尺寸下限、魔数、尺寸越界、缓冲区截断等严格防御性检查；针对大端字节序按 `(b[0] << 8) | b[1]` 规范解码。
+2. **离线构建管线数据抽取 (`tools/build_playable_content.py`)**:
+   - 遵循 D 线纪律（`04-storage-schema.md` §7.1、`backlog/02-deferred-scope.md` §3）：“终点是构建管线 bundle，不直接在运行时动态读几千个原始 txt”；
+   - 实现 `extract_floor_100_npcs`：全量扫描 `csa8.0/gmsv/data/npc` 下 71 个 create 文件，解析并抽取 Floor 100 对应的 107 个配置块：
+     - 59 个 `npcgen_warp` 传送点（含萨姆吉尔、玛丽那丝、柯奥、达那、迷宫与副本入口）；
+     - 48 个 NPC 实体：SignBoard（告示牌）、Dengon（留言板）、WarpMan（传送员）、Shop（道具商店）、WindowHealer（恢复员）、ExChangeMan（任务使者）、TownPeople（长毛象客运向导）；
+     - 解析引用的 `.arg` 脚本，抽取对白、标题、目的地、买卖倍率、`itemset6.txt` 关联商品（采石权利书 2475-2477）以及任务条件；
+   - 生成具有确定性排序与哈希可重现性的 `world.json` 与 `manifest.json`，同步产出双端 assets。
+3. **运行时原子装载对接 (`src/main.cpp`)**:
+   - 在 `configureContent` 中解析 `bundle.world` 的 `"warp_points"` 并调用 `world.loadWarpPoints(...)`；
+   - 解析 `"npcs"` 实体列表，将各类 NPC 映射至 `NpcEntity` 并调用 `world.loadNpcEntities(...)`；
+   - 对 `ExChangeMan` 的任务脚本直接复用已验证的 `parseExChangeBlocks` 原生解析器。
+4. **跨图传送与单场景解耦 (`src/world/World.cpp`)**:
+   - 重构 `kCharLoop` 中 Warp 传送触发逻辑，复用统一的 `warpPlayer` 实现；
+   - 修复跨图传送判定：同图（`dst_floor == p->floor`）校验当前图元通行性，跨图（`dst_floor != p->floor`）由目标图管辖，解除对异图坐标在本地图上的越界阻断。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 72 增至 **74**（+2 组大型实战用例），断言数从 1843 增至 **1896**（+53 断言）。
+- **原生 LS2MAP 二进制解析用例**:
+  - 防御性异常覆盖：空缓冲、短头截断（43 字节）、错误魔数（"LS1MAP"）、宽高为 0、数据段截断（少 1 字节）；
+  - 内存缓冲区大端解码正确性验证；
+  - 本地真实 `sainasu` 地图文件全量加载验证（id=100, 800x800, 640,000 tiles, 640,000 objs, `(643, 459)` 界内判定）。
+- **萨伊那斯 Floor 100 传送点与 NPC 端到端验证**:
+  - 装载 59 个传送点与 48 个 NPC 实体；
+  - 玩家向东跨步触发 (638, 491) 传送点，成功瞬移至 (1000, 50, 116)；
+  - 玩家面对 (728, 501) 告示牌交互，成功获取并弹窗《第1检查点》告示正文；
+  - 玩家面对 (343, 464) 医院恢复员交互，受损 HP/MP 成功全额回复。
+- **反向验证 (RV-1)**: 反转 `parseLs2Map` 魔数校验逻辑（`memcmp == 0` 返回 nullopt）⇒ `原生 LS2MAP 地图解析` 报红致命错误；恢复后回绿。
+- **反向验证 (RV-2)**: 故意跳过 `world.loadWarpPoints` 注入 ⇒ 传送触发断言报红（未瞬移，停留在 (100, 638, 491)）；恢复后回绿。
+- **全套静态守卫**: 22 项 ctest 全量绿灯，`ci_verify.py` 全部 6 项门禁通过。
+
+
 
 
 
