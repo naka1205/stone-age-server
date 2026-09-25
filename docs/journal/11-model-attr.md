@@ -686,3 +686,31 @@ r"^(?P<loc>[^\n:]+:\d+:\d+):\s*(?:error|warning):\s*THIS-WORDING-NO-LONGER-MATCH
 - 前推 tag `shared-v0.36.0`，客户端换 pin 并同步通过全量测试，零告警零漂移。
 
 ---
+
+### 9.0.83 批次 P.2 —— 属性点分配系统: SKILLUP 消费与四维加点闭环 (2026-09-25)
+
+> **本批聚焦**: 承接 9.0.82 (批次 P.1) 升级赋予未分配属性点（`skillup_points += 3`）之后，落地完整的属性点分配（SkillUp / 加点）系统。
+> 1:1 移植原版 `CHAR_SkillUp` (`char/char.c:2550-2660`) 与网络指令 `lssproto_SKUP_recv` (`callfromcli.c:706-720`)。提供定点数比例换算（1 点 = 100 单位）、非战斗/非阵亡安全门禁、多点批量分配，以及加点后即时重算战斗三围（`deriveEquippedStats`）与生命上限/当前生命值自适应调整闭环。
+
+#### ① 核心真源与领域规则兑现
+1. **加点分配比例与纯函数 (`shared/rules/Progression.h` / `Progression.cpp`)**:
+   - `StatCategory` 强类型枚举映射四维：`kVital = 0` (体力), `kStr = 1` (腕力), `kTough = 2` (耐力), `kDex = 3` (敏捷/速度)（对应原版 `SkUpTbl[]`）。
+   - `applyStatAllocation` 纯函数：严格保持定点数换算（`1 属性点 = 100 内部数值`，`char.c:2645`）。
+   - 契约约束：`points_to_allocate >= 1` 且 `skillup_points >= points_to_allocate`，属性类别有效，非法输入保持数值不可变并返回 `success = false`。
+2. **世界运行时与安全门禁 (`src/world/World.cpp` / `Api.h`)**:
+   - 暴露 `World::allocateStatPoint(SessionId, StatCategory, int points = 1)` 与整数重载。
+   - 安全校验：必须非战斗状态（`inBattle == false`，`callfromcli.c:714`）、非阵亡状态（`player->hp > 0`，`char.c:2553`）、会话实体有效且剩余点数充足。
+   - 状态即时重算与生命调整（`CHAR_complianceParameter`, `char.c:3868`）：
+     - 加点生效后立即扣减 `skillup_points` 并累加对应四维；
+     - 结合穿戴装备加成即时推导新战斗三围；
+     - 体力（Vital）增加引发最大生命提升时，原处于满血状态的玩家平滑保持满血，其他情况钳位在新生命上限内。
+   - 顺手补齐 `equipItem` / `unequipItem` 穿脱装备时的生命与法力上限即时合规校验（`CHAR_complianceParameter`）。
+3. **只读观察面扩展 (`world/Api.h`)**:
+   - 提供 `playerVital(session)`, `playerStr(session)`, `playerTough(session)`, `playerDex(session)` 四维公开观察接口，杜绝外部越权修改内部四维。
+
+#### ② 验证与工程纪律
+- 服务端 22 项全量 CTest 100% 通过（`rules_progression` 增补四维换算、多点分配与越界保护单元测试；`world_map` 增补战斗升级后战斗中拦截、战斗后多维加点与点数耗尽保护全链路集成测试）。
+- 反向验证：故意篡改四维期望断言验证确实报错转红，恢复后重新回绿。
+- `ci_verify.py` 全量通过（6/6 项全绿）。
+
+---

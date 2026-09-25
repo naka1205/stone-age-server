@@ -702,4 +702,28 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 - **守卫闭环**:
   - 服务端打附注 tag `shared-v0.36.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.36.0`，消除 D2 漂移告警，保持双端 CI 100% 绿灯。
 
+---
+
+### 9.0.83b ★ 推送窗口执行记录 —— `shared-v0.37.0`(2026-09-25)
+
+> **本窗口前推范围**: 批次 P.2 属性点分配系统（§9.0.83），涉及 `shared/rules/Progression.h` / `Progression.cpp` 与 `tests/RulesProgressionTest.cpp`。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `shared-v0.37.0`(**附注** tag，subject「release: shared-v0.37.0 (batch P.2 stat allocation / skillup system)」) |
+| client master | pin v0.36.0 → **v0.37.0**(`cmake/SaShared.cmake`) |
+| client 本机 ci_verify | **8 项全过**(清洁构建 · 锁定 ref 与源码一致 · shared/ 与锁定 ref 一致无漂移 · 7 条全部注册 · ctest 7/7) |
+| server 本机 ci_verify | **6 项全过**(22 条全部注册 · ctest 22/22 · 断言防线反向验证通过) |
+| 两端用例集一致性 | D2「一份规则两端编译」本批闭环 |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/rules/Progression.h` / `Progression.cpp`: 增加四维属性枚举 `StatCategory`、分配计算结果结构体 `StatAllocationResult`、属性加点纯函数 `applyStatAllocation`（1 点 = 100 定点数换算、安全校验边界）。
+  - `tests/RulesProgressionTest.cpp`: 增加属性加点纯函数测试用例（四维换算比例、多点分配、点数不足与非法参数保护）。
+- **守卫闭环**:
+  - 服务端打附注 tag `shared-v0.37.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.37.0`，消除 D2 漂移告警，保持双端 CI 100% 绿灯。
+
 

@@ -1258,6 +1258,18 @@ class World final : public SA::Net::TransportEvents,
 	int playerMp(SA::Net::SessionId session) const;
 	int playerLevel(SA::Net::SessionId session) const;
 	int playerSkillupPoints(SA::Net::SessionId session) const;
+	int playerVital(SA::Net::SessionId session) const;
+	int playerStr(SA::Net::SessionId session) const;
+	int playerTough(SA::Net::SessionId session) const;
+	int playerDex(SA::Net::SessionId session) const;
+
+	// ── 属性点分配 (批次 P.2)────────────────────────────────────────────
+	// 将角色升级未分配点数分配至指定四维属性 (原 CHAR_SkillUp / lssproto_SKUP_recv)。
+	// category: 0:Vital, 1:Str, 2:Tough, 3:Dex (对应 StatCategory)
+	// 校验: 会话有效、非阵亡 (hp > 0)、非战斗中、未分配点数 >= points 且 points >= 1。
+	// 生效: 扣减 skillup_points，增加对应四维 (1点 = 100)，即时重算战斗三围并调整生命值。
+	bool allocateStatPoint(SA::Net::SessionId session, SA::Rules::StatCategory category, int points = 1);
+	bool allocateStatPoint(SA::Net::SessionId session, int stat_index, int points = 1);
 
 	// ── 装备穿戴与属性 (批次 P.1)────────────────────────────────────────
 	// 将背包栏 [kStartItemArray, kMaxItemHave) 中的道具穿戴至装备栏 [0, kStartItemArray)。

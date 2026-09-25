@@ -332,4 +332,57 @@ std::int32_t getEquipSlotForCategory(std::int32_t category) noexcept
 	}
 }
 
+// ══ 属性点分配系统 (批次 P.2)═════════════════════════════════════════
+
+StatAllocationResult applyStatAllocation(std::int32_t vital, std::int32_t str,
+                                         std::int32_t tough, std::int32_t dex,
+                                         std::int32_t skillup_points,
+                                         StatCategory category,
+                                         std::int32_t points_to_allocate) noexcept
+{
+	StatAllocationResult res{};
+	res.remaining_skillup_points = skillup_points;
+	res.new_vital = vital;
+	res.new_str = str;
+	res.new_tough = tough;
+	res.new_dex = dex;
+
+	if (points_to_allocate <= 0 || skillup_points < points_to_allocate)
+	{
+		res.success = false;
+		return res;
+	}
+
+	const auto cat_val = static_cast<std::uint8_t>(category);
+	if (cat_val > static_cast<std::uint8_t>(StatCategory::kDex))
+	{
+		res.success = false;
+		return res;
+	}
+
+	const std::int32_t delta = points_to_allocate * 100;
+	switch (category)
+	{
+	case StatCategory::kVital:
+		res.new_vital += delta;
+		break;
+	case StatCategory::kStr:
+		res.new_str += delta;
+		break;
+	case StatCategory::kTough:
+		res.new_tough += delta;
+		break;
+	case StatCategory::kDex:
+		res.new_dex += delta;
+		break;
+	default:
+		res.success = false;
+		return res;
+	}
+
+	res.remaining_skillup_points -= points_to_allocate;
+	res.success = true;
+	return res;
+}
+
 } // namespace SA::Rules

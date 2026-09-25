@@ -505,3 +505,84 @@ TEST_CASE("装备槽位:道具分类至装备部位映射正确")
 	CHECK(getEquipSlotForCategory(24) == 8);   // ITEM_WBELT -> Belt (8)
 	CHECK(getEquipSlotForCategory(999) == -1); // 非装备 -> -1
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  13. 属性点分配系统 (CHAR_SkillUp, char.c:2550-2660, 批次 P.2)
+// ═══════════════════════════════════════════════════════════════════════════
+TEST_CASE("属性点分配:四维换算比例与越界校验")
+{
+	// 初始状态: 四维各 1000 (10 点实际属性), 未分配点数 5
+	const std::int32_t init_v = 1000;
+	const std::int32_t init_s = 1000;
+	const std::int32_t init_t = 1000;
+	const std::int32_t init_d = 1000;
+	const std::int32_t points = 5;
+
+	// 1. 分配体力 (kVital): 1 点 = +100 定点数
+	{
+		const auto res = applyStatAllocation(init_v, init_s, init_t, init_d, points, StatCategory::kVital, 1);
+		CHECK(res.success);
+		CHECK(res.remaining_skillup_points == 4);
+		CHECK(res.new_vital == 1100);
+		CHECK(res.new_str == 1000);
+		CHECK(res.new_tough == 1000);
+		CHECK(res.new_dex == 1000);
+	}
+
+	// 2. 分配力量 (kStr): 2 点 = +200 定点数
+	{
+		const auto res = applyStatAllocation(init_v, init_s, init_t, init_d, points, StatCategory::kStr, 2);
+		CHECK(res.success);
+		CHECK(res.remaining_skillup_points == 3);
+		CHECK(res.new_vital == 1000);
+		CHECK(res.new_str == 1200);
+		CHECK(res.new_tough == 1000);
+		CHECK(res.new_dex == 1000);
+	}
+
+	// 3. 分配耐力 (kTough): 1 点 = +100 定点数
+	{
+		const auto res = applyStatAllocation(init_v, init_s, init_t, init_d, points, StatCategory::kTough, 1);
+		CHECK(res.success);
+		CHECK(res.remaining_skillup_points == 4);
+		CHECK(res.new_vital == 1000);
+		CHECK(res.new_str == 1000);
+		CHECK(res.new_tough == 1100);
+		CHECK(res.new_dex == 1000);
+	}
+
+	// 4. 分配速度 (kDex): 3 点 = +300 定点数
+	{
+		const auto res = applyStatAllocation(init_v, init_s, init_t, init_d, points, StatCategory::kDex, 3);
+		CHECK(res.success);
+		CHECK(res.remaining_skillup_points == 2);
+		CHECK(res.new_vital == 1000);
+		CHECK(res.new_str == 1000);
+		CHECK(res.new_tough == 1000);
+		CHECK(res.new_dex == 1300);
+	}
+
+	// 5. 校验边界: 点数不足时分配失败且数值不变
+	{
+		const auto res = applyStatAllocation(init_v, init_s, init_t, init_d, points, StatCategory::kStr, 6);
+		CHECK_FALSE(res.success);
+		CHECK(res.remaining_skillup_points == 5);
+		CHECK(res.new_vital == init_v);
+		CHECK(res.new_str == init_s);
+	}
+
+	// 6. 校验边界: 非法点数 (0 或负数)
+	{
+		const auto res0 = applyStatAllocation(init_v, init_s, init_t, init_d, points, StatCategory::kStr, 0);
+		CHECK_FALSE(res0.success);
+		const auto res_neg = applyStatAllocation(init_v, init_s, init_t, init_d, points, StatCategory::kStr, -1);
+		CHECK_FALSE(res_neg.success);
+	}
+
+	// 7. 校验边界: 非法属性类别
+	{
+		const auto res = applyStatAllocation(init_v, init_s, init_t, init_d, points, static_cast<StatCategory>(99), 1);
+		CHECK_FALSE(res.success);
+		CHECK(res.remaining_skillup_points == 5);
+	}
+}

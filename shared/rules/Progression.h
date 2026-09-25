@@ -228,6 +228,43 @@ DerivedStats deriveEquippedStats(std::int32_t vital, std::int32_t str,
 // 返回: 0..8 对应的装备位下标 (0:Head, 1:Body, 2:Arm, 3:Shield, 4:Deco1, 6:Shoes, 7:Glove, 8:Belt)，无法穿戴返回 -1。
 std::int32_t getEquipSlotForCategory(std::int32_t category) noexcept;
 
+// ══ 属性点分配系统 (批次 P.2)═════════════════════════════════════════
+
+// 四维属性类别 (原 SkUpTbl[] = { CHAR_VITAL, CHAR_STR, CHAR_TOUGH, CHAR_DEX }, char/char.c:2556)。
+enum class StatCategory : std::uint8_t
+{
+	kVital = 0, // 0: 体力 (CHAR_VITAL)
+	kStr = 1,   // 1: 腕力/力量 (CHAR_STR)
+	kTough = 2, // 2: 耐力 (CHAR_TOUGH)
+	kDex = 3    // 3: 速度/敏捷 (CHAR_DEX)
+};
+
+// 属性点分配计算结果。
+struct StatAllocationResult
+{
+	bool success = false;
+	std::int32_t remaining_skillup_points = 0;
+	std::int32_t new_vital = 0;
+	std::int32_t new_str = 0;
+	std::int32_t new_tough = 0;
+	std::int32_t new_dex = 0;
+};
+
+// 属性点分配纯函数。
+// 1:1 移植 CHAR_SkillUp 核心计算段 (char/char.c:2550-2660)。
+// 换算规则: 1 属性点 = 100 内部定点数 (CHAR_getInt + points * 100)。
+//
+// 契约:
+//   ① points_to_allocate 必须 >= 1，且 skillup_points >= points_to_allocate；
+//   ② category 必须在 [kVital, kDex] 范围内；
+//   ③ 校验不通过时返回 success = false，原数值保持不变；
+//   ④ 校验通过时返回 success = true，扣减技能点数，对应四维增加 points * 100。
+StatAllocationResult applyStatAllocation(std::int32_t vital, std::int32_t str,
+                                         std::int32_t tough, std::int32_t dex,
+                                         std::int32_t skillup_points,
+                                         StatCategory category,
+                                         std::int32_t points_to_allocate = 1) noexcept;
+
 } // namespace SA::Rules
 
 #endif // __SA_Progression_H__

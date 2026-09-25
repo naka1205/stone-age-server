@@ -6826,6 +6826,93 @@ int World::playerSkillupPoints(SA::Net::SessionId session) const
 	return p == nullptr ? -1 : static_cast<int>(p->skillup_points);
 }
 
+int World::playerVital(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : static_cast<int>(p->vital);
+}
+
+int World::playerStr(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : static_cast<int>(p->str);
+}
+
+int World::playerTough(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : static_cast<int>(p->tough);
+}
+
+int World::playerDex(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : static_cast<int>(p->dex);
+}
+
+bool World::allocateStatPoint(SA::Net::SessionId session, int stat_index, int points)
+{
+	if (stat_index < 0 || stat_index > 3)
+		return false;
+	return allocateStatPoint(session, static_cast<SA::Rules::StatCategory>(stat_index), points);
+}
+
+bool World::allocateStatPoint(SA::Net::SessionId session, SA::Rules::StatCategory category, int points)
+{
+	if (points <= 0)
+		return false;
+
+	Impl &s = *_impl;
+	if (s.inBattle(session))
+		return false; // 战斗中禁止加点 (callfromcli.c:714)
+
+	SA::Model::Player *player = s.players.resolve(s.player_of_session.find(session));
+	if (player == nullptr)
+		return false;
+
+	if (player->hp <= 0)
+		return false; // 阵亡状态禁止加点 (char.c:2553)
+
+	if (player->skillup_points < points)
+		return false; // 点数不足
+
+	const auto old_equip = playerEquipModifiers(session);
+	const auto old_stats = SA::Rules::deriveEquippedStats(player->vital, player->str, player->tough, player->dex, old_equip);
+
+	const auto res = SA::Rules::applyStatAllocation(
+	    player->vital, player->str, player->tough, player->dex,
+	    player->skillup_points, category, points);
+	if (!res.success)
+		return false;
+
+	player->skillup_points = res.remaining_skillup_points;
+	player->vital = res.new_vital;
+	player->str = res.new_str;
+	player->tough = res.new_tough;
+	player->dex = res.new_dex;
+
+	// 重算战斗三围并调整 HP (char.c:2648 CHAR_complianceParameter)
+	const auto new_stats = SA::Rules::deriveEquippedStats(player->vital, player->str, player->tough, player->dex, old_equip);
+	if (category == SA::Rules::StatCategory::kVital)
+	{
+		if (player->hp >= old_stats.max_hp)
+			player->hp = new_stats.max_hp; // 原先满血时保持满血
+		else
+			player->hp = std::min(player->hp, new_stats.max_hp);
+	}
+	else
+	{
+		player->hp = std::min(player->hp, new_stats.max_hp);
+	}
+	player->hp = std::max(1, player->hp);
+
+	return true;
+}
+
 int World::petLevel(SA::Net::SessionId session, int pet_slot) const
 {
 	if (pet_slot < 0 || static_cast<std::size_t>(pet_slot) >= SA::Model::kMaxPetHave)
@@ -6889,6 +6976,11 @@ bool World::equipItem(SA::Net::SessionId session, int inventory_slot, int target
 	// 互换装备槽与背包槽
 	std::swap(p->items[static_cast<std::size_t>(inventory_slot)],
 	          p->items[static_cast<std::size_t>(target_slot)]);
+
+	// 重新校验生命值与法力值上限 (char.c:3892 CHAR_complianceParameter)
+	const auto eq_stats = SA::Rules::deriveEquippedStats(p->vital, p->str, p->tough, p->dex, playerEquipModifiers(session));
+	p->hp = std::max(1, std::min(p->hp, eq_stats.max_hp));
+	p->mp = std::max(0, std::min(p->mp, p->max_mp));
 	return true;
 }
 
@@ -6940,6 +7032,11 @@ bool World::unequipItem(SA::Net::SessionId session, int equip_slot, int target_i
 
 	p->items[static_cast<std::size_t>(target_inventory_slot)] = eq_handle;
 	p->items[static_cast<std::size_t>(equip_slot)] = SA::Model::kNullHandle;
+
+	// 重新校验生命值与法力值上限 (char.c:3892 CHAR_complianceParameter)
+	const auto eq_stats = SA::Rules::deriveEquippedStats(p->vital, p->str, p->tough, p->dex, playerEquipModifiers(session));
+	p->hp = std::max(1, std::min(p->hp, eq_stats.max_hp));
+	p->mp = std::max(0, std::min(p->mp, p->max_mp));
 	return true;
 }
 

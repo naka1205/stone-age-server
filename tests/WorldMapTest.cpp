@@ -4131,8 +4131,9 @@ TEST_CASE("成长与装备闭环: 装备穿脱、属性加成与战斗升级")
 	REQUIRE(f.world.battleCount() == 1);
 	const BattleId battle = 1;
 
-	// 处于战斗中时无法脱换装备
+	// 处于战斗中时无法脱换装备与分配属性点
 	CHECK_FALSE(f.world.unequipItem(id, 0));
+	CHECK_FALSE(f.world.allocateStatPoint(id, SA::Rules::StatCategory::kStr, 1));
 
 	for (int i = 0; i < 30; ++i)
 	{
@@ -4163,4 +4164,50 @@ TEST_CASE("成长与装备闭环: 装备穿脱、属性加成与战斗升级")
 	// 战斗结束后脱下装备恢复正常
 	REQUIRE(f.world.unequipItem(id, 0));
 	CHECK(f.world.playerEquipModifiers(id).modify_attack == 0);
+
+	// ── 3. 升级后属性点分配与四维即时生效 (批次 P.2) ───────────────────
+	const int initial_pts = f.world.playerSkillupPoints(id);
+	REQUIRE(initial_pts >= 3);
+	const int v0 = f.world.playerVital(id);
+	const int s0 = f.world.playerStr(id);
+	const int t0 = f.world.playerTough(id);
+	const int d0 = f.world.playerDex(id);
+	const int hp0 = f.world.playerHp(id);
+
+	// 非法参数拒绝
+	CHECK_FALSE(f.world.allocateStatPoint(id, SA::Rules::StatCategory::kStr, 0));
+	CHECK_FALSE(f.world.allocateStatPoint(id, SA::Rules::StatCategory::kStr, -1));
+	CHECK_FALSE(f.world.allocateStatPoint(id, SA::Rules::StatCategory::kStr, initial_pts + 1));
+	CHECK_FALSE(f.world.allocateStatPoint(id, 99, 1));
+
+	// 分配 1 点至力量 (Str): 力量 +100
+	REQUIRE(f.world.allocateStatPoint(id, SA::Rules::StatCategory::kStr, 1));
+	CHECK(f.world.playerSkillupPoints(id) == initial_pts - 1);
+	CHECK(f.world.playerStr(id) == s0 + 100);
+
+	// 分配 1 点至体力 (Vital): 体力 +100, 生命上限提升且保持满血
+	REQUIRE(f.world.allocateStatPoint(id, SA::Rules::StatCategory::kVital, 1));
+	CHECK(f.world.playerSkillupPoints(id) == initial_pts - 2);
+	CHECK(f.world.playerVital(id) == v0 + 100);
+	CHECK(f.world.playerHp(id) >= hp0);
+
+	// 分配 1 点至速度 (Dex): 速度 +100
+	REQUIRE(f.world.allocateStatPoint(id, SA::Rules::StatCategory::kDex, 1));
+	CHECK(f.world.playerSkillupPoints(id) == initial_pts - 3);
+	CHECK(f.world.playerDex(id) == d0 + 100);
+
+	// 分配至耐力 (Tough) 使用整数下标重载 (stat_index = 2)
+	const int remaining = f.world.playerSkillupPoints(id);
+	if (remaining > 0)
+	{
+		REQUIRE(f.world.allocateStatPoint(id, 2, 1));
+		CHECK(f.world.playerTough(id) == t0 + 100);
+		CHECK(f.world.playerSkillupPoints(id) == remaining - 1);
+	}
+
+	// 点数耗尽后无法继续分配
+	if (f.world.playerSkillupPoints(id) == 0)
+	{
+		CHECK_FALSE(f.world.allocateStatPoint(id, SA::Rules::StatCategory::kTough, 1));
+	}
 }
