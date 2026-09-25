@@ -182,6 +182,36 @@ void configureContent(SA::World::World &world, const SA::Content::Bundle &bundle
 	}
 	world.loadEncounterTables(std::move(areas), std::move(groups), std::move(encounters), std::move(templates));
 
+	if (const auto *floors_val = bundle.world.find("floors"); floors_val && floors_val->isArray())
+	{
+		for (const auto &item : floors_val->asArray())
+		{
+			if (!item.isObject())
+				continue;
+			const auto *fid_val = item.find("floor");
+			const auto *w_val = item.find("width");
+			const auto *h_val = item.find("height");
+			const auto *walk_val = item.find("walkable");
+			if (!fid_val || !w_val || !h_val || !walk_val)
+				continue;
+			const auto fid = integer(*fid_val);
+			const auto w = integer(*w_val);
+			const auto h = integer(*h_val);
+			const auto walk_b64 = text(*walk_val);
+			if (w <= 0 || h <= 0 || w > 2048 || h > 2048)
+				continue;
+			const auto decoded = SA::World::decodeBase64(walk_b64);
+			if (decoded.size() != static_cast<std::size_t>(w * h))
+				continue;
+			SA::World::GridMap fl_map;
+			fl_map.width = w;
+			fl_map.height = h;
+			fl_map.tile.assign(decoded.size(), 1);
+			fl_map.obj.assign(decoded.begin(), decoded.end());
+			world.loadFloorMap(fid, std::move(fl_map));
+		}
+	}
+
 	if (const auto *warps_val = bundle.world.find("warp_points"); warps_val && warps_val->isArray())
 	{
 		std::vector<SA::World::WarpPoint> warp_points;

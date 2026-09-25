@@ -3518,12 +3518,17 @@ TEST_CASE("真实地图数据接入:萨伊那斯 Floor 100 传送点与 NPC 端�
 	const auto *warps_val = bundle.world.find("warp_points");
 	REQUIRE(warps_val != nullptr);
 	REQUIRE(warps_val->isArray());
-	CHECK_EQ(warps_val->asArray().size(), 59);
+	CHECK_EQ(warps_val->asArray().size(), 164);
 
 	const auto *npcs_val = bundle.world.find("npcs");
 	REQUIRE(npcs_val != nullptr);
 	REQUIRE(npcs_val->isArray());
-	CHECK_EQ(npcs_val->asArray().size(), 48);
+	CHECK_EQ(npcs_val->asArray().size(), 254);
+
+	const auto *floors_val = bundle.world.find("floors");
+	REQUIRE(floors_val != nullptr);
+	REQUIRE(floors_val->isArray());
+	CHECK_EQ(floors_val->asArray().size(), 4);
 
 	// 1. 初始化世界地图
 	SA::Platform::ServerConfig config = makeMoveConfig();
@@ -3556,7 +3561,25 @@ TEST_CASE("真实地图数据接入:萨伊那斯 Floor 100 传送点与 NPC 端�
 
 	world.configurePlayable(std::move(map), std::move(attributes), bundle.version, defaults);
 
-	// 装载 59 个传送点
+	// 装载 4 大村庄地图 (批次 D.2)
+	for (const auto &item : floors_val->asArray())
+	{
+		const auto fid = SA::Content::integer(*item.find("floor"));
+		const auto w = SA::Content::integer(*item.find("width"));
+		const auto h = SA::Content::integer(*item.find("height"));
+		const auto walk_b64 = SA::Content::text(*item.find("walkable"));
+		const auto decoded = SA::World::decodeBase64(walk_b64);
+		CHECK_EQ(decoded.size(), static_cast<std::size_t>(w * h));
+		GridMap fl_map;
+		fl_map.width = w;
+		fl_map.height = h;
+		fl_map.tile.assign(decoded.size(), 1);
+		fl_map.obj.assign(decoded.begin(), decoded.end());
+		world.loadFloorMap(fid, std::move(fl_map));
+	}
+	CHECK_EQ(world.floorMapCount(), 4);
+
+	// 装载 164 个传送点
 	std::vector<WarpPoint> warp_points;
 	for (const auto &item : warps_val->asArray())
 	{
@@ -3576,9 +3599,9 @@ TEST_CASE("真实地图数据接入:萨伊那斯 Floor 100 传送点与 NPC 端�
 		warp_points.push_back(wp);
 	}
 	world.loadWarpPoints(warp_points);
-	CHECK_EQ(world.warpPointCount(), 59);
+	CHECK_EQ(world.warpPointCount(), 164);
 
-	// 装载 48 个 NPC
+	// 装载 254 个 NPC
 	std::vector<NpcEntity> npcs;
 	for (const auto &item : npcs_val->asArray())
 	{
@@ -3683,7 +3706,7 @@ TEST_CASE("真实地图数据接入:萨伊那斯 Floor 100 传送点与 NPC 端�
 		npcs.push_back(std::move(npc));
 	}
 	world.loadNpcEntities(npcs);
-	CHECK_EQ(world.npcCount(), 48);
+	CHECK_EQ(world.npcCount(), 254);
 
 	// 2. 玩家在 (643, 459) 生成，移动至 (637, 491)，向东走一步踩上传送点 (638, 491)
 	const auto id = transport.connect();
@@ -3713,6 +3736,22 @@ TEST_CASE("真实地图数据接入:萨伊那斯 Floor 100 传送点与 NPC 端�
 	CHECK_EQ(warped_pos.floor, 1000);
 	CHECK_EQ(warped_pos.x, 50);
 	CHECK_EQ(warped_pos.y, 116);
+
+	// 推进时钟推进一个步频周期 (300ms)
+	clock.advance(300);
+
+	// 向西走一步 'g'，踩入 (49, 116)，触发反向传送回到萨伊那斯 (100, 637, 491)
+	SA::Domain::WalkRequest walk_back{};
+	walk_back.x = warped_pos.x;
+	walk_back.y = warped_pos.y;
+	REQUIRE(walk_back.direction.assign("g"));
+	world.onWalk(id, walk_back);
+	world.tick();
+
+	const auto return_pos = world.playerPos(id);
+	CHECK_EQ(return_pos.floor, 100);
+	CHECK_EQ(return_pos.x, 637);
+	CHECK_EQ(return_pos.y, 491);
 
 	// 3. 告示牌 NPC 交互验证: 位于 (728, 501)
 	// 将玩家置于 (728, 500) 面对 (728, 501) (向南 dir 4)
@@ -3746,4 +3785,288 @@ TEST_CASE("真实地图数据接入:萨伊那斯 Floor 100 传送点与 NPC 端�
 
 	CHECK_EQ(world.playerHp(id), 46);
 	CHECK_EQ(world.playerMp(id), 100);
+}
+
+TEST_CASE("四大村庄多地图管理、跨图视野隔离与真实村庄服务交互 (批次 D.2)")
+{
+	SUBCASE("Base64 编解码器正确性与防御性边界")
+	{
+		// 空输入
+		CHECK(SA::World::decodeBase64("").empty());
+		// 标准 RFC 4648 向量
+		const auto decoded_man = SA::World::decodeBase64("TWFu");
+		CHECK_EQ(std::string(decoded_man.begin(), decoded_man.end()), "Man");
+		// 填充处理 (padding)
+		const auto decoded_bc = SA::World::decodeBase64("YmM=");
+		CHECK_EQ(std::string(decoded_bc.begin(), decoded_bc.end()), "bc");
+		const auto decoded_a = SA::World::decodeBase64("YQ==");
+		CHECK_EQ(std::string(decoded_a.begin(), decoded_a.end()), "a");
+		// 忽略空白与换行
+		const auto decoded_ws = SA::World::decodeBase64("  TW  \nFu  \r\n");
+		CHECK_EQ(std::string(decoded_ws.begin(), decoded_ws.end()), "Man");
+	}
+
+	SUBCASE("四大村庄地图加载与跨地图视野隔离实测")
+	{
+		SA::Platform::ServerConfig config = makeMoveConfig();
+		SA::Platform::ManualClock clock{0};
+		SA::Platform::Logger logger{SA::Platform::LogLevel::kError};
+		SA::Platform::RandomSource random{0x123456};
+		SA::Net::LoopbackTransport transport{};
+		World world{config, clock, logger, random, transport};
+
+		// 默认主地图 (Floor 100, 64x64)
+		GridMap main_map = makeFixtureMap(64, 64);
+		TileAttrTable attr = makeFixtureAttr();
+		SA::Domain::CharacterRecord defs{};
+		defs.schema_ver = 1;
+		defs.player.level = 1;
+		defs.player.floor = 100;
+		defs.player.x = 20;
+		defs.player.y = 20;
+		world.configurePlayable(std::move(main_map), std::move(attr), "test-v1", defs);
+
+		// 注册村庄地图: Floor 1000 (160x160), Floor 2000 (150x150), Floor 3000 (150x150), Floor 4000 (150x150)
+		GridMap map1000 = makeFixtureMap(160, 160);
+		GridMap map2000 = makeFixtureMap(150, 150);
+		GridMap map3000 = makeFixtureMap(150, 150);
+		GridMap map4000 = makeFixtureMap(150, 150);
+		world.loadFloorMap(1000, std::move(map1000));
+		world.loadFloorMap(2000, std::move(map2000));
+		world.loadFloorMap(3000, std::move(map3000));
+		world.loadFloorMap(4000, std::move(map4000));
+
+		CHECK_EQ(world.floorMapCount(), 4);
+		const auto *f1000 = world.findFloorMap(1000);
+		REQUIRE(f1000 != nullptr);
+		CHECK_EQ(f1000->width, 160);
+		CHECK_EQ(f1000->height, 160);
+
+		const auto *f2000 = world.findFloorMap(2000);
+		REQUIRE(f2000 != nullptr);
+		CHECK_EQ(f2000->width, 150);
+		CHECK_EQ(f2000->height, 150);
+
+		CHECK(world.findFloorMap(9999) == nullptr);
+
+		// 跨地图同坐标视野隔离测试:
+		// 玩家 A 登录在 Floor 100 的 (20, 20)
+		const auto id_a = transport.connect();
+		world.onSessionReady(id_a);
+		world.tick();
+
+		// 玩家 B 登录后传送至 Floor 1000 的 (20, 20)
+		const auto id_b = transport.connect();
+		world.onSessionReady(id_b);
+		world.tick();
+		auto *pb = world.playerForTest(id_b);
+		REQUIRE(pb != nullptr);
+		world.warpPlayerForTest(id_b, 1000, 20, 20);
+		world.tick();
+
+		VisMirror ma;
+		ma.feed(transport.sent(id_a));
+		// 校验 A 此时已经收到了 B 的 CharDisappear (因为 B 传送走了)
+		CHECK(std::find(ma.disappears.begin(), ma.disappears.end(), id_b) != ma.disappears.end());
+
+		VisMirror mb;
+		mb.feed(transport.sent(id_b));
+		// 校验 B 此时已经收到了 A 的 CharDisappear (因为 B 传送离开 Floor 100)
+		CHECK(std::find(mb.disappears.begin(), mb.disappears.end(), id_a) != mb.disappears.end());
+
+		// 清空当前镜像事件列表，重置观察窗口
+		ma.appears.clear();
+		ma.moves.clear();
+		ma.disappears.clear();
+		mb.appears.clear();
+		mb.moves.clear();
+		mb.disappears.clear();
+
+		// A 在 Floor 100 上移动，B 绝不会收到 A 的 CharMove 或 CharAppear
+		clock.advance(300);
+		SA::Domain::WalkRequest walk_a{};
+		walk_a.x = 20;
+		walk_a.y = 20;
+		REQUIRE(walk_a.direction.assign("c")); // 向东走一步
+		world.onWalk(id_a, walk_a);
+		world.tick();
+
+		ma.feed(transport.sent(id_a));
+		mb.feed(transport.sent(id_b));
+		// B 处于 Floor 1000，虽然坐标与 A 仅差 1 格，但分属不同 Floor，绝对收不到 A 的任何 CharMove 或 CharAppear！
+		CHECK(mb.moves.empty());
+		CHECK(mb.appears.empty());
+
+		// 同样，B 在 Floor 1000 上移动，A 绝对收不到 B 的任何 CharMove 或 CharAppear！
+		clock.advance(300);
+		SA::Domain::WalkRequest walk_b{};
+		walk_b.x = 20;
+		walk_b.y = 20;
+		REQUIRE(walk_b.direction.assign("c"));
+		world.onWalk(id_b, walk_b);
+		world.tick();
+
+		ma.feed(transport.sent(id_a));
+		mb.feed(transport.sent(id_b));
+		CHECK(ma.moves.empty());
+		CHECK(ma.appears.empty());
+	}
+
+	SUBCASE("加加村与卡鲁它那村 NPC 真实服务交互")
+	{
+		std::string content_dir;
+		for (const auto &p : {"content/p2-v1", "../content/p2-v1", "../../content/p2-v1"})
+		{
+			if (std::filesystem::exists(std::string(p) + "/manifest.json"))
+			{
+				content_dir = p;
+				break;
+			}
+		}
+		if (content_dir.empty())
+			return;
+
+		const auto bundle = SA::Content::load(content_dir, false);
+		SA::Platform::ServerConfig config = makeMoveConfig();
+		SA::Platform::ManualClock clock{0};
+		SA::Platform::Logger logger{SA::Platform::LogLevel::kError};
+		SA::Platform::RandomSource random{0xABCDEF};
+		SA::Net::LoopbackTransport transport{};
+		World world{config, clock, logger, random, transport};
+
+		GridMap map;
+		map.width = bundle.width;
+		map.height = bundle.height;
+		map.tile.assign(bundle.walkable.size(), 1);
+		map.obj.assign(bundle.walkable.begin(), bundle.walkable.end());
+		TileAttrTable attributes;
+		attributes.walkable = {WalkKind::kBlocked, WalkKind::kFree};
+
+		SA::Domain::CharacterRecord defaults{};
+		defaults.schema_ver = 1;
+		defaults.player.level = 1;
+		defaults.player.charm = 60;
+		defaults.player.mp = defaults.player.max_mp = 100;
+		defaults.player.hp = 100;
+		defaults.player.default_pet = -1;
+		defaults.player.floor = 100;
+		defaults.player.x = 643;
+		defaults.player.y = 459;
+		defaults.player.dir = 5;
+		defaults.player.image = 100000;
+		world.configurePlayable(std::move(map), std::move(attributes), bundle.version, defaults);
+
+		// 装载 4 大村庄
+		const auto *floors_val = bundle.world.find("floors");
+		REQUIRE(floors_val != nullptr);
+		for (const auto &item : floors_val->asArray())
+		{
+			const auto fid = SA::Content::integer(*item.find("floor"));
+			const auto w = SA::Content::integer(*item.find("width"));
+			const auto h = SA::Content::integer(*item.find("height"));
+			const auto walk_b64 = SA::Content::text(*item.find("walkable"));
+			const auto decoded = SA::World::decodeBase64(walk_b64);
+			GridMap fl_map;
+			fl_map.width = w;
+			fl_map.height = h;
+			fl_map.tile.assign(decoded.size(), 1);
+			fl_map.obj.assign(decoded.begin(), decoded.end());
+			world.loadFloorMap(fid, std::move(fl_map));
+		}
+
+		// 装载 NPC
+		const auto *npcs_val = bundle.world.find("npcs");
+		REQUIRE(npcs_val != nullptr);
+		std::vector<NpcEntity> npcs;
+		for (const auto &item : npcs_val->asArray())
+		{
+			NpcEntity npc;
+			if (const auto *nid = item.find("id"))
+				npc.id = static_cast<std::uint64_t>(SA::Content::integer(*nid));
+			if (const auto *fl = item.find("floor"))
+				npc.floor = SA::Content::integer(*fl);
+			if (const auto *x = item.find("x"))
+				npc.x = SA::Content::integer(*x);
+			if (const auto *y = item.find("y"))
+				npc.y = SA::Content::integer(*y);
+			if (const auto *dir = item.find("dir"))
+				npc.dir = static_cast<std::uint8_t>(SA::Content::integer(*dir));
+			if (const auto *img = item.find("image"))
+				npc.image = SA::Content::integer(*img);
+			if (const auto *nm = item.find("name"))
+				npc.name = SA::Content::text(*nm);
+			if (const auto *msg = item.find("message"))
+				npc.message = SA::Content::text(*msg);
+			if (const auto *st = item.find("sign_title"))
+				npc.sign_title = SA::Content::text(*st);
+			if (const auto *tp = item.find("type"); tp && tp->isString())
+			{
+				const auto &tstr = tp->asString();
+				if (tstr == "signboard")
+					npc.type = NpcType::kSignBoard;
+				else if (tstr == "shop")
+					npc.type = NpcType::kShop;
+				else if (tstr == "healer")
+					npc.type = NpcType::kHealer;
+				else
+					npc.type = NpcType::kOther;
+			}
+			if (const auto *prods = item.find("shop_products"); prods && prods->isArray())
+			{
+				for (const auto &p : prods->asArray())
+				{
+					ShopProduct sp;
+					if (const auto *pi = p.find("item_id"))
+						sp.item_id = SA::Content::integer(*pi);
+					if (const auto *pc = p.find("cost"))
+						sp.cost = SA::Content::integer(*pc);
+					if (const auto *pm = p.find("image_id"))
+						sp.image_id = static_cast<std::uint32_t>(SA::Content::integer(*pm));
+					if (const auto *pl = p.find("level"))
+						sp.level = static_cast<std::uint32_t>(SA::Content::integer(*pl));
+					if (const auto *pn = p.find("name"))
+						sp.name = SA::Content::text(*pn);
+					npc.shop_products.push_back(std::move(sp));
+				}
+			}
+			npcs.push_back(std::move(npc));
+		}
+		world.loadNpcEntities(npcs);
+
+		const auto id = transport.connect();
+		world.onSessionReady(id);
+		world.tick();
+
+		auto *player = world.playerForTest(id);
+		REQUIRE(player != nullptr);
+
+		// 1. 加加村 (Floor 3000)「多多的传言板」(SignBoard at 50, 62)
+		world.warpPlayerForTest(id, 3000, 50, 61);
+		world.tick();
+		player->dir = 4; // 面向南 (50, 62)
+
+		SA::Domain::EventRequest req{};
+		req.dir = 4;
+		req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+		req.seqno = 7001;
+		world.onEvent(id, req);
+		world.tick();
+
+		CHECK(world.playerHasActiveWindow(id));
+		CHECK_FALSE(world.playerLastWindowText(id).empty());
+
+		// 2. 卡鲁它那村 (Floor 4000)「特产品贩卖员」(Shop at 36, 70)
+		world.warpPlayerForTest(id, 4000, 36, 69);
+		world.tick();
+		player->dir = 4; // 面向南 (36, 70)
+
+		req.seqno = 7002;
+		world.onEvent(id, req);
+		world.tick();
+
+		CHECK(world.playerHasActiveWindow(id));
+		const auto win_opt = findLastWindowOpen(transport.sent(id));
+		REQUIRE(win_opt.has_value());
+		CHECK(win_opt->kind == SA::Domain::WindowKind::WINDOW_KIND_ITEM_SHOP);
+	}
 }

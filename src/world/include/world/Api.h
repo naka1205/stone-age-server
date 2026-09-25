@@ -128,6 +128,7 @@ struct Ls2MapInfo
 
 std::optional<Ls2MapInfo> parseLs2Map(std::span<const std::uint8_t> bytes);
 std::optional<Ls2MapInfo> loadLs2MapFile(const std::string &filepath);
+std::vector<std::uint8_t> decodeBase64(std::string_view text);
 
 // tick 的阶段。★ 顺序**照抄** 01 §3.1,连未实现的四步也占位 ——
 //   原版 mainloop() 的顺序是"整个服务端行为的骨架"(01 §2),
@@ -1022,6 +1023,12 @@ class World final : public SA::Net::TransportEvents,
 	                         std::vector<EnemyEncounter> encounters,
 	                         std::vector<EnemyTemplate> templates);
 
+	// 注入多地图(批次 D.2)—— 为指定 Floor 注册专属地图与独立视野索引。
+	// ⚠️★ 默认单图: 未显式注册的 Floor 自动回退至 configurePlayable 配置的主地图。
+	void loadFloorMap(std::int32_t floor_id, GridMap map);
+	const GridMap *findFloorMap(std::int32_t floor_id) const noexcept;
+	std::size_t floorMapCount() const noexcept;
+
 	// 注入世界刷怪点(批次 W.2)—— 让 `kNpcSpawn` 据它把敌人刷到地图上。
 	//
 	// ⚠️★ **默认空 ⇒ 世界里没有常驻怪** —— 现有走路 / 遇敌用例不注入即不受影响(同
@@ -1089,6 +1096,9 @@ class World final : public SA::Net::TransportEvents,
 
 	// 获取某会话背后的 Player 实体指针 (批次 W.9 测试注入 seam)
 	SA::Model::Player *playerForTest(SA::Net::SessionId session) noexcept;
+
+	// 供测试直接触发 warpPlayer 逻辑 (批次 D.2)
+	void warpPlayerForTest(SA::Net::SessionId session, std::int32_t floor, std::int32_t x, std::int32_t y);
 
 	// 向商店 NPC 出售指定背包槽位的道具 (批次 W.12, 移植 npc_itemshop.c 逻辑)
 	bool sellItemToShop(SA::Net::SessionId session, std::uint64_t npc_id, int slot);

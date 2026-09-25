@@ -2360,6 +2360,30 @@ struct World::Impl : GoldAuditSink
 	GridMap map = makeFixtureMap(64, 64);
 	TileAttrTable map_attr = makeFixtureAttr();
 
+	// ── 多地图与视野索引 (批次 D.2) ──────────────────────────────────
+	struct FloorState
+	{
+		std::int32_t floor_id = 0;
+		GridMap map{};
+		std::vector<std::vector<SA::Net::ConnectionId>> olink{};
+	};
+	std::unordered_map<std::int32_t, FloorState> floors{};
+
+	FloorState *getFloor(std::int32_t floor) noexcept
+	{
+		auto it = floors.find(floor);
+		if (it != floors.end())
+			return &it->second;
+		return nullptr;
+	}
+	const FloorState *getFloor(std::int32_t floor) const noexcept
+	{
+		auto it = floors.find(floor);
+		if (it != floors.end())
+			return &it->second;
+		return nullptr;
+	}
+
 	// ── 遇敌数据表(批次 W.4)────────────────────────────────────────────
 	//   ★ 默认空 ⇒ `findEncountArea` 恒返 -1 ⇒ 永不遇敌(现有走路用例不受影响)。
 	//     由 `loadEncounterTables` 注入(1.5 fixture / 阶段 2 D 线导入)。
@@ -2444,7 +2468,7 @@ struct World::Impl : GoldAuditSink
 	// ── 视野广播(里程碑②)。★ 作为成员而非自由函数:要访问 olink/conns/players 等私有状态,
 	//   而 conns 的 value(Conn)是 Impl 私有嵌套 ⇒ context struct(如 WorldWriteContext)装不下,
 	//   只能做成员。声明在此,定义在文件后半(「World::Impl 的视野广播方法」一节)。
-	std::vector<SA::Net::ConnectionId> collectVisible(std::int32_t cx, std::int32_t cy,
+	std::vector<SA::Net::ConnectionId> collectVisible(std::int32_t floor, std::int32_t cx, std::int32_t cy,
 	                                                  SA::Net::ConnectionId self) const;
 	template <typename M>
 	void sendTo(SA::Net::ConnectionId to, const M &msg);
@@ -2453,7 +2477,7 @@ struct World::Impl : GoldAuditSink
 	void broadcastMove(SA::Net::ConnectionId mover, std::int32_t ox, std::int32_t oy,
 	                   const SA::Model::Player &p);
 	void broadcastSpawn(SA::Net::ConnectionId who, const SA::Model::Player &p);
-	void broadcastDespawn(SA::Net::ConnectionId who, std::int32_t x, std::int32_t y);
+	void broadcastDespawn(SA::Net::ConnectionId who, std::int32_t floor, std::int32_t x, std::int32_t y);
 
 	// ── 世界敌人:生成 / 游荡 / 视野(批次 W.2 / W.3)──────────────────────────
 	//   ★ 都是 Impl 成员:要碰 enemies 池 / world_enemies / olink / 视野下行,自由函数装不下。
@@ -2467,13 +2491,13 @@ struct World::Impl : GoldAuditSink
 	// kCharLoop 非玩家段:条数制摊还,本 tick 最多处理 max_this_tick 只(到期的游荡一步)。
 	void wanderWorldEnemies(std::size_t max_this_tick);
 	// 收视野内玩家会话(★ 不排除 self)—— 敌人广播用(敌人无会话,无 self 可排)。
-	std::vector<SA::Net::ConnectionId> collectVisiblePlayers(std::int32_t cx,
+	std::vector<SA::Net::ConnectionId> collectVisiblePlayers(std::int32_t floor, std::int32_t cx,
 	                                                         std::int32_t cy) const;
 	// 敌人视野广播(★ 单向:敌人无会话、不接收下行,只发给周围玩家;entity_type = ENTITY_ENEMY)。
 	void broadcastEnemySpawn(const SA::Model::Enemy &e, std::uint64_t eid);
 	void broadcastEnemyMove(const SA::Model::Enemy &e, std::uint64_t eid, std::int32_t ox,
 	                        std::int32_t oy);
-	void broadcastEnemyDespawn(std::int32_t x, std::int32_t y, std::uint64_t eid);
+	void broadcastEnemyDespawn(std::int32_t floor, std::int32_t x, std::int32_t y, std::uint64_t eid);
 	// 玩家移动 (ox,oy)→(p.x,p.y) 后,把视野**新进 / 离开**的世界敌人补 appear / disappear 给他。
 	//   ★ 这是"玩家看敌人"那一半(broadcastMove 只做了"玩家看玩家")。
 	void refreshEnemyView(SA::Net::ConnectionId viewer, const SA::Model::Player &p,
@@ -2621,19 +2645,27 @@ void World::Impl::warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std:
 	Conn &c = it->second;
 	c.walk_seq.clear(); // 清空剩余未走路径串 (CHAR_WORKWALKARRAY, char.c:4671)
 
+	const std::int32_t ofloor = p->floor;
 	const std::int32_t ox = p->x;
 	const std::int32_t oy = p->y;
 
-	// 1. 从旧格 olink 移除 (玩家刚从 ox, oy 走来)
-	if (map.inBounds(ox, oy))
+	// 1. 从旧格 olink 移除 (玩家刚从 ofloor 的 ox, oy 走来)
+	auto *old_fl = getFloor(ofloor);
+	const auto &old_map = old_fl ? old_fl->map : map;
+	auto &old_olink = old_fl ? old_fl->olink : olink;
+	if (old_map.inBounds(ox, oy))
 	{
-		auto &oldcell = olink[map.index(ox, oy)];
-		oldcell.erase(std::remove(oldcell.begin(), oldcell.end(), id),
-		              oldcell.end());
+		const auto idx = old_map.index(ox, oy);
+		if (idx < old_olink.size())
+		{
+			auto &oldcell = old_olink[idx];
+			oldcell.erase(std::remove(oldcell.begin(), oldcell.end(), id),
+			              oldcell.end());
+		}
 	}
 
 	// 2. 旧视野广播 Disappear (旧视野内其他玩家看到 id 消失, id 看到旧视野玩家消失)
-	const auto old_vis = collectVisible(ox, oy, id);
+	const auto old_vis = collectVisible(ofloor, ox, oy, id);
 	for (const SA::Net::ConnectionId b : old_vis)
 	{
 		SA::Domain::CharDisappear dis{};
@@ -2652,15 +2684,24 @@ void World::Impl::warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std:
 	p->y = dst_y;
 
 	// 4. 新格 olink 挂接
-	if (map.inBounds(p->x, p->y))
+	auto *new_fl = getFloor(dst_floor);
+	const auto &new_map = new_fl ? new_fl->map : map;
+	auto &new_olink = new_fl ? new_fl->olink : olink;
+	if (new_map.inBounds(p->x, p->y))
 	{
-		olink[map.index(p->x, p->y)].push_back(id);
+		const auto idx = new_map.index(p->x, p->y);
+		if (idx < new_olink.size())
+		{
+			new_olink[idx].push_back(id);
+		}
 	}
 
-	// 5. 新视野广播 Appear + 敌人/NPC 视野刷新 (旧出新进 diff)
+	// 5. 新视野广播 Appear + 敌人/NPC 视野刷新 (跨图传送时旧坐标设为 -1000 以全量刷新)
 	broadcastSpawn(id, *p);
-	refreshEnemyView(id, *p, ox, oy);
-	refreshNpcView(id, *p, ox, oy);
+	const std::int32_t ref_ox = (ofloor == dst_floor) ? ox : -1000;
+	const std::int32_t ref_oy = (ofloor == dst_floor) ? oy : -1000;
+	refreshEnemyView(id, *p, ref_ox, ref_oy);
+	refreshNpcView(id, *p, ref_ox, ref_oy);
 
 	// 6. 给玩家自身下发坐标同步 (CharMove)
 	SA::Domain::CharMove self_mv{};
@@ -3063,16 +3104,22 @@ SA::Domain::CharAppear makeEnemyAppear(std::uint64_t eid, const SA::Model::Enemy
 // 扫 (cx,cy) 周围 529 格的 olink,收集其中的玩家会话(除 self)。
 //   ★ 10 §5.3 决策5:先扫格 + 聚合,不做订阅(视野连续变化,订阅维护成本可能更高,
 //     留到有实测数据之后)。
-std::vector<SA::Net::ConnectionId> World::Impl::collectVisible(std::int32_t cx, std::int32_t cy,
+std::vector<SA::Net::ConnectionId> World::Impl::collectVisible(std::int32_t floor, std::int32_t cx, std::int32_t cy,
                                                                SA::Net::ConnectionId self) const
 {
 	std::vector<SA::Net::ConnectionId> out;
+	const auto *fl = getFloor(floor);
+	const auto &m = fl ? fl->map : map;
+	const auto &ol = fl ? fl->olink : olink;
 	for (std::int32_t j = cy - kSeeRadius; j <= cy + kSeeRadius; ++j)
 		for (std::int32_t i = cx - kSeeRadius; i <= cx + kSeeRadius; ++i)
 		{
-			if (!map.inBounds(i, j))
+			if (!m.inBounds(i, j))
 				continue;
-			for (const SA::Net::ConnectionId c : olink[map.index(i, j)])
+			const auto idx = m.index(i, j);
+			if (idx >= ol.size())
+				continue;
+			for (const SA::Net::ConnectionId c : ol[idx])
 				if (c != self)
 					out.push_back(c);
 		}
@@ -3104,8 +3151,8 @@ void World::Impl::appearBetween(SA::Net::ConnectionId a, const SA::Model::Player
 void World::Impl::broadcastMove(SA::Net::ConnectionId mover, std::int32_t ox, std::int32_t oy,
                                 const SA::Model::Player &p)
 {
-	const auto old_vis = collectVisible(ox, oy, mover);
-	const auto new_vis = collectVisible(p.x, p.y, mover);
+	const auto old_vis = collectVisible(p.floor, ox, oy, mover);
+	const auto new_vis = collectVisible(p.floor, p.x, p.y, mover);
 
 	SA::Domain::CharMove mv{};
 	mv.entity_id = mover;
@@ -3136,32 +3183,38 @@ void World::Impl::broadcastMove(SA::Net::ConnectionId mover, std::int32_t ox, st
 // 出生 / 进图:与视野内每个玩家双向 CharAppear(原版进图 CHAR_sendCToArroundCharacter)。
 void World::Impl::broadcastSpawn(SA::Net::ConnectionId who, const SA::Model::Player &p)
 {
-	for (const SA::Net::ConnectionId b : collectVisible(p.x, p.y, who))
+	for (const SA::Net::ConnectionId b : collectVisible(p.floor, p.x, p.y, who))
 		appearBetween(who, p, b);
 }
 
 // 离场 / 断线:给视野内每个玩家发 CharDisappear(who)。⚠️ 须在 olink 移除**之前**调(要 who 的位置)。
-void World::Impl::broadcastDespawn(SA::Net::ConnectionId who, std::int32_t x, std::int32_t y)
+void World::Impl::broadcastDespawn(SA::Net::ConnectionId who, std::int32_t floor, std::int32_t x, std::int32_t y)
 {
 	SA::Domain::CharDisappear dis{};
 	dis.entity_id = who;
-	for (const SA::Net::ConnectionId b : collectVisible(x, y, who))
+	for (const SA::Net::ConnectionId b : collectVisible(floor, x, y, who))
 		sendTo(b, dis);
 }
 
 // ══ 世界敌人:视野 / 生成 / 游荡(批次 W.2 / W.3)══════════════════════════════
 
 // 收视野内玩家会话(★ 不排除 self)。敌人无会话,没有"自己"要排 —— 与 collectVisible 的唯一区别。
-std::vector<SA::Net::ConnectionId> World::Impl::collectVisiblePlayers(std::int32_t cx,
+std::vector<SA::Net::ConnectionId> World::Impl::collectVisiblePlayers(std::int32_t floor, std::int32_t cx,
                                                                       std::int32_t cy) const
 {
 	std::vector<SA::Net::ConnectionId> out;
+	const auto *fl = getFloor(floor);
+	const auto &m = fl ? fl->map : map;
+	const auto &ol = fl ? fl->olink : olink;
 	for (std::int32_t j = cy - kSeeRadius; j <= cy + kSeeRadius; ++j)
 		for (std::int32_t i = cx - kSeeRadius; i <= cx + kSeeRadius; ++i)
 		{
-			if (!map.inBounds(i, j))
+			if (!m.inBounds(i, j))
 				continue;
-			for (const SA::Net::ConnectionId c : olink[map.index(i, j)])
+			const auto idx = m.index(i, j);
+			if (idx >= ol.size())
+				continue;
+			for (const SA::Net::ConnectionId c : ol[idx])
 				out.push_back(c);
 		}
 	return out;
@@ -3171,7 +3224,7 @@ std::vector<SA::Net::ConnectionId> World::Impl::collectVisiblePlayers(std::int32
 void World::Impl::broadcastEnemySpawn(const SA::Model::Enemy &e, std::uint64_t eid)
 {
 	const SA::Domain::CharAppear a = makeEnemyAppear(eid, e);
-	for (const SA::Net::ConnectionId b : collectVisiblePlayers(e.x, e.y))
+	for (const SA::Net::ConnectionId b : collectVisiblePlayers(e.floor, e.x, e.y))
 		sendTo(b, a);
 }
 
@@ -3179,8 +3232,8 @@ void World::Impl::broadcastEnemySpawn(const SA::Model::Enemy &e, std::uint64_t e
 void World::Impl::broadcastEnemyMove(const SA::Model::Enemy &e, std::uint64_t eid,
                                      std::int32_t ox, std::int32_t oy)
 {
-	const auto old_vis = collectVisiblePlayers(ox, oy);
-	const auto new_vis = collectVisiblePlayers(e.x, e.y);
+	const auto old_vis = collectVisiblePlayers(e.floor, ox, oy);
+	const auto new_vis = collectVisiblePlayers(e.floor, e.x, e.y);
 
 	SA::Domain::CharMove mv{};
 	mv.entity_id = eid;
@@ -3206,12 +3259,12 @@ void World::Impl::broadcastEnemyMove(const SA::Model::Enemy &e, std::uint64_t ei
 }
 
 // 敌人离开世界(被拉进战斗 / 死亡)⇒ 给视野内每个玩家发 CharDisappear。⚠️ 须在改位置**之前**调。
-void World::Impl::broadcastEnemyDespawn(std::int32_t x, std::int32_t y, std::uint64_t eid)
+void World::Impl::broadcastEnemyDespawn(std::int32_t floor, std::int32_t x, std::int32_t y, std::uint64_t eid)
 {
 	SA::Domain::CharDisappear dis{};
 	dis.entity_id = eid;
 	dis.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY);
-	for (const SA::Net::ConnectionId b : collectVisiblePlayers(x, y))
+	for (const SA::Net::ConnectionId b : collectVisiblePlayers(floor, x, y))
 		sendTo(b, dis);
 }
 
@@ -3291,8 +3344,8 @@ bool World::Impl::isNpcEngagedInDialog(std::uint64_t npc_id) const
 // NPC 移动一步广播 (批次 W.11, 视野扫格 diff: 一直可见→CharMove / 新进→CharAppear / 离开→CharDisappear)
 void World::Impl::broadcastNpcMove(const NpcEntity &npc, std::int32_t ox, std::int32_t oy)
 {
-	const auto old_vis = collectVisiblePlayers(ox, oy);
-	const auto new_vis = collectVisiblePlayers(npc.x, npc.y);
+	const auto old_vis = collectVisiblePlayers(npc.floor, ox, oy);
+	const auto new_vis = collectVisiblePlayers(npc.floor, npc.x, npc.y);
 
 	SA::Domain::CharMove mv{};
 	mv.entity_id = npc.id;
@@ -3426,14 +3479,16 @@ void World::Impl::wanderNpcs(std::size_t max_this_tick)
 			bool blocked = false;
 
 			// ① 地图通行门 (含斜向墙角保护)
-			if (!mapWalkable(map, map_attr, nx, ny))
+			const auto *npc_fl = getFloor(npc.floor);
+			const auto &npc_map = npc_fl ? npc_fl->map : map;
+			if (!mapWalkable(npc_map, map_attr, nx, ny))
 			{
 				blocked = true;
 			}
 			else if (kDirDelta[dir].dx != 0 && kDirDelta[dir].dy != 0)
 			{
-				if (!mapWalkable(map, map_attr, npc.x + kDirDelta[dir].dx, npc.y) ||
-				    !mapWalkable(map, map_attr, npc.x, npc.y + kDirDelta[dir].dy))
+				if (!mapWalkable(npc_map, map_attr, npc.x + kDirDelta[dir].dx, npc.y) ||
+				    !mapWalkable(npc_map, map_attr, npc.x, npc.y + kDirDelta[dir].dy))
 				{
 					blocked = true;
 				}
@@ -3605,8 +3660,10 @@ void World::Impl::wanderWorldEnemies(std::size_t max_this_tick)
 		adx = adx < 0 ? -adx : adx;
 		std::int32_t ady = ny - sp.y;
 		ady = ady < 0 ? -ady : ady;
+		const auto *e_fl = getFloor(e->floor);
+		const auto &e_map = e_fl ? e_fl->map : map;
 		const bool blocked_or_far =
-		    !mapWalkable(map, map_attr, nx, ny) ||
+		    !mapWalkable(e_map, map_attr, nx, ny) ||
 		    (sp.wander_radius >= 0 && (adx > sp.wander_radius || ady > sp.wander_radius));
 		if (!blocked_or_far)
 		{
@@ -4054,8 +4111,11 @@ void World::tick()
 		const std::int32_t ox = p->x;
 		const std::int32_t oy = p->y;
 		bool moved = false;
+		auto *fl = s.getFloor(p->floor);
+		const auto &cur_map = fl ? fl->map : s.map;
+		auto &cur_olink = fl ? fl->olink : s.olink;
 		if (decodeDirChar(c.walk_seq.front(), dir, is_turn))
-			moved = walkStep(*p, s.map, s.map_attr, dir, is_turn);
+			moved = walkStep(*p, cur_map, s.map_attr, dir, is_turn);
 		// ⚠️ 非法字符也消费掉,不卡住整串(原版 ctodirmode 不校验,越界由 VALIDATEDIR 兜)。
 		c.walk_seq.erase(c.walk_seq.begin());
 		c.next_walk_at_ms = s.now_ms + kWalkIntervalMs;
@@ -4086,26 +4146,48 @@ void World::tick()
 		if (moved)
 		{
 			const WarpPoint *wp = s.findWarpPoint(p->floor, p->x, p->y);
-			const bool same_floor = (wp != nullptr && wp->dst_floor == p->floor);
-			if (wp != nullptr &&
-			    (!same_floor || (s.map.inBounds(wp->dst_x, wp->dst_y) &&
-			                     mapWalkable(s.map, s.map_attr, wp->dst_x, wp->dst_y))))
+			if (wp != nullptr)
 			{
-				warped = true;
-				s.warpPlayer(kv.first, wp->dst_floor, wp->dst_x, wp->dst_y);
+				const bool same_floor = (wp->dst_floor == p->floor);
+				const auto *dst_fl = s.getFloor(wp->dst_floor);
+				const auto &dst_map = dst_fl ? dst_fl->map : s.map;
+				if (dst_fl != nullptr)
+				{
+					if (dst_map.inBounds(wp->dst_x, wp->dst_y) &&
+					    mapWalkable(dst_map, s.map_attr, wp->dst_x, wp->dst_y))
+					{
+						warped = true;
+						s.warpPlayer(kv.first, wp->dst_floor, wp->dst_x, wp->dst_y);
+					}
+				}
+				else if (!same_floor || (s.map.inBounds(wp->dst_x, wp->dst_y) &&
+				                         mapWalkable(s.map, s.map_attr, wp->dst_x, wp->dst_y)))
+				{
+					warped = true;
+					s.warpPlayer(kv.first, wp->dst_floor, wp->dst_x, wp->dst_y);
+				}
 			}
 		}
 
 		// 里程碑②:位置变了且未传送 ⇒ 更新 olink(旧格摘、新格挂)+ 视野广播(扫格 diff)。
 		if (moved && !warped)
 		{
-			if (s.map.inBounds(ox, oy))
+			if (cur_map.inBounds(ox, oy))
 			{
-				auto &oldcell = s.olink[s.map.index(ox, oy)];
-				oldcell.erase(std::remove(oldcell.begin(), oldcell.end(), kv.first),
-				              oldcell.end());
+				const auto idx = cur_map.index(ox, oy);
+				if (idx < cur_olink.size())
+				{
+					auto &oldcell = cur_olink[idx];
+					oldcell.erase(std::remove(oldcell.begin(), oldcell.end(), kv.first),
+					              oldcell.end());
+				}
 			}
-			s.olink[s.map.index(p->x, p->y)].push_back(kv.first);
+			if (cur_map.inBounds(p->x, p->y))
+			{
+				const auto idx = cur_map.index(p->x, p->y);
+				if (idx < cur_olink.size())
+					cur_olink[idx].push_back(kv.first);
+			}
 			s.broadcastMove(kv.first, ox, oy, *p);
 			// W.3:玩家移动后补发视野内**世界敌人**的 appear / disappear(玩家看敌人那一半)。
 			s.refreshEnemyView(kv.first, *p, ox, oy);
@@ -4557,6 +4639,11 @@ SA::Model::Player *World::playerForTest(SA::Net::SessionId session) noexcept
 	return _impl->players.resolve(_impl->player_of_session.find(session));
 }
 
+void World::warpPlayerForTest(SA::Net::SessionId session, std::int32_t floor, std::int32_t x, std::int32_t y)
+{
+	_impl->warpPlayer(session, floor, x, y);
+}
+
 std::size_t World::battleCount() const noexcept { return _impl->battles.size(); }
 
 std::size_t World::worldEnemyCount() const noexcept { return _impl->world_enemies.size(); }
@@ -4778,7 +4865,7 @@ bool World::triggerNpcEnemyBattle(SA::Net::SessionId session, std::size_t world_
 
 	// ── 从世界态移除 + 广播消失(原版明雷进战斗态即从地图消失)───────────────────
 	//   ⚠️ 先广播(用移除前的世界坐标)再 erase;broadcastEnemyDespawn 单向发给视野内玩家。
-	s.broadcastEnemyDespawn(ex, ey, encodeHandle(we.handle));
+	s.broadcastEnemyDespawn(enemy->floor, ex, ey, encodeHandle(we.handle));
 	s.world_enemies.erase(s.world_enemies.begin() +
 	                      static_cast<std::ptrdiff_t>(world_enemy_idx));
 	return true;
@@ -4919,11 +5006,18 @@ void World::removeSession(SA::Net::ConnectionId id)
 	if (SA::Model::Player *p = s.players.resolve(ph); p != nullptr)
 	{
 		// 里程碑②:先给视野内玩家发 CharDisappear + 从 olink 摘除(都要 p 的位置,须在释放前)。
-		s.broadcastDespawn(id, p->x, p->y);
-		if (s.map.inBounds(p->x, p->y))
+		s.broadcastDespawn(id, p->floor, p->x, p->y);
+		auto *fl = s.getFloor(p->floor);
+		const auto &cur_map = fl ? fl->map : s.map;
+		auto &cur_olink = fl ? fl->olink : s.olink;
+		if (cur_map.inBounds(p->x, p->y))
 		{
-			auto &cell = s.olink[s.map.index(p->x, p->y)];
-			cell.erase(std::remove(cell.begin(), cell.end(), id), cell.end());
+			const auto idx = cur_map.index(p->x, p->y);
+			if (idx < cur_olink.size())
+			{
+				auto &cell = cur_olink[idx];
+				cell.erase(std::remove(cell.begin(), cell.end(), id), cell.end());
+			}
 		}
 		for (std::size_t i = 0; i < SA::Model::kMaxPetHave; ++i)
 		{
@@ -5009,7 +5103,15 @@ void World::onSessionReady(SA::Net::SessionId id)
 					np->y = s.map.height / 2;
 				}
 				// 里程碑②:入 olink + 与视野内玩家双向 CharAppear(原版进图 sendCToArround)。
-				s.olink[s.map.index(np->x, np->y)].push_back(id);
+				auto *fl = s.getFloor(np->floor);
+				const auto &cur_map = fl ? fl->map : s.map;
+				auto &cur_olink = fl ? fl->olink : s.olink;
+				if (cur_map.inBounds(np->x, np->y))
+				{
+					const auto idx = cur_map.index(np->x, np->y);
+					if (idx < cur_olink.size())
+						cur_olink[idx].push_back(id);
+				}
 				s.broadcastSpawn(id, *np);
 				s.refreshEnemyView(id, *np, -1000, -1000);
 				s.refreshNpcView(id, *np, -1000, -1000);
@@ -5252,7 +5354,9 @@ void World::onWalk(SA::Net::SessionId id, const SA::Domain::WalkRequest &req)
 	// 碰撞预检(:552):声明的目标格不可走 ⇒ 忽略本次请求。
 	//   ⚠️ 原版拉回当前后仍排串(direction 串会走回合法处);我们更严:目标非法直接不排,
 	//      理由是 fixture 期无预测回滚需求,严格拒绝更好定位问题。真实客户端预测接入时再放宽。
-	if (!mapWalkable(s.map, s.map_attr, cx, cy))
+	const auto *fl = s.getFloor(p->floor);
+	const auto &cur_map = fl ? fl->map : s.map;
+	if (!mapWalkable(cur_map, s.map_attr, cx, cy))
 		return;
 
 	// 排走路串(walk_init:948 → walk_start:891 setWorkChar WALKARRAY)。
@@ -6395,7 +6499,18 @@ bool World::warpPlayerByNpc(SA::Net::SessionId id, std::uint64_t npc_id, std::si
 
 	// 目标坐标可通行门禁检查 (同层时校验目标格通行性, 跨层时由目标地图管辖, 移植 npc_warpman.c)
 	const bool same_floor = (dest.floor == p->floor);
-	if (same_floor && (!s.map.inBounds(dest.x, dest.y) || !mapWalkable(s.map, s.map_attr, dest.x, dest.y)))
+	const auto *dst_fl = s.getFloor(dest.floor);
+	const auto &dst_map = dst_fl ? dst_fl->map : s.map;
+	if (dst_fl != nullptr)
+	{
+		if (!dst_map.inBounds(dest.x, dest.y) || !mapWalkable(dst_map, s.map_attr, dest.x, dest.y))
+		{
+			s.sendExChangeWindow(id, npc->id, "目标地点暂时无法通行！",
+			                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+			return false;
+		}
+	}
+	else if (same_floor && (!s.map.inBounds(dest.x, dest.y) || !mapWalkable(s.map, s.map_attr, dest.x, dest.y)))
 	{
 		s.sendExChangeWindow(id, npc->id, "目标地点暂时无法通行！",
 		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
@@ -7571,7 +7686,15 @@ bool World::Impl::install(SA::Net::SessionId id, const SA::Domain::CharacterReco
 	conn.char_id = record.char_id;
 	conn.revision = record.revision;
 	conn.session->markOnline();
-	olink[map.index(player->x, player->y)].push_back(id);
+	auto *fl = getFloor(player->floor);
+	const auto &cur_map = fl ? fl->map : map;
+	auto &cur_olink = fl ? fl->olink : olink;
+	if (cur_map.inBounds(player->x, player->y))
+	{
+		const auto idx = cur_map.index(player->x, player->y);
+		if (idx < cur_olink.size())
+			cur_olink[idx].push_back(id);
+	}
 	broadcastSpawn(id, *player);
 	refreshEnemyView(id, *player, -1000, -1000);
 	refreshNpcView(id, *player, -1000, -1000);
@@ -7901,8 +8024,29 @@ void World::processStorage()
 	for (const auto &entry : s.conns)
 		if (entry.second.detached && entry.second.logged_in && !entry.second.pending && s.now_ms >= entry.second.retry_at)
 			retry.push_back(entry.first);
-	for (auto id : retry)
-		saveCharacter(id, true, 0);
+}
+
+void World::loadFloorMap(std::int32_t floor_id, GridMap map)
+{
+	auto &s = *_impl;
+	Impl::FloorState state;
+	state.floor_id = floor_id;
+	state.olink.assign(map.tile.size(), {});
+	state.map = std::move(map);
+	s.floors[floor_id] = std::move(state);
+}
+
+const GridMap *World::findFloorMap(std::int32_t floor_id) const noexcept
+{
+	const auto &s = *_impl;
+	const auto *fl = s.getFloor(floor_id);
+	return fl ? &fl->map : nullptr;
+}
+
+std::size_t World::floorMapCount() const noexcept
+{
+	const auto &s = *_impl;
+	return s.floors.size();
 }
 
 } // namespace SA::World

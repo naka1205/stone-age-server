@@ -592,6 +592,49 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证 (RV-2)**: 故意跳过 `world.loadWarpPoints` 注入 ⇒ 传送触发断言报红（未瞬移，停留在 (100, 638, 491)）；恢复后回绿。
 - **全套静态守卫**: 22 项 ctest 全量绿灯，`ci_verify.py` 全部 6 项门禁通过。
 
+### 9.0.81 批次 D.2: 四大村庄全量地图与 NPC/Warp 批量导入与多地图管理 (2026-09-25)
+
+2026-09-25 交付。在批次 D.1 基础上推进多地图运行时架构（`Multi-Floor World Map`），实现了石器时代四大村庄（1000 萨姆吉尔村、2000 玛丽娜丝渔村、3000 加加村、4000 卡鲁它那村）可走阻挡图的离线构建与运行时独立管理。离线管线 `tools/build_playable_content.py` 完成了 5 大核心区域全量 164 个 Warp 传送点与 254 个世界 NPC 实体的全量扫描与属性提取，解决了官方历史脚本中 `borncenter` 矩形中心半径解析、`ItemList` 逗号与连字符混排、字段错位容错等多项数据缺陷。服务端不仅支持跨地图坐标系解耦与视野分层严格隔离，还实现了萨伊那斯与萨姆吉尔村之间真实双向传送闭环以及四大村庄 NPC 真实服务交互。
+
+#### 1. 源码事实与裁定
+
+1. **多地图运行时管理体系 (`src/world/include/world/Api.h`, `src/world/World.cpp`)**:
+   - `World::Impl` 引入 `FloorState`（内含独立 `GridMap` 与专属 `olink` 空间二维表）；
+   - 暴露 `loadFloorMap(int32_t floor_id, GridMap map)`、`findFloorMap(int32_t floor_id)`、`floorMapCount()` C++ API；
+   - ⚠️ 默认单图向前兼容：未显式注册的 Floor 自动回退至 `s.map` 与 `s.olink`，既有单图用例与测试无需任何适配；
+   - 实现零依赖、防越界、无异常逃逸的标准 Base64 解码器 `decodeBase64`。
+2. **跨地图视野完全隔离与双向传送重构 (`src/world/World.cpp`)**:
+   - `collectVisible`、`collectVisiblePlayers`、`broadcastDespawn`、`broadcastEnemyDespawn` 全面挂接目标 `floor` 参数，严格通过对应图层的 `olink` 索引扫格，彻底阻断跨 Floor 坐标重叠带来的视野泄漏；
+   - `warpPlayer` 完善旧图 `olink` 摘除、旧图视野双向 `CharDisappear` 广播、目标图坐标校验与新图 `olink` 挂接；跨图传送时将参考坐标置为 `-1000, -1000` 全量重置目标图的 NPC 与世界怪物视野；
+   - 扩展 `kCharLoop` 玩家移动碰撞与传送门逻辑：玩家在当前 `p->floor` 的专属地图上漫步，踩中 Warp 传送点时自动校验目标 Floor 是否在目标图界内且可通行；`warpPlayerByNpc` 同步支持目标图层通行校验。
+3. **离线构建管线全量数据抽取 (`tools/build_playable_content.py`)**:
+   - `extract_world_content` 抽取 4 大村庄二进制 LS2MAP 地图（1000 萨姆吉尔村 160x160、2000 玛丽娜丝渔村 150x150、3000 加加村 150x150、4000 卡鲁它那村 150x150），结合 `mapset.txt` 图元属性表计算可走阻挡图，紧凑 Base64 编码存入 `world.json` 的 `floors` 列表；
+   - 全量扫描 5 大区域（100, 1000, 2000, 3000, 4000）全部 NPC create 脚本，产出 **164** 个 Warp 传送点与 **254** 个世界 NPC（71 other、66 exchangeman、55 townpeople、41 signboard、11 warpman、8 shop、2 healer）；
+   - 防御性解析裁定：
+     - `borncenter` 语义对齐原版 C 源码（`cx, cy, w, h`），消除以前误当作 corner 导致的 8,800+ 虚拟格子膨胀问题；
+     - `ItemList` 支持逗号与连字符混排（如 `13053,13088-13092,20176`）；
+     - `shop_m2.create` 中 `dir=多多的传言板` 非数值容错恢复为 NPC 名字。
+4. **运行时原子装载 (`src/main.cpp`)**:
+   - 在 `configureContent` 中解析 `bundle.world` 的 `"floors"` 列表并调用 `world.loadFloorMap(...)`，完成服务端启动时多地图全量装载。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 74 增至 **75**（+1 组大型多地图实测用例），断言数从 1896 增至 **1952**（+56 断言）。
+- **Base64 编解码器与多地图管理验证**:
+  - RFC 4648 向量（空串、"TWFu"->"Man"、Padding、换行忽略）测试全部通过；
+  - 四大村庄地图尺寸（1000: 160x160, 2000/3000/4000: 150x150）与 `floorMapCount() == 4` 校验通过。
+- **跨地图视野完全隔离验证**:
+  - 玩家 A 位于 Floor 100 (20, 20)，玩家 B 位于 Floor 1000 (20, 20)；
+  - 验证 B 传送离开时双方收到对端的 `CharDisappear`；
+  - 验证 A 在 Floor 100 移动时，B 未收到任何 `CharMove` 或 `CharAppear`；B 在 Floor 1000 移动时，A 同样零广播泄漏。
+- **双向跨图传送与村庄真实 NPC 交互验证**:
+  - 玩家在萨伊那斯 (100, 638, 491) 踩传送点瞬移至萨姆吉尔村 (1000, 50, 116)；
+  - 玩家在萨姆吉尔村向西移动踩入 (1000, 49, 116)，成功反向瞬移回萨伊那斯 (100, 637, 491)，双向传送闭环达成；
+  - 加加村「多多的传言板」(SignBoard at 50, 62) 与卡鲁它那村「特产品贩卖员」(Shop at 36, 70) 交互成功下发对话与商店窗口。
+- **反向验证 (RV-1)**: 篡改 `getFloor` 恒返回 `nullptr`（所有 Floor 错误共享主地图）⇒ `findFloorMap` 断言与跨图移动碰撞检测立即失败；恢复后回绿。
+- **反向验证 (RV-2)**: 篡改 `kCharLoop` 的 Warp 触发条件（强制为 false）⇒ 传送瞬移断言（未瞬移，停留在 (100, 638, 491)）立即失败；恢复后回绿。
+- **全套静态守卫**: 22 项 CTest 全量通过，`python3 tools/ci_verify.py` 全部 6 项门禁通过。
+
 
 
 

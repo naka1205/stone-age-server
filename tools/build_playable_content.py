@@ -4,6 +4,7 @@
 No original executable is run. Output is a versioned read-only content bundle.
 """
 import argparse
+import base64
 import collections
 import hashlib
 import importlib.util
@@ -93,7 +94,7 @@ def parse_npc_blocks(filepath):
     return blocks
 
 
-def extract_floor_100_npcs(data, used_sources):
+def extract_world_content(data, attributes, used_sources):
     items = {}
     item_file = data / 'itemset6.txt'
     if item_file.exists():
@@ -108,12 +109,46 @@ def extract_floor_100_npcs(data, used_sources):
                     'cost': int(parts[18]) if parts[18].isdigit() else 0
                 }
 
+    # 1. 四大村庄全量地图抽取 (1000, 2000, 3000, 4000)
+    village_maps = {
+        1000: data / 'map/sainasu/samugiru/samugiru',
+        2000: data / 'map/sainasu/marinasu/marinasu',
+        3000: data / 'map/jyaruga/jaja/jaja',
+        4000: data / 'map/jyaruga/karutana/karutana',
+    }
+    floors = []
+    for fl_id, mpath in sorted(village_maps.items()):
+        if not mpath.exists():
+            continue
+        used_sources.append(mpath)
+        buf = mpath.read_bytes()
+        assert buf[:6] == b'LS2MAP'
+        w, h = struct.unpack_from('>HH', buf, 40)
+        cnt = w * h
+        server_tiles = struct.unpack_from(f'>{cnt}H', buf, 44)
+        server_objects = struct.unpack_from(f'>{cnt}H', buf, 44 + cnt * 2)
+        name = buf[8:40].split(b'\0')[0].decode('gbk', errors='replace').split('|')[0]
+        walkable = bytes(1 if attributes.get(obj, 0) == 2 or
+                         attributes.get(obj, 0) == 1 and attributes.get(tile, 0) == 1 else 0
+                         for tile, obj in zip(server_tiles, server_objects))
+        b64 = base64.b64encode(walkable).decode('ascii')
+        floors.append({
+            'floor': fl_id,
+            'name': name,
+            'width': w,
+            'height': h,
+            'walkable': b64
+        })
+
+    # 2. 五大区域全量 NPC 与 Warp 抽取 (100, 1000, 2000, 3000, 4000)
+    target_floors = {100, 1000, 2000, 3000, 4000}
     npc_dir = data / 'npc'
     crates = []
     for p in sorted(npc_dir.rglob('*.create')):
         file_matched = False
         for b in parse_npc_blocks(p):
-            if b.get('floorid') == '100':
+            fid_str = b.get('floorid', '')
+            if fid_str.isdigit() and int(fid_str) in target_floors:
                 b['_file'] = p
                 crates.append(b)
                 file_matched = True
@@ -125,13 +160,29 @@ def extract_floor_100_npcs(data, used_sources):
     npc_id = 100000
 
     for c in crates:
-        pos_str = c.get('borncorner', c.get('borncenter', ''))
-        coords = [int(v.strip()) for v in pos_str.split(',') if v.strip().lstrip('-').isdigit()]
-        if len(coords) >= 4:
-            x1, y1, x2, y2 = coords[:4]
-        elif len(coords) >= 2:
-            x1, y1 = coords[:2]
-            x2, y2 = x1, y1
+        fl_id = int(c.get('floorid'))
+        bco = c.get('borncorner')
+        bc = c.get('borncenter')
+        if bco:
+            coords = [int(v.strip()) for v in bco.split(',') if v.strip().lstrip('-').isdigit()]
+            if len(coords) >= 4:
+                x1, y1, x2, y2 = coords[:4]
+            elif len(coords) >= 2:
+                x1, y1 = coords[:2]
+                x2, y2 = x1, y1
+            else:
+                continue
+        elif bc:
+            coords = [int(v.strip()) for v in bc.split(',') if v.strip().lstrip('-').isdigit()]
+            if len(coords) >= 4:
+                cx, cy, w, h = coords[:4]
+                x1, x2 = cx - w // 2, cx + w // 2
+                y1, y2 = cy - h // 2, cy + h // 2
+            elif len(coords) >= 2:
+                x1, y1 = coords[:2]
+                x2, y2 = x1, y1
+            else:
+                continue
         else:
             continue
 
@@ -146,7 +197,7 @@ def extract_floor_100_npcs(data, used_sources):
                 for x in range(min(x1, x2), max(x1, x2) + 1):
                     for y in range(min(y1, y2), max(y1, y2) + 1):
                         warps.append({
-                            'src_floor': 100,
+                            'src_floor': fl_id,
                             'src_x': x,
                             'src_y': y,
                             'dst_floor': dst_floor,
@@ -155,6 +206,15 @@ def extract_floor_100_npcs(data, used_sources):
                         })
         else:
             npc_id += 1
+            name = c.get('name', '')
+            dir_val = c.get('dir', '0')
+            if not dir_val.lstrip('-').isdigit():
+                if not name:
+                    name = dir_val
+                dir_val = 0
+            else:
+                dir_val = int(dir_val)
+
             arg_text = ''
             if len(parts) > 1 and parts[1].startswith('file:'):
                 arg_p = npc_dir / parts[1][5:]
@@ -164,12 +224,12 @@ def extract_floor_100_npcs(data, used_sources):
 
             npc = {
                 'id': npc_id,
-                'floor': 100,
+                'floor': fl_id,
                 'x': x1,
                 'y': y1,
-                'dir': int(c.get('dir', 0)),
+                'dir': dir_val,
                 'image': int(c.get('graphicname', c.get('image', 100000))),
-                'name': c.get('name', '')
+                'name': name
             }
             if kind == 'npcgen_signboard':
                 npc['type'] = 'signboard'
@@ -211,10 +271,18 @@ def extract_floor_100_npcs(data, used_sources):
                     elif line.startswith('sell_rate:'): sell_rate = float(line[10:])
                     elif line.startswith('main_msg:'): main_msg = line[9:]
                     elif line.startswith('ItemList:'):
-                        r = line[9:]
-                        if '-' in r:
-                            s, e = r.split('-', 1)
-                            for iid in range(int(s), int(e) + 1):
+                        r_str = line[9:]
+                        for chunk in r_str.split(','):
+                            chunk = chunk.strip()
+                            if not chunk: continue
+                            if '-' in chunk:
+                                sub = chunk.split('-', 1)
+                                if sub[0].strip().isdigit() and sub[1].strip().isdigit():
+                                    for iid in range(int(sub[0]), int(sub[1]) + 1):
+                                        it = items.get(iid, {'name': f'道具{iid}', 'cost': 100, 'image': 20000})
+                                        prods.append({'item_id': iid, 'cost': it['cost'], 'image_id': it['image'], 'level': 0, 'name': it['name']})
+                            elif chunk.isdigit():
+                                iid = int(chunk)
                                 it = items.get(iid, {'name': f'道具{iid}', 'cost': 100, 'image': 20000})
                                 prods.append({'item_id': iid, 'cost': it['cost'], 'image_id': it['image'], 'level': 0, 'name': it['name']})
                 npc['shop_products'] = prods
@@ -242,7 +310,7 @@ def extract_floor_100_npcs(data, used_sources):
 
     warps.sort(key=lambda w: (w['src_floor'], w['src_x'], w['src_y'], w['dst_floor'], w['dst_x'], w['dst_y']))
     npcs.sort(key=lambda n: (n['floor'], n['x'], n['y'], n['id']))
-    return warps, npcs
+    return floors, warps, npcs
 
 
 def main():
@@ -379,11 +447,11 @@ def main():
     binary = b'SAM1' + struct.pack('<III', 100, width, height)
     binary += struct.pack(f'<{count}I', *(map_bitmap(t, reverse) for t in tiles))
     binary += struct.pack(f'<{count}I', *(map_bitmap(t, reverse) for t in objects)) + walkable
-    warps, npcs = extract_floor_100_npcs(data, used_sources)
+    floors, warps, npcs = extract_world_content(data, attributes, used_sources)
     world = {'schema_ver': 1, 'floor': 100, 'name': server[8:40].split(b'\0')[0].decode('gbk'),
              'spawn': list(spawn), 'player_image': 100000, 'areas': areas, 'groups': groups,
              'encounters': encounters, 'templates': templates,
-             'warp_points': warps, 'npcs': npcs}
+             'floors': floors, 'warp_points': warps, 'npcs': npcs}
     world_text = json.dumps(world, ensure_ascii=False, separators=(',', ':'))
     source_manifest = {str(path.relative_to(root)): digest(path) for path in sorted(set(used_sources), key=lambda p: str(p))}
     manifest = {'schema_ver': 1, 'world': 'world.json', 'map': 'map.bin', 'width': width, 'height': height,

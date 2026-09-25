@@ -123,4 +123,39 @@ std::optional<Ls2MapInfo> loadLs2MapFile(const std::string &filepath)
 	return parseLs2Map(buffer);
 }
 
+std::vector<std::uint8_t> decodeBase64(std::string_view in)
+{
+	std::vector<std::uint8_t> out;
+	out.reserve((in.size() * 3) / 4);
+	std::uint32_t val = 0;
+	int bits = -8;
+	for (const char ch : in)
+	{
+		const auto c = static_cast<unsigned char>(ch);
+		int d = -1;
+		if (c >= 'A' && c <= 'Z')
+			d = c - 'A';
+		else if (c >= 'a' && c <= 'z')
+			d = c - 'a' + 26;
+		else if (c >= '0' && c <= '9')
+			d = c - '0' + 52;
+		else if (c == '+')
+			d = 62;
+		else if (c == '/')
+			d = 63;
+		else if (c == '=')
+			break;
+		else
+			continue;
+		val = (val << 6) | static_cast<std::uint32_t>(d);
+		bits += 6;
+		if (bits >= 0)
+		{
+			out.push_back(static_cast<std::uint8_t>((val >> bits) & 0xFF));
+			bits -= 8;
+		}
+	}
+	return out;
+}
+
 } // namespace SA::World
