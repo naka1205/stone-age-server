@@ -440,4 +440,37 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证 (RV-2)**: 篡改对话打断逻辑（绕过 `isNpcEngagedInDialog`）⇒ `W.11: 对话打断锁定` 测试精准报红（2 失败 / 56 通过）；恢复后回绿。
 - **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py`、22 项 ctest 全量绿灯。
 
+---
+
+### 9.0.77 批次 W.12 —— NPC 商店与道具交易系统 (2026-09-25)
+
+2026-09-25 交付。世界系统中落地石器 8.0 规范的 NPC 商店与道具交易系统（`npc_itemshop.c`、`07-npc-quest.md` §0.1、`08-economy.md` §7.2），实现了从玩家触发商店对话、查看结构化货物列表（`WindowOpen::ShopBody`）、买入结算到向商店出售回收（`sellItemToShop`）的全流程闭环。
+
+#### 1. 源码事实与裁定
+
+1. **实体与协议契约 (`src/world/include/world/Api.h`, `idl/schema/domain/window.proto`)**:
+   - `NpcType::kShop` 确立为一等 NPC 类型（原版 `CHAR_TYPESHOP`，308 个投产实例）；
+   - 商店数据定义：`ShopProduct`（`item_id`, `cost`, `image_id`, `level`, `name`）、`shop_products` 货物列表、`buy_rate`（买入倍率，默认 1.0）、`sell_rate`（回收倍率，默认 0.2）、`shop_name`、`main_msg`、`stone_less_msg`、`item_full_msg` 与 `stone_full_msg`；
+   - 对齐 IDL `ShopBody` 与 `ShopHeader`：使用显式 `entry_id`（1-based 序号，非位置耦合），下发 `WINDOW_KIND_ITEM_SHOP`（11）。
+2. **购买交易与原子状态机 (`World.cpp`, `npc_itemshop.c:488-680`)**:
+   - 会话状态机：记录 `pending_shop.npc_id`，在收到 `WindowReply`（`ENTRY_ID`）时进入结算；
+   - 门 1（石币门）：`p->gold < price` 时阻断并下发 `stone_less_msg`；
+   - 门 2（容量门）：`p->findFreeItemSlot() < 0` 时阻断并下发 `item_full_msg`；
+   - 事务结算：扣除石币严格经唯一入口 `delGold(*p, GoldReason::kShopBuy, price, ...)`；背包分配新道具（`Item` 实例落池，`giveItemIntoPlayer`）并提示购买成功。
+3. **出售回收与上限保护 (`World::sellItemToShop`, `npc_itemshop.c:1037-1100`, DR-EC3)**:
+   - 距离守卫：检查玩家与 NPC 距离 $\le 3$ 格；
+   - 回收定价：以道具 `cost`（或商店同名道具基准价）$\times sell\_rate$ 计价（保底 1 石币），支持堆叠数倍增；
+   - 溢出拦截门：若 `p->gold + total_price > maxHaveGold(0)`，下发 `stone_full_msg` 并拒绝交易，**严守 DR-EC3 拒绝原则：不移除道具、不改余额、零静默销毁**；
+   - 事务结算：背包清槽并释放道具池（`items.release`），增加石币严格经唯一入口 `addGold(*p, GoldReason::kShopSell, total_price, ...)`。
+4. **经济账本纪律 (`check_gold_writes.py`)**:
+   - `GoldReason` 追加 `kShopBuy`（汇）与 `kShopSell`（源），`gold_writes` 门禁 100% 保持通过，杜绝任何裸写。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 57 增至 **62**（+5 专项用例），断言数从 1651 增至 **1689**（+38 断言）。
+- **反向验证 (RV-1)**: 篡改购买石币检查逻辑（绕过余额检查）⇒ `W.12: 商店购买石币不足拦截` 测试精准报红（2 失败 / 61 通过）；恢复后回绿。
+- **反向验证 (RV-2)**: 篡改出售石币上限检查逻辑（绕过 `maxHaveGold` 检查）⇒ `W.12: 商店回收出售石币超上限拦截` 测试精准报红（4 失败 / 61 通过）；恢复后回绿。
+- **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py`、22 项 ctest 全量绿灯。
+
+
 

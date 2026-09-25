@@ -677,13 +677,24 @@ struct EventCheckContext
 int evaluateEventCondition(std::string_view condition, const SA::Model::Player &player);
 int evaluateEventCondition(std::string_view condition, const EventCheckContext &ctx);
 
-// NPC 实体类型(批次 W.7「NPC 实体框架与 Healer」; 批次 W.8「城镇居民 TownPeople」; 批次 W.9「任务兑换 ExChangeMan」)
+// NPC 实体类型(批次 W.7「NPC 实体框架与 Healer」; 批次 W.8「城镇居民 TownPeople」; 批次 W.9「任务兑换 ExChangeMan」; 批次 W.12「商店 NPC ShopMan」)
 enum class NpcType : std::uint8_t
 {
 	kHealer = 0,
 	kTownPeople = 1,
 	kExChangeMan = 2,
-	kOther = 3,
+	kShop = 3,
+	kOther = 4,
+};
+
+// 商店商品条目 (批次 W.12)
+struct ShopProduct
+{
+	std::int32_t item_id = 0;   // 道具 ID (Item::item_id)
+	std::int32_t cost = 0;      // 道具基准原价 (石币)
+	std::uint32_t image_id = 0; // 道具展示图号 (image)
+	std::uint32_t level = 0;    // 需求等级
+	std::string name{};         // 道具名称
 };
 
 // NPC 巡逻路点 (批次 W.11)
@@ -693,9 +704,9 @@ struct NpcPoint
 	std::int32_t y = 0;
 };
 
-// 世界 NPC 实体配置/状态(批次 W.7/W.8/W.9/W.11)
-// ⚠️ 原版 npc_healer.c / npc_townpeople.c / npc_exchangeman.c
-//   CHAR_WHICHTYPE = CHAR_TYPEHEALER / CHAR_TYPETOWNPEOPLE, CHAR_ISOVERED = 0 (不可穿透阻挡)
+// 世界 NPC 实体配置/状态(批次 W.7/W.8/W.9/W.11/W.12)
+// ⚠️ 原版 npc_healer.c / npc_townpeople.c / npc_exchangeman.c / npc_itemshop.c
+//   CHAR_WHICHTYPE = CHAR_TYPEHEALER / CHAR_TYPETOWNPEOPLE / CHAR_TYPESHOP, CHAR_ISOVERED = 0 (不可穿透阻挡)
 struct NpcEntity
 {
 	std::uint64_t id = 0;
@@ -718,6 +729,16 @@ struct NpcEntity
 	std::int64_t next_wander_at_ms = 0;  // 下次漫游时间戳 (毫秒)
 	std::vector<NpcPoint> route{};       // 固定巡逻路点序列 (非空时按巡逻路线行走; 为空时按 wander_radius 自由游荡)
 	std::size_t route_index = 0;         // 当前巡逻目标路点游标
+
+	// ── 批次 W.12: NPC 商店与道具买卖交易 (移植 npc_itemshop.c 逻辑) ───────────
+	std::vector<ShopProduct> shop_products{}; // 商店在售商品列表
+	double buy_rate = 1.0;                    // 买入倍率 (1.0 = 100% 原价)
+	double sell_rate = 0.2;                   // 回购倍率 (0.2 = 原价 20%)
+	std::string shop_name{};                  // 商店名称 (下发至 ShopHeader)
+	std::string main_msg{};                   // 商店欢迎语/主对白
+	std::string stone_less_msg{};             // 石币不足提示语
+	std::string item_full_msg{};              // 背包已满提示语
+	std::string stone_full_msg{};             // 出售时石币超上限提示语
 };
 
 // 世界态敌人的位置快照(批次 W.2 / W.3 的观察面)。
@@ -988,6 +1009,9 @@ class World final : public SA::Net::TransportEvents,
 
 	// 获取某会话背后的 Player 实体指针 (批次 W.9 测试注入 seam)
 	SA::Model::Player *playerForTest(SA::Net::SessionId session) noexcept;
+
+	// 向商店 NPC 出售指定背包槽位的道具 (批次 W.12, 移植 npc_itemshop.c 逻辑)
+	bool sellItemToShop(SA::Net::SessionId session, std::uint64_t npc_id, int slot);
 
 	// ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
 	void requestShutdown() noexcept;
@@ -1491,6 +1515,10 @@ enum class GoldReason : std::uint8_t
 	kQuestReward,
 	// 任务需求/交付石币扣除 (汇,批次 W.10)
 	kQuestFee,
+	// 商店购买道具扣除石币 (汇, 批次 W.12)
+	kShopBuy,
+	// 商店回收道具给予石币 (源, 批次 W.12)
+	kShopSell,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -1593,6 +1621,10 @@ inline const char *goldReasonName(GoldReason r) noexcept
 		return "quest_reward";
 	case GoldReason::kQuestFee:
 		return "quest_fee";
+	case GoldReason::kShopBuy:
+		return "shop_buy";
+	case GoldReason::kShopSell:
+		return "shop_sell";
 	}
 	return "unknown";
 }

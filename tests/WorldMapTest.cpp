@@ -1773,11 +1773,12 @@ TEST_CASE("W.9: ExChangeMan TYPE:ACCEPT 接取、取消与结算全生命周期�
 
 namespace
 {
-inline SA::Model::Item makeTestItem(std::int32_t item_id, std::int32_t pile = 1)
+inline SA::Model::Item makeTestItem(std::int32_t item_id, std::int32_t pile = 1, std::int32_t cost = 0)
 {
 	SA::Model::Item it{};
 	it.item_id = item_id;
 	it.current_pile = pile;
+	it.cost = cost;
 	return it;
 }
 
@@ -2548,4 +2549,237 @@ TEST_CASE("W.11: 对话打断锁定 (玩家打开窗口交互期间 NPC 暂停�
 	CHECK(npc_ptr->x == 33);
 	CHECK(npc_ptr->y == 33);
 	CHECK(npc_ptr->dir == 4); // 南
+}
+
+// ══ 批次 W.12: NPC 商店与道具交易系统 (ShopMan 购买 / 出售 / 石币联动) ═════
+
+TEST_CASE("W.12: 商店购买道具成功结算 (ShopMan 扣除折后石币, 背包放入新道具, 道具池与状态正确)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f); // 玩家在 (32, 32)
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->gold = 1000; // 初始金币 1000
+
+	// 配置商店 NPC 在玩家东面 (33, 32)
+	NpcEntity npc{};
+	npc.id = 7001;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kShop;
+	npc.shop_name = "萨姆吉尔道具店";
+	npc.buy_rate = 1.0;
+	npc.sell_rate = 0.5;
+	npc.shop_products = {
+	    {101, 300, 1001, 1, "木棒"},
+	    {102, 600, 1002, 5, "铜斧"},
+	};
+	f.world.loadNpcEntities({npc});
+
+	// 1. 玩家面向东 (dir=2) 发起对话打开商店
+	SA::Domain::EventRequest req{};
+	req.dir = 2;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req.seqno = 2001;
+	f.world.onEvent(id, req);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	const std::uint32_t wid = f.world.playerActiveWindowId(id);
+
+	// 2. 玩家选择购买第 1 个条目: "木棒", 价格 300
+	SA::Domain::WindowReply rep{};
+	rep.window_id = wid;
+	rep.source.entity_id = 7001;
+	rep.result_kind = SA::Domain::WindowReply::ResultKind::ENTRY_ID;
+	rep.result.entry_id = 1;
+	f.world.onWindowReply(id, rep);
+
+	// 3. 验证购买结算:
+	//    - 石币扣减: 1000 - 300 = 700
+	//    - 背包新增: 道具槽出现 item_id == 101, cost == 300, name == "木棒"
+	CHECK(p->gold == 700);
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+
+	bool found_stick = false;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		const auto *it = f.world.playerItemAt(id, static_cast<int>(i));
+		if (it != nullptr && it->item_id == 101 && it->cost == 300)
+		{
+			found_stick = true;
+			break;
+		}
+	}
+	CHECK(found_stick);
+}
+
+TEST_CASE("W.12: 商店购买石币不足拦截 (石币少于总价时下发 stone_less_msg 且零副作用)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->gold = 200; // 金币 200，不足以购买 300 的木棒
+
+	NpcEntity npc{};
+	npc.id = 7002;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kShop;
+	npc.stone_less_msg = "穷光蛋，你的石币不够买这个！";
+	npc.shop_products = {{101, 300, 1001, 1, "木棒"}};
+	f.world.loadNpcEntities({npc});
+
+	// 打开商店
+	SA::Domain::EventRequest req{};
+	req.dir = 2;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req.seqno = 2002;
+	f.world.onEvent(id, req);
+	f.world.tick();
+
+	const std::uint32_t wid = f.world.playerActiveWindowId(id);
+
+	// 回复尝试购买 entry 1
+	SA::Domain::WindowReply rep{};
+	rep.window_id = wid;
+	rep.source.entity_id = 7002;
+	rep.result_kind = SA::Domain::WindowReply::ResultKind::ENTRY_ID;
+	rep.result.entry_id = 1;
+	f.world.onWindowReply(id, rep);
+
+	// 拦截断言:
+	// - 弹出不足提示语
+	// - 玩家金币保持 200 未被扣除
+	// - 背包仍无道具
+	CHECK(f.world.playerLastWindowText(id) == "穷光蛋，你的石币不够买这个！");
+	CHECK(p->gold == 200);
+	CHECK(f.world.playerItemSlotsUsed(id) == 0);
+}
+
+TEST_CASE("W.12: 商店购买背包已满拦截 (背包无空槽时下发 item_full_msg 且零扣款)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->gold = 5000;
+
+	// 背包装满 45 个道具 (满包)
+	int filled = 0;
+	while (f.world.giveItemToPlayer(id, makeTestItem(999)) >= 0)
+	{
+		++filled;
+	}
+	CHECK(filled == 45);
+	CHECK(f.world.playerItemSlotsUsed(id) == 45);
+
+	NpcEntity npc{};
+	npc.id = 7003;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kShop;
+	npc.item_full_msg = "背包都鼓成这样了，装不下啦！";
+	npc.shop_products = {{101, 300, 1001, 1, "木棒"}};
+	f.world.loadNpcEntities({npc});
+
+	// 打开商店
+	SA::Domain::EventRequest req{};
+	req.dir = 2;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req.seqno = 2003;
+	f.world.onEvent(id, req);
+	f.world.tick();
+
+	const std::uint32_t wid = f.world.playerActiveWindowId(id);
+
+	// 尝试购买
+	SA::Domain::WindowReply rep{};
+	rep.window_id = wid;
+	rep.source.entity_id = 7003;
+	rep.result_kind = SA::Domain::WindowReply::ResultKind::ENTRY_ID;
+	rep.result.entry_id = 1;
+	f.world.onWindowReply(id, rep);
+
+	// 拦截断言:
+	// - 提示道具栏满
+	// - 金币保持 5000 零扣款
+	// - 背包依然 45 个
+	CHECK(f.world.playerLastWindowText(id) == "背包都鼓成这样了，装不下啦！");
+	CHECK(p->gold == 5000);
+	CHECK(f.world.playerItemSlotsUsed(id) == 45);
+}
+
+TEST_CASE("W.12: 商店回收出售道具成功 (按 sell_rate 回收背包道具, 释放池并入账石币)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->gold = 100;
+
+	// 背包槽位放入一件价值 1000 石币的铠甲道具
+	const int slot = f.world.giveItemToPlayer(id, makeTestItem(501, /*pile=*/1, /*cost=*/1000));
+	REQUIRE(slot >= 0);
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+
+	NpcEntity npc{};
+	npc.id = 7004;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kShop;
+	npc.sell_rate = 0.5; // 50% 回收率
+	f.world.loadNpcEntities({npc});
+
+	// 调用出售接口出售该槽位
+	const bool sold = f.world.sellItemToShop(id, 7004, slot);
+	CHECK(sold);
+
+	// 结算断言:
+	// - 道具被移除并释放: 该槽位变为无效
+	// - 金钱入账: 100 + 1000 * 0.5 = 600
+	CHECK_FALSE(p->items[static_cast<std::size_t>(slot)].valid());
+	CHECK(f.world.playerItemSlotsUsed(id) == 0);
+	CHECK(p->gold == 600);
+}
+
+TEST_CASE("W.12: 商店回收出售石币超上限拦截 (金币超上限时拒绝交易, 保留道具与原余额)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	// 0 转上限为 1,000,000; 当前余额 999,900
+	p->gold = 999900;
+
+	const int slot = f.world.giveItemToPlayer(id, makeTestItem(502, /*pile=*/1, /*cost=*/1000));
+	REQUIRE(slot >= 0);
+
+	NpcEntity npc{};
+	npc.id = 7005;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kShop;
+	npc.sell_rate = 0.5; // 回收得 500 石币; 999,900 + 500 = 1,000,400 > 1,000,000 溢出
+	npc.stone_full_msg = "钱包太沉了，装不下更多石币啦！";
+	f.world.loadNpcEntities({npc});
+
+	// 尝试出售
+	const bool sold = f.world.sellItemToShop(id, 7005, slot);
+
+	// 拦截断言:
+	// - 交易被拒绝 (返回 false)
+	// - 道具依然完好保存在背包中
+	// - 金币依然是 999,900 (DR-EC3 拒绝, 零侵蚀)
+	// - 下发超限提示
+	CHECK_FALSE(sold);
+	CHECK(p->items[static_cast<std::size_t>(slot)].valid());
+	CHECK(p->gold == 999900);
+	CHECK(f.world.playerLastWindowText(id) == "钱包太沉了，装不下更多石币啦！");
 }

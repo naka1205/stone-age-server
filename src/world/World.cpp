@@ -2192,6 +2192,13 @@ struct World::Impl : GoldAuditSink
 			int branch_idx = 0;
 		};
 		PendingExChange pending_exchange{};
+
+		// ── ShopMan 待决商店交互 (批次 W.12) ─────────────────────────
+		struct PendingShop
+		{
+			std::uint64_t npc_id = 0;
+		};
+		PendingShop pending_shop{};
 	};
 
 	Impl(const SA::Platform::ServerConfig &cfg, SA::Platform::Clock &clk,
@@ -5486,6 +5493,60 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 						ok = true;
 					}
 				}
+				else if (npc.type == NpcType::kShop)
+				{
+					// 商店 NPC 交互 (批次 W.12, 移植 npc_itemshop.c)
+					SA::Domain::WindowOpen win{};
+					win.window_id = ++s.next_window_id;
+					win.kind = SA::Domain::WindowKind::WINDOW_KIND_ITEM_SHOP;
+					win.buttons = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_CANCEL);
+					win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+					win.source.entity_id = static_cast<std::uint32_t>(npc.id);
+					win.body_kind = SA::Domain::WindowOpen::BodyKind::SHOP;
+
+					auto &shop = win.body.shop;
+					shop.header.can_buy = true;
+					shop.header.reuse_previous = false;
+
+					std::string shop_name = npc.shop_name.empty() ? "道具商店" : npc.shop_name;
+					if (shop_name.size() > 63)
+						shop_name.resize(63);
+					shop.header.shop_name.assign(shop_name.data(), shop_name.size());
+
+					std::string msg = npc.main_msg.empty() ? "欢迎光临！请选择你要购买的道具。" : npc.main_msg;
+					if (msg.size() > 255)
+						msg.resize(255);
+					shop.header.message.assign(msg.data(), msg.size());
+
+					std::string full_msg = npc.item_full_msg.empty() ? "道具栏已满！" : npc.item_full_msg;
+					if (full_msg.size() > 255)
+						full_msg.resize(255);
+					shop.header.item_full_message.assign(full_msg.data(), full_msg.size());
+
+					// 填充在售道具列表 (最多 32 个)
+					const std::size_t limit = std::min<std::size_t>(npc.shop_products.size(), 32);
+					for (std::size_t i = 0; i < limit; ++i)
+					{
+						const auto &prod = npc.shop_products[i];
+						if (auto *entry = shop.entries.push_back())
+						{
+							entry->entry_id = static_cast<std::uint32_t>(i + 1); // 1-based ID
+							entry->item_id = static_cast<std::uint32_t>(prod.item_id);
+							entry->image_id = prod.image_id;
+							entry->level = prod.level;
+							entry->price = std::max(1, static_cast<std::int32_t>(prod.cost * npc.buy_rate));
+							entry->purchasable = (p->gold >= entry->price);
+						}
+					}
+
+					it->second.active_window_id = win.window_id;
+					it->second.active_window_npc_id = npc.id;
+					it->second.last_window_text = msg;
+					it->second.pending_shop.npc_id = npc.id;
+
+					s.sendTo(id, win);
+					ok = true;
+				}
 			}
 		}
 	}
@@ -5551,9 +5612,155 @@ void World::onWindowReply(SA::Net::SessionId id, const SA::Domain::WindowReply &
 			}
 		}
 
+		// 检查是否存在待决 Shop 商店交互 (批次 W.12)
+		if (it->second.pending_shop.npc_id != 0 &&
+		    it->second.pending_shop.npc_id == reply.source.entity_id)
+		{
+			const std::uint64_t shop_npc_id = it->second.pending_shop.npc_id;
+			it->second.pending_shop = {};
+
+			const bool is_cancel = (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_CANCEL)) != 0 ||
+			                       (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO)) != 0;
+
+			if (!is_cancel && reply.result_kind == SA::Domain::WindowReply::ResultKind::ENTRY_ID)
+			{
+				const NpcEntity *npc = findNpc(shop_npc_id);
+				const std::uint32_t entry_id = reply.result.entry_id;
+				if (npc != nullptr && entry_id >= 1 && entry_id <= npc->shop_products.size())
+				{
+					const auto &prod = npc->shop_products[entry_id - 1];
+					const std::int32_t price = std::max(1, static_cast<std::int32_t>(prod.cost * npc->buy_rate));
+
+					// 门 ①: 石币是否充足 (DR-EC3 余额不足拒绝)
+					if (p->gold < price)
+					{
+						std::string less_msg = npc->stone_less_msg.empty() ? "石币不足！" : npc->stone_less_msg;
+						s.sendExChangeWindow(id, npc->id, less_msg,
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+						return;
+					}
+
+					// 门 ②: 背包是否有空槽
+					if (p->findFreeItemSlot() < 0)
+					{
+						std::string full_msg = npc->item_full_msg.empty() ? "道具栏已满！" : npc->item_full_msg;
+						s.sendExChangeWindow(id, npc->id, full_msg,
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+						return;
+					}
+
+					// 门 ③: 道具池分配
+					const auto h = s.items.allocate();
+					if (h.valid())
+					{
+						auto *new_item = s.items.resolve(h);
+						if (new_item != nullptr)
+						{
+							// 扣除石币 (走 GoldLedger, 汇 kShopBuy)
+							(void)delGold(*p, GoldReason::kShopBuy, price,
+							              /*trans=*/0, static_cast<std::uint64_t>(id), s);
+
+							// 填充道具信息并入包
+							new_item->uid = ++s.next_window_id;
+							new_item->item_id = prod.item_id;
+							new_item->name.assign(prod.name.c_str());
+							new_item->cost = prod.cost;
+							new_item->level = static_cast<std::int32_t>(prod.level);
+							new_item->current_pile = 1;
+							new_item->use_pile_nums = 1;
+
+							const int slot = p->findFreeItemSlot();
+							if (slot >= 0)
+							{
+								p->items[static_cast<std::size_t>(slot)] = h;
+								s.sendExChangeWindow(id, npc->id, "购买成功！欢迎下次光临。",
+								                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+								return;
+							}
+							else
+							{
+								s.items.release(h);
+							}
+						}
+						else
+						{
+							s.items.release(h);
+						}
+					}
+				}
+			}
+		}
+
 		it->second.active_window_id = 0;
 		it->second.active_window_npc_id = 0;
 	}
+}
+
+bool World::sellItemToShop(SA::Net::SessionId id, std::uint64_t npc_id, int slot)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(id);
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(id));
+	if (it == s.conns.end() || p == nullptr)
+		return false;
+
+	const NpcEntity *npc = findNpc(npc_id);
+	if (npc == nullptr || npc->type != NpcType::kShop)
+		return false;
+
+	// 距离检查: 玩家与 NPC 距离 <= 3 格 (原版 NPC_Util_CharDistance <= 3)
+	if (std::abs(p->x - npc->x) > 3 || std::abs(p->y - npc->y) > 3)
+		return false;
+
+	// 槽位有效性与道具存在性检查
+	if (slot < static_cast<int>(SA::Model::kStartItemArray) ||
+	    slot >= static_cast<int>(SA::Model::kMaxItemHave))
+		return false;
+
+	const auto h = p->items[static_cast<std::size_t>(slot)];
+	if (!h.valid())
+		return false;
+
+	auto *item = s.items.resolve(h);
+	if (item == nullptr)
+		return false;
+
+	// 计算回购价格: 道具原价 * sell_rate (保底 1 石币)
+	std::int32_t base_cost = item->cost;
+	if (base_cost <= 0)
+	{
+		for (const auto &prod : npc->shop_products)
+		{
+			if (prod.item_id == item->item_id && prod.cost > 0)
+			{
+				base_cost = prod.cost;
+				break;
+			}
+		}
+	}
+	if (base_cost <= 0)
+		base_cost = 1;
+
+	const std::int32_t unit_price = std::max(1, static_cast<std::int32_t>(base_cost * npc->sell_rate));
+	const std::int32_t total_price = unit_price * std::max(1, item->current_pile);
+
+	// 门: 随身石币上限检查 (DR-EC3 拒绝, 零改动)
+	const std::int32_t cap = maxHaveGold(0);
+	if (static_cast<std::int64_t>(p->gold) + total_price > cap)
+	{
+		std::string full_msg = npc->stone_full_msg.empty() ? "钱包装不下这么多石币！" : npc->stone_full_msg;
+		s.sendExChangeWindow(id, npc->id, full_msg,
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 执行出售原子操作: 扣除并释放道具 + 增加石币 (走 GoldLedger, 源 kShopSell)
+	p->clearItemSlot(slot);
+	s.items.release(h);
+
+	(void)addGold(*p, GoldReason::kShopSell, total_price,
+	              /*trans=*/0, static_cast<std::uint64_t>(id), s);
+	return true;
 }
 
 void World::onSessionClosed(SA::Net::SessionId id)
