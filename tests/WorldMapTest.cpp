@@ -509,7 +509,7 @@ SA::Net::ConnectionId spawnHandshaked(MoveFixture &f)
 
 // 注入一条最小遇敌链:floor 0 全图 → 编组 1 → 一只 1 级乌力(temp_no=1)。
 //   ⚠️ 模板 temp_no 必须 == enc.temp_no —— triggerEncounter 靠 findEnemyTemplate 配对。
-void loadEncounterFixture(World &world, std::int32_t prob)
+void loadEncounterFixture(World &world, std::int32_t prob, std::int32_t enc_exp = -1)
 {
 	EncountArea area{};
 	area.index = 1;
@@ -541,6 +541,7 @@ void loadEncounterFixture(World &world, std::int32_t prob)
 	enc.lv_max = 1;
 	enc.capturable = true;
 	enc.create_max_num = 1;
+	enc.exp = enc_exp;
 
 	EnemyTemplate tmpl{};
 	tmpl.temp_no = 1;
@@ -4069,4 +4070,97 @@ TEST_CASE("四大村庄多地图管理、跨图视野隔离与真实村庄服务
 		REQUIRE(win_opt.has_value());
 		CHECK(win_opt->kind == SA::Domain::WindowKind::WINDOW_KIND_ITEM_SHOP);
 	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  成长与装备闭环集成测试 (批次 P.1)
+// ═══════════════════════════════════════════════════════════════════════════
+TEST_CASE("成长与装备闭环: 装备穿脱、属性加成与战斗升级")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	REQUIRE(f.world.playerLevel(id) == 1);
+	REQUIRE(f.world.playerSkillupPoints(id) == 0);
+
+	// ── 1. 装备穿脱与属性加成累加 ─────────────────────────────────
+	SA::Model::Item helm{};
+	helm.item_id = 1001;
+	helm.type = 6; // ITEM_HELM (对应槽位 0: kHead)
+	helm.modify_attack = 10;
+	helm.modify_defense = 25;
+	helm.modify_hp = 50;
+
+	const int inv_slot = f.world.giveItemToPlayer(id, helm);
+	REQUIRE(inv_slot >= static_cast<int>(SA::Model::kStartItemArray));
+
+	// 初始未穿戴加成为 0
+	auto mods = f.world.playerEquipModifiers(id);
+	CHECK(mods.modify_attack == 0);
+	CHECK(mods.modify_defense == 0);
+	CHECK(mods.modify_hp == 0);
+
+	// 自动穿戴到头部 (slot 0)
+	REQUIRE(f.world.equipItem(id, inv_slot));
+	CHECK(f.world.playerItemAt(id, 0) != nullptr);
+	CHECK(f.world.playerItemAt(id, inv_slot) == nullptr);
+
+	// 穿戴后加成生效
+	mods = f.world.playerEquipModifiers(id);
+	CHECK(mods.modify_attack == 10);
+	CHECK(mods.modify_defense == 25);
+	CHECK(mods.modify_hp == 50);
+
+	// 卸下装备至背包
+	REQUIRE(f.world.unequipItem(id, 0));
+	CHECK(f.world.playerItemAt(id, 0) == nullptr);
+	CHECK(f.world.playerItemAt(id, inv_slot) != nullptr);
+
+	// 卸下后加成归零
+	mods = f.world.playerEquipModifiers(id);
+	CHECK(mods.modify_attack == 0);
+	CHECK(mods.modify_defense == 0);
+	CHECK(mods.modify_hp == 0);
+
+	// ── 2. 战斗获胜升级与属性点结算 ───────────────────────────────
+	// 重新穿上头盔进入战斗
+	REQUIRE(f.world.equipItem(id, inv_slot, 0));
+
+	loadEncounterFixture(f.world, /*prob=*/120, /*enc_exp=*/10); // 必遇敌且击败后提供 10 经验
+	f.sendWalk(id, "c");
+	f.world.tick(); // 走一步 → 遇敌 → 开战
+	REQUIRE(f.world.battleCount() == 1);
+	const BattleId battle = 1;
+
+	// 处于战斗中时无法脱换装备
+	CHECK_FALSE(f.world.unequipItem(id, 0));
+
+	for (int i = 0; i < 30; ++i)
+	{
+		const SA::Rules::BattleField *fld = f.world.battleField(battle);
+		if (fld == nullptr)
+			break;
+		const BattleStats *st = f.world.stats(battle);
+		if (st != nullptr && st->finished)
+			break;
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = fld->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd.command.attack.target = static_cast<std::uint32_t>(SA::Rules::kSideOffset);
+		f.world.onBattleCommand(id, cmd);
+		f.clock.advance(1000);
+		f.world.tick();
+	}
+
+	REQUIRE(f.world.stats(battle) != nullptr);
+	CHECK(f.world.stats(battle)->finished);
+
+	// 击败 1 级乌力后获得经验并触发升级 (exp.txt 2 级只需 2 经验)
+	CHECK(f.world.playerLevel(id) >= 2);
+	CHECK(f.world.playerSkillupPoints(id) >= 3);
+	CHECK(f.world.playerHp(id) > 0);
+
+	// 战斗结束后脱下装备恢复正常
+	REQUIRE(f.world.unequipItem(id, 0));
+	CHECK(f.world.playerEquipModifiers(id).modify_attack == 0);
 }

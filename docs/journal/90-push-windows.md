@@ -676,3 +676,30 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 - **守卫闭环**:
   - 服务端打附注 tag `shared-v0.35.0` 推送 GitHub，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.35.0`，消除 D2 漂移告警，恢复 8/8 全绿。
 
+---
+
+### 9.0.82b ★ 推送窗口执行记录 —— `shared-v0.36.0`(2026-09-25)
+
+> **本窗口前推范围**: 批次 P.1 成长与装备闭环（§9.0.82），涉及 `shared/rules/Progression.h` / `Progression.cpp`、`shared/model/Item.h`、`shared/model/Pet.h`、`shared/model/Player.h`。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `shared-v0.36.0`(**附注** tag，subject「release: shared-v0.36.0 (batch P.1 progression and equip)」) |
+| client master | pin v0.35.0 → **v0.36.0**(`cmake/SaShared.cmake`) |
+| client 本机 ci_verify | **8 项全过**(清洁构建 · 锁定 ref 与源码一致 · shared/ 与锁定 ref 一致无漂移 · 7 条全部注册 · ctest 7/7) |
+| server 本机 ci_verify | **6 项全过**(22 条全部注册 · ctest 22/22 · 断言防线反向验证通过) |
+| 两端用例集一致性 | D2「一份规则两端编译」本批闭环 |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/rules/Progression.h` / `Progression.cpp`: 增加官方 200 项经验门限纯函数 `getNeedLevelUpExp`、角色经验升级结算纯函数 `checkPlayerLevelUp`、宠物升级四维摇号纯函数 `rollPetLevelUp`、装备加成衍生属性计算纯函数 `deriveEquippedStats`、装备槽位类别映射函数 `getEquipSlotForCategory`。
+  - `shared/model/Item.h`: 增加装备属性修正字段 `modify_attack`, `modify_defense`, `modify_quick`, `modify_hp`, `modify_mp`。
+  - `shared/model/Pet.h`: 增加 `std::int32_t exp = 0;`。
+  - `shared/model/Player.h`: 增加升级未分配属性点 `std::int32_t skillup_points = 0;`。
+- **守卫闭环**:
+  - 服务端打附注 tag `shared-v0.36.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.36.0`，消除 D2 漂移告警，保持双端 CI 100% 绿灯。
+
+

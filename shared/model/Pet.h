@@ -121,6 +121,7 @@ struct Pet
 	std::int32_t wind = 0;
 
 	std::int32_t level = 0;
+	std::int32_t exp = 0;
 
 	// ── 成长率:CHAR_ALLOCPOINT 的展开(M6,源码 :374)────────────────
 	//

@@ -101,6 +101,8 @@ struct Player
 	std::int32_t exp = 0;
 	// Persistent character attributes (char.c creation; derived stats remain transient).
 	std::int32_t level = 1;
+	// 未分配属性点 (原 CHAR_SKILLUPPOINT，每次升级 +3 点，批次 P.1)
+	std::int32_t skillup_points = 0;
 	std::int32_t hp = 0;
 	std::int32_t mp = 100;
 	std::int32_t max_mp = 100;

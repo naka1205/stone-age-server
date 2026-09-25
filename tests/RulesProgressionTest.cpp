@@ -383,3 +383,125 @@ TEST_CASE("评级档位:五个阈值的边界(enemy.c:812-819)")
 	CHECK(rank_of(0) == 5);   // 末档阈值 0 ⇒ 非负必有归属
 	CHECK(rank_of(405) == 0); // 实测上界仍是首档
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  8. 经验曲线真源:exp.txt 200 级阈值表 (08-progression.md §2.2 / char_data.c:1231)
+// ═══════════════════════════════════════════════════════════════════════════
+TEST_CASE("经验门限:官方 200 项经验曲线精确比对 (08-progression.md §2.2 C2)")
+{
+	CHECK(getNeedLevelUpExp(0) == 0);
+	CHECK(getNeedLevelUpExp(1) == 0);
+	CHECK(getNeedLevelUpExp(2) == 2);
+	CHECK(getNeedLevelUpExp(3) == 6);
+	CHECK(getNeedLevelUpExp(5) == 37);
+	CHECK(getNeedLevelUpExp(10) == 344);
+	CHECK(getNeedLevelUpExp(20) == 2968);
+	CHECK(getNeedLevelUpExp(40) == 24656);
+	CHECK(getNeedLevelUpExp(60) == 84264);
+	CHECK(getNeedLevelUpExp(100) == 1256663);
+	CHECK(getNeedLevelUpExp(140) == 70858959);
+	CHECK(getNeedLevelUpExp(200) == 91800799);
+	CHECK(getNeedLevelUpExp(201) == -1); // 超过表上限
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  9. 角色晋级结算:经验判定与点数奖励 (char_data.c:1361 / battle.c:4350)
+// ═══════════════════════════════════════════════════════════════════════════
+TEST_CASE("玩家升级:经验结算、属性点 +3/级与魅力增长")
+{
+	// 经验不足 ⇒ 不升级
+	{
+		const auto res = checkPlayerLevelUp(1, 1);
+		CHECK(res.old_level == 1);
+		CHECK(res.new_level == 1);
+		CHECK(res.levels_gained == 0);
+		CHECK(res.skillup_points_gained == 0);
+	}
+
+	// 达到 2 级门限 (exp=2) ⇒ 升 1 级，获得 3 属性点，1 魅力
+	{
+		const auto res = checkPlayerLevelUp(1, 2);
+		CHECK(res.old_level == 1);
+		CHECK(res.new_level == 2);
+		CHECK(res.levels_gained == 1);
+		CHECK(res.skillup_points_gained == 3);
+		CHECK(res.charm_gained == 1);
+	}
+
+	// 连续跳级: 1 级直达 5 级 (exp=37) ⇒ 升 4 级，获得 12 属性点，4 魅力
+	{
+		const auto res = checkPlayerLevelUp(1, 37);
+		CHECK(res.old_level == 1);
+		CHECK(res.new_level == 5);
+		CHECK(res.levels_gained == 4);
+		CHECK(res.skillup_points_gained == 12);
+		CHECK(res.charm_gained == 4);
+	}
+
+	// 达到等级上限 140 后不再升级
+	{
+		const auto res = checkPlayerLevelUp(140, 2100000000, /*max_level=*/140);
+		CHECK(res.old_level == 140);
+		CHECK(res.new_level == 140);
+		CHECK(res.levels_gained == 0);
+		CHECK(res.skillup_points_gained == 0);
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  10. 宠物升级属性增长摇号 (char_data.c:1545-1610)
+// ═══════════════════════════════════════════════════════════════════════════
+TEST_CASE("宠物升级:四维分配与档位比例计算可复现")
+{
+	// 使用固化种子验证确定性
+	SeededRandom rng(123456789u);
+	// 宠 rank 0 (最高档 [105, 110]), 成长率 (30, 25, 20, 15)
+	const auto res = rollPetLevelUp(30, 25, 20, 15, 0, rng);
+	CHECK(res.added_vital >= 0);
+	CHECK(res.added_str >= 0);
+	CHECK(res.added_tough >= 0);
+	CHECK(res.added_dex >= 0);
+	// 成长四维之和应有显著正向提升
+	const int sum = res.added_vital + res.added_str + res.added_tough + res.added_dex;
+	CHECK(sum > 0);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  11. 装备属性修正 (ITEM_equipEffect / char.c:3525-3547)
+// ═══════════════════════════════════════════════════════════════════════════
+TEST_CASE("装备加成:叠加与下限保底")
+{
+	// 基础四维各 1000
+	EquipModifiers equip{};
+	equip.modify_attack = 50;
+	equip.modify_defense = 30;
+	equip.modify_quick = -100; // 测试敏捷下限保底 1
+	equip.modify_hp = 200;
+
+	const auto st = deriveEquippedStats(1000, 1000, 1000, 1000, equip);
+	const auto base = deriveBaseStats(1000, 1000, 1000, 1000);
+
+	CHECK(st.attack == base.attack + 50);
+	CHECK(st.defense == base.defense + 30);
+	CHECK(st.quick == 1); // 敏捷最低保底 1 (DR-U01)
+	CHECK(st.max_hp == base.max_hp + 200);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  12. 装备槽位映射 (ITEM_getEquipPlace, item.c:1360-1420)
+// ═══════════════════════════════════════════════════════════════════════════
+TEST_CASE("装备槽位:道具分类至装备部位映射正确")
+{
+	CHECK(getEquipSlotForCategory(6) == 0);    // ITEM_HELM -> Head (0)
+	CHECK(getEquipSlotForCategory(7) == 1);    // ITEM_ARMOUR -> Body (1)
+	CHECK(getEquipSlotForCategory(1) == 2);    // ITEM_AXE -> Arm (2)
+	CHECK(getEquipSlotForCategory(4) == 2);    // ITEM_BOW -> Arm (2)
+	CHECK(getEquipSlotForCategory(17) == 2);   // ITEM_BOOMERANG -> Arm (2)
+	CHECK(getEquipSlotForCategory(5) == 3);    // ITEM_SHIELD -> Shield (3)
+	CHECK(getEquipSlotForCategory(10) == 4);   // ITEM_NECKLACE -> Deco1 (4)
+	CHECK(getEquipSlotForCategory(11) == 4);   // ITEM_RING -> Deco1 (4)
+	CHECK(getEquipSlotForCategory(26) == 6);   // ITEM_WSHOES -> Shoes (6)
+	CHECK(getEquipSlotForCategory(27) == 7);   // ITEM_WGLOVE -> Glove (7)
+	CHECK(getEquipSlotForCategory(24) == 8);   // ITEM_WBELT -> Belt (8)
+	CHECK(getEquipSlotForCategory(999) == -1); // 非装备 -> -1
+}

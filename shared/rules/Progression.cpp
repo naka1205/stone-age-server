@@ -15,6 +15,7 @@
 // ⚠️ 逐位一致最终依赖 shared/CMakeLists.txt 的 `-ffp-contract=off` / `/fp:precise`。
 
 #include "rules/Progression.h"
+#include <algorithm>
 
 namespace SA::Rules
 {
@@ -165,6 +166,170 @@ std::int32_t enemyRank(const SpawnTemplate &tmpl) noexcept
 		}
 	}
 	return ranknum;
+}
+
+// ══ 经验与等级成长 (批次 P.1)═════════════════════════════════════════
+
+// 官方 200 项经验门限表（csa8.0/data/exp.txt 与 char_data.c:1231 逐项比对完全一致）。
+// 下标 0..199 对应升到等级 1..200 所需累计经验。
+static constexpr std::int32_t kNeedLevelUpTbls[200] = {
+    0, 2, 6, 18, 37, 67, 110, 170,
+    246, 344, 464, 610, 782, 986, 1221, 1491,
+    1798, 2146, 2534, 2968, 3448, 3978, 4558, 5194,
+    5885, 6635, 7446, 8322, 9262, 10272, 11352, 12506,
+    13734, 15042, 16429, 17899, 19454, 21098, 22830, 24656,
+    26576, 28594, 30710, 32930, 35253, 37683, 40222, 42874,
+    45638, 48520, 51520, 54642, 57886, 61258, 64757, 68387,
+    72150, 76050, 80086, 84264, 106110, 113412, 121149, 129352,
+    138044, 147256, 157019, 167366, 178334, 189958, 202282, 215348,
+    229205, 243901, 259495, 276041, 293606, 312258, 332071, 353126,
+    375511, 399318, 424655, 451631, 480370, 511007, 543686, 578571,
+    615838, 655680, 698312, 743971, 792917, 845443, 901868, 962554,
+    1027899, 1098353, 1174420, 1256663, 1345723, 1442322, 1547281, 1661531,
+    1786143, 1922340, 2071533, 2235351, 2415689, 2614754, 2835137, 3079892,
+    3352633, 3657676, 4000195, 4386445, 4824041, 5322323, 5892866, 6550125,
+    12326614, 15496114, 20025638, 26821885, 37698249, 56734876, 68097265, 68290815,
+    68487425, 68687119, 68889921, 69095855, 69304945, 69517215, 69732689, 69951391,
+    70173345, 70398575, 70627105, 70858959, 71244161, 71342735, 71584705, 71830095,
+    72078929, 72331231, 72587025, 72846335, 73109185, 73615599, 73655601, 73929215,
+    74206465, 74487375, 74771969, 75060271, 75352305, 75648095, 75947665, 76421039,
+    76563241, 76874295, 77189225, 77508055, 77830809, 78157511, 78488185, 78822855,
+    79161545, 79724279, 79856081, 80206975, 80561985, 80921135, 81284449, 81651951,
+    82023665, 82399615, 82779825, 83434319, 83558121, 83951255, 84348745, 84750615,
+    85156889, 85567591, 85982745, 86402375, 86826505, 87575159, 87693361, 88131135,
+    88573505, 89020495, 89472129, 89928431, 90389425, 90855135, 91325585, 91800799};
+
+std::int32_t getNeedLevelUpExp(std::int32_t target_level) noexcept
+{
+	if (target_level <= 1)
+		return 0;
+	if (target_level > 200)
+		return -1;
+	return kNeedLevelUpTbls[target_level - 1];
+}
+
+PlayerLevelUpResult checkPlayerLevelUp(std::int32_t current_level, std::int32_t current_exp,
+                                       std::int32_t max_level) noexcept
+{
+	PlayerLevelUpResult res{};
+	res.old_level = current_level;
+	res.new_level = current_level;
+	if (current_level >= max_level || current_level >= 200)
+		return res;
+
+	std::int32_t lvl = current_level;
+	while (lvl < max_level && lvl < 200)
+	{
+		const std::int32_t next_exp = getNeedLevelUpExp(lvl + 1);
+		if (next_exp < 0 || current_exp < next_exp)
+			break;
+		++lvl;
+	}
+
+	res.new_level = lvl;
+	res.levels_gained = lvl - current_level;
+	res.skillup_points_gained = res.levels_gained * 3;
+	res.charm_gained = res.levels_gained;
+	return res;
+}
+
+PetLevelUpStats rollPetLevelUp(std::uint8_t growth_vital, std::uint8_t growth_str,
+                               std::uint8_t growth_tough, std::uint8_t growth_dex,
+                               std::int32_t petrank, Random &rng) noexcept
+{
+	struct RankRange
+	{
+		std::int32_t min;
+		std::int32_t max;
+	};
+	static constexpr RankRange kRankRandTbl[6] = {
+	    {450, 500},
+	    {470, 520},
+	    {490, 540},
+	    {510, 560},
+	    {530, 580},
+	    {550, 600},
+	};
+
+	if (petrank < 0 || petrank > 5)
+		petrank = 0;
+
+	double param[4] = {0.0, 0.0, 0.0, 0.0};
+	for (int i = 0; i < 10; ++i)
+	{
+		const int slot = rng.rand(0, 3);
+		if (slot >= 0 && slot < 4)
+			param[slot] += 1.0;
+	}
+
+	const double fRand = static_cast<double>(rng.rand(kRankRandTbl[petrank].min, kRankRandTbl[petrank].max)) * 0.01;
+
+	PetLevelUpStats out{};
+	const double v = static_cast<double>(growth_vital) * fRand + param[0] * fRand;
+	const double s = static_cast<double>(growth_str) * fRand + param[1] * fRand;
+	const double t = static_cast<double>(growth_tough) * fRand + param[2] * fRand;
+	const double d = static_cast<double>(growth_dex) * fRand + param[3] * fRand;
+
+	out.added_vital = std::max(0, static_cast<std::int32_t>(v));
+	out.added_str = std::max(0, static_cast<std::int32_t>(s));
+	out.added_tough = std::max(0, static_cast<std::int32_t>(t));
+	out.added_dex = std::max(0, static_cast<std::int32_t>(d));
+
+	return out;
+}
+
+// ══ 装备属性修正 (批次 P.1)═══════════════════════════════════════════
+
+DerivedStats deriveEquippedStats(std::int32_t vital, std::int32_t str,
+                                 std::int32_t tough, std::int32_t dex,
+                                 const EquipModifiers &equip) noexcept
+{
+	DerivedStats base = deriveBaseStats(vital, str, tough, dex);
+	base.attack = std::max(0, base.attack + equip.modify_attack);
+	base.defense = std::max(0, base.defense + equip.modify_defense);
+	base.quick = std::max(1, base.quick + equip.modify_quick);
+	base.max_hp = std::max(1, base.max_hp + equip.modify_hp);
+	return base;
+}
+
+std::int32_t getEquipSlotForCategory(std::int32_t category) noexcept
+{
+	switch (category)
+	{
+	case 6:       // ITEM_HELM
+		return 0; // kHead
+	case 7:       // ITEM_ARMOUR
+		return 1; // kBody
+	case 0:       // ITEM_FIST
+	case 1:       // ITEM_AXE
+	case 2:       // ITEM_CLUB
+	case 3:       // ITEM_SPEAR
+	case 4:       // ITEM_BOW
+	case 17:      // ITEM_BOOMERANG
+	case 18:      // ITEM_BOUNDTHROW
+	case 19:      // ITEM_BREAKTHROW
+		return 2; // kArm
+	case 5:       // ITEM_SHIELD
+	case 25:      // ITEM_WSHIELD
+		return 3; // kShield
+	case 8:       // ITEM_BRACELET
+	case 9:       // ITEM_MUSIC
+	case 10:      // ITEM_NECKLACE
+	case 11:      // ITEM_RING
+	case 12:      // ITEM_BELT
+	case 13:      // ITEM_EARRING
+	case 14:      // ITEM_NOSERING
+	case 15:      // ITEM_AMULET
+		return 4; // kDecoration1
+	case 26:      // ITEM_WSHOES
+		return 6; // kShoes
+	case 27:      // ITEM_WGLOVE
+		return 7; // kGlove
+	case 24:      // ITEM_WBELT
+		return 8; // kBelt
+	default:
+		return -1;
+	}
 }
 
 } // namespace SA::Rules

@@ -1256,6 +1256,23 @@ class World final : public SA::Net::TransportEvents,
 	int playerGold(SA::Net::SessionId session) const;
 	int playerHp(SA::Net::SessionId session) const;
 	int playerMp(SA::Net::SessionId session) const;
+	int playerLevel(SA::Net::SessionId session) const;
+	int playerSkillupPoints(SA::Net::SessionId session) const;
+
+	// ── 装备穿戴与属性 (批次 P.1)────────────────────────────────────────
+	// 将背包栏 [kStartItemArray, kMaxItemHave) 中的道具穿戴至装备栏 [0, kStartItemArray)。
+	// 若 target_slot < 0，自动按道具类别映射对应槽位 (getEquipSlotForCategory)。
+	bool equipItem(SA::Net::SessionId session, int inventory_slot, int target_slot = -1);
+
+	// 将装备栏 [0, kStartItemArray) 中的道具卸下至背包栏。
+	// 若 target_inventory_slot < 0，自动放入第一个空格；若背包已满返回 false。
+	bool unequipItem(SA::Net::SessionId session, int equip_slot, int target_inventory_slot = -1);
+
+	// 计算某玩家当前全部已穿戴装备的属性加成总和。
+	SA::Rules::EquipModifiers playerEquipModifiers(SA::Net::SessionId session) const;
+
+	// 某会话玩家指定宠物槽的当前等级。-1 = 会话无实体 / 槽无宠物。
+	int petLevel(SA::Net::SessionId session, int pet_slot) const;
 
 	// 某会话背后 Player 的位置(批次 W.1)。valid == false ⇒ 该会话无 L2 实体。
 	//   ★ 移动用例的观察面:走一步坐标变化 / 撞墙不变 / 转身只改 dir。

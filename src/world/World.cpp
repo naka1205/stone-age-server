@@ -804,7 +804,7 @@ void syncPetState(BattleInstance &b, PetPool &pets)
 // (8.5 `battle.c:3851-3860`;SSRC80 全树无 getBattleGold 符号)在本实现走
 // finished 段的 GoldLedger 产币(见下方「战斗产币」注释)—— 与经验域解耦:
 // dp 门只拦金,不拦这里的经验/掉落交付。
-void deliverPlayerProfit(BattleInstance &b, int slot, PlayerPool &players, ItemPool &items)
+void deliverPlayerProfit(BattleInstance &b, int slot, PlayerPool &players, ItemPool &items, PetPool *pets = nullptr)
 {
 	if (slot < 0 || slot >= SA::Rules::kBattlePlayerMax || b.field.at(slot).dead)
 		return;
@@ -816,6 +816,86 @@ void deliverPlayerProfit(BattleInstance &b, int slot, PlayerPool &players, ItemP
 	player->exp += exp;
 	b.gained[at] += exp;
 	b.pending_exp[at] = 0;
+
+	// ── 玩家经验升级与满血满蓝结算 (批次 P.1) ───────────────────────
+	const auto lvl_res = SA::Rules::checkPlayerLevelUp(player->level, player->exp);
+	if (lvl_res.levels_gained > 0)
+	{
+		player->level = lvl_res.new_level;
+		player->skillup_points += lvl_res.skillup_points_gained;
+		player->charm = std::min(100, player->charm + lvl_res.charm_gained);
+
+		// 升级满血满蓝 (char_data.c:1400 / battle.c:4350)
+		SA::Rules::EquipModifiers equip{};
+		for (std::size_t i = 0; i < SA::Model::kStartItemArray; ++i)
+		{
+			if (const auto *it = items.resolve(player->items[i]))
+			{
+				equip.modify_attack += it->modify_attack;
+				equip.modify_defense += it->modify_defense;
+				equip.modify_quick += it->modify_quick;
+				equip.modify_hp += it->modify_hp;
+				equip.modify_mp += it->modify_mp;
+			}
+		}
+		const auto stats = SA::Rules::deriveEquippedStats(player->vital, player->str, player->tough, player->dex, equip);
+		player->hp = stats.max_hp;
+		player->mp = player->max_mp;
+		if (at < static_cast<std::size_t>(SA::Rules::kSlotCount))
+		{
+			const int i_at = static_cast<int>(at);
+			b.field.at(i_at).level = player->level;
+			b.field.at(i_at).hp = player->hp;
+			b.field.at(i_at).mp = player->mp;
+		}
+	}
+
+	// ── 宠物经验升级与四维成长 (批次 P.1) ───────────────────────────
+	const std::size_t pet_slot = at + SA::Rules::kBattlePlayerMax;
+	if (pets != nullptr && pet_slot < static_cast<std::size_t>(SA::Rules::kSlotCount))
+	{
+		if (auto *pet = pets->resolve(b.pet_of_slot[pet_slot]))
+		{
+			const int pet_exp = std::max(0, b.pending_exp[pet_slot]);
+			b.pending_exp[pet_slot] = 0;
+			if (pet_exp > 0)
+			{
+				pet->exp += pet_exp;
+				const auto pet_lvl_res = SA::Rules::checkPlayerLevelUp(pet->level, pet->exp);
+				if (pet_lvl_res.levels_gained > 0)
+				{
+					for (int g = 0; g < pet_lvl_res.levels_gained; ++g)
+					{
+						const auto roll = SA::Rules::rollPetLevelUp(
+						    pet->growth_vital, pet->growth_str, pet->growth_tough, pet->growth_dex,
+						    pet->pet_rank, b.rng);
+						pet->vital += roll.added_vital;
+						pet->str += roll.added_str;
+						pet->tough += roll.added_tough;
+						pet->dex += roll.added_dex;
+						pet->level += 1;
+					}
+					const auto pet_stats = SA::Rules::deriveBaseStats(pet->vital, pet->str, pet->tough, pet->dex);
+					pet->hp = pet_stats.max_hp;
+					pet->mp = pet->max_mp;
+					const int i_pet_slot = static_cast<int>(pet_slot);
+					b.field.at(i_pet_slot).level = pet->level;
+					b.field.at(i_pet_slot).hp = pet->hp;
+					b.field.at(i_pet_slot).mp = pet->mp;
+					b.field.at(i_pet_slot).vital = pet->vital;
+					b.field.at(i_pet_slot).str = pet->str;
+					b.field.at(i_pet_slot).tough = pet->tough;
+					b.field.at(i_pet_slot).dex = pet->dex;
+					b.field.at(i_pet_slot).max_hp = pet_stats.max_hp;
+					b.field.at(i_pet_slot).attack = pet_stats.attack;
+					b.field.at(i_pet_slot).defense = pet_stats.defense;
+					b.field.at(i_pet_slot).quick = pet_stats.quick;
+					b.field.at(i_pet_slot).fix_dex = pet_stats.quick;
+				}
+			}
+		}
+	}
+
 	for (auto &item_id : b.getitem[at])
 	{
 		if (item_id < 0)
@@ -1682,7 +1762,7 @@ void applyEvents(SA::Domain::BattleEvents &events,
 				//   把它记成阵亡会污染战果/经验结算(阶段 2)。
 				c.occupied = false;
 				if (ctx.battle != nullptr && ctx.players != nullptr && ctx.items != nullptr)
-					deliverPlayerProfit(*ctx.battle, static_cast<int>(esc.actor), *ctx.players, *ctx.items);
+					deliverPlayerProfit(*ctx.battle, static_cast<int>(esc.actor), *ctx.players, *ctx.items, ctx.pets);
 				if (ctx.battle != nullptr && ctx.pets != nullptr)
 					syncPetState(*ctx.battle, *ctx.pets);
 				if (c.isPlayer() && esc.actor % SA::Rules::kSideOffset < SA::Rules::kBattlePlayerMax)
@@ -2063,26 +2143,27 @@ int clampEnemyAction(std::uint32_t enemy_action)
 //    `makeDemoField` 手填)⇒ 用占位四维,**登记为无选角来源那族残缺**,阶段 2 接选角后由存档取代。
 // ★ 占位量级照 `makeDemoField` 的 me(力量为主):让占位玩家能打动遇敌链产出的真实弱怪,
 //   使「打赢拿经验」闭环有意义 —— 与欠债 25「真实模板 18 级弱 demo 约 16 倍」同一量级考量。
-SA::Rules::Combatant makePlayerCombatant(const SA::Model::Player *player = nullptr)
+SA::Rules::Combatant makePlayerCombatant(const SA::Model::Player *player = nullptr,
+                                         const SA::Rules::EquipModifiers &equip = {})
 {
 	SA::Rules::Combatant c{};
 	c.occupied = true;
 	c.kind = SA::Rules::CombatantKind::kPlayer;
 	c.slot = 0;
-	if (player)
+	if (player && (player->vital > 0 || player->str > 0 || player->tough > 0 || player->dex > 0))
 	{
 		c.level = player->level;
-		c.hp = player->hp;
-		c.mp = player->mp;
-		c.max_mp = player->max_mp;
 		c.charm = player->charm;
 		c.luck = player->luck;
 		c.vital = player->vital;
 		c.str = player->str;
 		c.tough = player->tough;
 		c.dex = player->dex;
-		const auto stats = SA::Rules::deriveBaseStats(c.vital, c.str, c.tough, c.dex);
+		const auto stats = SA::Rules::deriveEquippedStats(c.vital, c.str, c.tough, c.dex, equip);
 		c.max_hp = stats.max_hp;
+		c.hp = player->hp > 0 ? std::min(player->hp, stats.max_hp) : stats.max_hp;
+		c.mp = player->mp > 0 ? player->mp : 100;
+		c.max_mp = player->max_mp > 0 ? player->max_mp : 100;
 		c.attack = stats.attack;
 		c.defense = stats.defense;
 		c.quick = stats.quick;
@@ -2094,12 +2175,13 @@ SA::Rules::Combatant makePlayerCombatant(const SA::Model::Player *player = nullp
 		c.elements[3] = player->wind;
 		return c;
 	}
-	c.level = 20;
-	c.mp = 100;
-	c.max_mp = 100;
-	c.luck = 10;
+	c.level = player ? player->level : 20;
+	c.mp = player && player->mp > 0 ? player->mp : 100;
+	c.max_mp = player && player->max_mp > 0 ? player->max_mp : 100;
+	c.luck = player ? player->luck : 10;
+	c.charm = player ? player->charm : 0;
 	const SA::Rules::DerivedStats st =
-	    SA::Rules::deriveBaseStats(8000, 30000, 4000, 20000);
+	    SA::Rules::deriveEquippedStats(8000, 30000, 4000, 20000, equip);
 	c.vital = 8000;
 	c.str = 30000;
 	c.tough = 4000;
@@ -2109,7 +2191,14 @@ SA::Rules::Combatant makePlayerCombatant(const SA::Model::Player *player = nullp
 	c.quick = st.quick;
 	c.fix_dex = st.quick;
 	c.max_hp = st.max_hp;
-	c.hp = c.max_hp;
+	c.hp = player && player->hp > 0 ? std::min(player->hp, st.max_hp) : st.max_hp;
+	if (player)
+	{
+		c.elements[0] = player->earth;
+		c.elements[1] = player->water;
+		c.elements[2] = player->fire;
+		c.elements[3] = player->wind;
+	}
 	return c;
 }
 
@@ -3740,7 +3829,7 @@ void World::tick()
 					for (auto sid : waiting)
 					{
 						const auto slot = b.slot_of.at(sid);
-						deliverPlayerProfit(b, slot, s.players, s.items);
+						deliverPlayerProfit(b, slot, s.players, s.items, &s.pets);
 						b.field.at(slot).occupied = false;
 						if (slot % SA::Rules::kSideOffset < SA::Rules::kBattlePlayerMax)
 						{
@@ -3978,7 +4067,7 @@ void World::tick()
 			{
 				const bool player_won = sideWipedOut(b.field, true) && !sideWipedOut(b.field, false);
 				for (int slot = 0; slot < SA::Rules::kBattlePlayerMax; ++slot)
-					deliverPlayerProfit(b, slot, s.players, s.items);
+					deliverPlayerProfit(b, slot, s.players, s.items, &s.pets);
 
 				// ── 战斗产币(经济地基批,DR-EC6;接点 = 战果结算,exp 分配旁)──────────
 				//
@@ -4763,7 +4852,8 @@ bool World::triggerEncounter(SA::Net::SessionId session, std::int32_t area_row)
 
 	// ── 建场 + 玩家入场(Side[0] 首位)─────────────────────────────────
 	SA::Rules::BattleField field{};
-	field.at(0) = makePlayerCombatant(s.storage ? s.players.resolve(s.player_of_session.find(session)) : nullptr);
+	field.at(0) = makePlayerCombatant(s.players.resolve(s.player_of_session.find(session)),
+	                                  playerEquipModifiers(session));
 	const BattleId battle = startBattle(field);
 	if (!joinBattle(battle, session, 0))
 	{
@@ -4835,7 +4925,8 @@ bool World::triggerNpcEnemyBattle(SA::Net::SessionId session, std::size_t world_
 
 	// ── 建场 + 玩家入场(Side[0] 首位,同 triggerEncounter)──────────────────
 	SA::Rules::BattleField field{};
-	field.at(0) = makePlayerCombatant(s.storage ? s.players.resolve(s.player_of_session.find(session)) : nullptr);
+	field.at(0) = makePlayerCombatant(s.players.resolve(s.player_of_session.find(session)),
+	                                  playerEquipModifiers(session));
 	const BattleId battle = startBattle(field);
 	if (!joinBattle(battle, session, 0))
 	{
@@ -6719,6 +6810,160 @@ std::int32_t World::playerItemPile(SA::Net::SessionId session, int slot) const
 	const SA::Model::Item *it =
 	    _impl->items.resolve(p->items[static_cast<std::size_t>(slot)]);
 	return it == nullptr ? -1 : it->current_pile; // 空槽 / 悬空句柄 ⇒ -1
+}
+
+int World::playerLevel(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : static_cast<int>(p->level);
+}
+
+int World::playerSkillupPoints(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : static_cast<int>(p->skillup_points);
+}
+
+int World::petLevel(SA::Net::SessionId session, int pet_slot) const
+{
+	if (pet_slot < 0 || static_cast<std::size_t>(pet_slot) >= SA::Model::kMaxPetHave)
+		return -1;
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return -1;
+	const SA::Model::Pet *pet = _impl->pets.resolve(p->pets[static_cast<std::size_t>(pet_slot)]);
+	return pet == nullptr ? -1 : static_cast<int>(pet->level);
+}
+
+bool World::equipItem(SA::Net::SessionId session, int inventory_slot, int target_slot)
+{
+	Impl &s = *_impl;
+	if (s.inBattle(session))
+		return false;
+
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (p == nullptr)
+		return false;
+
+	if (inventory_slot < static_cast<int>(SA::Model::kStartItemArray) ||
+	    static_cast<std::size_t>(inventory_slot) >= SA::Model::kMaxItemHave)
+	{
+		return false;
+	}
+
+	const auto inv_handle = p->items[static_cast<std::size_t>(inventory_slot)];
+	const SA::Model::Item *it = s.items.resolve(inv_handle);
+	if (it == nullptr)
+		return false;
+
+	if (target_slot < 0)
+	{
+		target_slot = SA::Rules::getEquipSlotForCategory(it->type);
+		if (target_slot < 0)
+			return false;
+		// 若为首饰位 (4: Deco1)，且 Deco1 已穿戴而 Deco2 (5) 为空，则自动穿到 Deco2
+		if (target_slot == 4 && p->items[4].valid() && !p->items[5].valid())
+		{
+			target_slot = 5;
+		}
+	}
+	else
+	{
+		if (target_slot < 0 || target_slot >= static_cast<int>(SA::Model::kStartItemArray))
+			return false;
+		// 校验目标槽位是否与该道具类别相符
+		const int expected_slot = SA::Rules::getEquipSlotForCategory(it->type);
+		if (expected_slot < 0)
+			return false;
+		if (target_slot != expected_slot)
+		{
+			// 允许首饰在 4 (Deco1) 与 5 (Deco2) 互换
+			if (!(expected_slot == 4 && target_slot == 5))
+				return false;
+		}
+	}
+
+	// 互换装备槽与背包槽
+	std::swap(p->items[static_cast<std::size_t>(inventory_slot)],
+	          p->items[static_cast<std::size_t>(target_slot)]);
+	return true;
+}
+
+bool World::unequipItem(SA::Net::SessionId session, int equip_slot, int target_inventory_slot)
+{
+	Impl &s = *_impl;
+	if (s.inBattle(session))
+		return false;
+
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (p == nullptr)
+		return false;
+
+	if (equip_slot < 0 || static_cast<std::size_t>(equip_slot) >= SA::Model::kStartItemArray)
+		return false;
+
+	const auto eq_handle = p->items[static_cast<std::size_t>(equip_slot)];
+	if (!eq_handle.valid() || s.items.resolve(eq_handle) == nullptr)
+		return false;
+
+	if (target_inventory_slot < 0)
+	{
+		// 自动寻找背包中的第一个空槽 [kStartItemArray, kMaxItemHave)
+		for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+		{
+			if (!p->items[i].valid() || s.items.resolve(p->items[i]) == nullptr)
+			{
+				target_inventory_slot = static_cast<int>(i);
+				break;
+			}
+		}
+		if (target_inventory_slot < 0)
+			return false; // 背包已满
+	}
+	else
+	{
+		if (target_inventory_slot < static_cast<int>(SA::Model::kStartItemArray) ||
+		    static_cast<std::size_t>(target_inventory_slot) >= SA::Model::kMaxItemHave)
+		{
+			return false;
+		}
+		// 若指定槽位非空，返回 false (脱装备必须脱到空格)
+		if (p->items[static_cast<std::size_t>(target_inventory_slot)].valid() &&
+		    s.items.resolve(p->items[static_cast<std::size_t>(target_inventory_slot)]) != nullptr)
+		{
+			return false;
+		}
+	}
+
+	p->items[static_cast<std::size_t>(target_inventory_slot)] = eq_handle;
+	p->items[static_cast<std::size_t>(equip_slot)] = SA::Model::kNullHandle;
+	return true;
+}
+
+SA::Rules::EquipModifiers World::playerEquipModifiers(SA::Net::SessionId session) const
+{
+	SA::Rules::EquipModifiers mods{};
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return mods;
+
+	for (std::size_t i = 0; i < SA::Model::kStartItemArray; ++i)
+	{
+		const SA::Model::Item *it = _impl->items.resolve(p->items[i]);
+		if (it != nullptr)
+		{
+			mods.modify_attack += it->modify_attack;
+			mods.modify_defense += it->modify_defense;
+			mods.modify_quick += it->modify_quick;
+			mods.modify_hp += it->modify_hp;
+			mods.modify_mp += it->modify_mp;
+		}
+	}
+	return mods;
 }
 
 const SA::Rules::BattleField *World::battleField(BattleId id) const

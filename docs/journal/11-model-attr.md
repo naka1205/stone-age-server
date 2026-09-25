@@ -661,3 +661,28 @@ r"^(?P<loc>[^\n:]+:\d+:\d+):\s*(?:error|warning):\s*THIS-WORDING-NO-LONGER-MATCH
 | ★ 锁定 ref | **`shared/` 有改动**(新增 `Enemy.h` · `Pet.h` 加 Y 五项 · `Progression` 加 `enemyRank`)⇒ **必须前推** |
 
 ---
+
+### 9.0.82 批次 P.1 —— 成长与装备闭环: 经验曲线与角色/宠物升级体系及装备槽穿戴加成 (2026-09-25)
+
+> **本批聚焦**: 承接 9.0.81 (D.2) 地图与 NPC 导入之后，打通「成长与养成」核心子系统（工作包 W2 / `08-progression.md`）。
+> 彻底解决历史遗留的经验曲线真源判定（`exp.txt` vs `LevelUpTbl`），完成角色经验结算与升级加点（`skillup_points += 3`、魅力上限增长、HP/MP 满额恢复）、宠物四维升级摇号（`rollPetLevelUp`），以及装备槽穿戴/卸下与属性修正（`deriveEquippedStats` / `EquipModifiers`）。
+
+#### ① 核心真源与领域规则兑现
+1. **经验曲线真源 (`08-progression.md` §2.1-§2.4 C1/C2)**:
+   - 裁定 `exp.txt`（`char_data.c:1231` 注释掉的 `NeedLevelUpTbls[]` 200 项数组）为权威经验门限，逐元素与官方一致（60 级差 15.4 倍，140 级差 17.3 倍）。
+   - `getNeedLevelUpExp(target_level)` 提供纯函数查询：`<=1` 返回 0，`2..200` 返回对应门限，`>200` 返回 -1。
+2. **玩家与宠物升级结算 (`char_data.c:1361` / `battle.c:4350`)**:
+   - `checkPlayerLevelUp(current_level, current_exp)`: 每升 1 级赋予 3 点未分配属性点（`skillup_points`）及 1 点魅力（上限 100），满血满蓝。
+   - `rollPetLevelUp(...)`: 10 次 `rand(0, 3)` 随机撒点 + 1 次档位浮动比例，四维成长率推导增量，满血满蓝。
+   - 战果交付（`deliverPlayerProfit`）挂接升级结算，战胜敌人后立即刷新属性与等级。
+3. **装备槽穿脱与数值修正 (`item.c:1360-1650` / `char.c:3525-3547`)**:
+   - 装备槽位映射 `getEquipSlotForCategory`（头盔/铠甲/武器/盾牌/首饰1/首饰2/鞋子/手套/腰带）。
+   - `World::equipItem` 与 `World::unequipItem`：在战斗外安全互换背包与装备槽。
+   - `World::playerEquipModifiers` 与 `deriveEquippedStats`：四维推导攻防敏血并叠加装备加成，维持敏捷下限保底 1（DR-U01）。
+
+#### ② 验证与工程纪律
+- 服务端 22 项全量 CTest 100% 通过（新增 `rules_progression` 5 项测试组与 `world_map` 装备穿脱战斗升级端到端集成测试）。
+- `ci_verify.py` 全量通过，断言防线反向验证全绿。
+- 前推 tag `shared-v0.36.0`，客户端换 pin 并同步通过全量测试，零告警零漂移。
+
+---

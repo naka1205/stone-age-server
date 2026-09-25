@@ -79,6 +79,13 @@ struct Item
 	std::int32_t level = 0;
 	std::int32_t cost = 0;
 
+	// ── 装备属性修正 (原 ITEM_MODIFYATTACK / DEFENCE / QUICK / HP / MP, item.h:143-147) ──────
+	std::int32_t modify_attack = 0;
+	std::int32_t modify_defense = 0;
+	std::int32_t modify_quick = 0;
+	std::int32_t modify_hp = 0;
+	std::int32_t modify_mp = 0;
+
 	// ── 堆叠(源码 `_ITEMSET4_TXT`,展开视图确认 8.0 启用)──────────────
 	//
 	// ★ `ITEM_CANBEPILE`(可否堆叠)/ `ITEM_USEPILENUMS`(单格堆叠上限)。掉落与使用

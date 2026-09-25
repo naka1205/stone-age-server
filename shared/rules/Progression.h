@@ -163,6 +163,71 @@ SpawnStats rollSpawnStats(const SpawnTemplate &tmpl, std::int32_t level,
 //   (`enemybase1.txt` 实测 1,053 行无负基数)⇒ 现实中走不到。
 std::int32_t enemyRank(const SpawnTemplate &tmpl) noexcept;
 
+// ══ 经验与等级成长 (批次 P.1)═════════════════════════════════════════
+
+// 升级所需累计经验值（原 NeedLevelUpTbls[]，由 csa8.0/data/exp.txt 与 char_data.c:1231 逐下标核实）。
+// 入参 target_level: 目标等级。
+// 返回: 升到 target_level 所需的最小累计经验值。
+//   target_level <= 1 返回 0;
+//   target_level >= 2 && target_level <= 200 返回对应门限;
+//   target_level > 200 返回 -1 (已达配置上限，无法继续升级)。
+std::int32_t getNeedLevelUpExp(std::int32_t target_level) noexcept;
+
+struct PlayerLevelUpResult
+{
+	std::int32_t old_level = 1;
+	std::int32_t new_level = 1;
+	std::int32_t levels_gained = 0;
+	std::int32_t skillup_points_gained = 0; // levels_gained * 3 (char_data.c / battle.c:4350)
+	std::int32_t charm_gained = 0;          // +1 每级，上限 100 (CH_FIX_PLAYERLEVELUP)
+};
+
+// 检查玩家经验是否满足升级条件并计算晋级结果。
+// 1:1 移植 CHAR_LevelUpCheck (char_data.c:1361-1415)。
+PlayerLevelUpResult checkPlayerLevelUp(std::int32_t current_level, std::int32_t current_exp,
+                                       std::int32_t max_level = 140) noexcept;
+
+struct PetLevelUpStats
+{
+	std::int32_t added_vital = 0;
+	std::int32_t added_str = 0;
+	std::int32_t added_tough = 0;
+	std::int32_t added_dex = 0;
+};
+
+// 宠物升级属性增长摇号。
+// 1:1 移植 CHAR_PetLevelUp (char_data.c:1545-1610)。
+//
+// 消耗 rng: 10 次 rand(0, 3) 随机撒点，再 1 次 rand(min, max) 档位浮动比例。
+// growth_* 为宠物成长率 (CHAR_ALLOCPOINT 展开的 4 项)。
+// petrank 为评级档位 [0, 5] (CHAR_PETRANK，由 enemyRank 算出)。
+PetLevelUpStats rollPetLevelUp(std::uint8_t growth_vital, std::uint8_t growth_str,
+                               std::uint8_t growth_tough, std::uint8_t growth_dex,
+                               std::int32_t petrank, Random &rng) noexcept;
+
+// ══ 装备属性修正 (批次 P.1)═══════════════════════════════════════════
+
+// 装备带来的属性修正值（原 ITEM_equipEffect / Other_DefcharWorkInt, item.c:1599-1650）。
+struct EquipModifiers
+{
+	std::int32_t modify_attack = 0;
+	std::int32_t modify_defense = 0;
+	std::int32_t modify_quick = 0;
+	std::int32_t modify_hp = 0;
+	std::int32_t modify_mp = 0;
+};
+
+// 叠加上装备加成后的最终战斗数值。
+// 1:1 移植 CHAR_complianceParameter (char/char.c:3525-3547)。
+DerivedStats deriveEquippedStats(std::int32_t vital, std::int32_t str,
+                                 std::int32_t tough, std::int32_t dex,
+                                 const EquipModifiers &equip = {}) noexcept;
+
+// 装备槽位映射（原 ITEM_getEquipPlace, item.c:1360-1420）。
+// category: ITEM_CATEGORY (0:FIST, 1:AXE, 2:CLUB, 3:SPEAR, 4:BOW, 5:SHIELD, 6:HELM, 7:ARMOUR, etc.)
+// 返回: 0..8 对应的装备位下标 (0:Head, 1:Body, 2:Arm, 3:Shield, 4:Deco1, 6:Shoes, 7:Glove, 8:Belt)，无法穿戴返回 -1。
+std::int32_t getEquipSlotForCategory(std::int32_t category) noexcept;
+
 } // namespace SA::Rules
 
 #endif // __SA_Progression_H__
