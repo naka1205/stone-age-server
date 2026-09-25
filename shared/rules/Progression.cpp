@@ -332,13 +332,46 @@ std::int32_t getEquipSlotForCategory(std::int32_t category) noexcept
 	}
 }
 
-// ══ 属性点分配系统 (批次 P.2)═════════════════════════════════════════
+std::int32_t getProfessionStatCap(ProfessionClass profession, StatCategory category) noexcept
+{
+	switch (profession)
+	{
+	case ProfessionClass::kFighter:
+		if (category == StatCategory::kDex)
+			return 200 * 100;
+		break;
+	case ProfessionClass::kWizard:
+		if (category == StatCategory::kStr || category == StatCategory::kTough)
+			return 200 * 100;
+		break;
+	case ProfessionClass::kHunter:
+		if (category == StatCategory::kStr || category == StatCategory::kTough)
+			return 200 * 100;
+		if (category == StatCategory::kDex)
+			return 400 * 100;
+		break;
+	case ProfessionClass::kNone:
+	default:
+		break;
+	}
+	return -1;
+}
+
+std::int32_t computeHunterEncounterFix(int skill_level, int rate, bool is_track) noexcept
+{
+	const int eff_level = skill_level / 10;
+	if (eff_level <= 0)
+		return 0;
+	const int per = eff_level * rate;
+	return is_track ? per : -per;
+}
 
 StatAllocationResult applyStatAllocation(std::int32_t vital, std::int32_t str,
                                          std::int32_t tough, std::int32_t dex,
                                          std::int32_t skillup_points,
                                          StatCategory category,
-                                         std::int32_t points_to_allocate) noexcept
+                                         std::int32_t points_to_allocate,
+                                         ProfessionClass profession) noexcept
 {
 	StatAllocationResult res{};
 	res.remaining_skillup_points = skillup_points;
@@ -360,19 +393,28 @@ StatAllocationResult applyStatAllocation(std::int32_t vital, std::int32_t str,
 		return res;
 	}
 
+	const std::int32_t cap = getProfessionStatCap(profession, category);
 	const std::int32_t delta = points_to_allocate * 100;
 	switch (category)
 	{
 	case StatCategory::kVital:
+		if (cap >= 0 && (vital >= cap || vital + delta > cap))
+			return res;
 		res.new_vital += delta;
 		break;
 	case StatCategory::kStr:
+		if (cap >= 0 && (str >= cap || str + delta > cap))
+			return res;
 		res.new_str += delta;
 		break;
 	case StatCategory::kTough:
+		if (cap >= 0 && (tough >= cap || tough + delta > cap))
+			return res;
 		res.new_tough += delta;
 		break;
 	case StatCategory::kDex:
+		if (cap >= 0 && (dex >= cap || dex + delta > cap))
+			return res;
 		res.new_dex += delta;
 		break;
 	default:

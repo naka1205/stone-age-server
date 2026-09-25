@@ -586,3 +586,109 @@ TEST_CASE("属性点分配:四维换算比例与越界校验")
 		CHECK(res.remaining_skillup_points == 5);
 	}
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  14. 职业属性上限门禁与非战斗遇敌率纯函数 (char.c:2570 / profession_skill.c:1332, 批次 A-γ2)
+// ═══════════════════════════════════════════════════════════════════════════
+TEST_CASE("职业属性上限门禁与非战斗遇敌率纯函数 (char.c:2570 / profession_skill.c:1332)")
+{
+	// 1. 测试各职业属性上限查询纯函数 (getProfessionStatCap)
+	// 勇士锁敏 200 (20000)
+	CHECK(getProfessionStatCap(ProfessionClass::kFighter, StatCategory::kDex) == 20000);
+	CHECK(getProfessionStatCap(ProfessionClass::kFighter, StatCategory::kStr) == -1);
+	CHECK(getProfessionStatCap(ProfessionClass::kFighter, StatCategory::kTough) == -1);
+	CHECK(getProfessionStatCap(ProfessionClass::kFighter, StatCategory::kVital) == -1);
+
+	// 巫师锁攻防 200 (20000)
+	CHECK(getProfessionStatCap(ProfessionClass::kWizard, StatCategory::kStr) == 20000);
+	CHECK(getProfessionStatCap(ProfessionClass::kWizard, StatCategory::kTough) == 20000);
+	CHECK(getProfessionStatCap(ProfessionClass::kWizard, StatCategory::kDex) == -1);
+	CHECK(getProfessionStatCap(ProfessionClass::kWizard, StatCategory::kVital) == -1);
+
+	// 猎人锁攻防 200 (20000)，锁敏 400 (40000)
+	CHECK(getProfessionStatCap(ProfessionClass::kHunter, StatCategory::kStr) == 20000);
+	CHECK(getProfessionStatCap(ProfessionClass::kHunter, StatCategory::kTough) == 20000);
+	CHECK(getProfessionStatCap(ProfessionClass::kHunter, StatCategory::kDex) == 40000);
+	CHECK(getProfessionStatCap(ProfessionClass::kHunter, StatCategory::kVital) == -1);
+
+	// 无职业 (kNone) 无上限限制
+	CHECK(getProfessionStatCap(ProfessionClass::kNone, StatCategory::kStr) == -1);
+	CHECK(getProfessionStatCap(ProfessionClass::kNone, StatCategory::kDex) == -1);
+
+	// 2. 勇士加点上限验证 (锁敏 20000)
+	{
+		// 敏捷当前 19900，分配 1 点 -> 20000 成功
+		const auto res1 = applyStatAllocation(1000, 1000, 1000, 19900, 3, StatCategory::kDex, 1, ProfessionClass::kFighter);
+		CHECK(res1.success);
+		CHECK(res1.new_dex == 20000);
+		CHECK(res1.remaining_skillup_points == 2);
+
+		// 敏捷已满 20000，再次尝试分配敏捷 -> 拦截失败
+		const auto res2 = applyStatAllocation(1000, 1000, 1000, 20000, 2, StatCategory::kDex, 1, ProfessionClass::kFighter);
+		CHECK_FALSE(res2.success);
+		CHECK(res2.new_dex == 20000);
+		CHECK(res2.remaining_skillup_points == 2);
+
+		// 敏捷从 19900 尝试一次分配 2 点 (目标 20100 > 20000) -> 越界拦截失败
+		const auto res3 = applyStatAllocation(1000, 1000, 1000, 19900, 3, StatCategory::kDex, 2, ProfessionClass::kFighter);
+		CHECK_FALSE(res3.success);
+		CHECK(res3.new_dex == 19900);
+
+		// 勇士分配力量超过 20000 -> 不受限
+		const auto res_str = applyStatAllocation(1000, 20000, 1000, 1000, 3, StatCategory::kStr, 1, ProfessionClass::kFighter);
+		CHECK(res_str.success);
+		CHECK(res_str.new_str == 20100);
+	}
+
+	// 3. 巫师加点上限验证 (锁攻防 20000)
+	{
+		// 力量满 20000 -> 拦截
+		const auto res_str = applyStatAllocation(1000, 20000, 1000, 1000, 3, StatCategory::kStr, 1, ProfessionClass::kWizard);
+		CHECK_FALSE(res_str.success);
+
+		// 耐力满 20000 -> 拦截
+		const auto res_tgh = applyStatAllocation(1000, 1000, 20000, 1000, 3, StatCategory::kTough, 1, ProfessionClass::kWizard);
+		CHECK_FALSE(res_tgh.success);
+
+		// 敏捷超过 20000 -> 巫师不锁敏，放行
+		const auto res_dex = applyStatAllocation(1000, 1000, 1000, 20000, 3, StatCategory::kDex, 1, ProfessionClass::kWizard);
+		CHECK(res_dex.success);
+		CHECK(res_dex.new_dex == 20100);
+	}
+
+	// 4. 猎人加点上限验证 (锁攻防 20000，锁敏 40000)
+	{
+		// 力量满 20000 -> 拦截
+		CHECK_FALSE(applyStatAllocation(1000, 20000, 1000, 1000, 3, StatCategory::kStr, 1, ProfessionClass::kHunter).success);
+		// 耐力满 20000 -> 拦截
+		CHECK_FALSE(applyStatAllocation(1000, 1000, 20000, 1000, 3, StatCategory::kTough, 1, ProfessionClass::kHunter).success);
+
+		// 敏捷在 39900 分配 1 点到 40000 -> 成功
+		const auto res_dex1 = applyStatAllocation(1000, 1000, 1000, 39900, 3, StatCategory::kDex, 1, ProfessionClass::kHunter);
+		CHECK(res_dex1.success);
+		CHECK(res_dex1.new_dex == 40000);
+
+		// 敏捷满 40000 -> 拦截
+		CHECK_FALSE(applyStatAllocation(1000, 1000, 1000, 40000, 3, StatCategory::kDex, 1, ProfessionClass::kHunter).success);
+
+		// 体力不受限
+		const auto res_vit = applyStatAllocation(30000, 1000, 1000, 1000, 3, StatCategory::kVital, 1, ProfessionClass::kHunter);
+		CHECK(res_vit.success);
+		CHECK(res_vit.new_vital == 30100);
+	}
+
+	// 5. 猎人非战斗遇敌率纯函数计算 (computeHunterEncounterFix)
+	{
+		// 追寻敌踪 (track): 10级 -> +10%
+		CHECK(computeHunterEncounterFix(10, 10, true) == 10);
+		// 追寻敌踪 (track): 35级 -> 3 * 10 = +30%
+		CHECK(computeHunterEncounterFix(35, 10, true) == 30);
+		// 回避战斗 (escape): 10级 -> -10%
+		CHECK(computeHunterEncounterFix(10, 10, false) == -10);
+		// 回避战斗 (escape): 50级 (rate 15) -> -75%
+		CHECK(computeHunterEncounterFix(50, 15, false) == -75);
+		// 等级不足 10 -> 0
+		CHECK(computeHunterEncounterFix(9, 10, true) == 0);
+		CHECK(computeHunterEncounterFix(0, 10, false) == 0);
+	}
+}

@@ -288,6 +288,20 @@ struct CombatModifiers
 	int pet_skill_apply_status = 0; // 目标状态号 1..11(COME3 low);0 = 非状态技
 	int pet_skill_status_turns = 0; // 声明回合(COM3 high,option `turn N` 的 N)
 
+	// ── 职技·直攻系 (批次 A-γ2) ──────────────────────────────
+	//
+	// ★★ 本组字段为本回合 PROF_SKILL 指令的参数投影:
+	//    World 层在 resolveAction 前查 64 职技映射表，将直攻系职技参数投影至此。
+	//    L3 结算在判定 cmd.command_kind == PROF_SKILL 且 prof_skill_direct 为 true 时接入既有 strike 管线。
+	//    ★ 全部默认值 = 0 / 100 ⇒ 非 PROF_SKILL 指令逐位保持不变。
+	bool prof_skill_direct = false;
+	int prof_skill_hits = 0;             // 段数 (如连环攻击2段、双重攻击2段、混乱攻击3~5段)
+	int prof_skill_damage_percent = 100; // 伤害倍率 (100 = 100%)
+	int prof_skill_attack_percent = 0;   // 攻击力提升百分比 (+%)
+	int prof_skill_quick_percent = 0;    // 敏捷修正百分比 (+/- %)
+	int prof_skill_apply_status = 0;     // 目标状态号 (如混乱)
+	int prof_skill_status_turns = 0;     // 状态回合
+
 	// ── 状态异常(§4,批次 L4.1)──────────────────────────────────
 	//
 	// ★★ **攻方「带毒装备」**(原 `CHAR_SUITPOISON`,`_SUIT_ADDPART4` 在 8.0 **开**,

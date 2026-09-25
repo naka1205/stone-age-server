@@ -250,6 +250,29 @@ struct StatAllocationResult
 	std::int32_t new_dex = 0;
 };
 
+// 职业类别定义 (原 PROFESSION_CLASS, profession_skill.h:18)。
+enum class ProfessionClass : std::uint8_t
+{
+	kNone = 0,
+	kFighter = 1, // 勇士/白狼
+	kWizard = 2,  // 巫师/暗灵
+	kHunter = 3   // 猎人/追猎
+};
+
+// 获取特定职业在特定属性上的加点上限（以内部定点数表示，1点=100）。
+// 1:1 移植 char.c:2570-2640 的职业属性上限门禁。
+// 勇士: 敏捷上限 200 (20000)
+// 巫师: 腕力上限 200 (20000)，耐力上限 200 (20000)
+// 猎人: 腕力上限 200 (20000)，耐力上限 200 (20000)，敏捷上限 400 (40000)
+// 若无职业限制，返回 -1。
+std::int32_t getProfessionStatCap(ProfessionClass profession, StatCategory category) noexcept;
+
+// 计算猎人追寻敌踪/回避战斗技能的遇敌率修正幅度 (原 per = (skill_level / 10) * rate)。
+// 1:1 移植 profession_skill.c:1332-1390 (PROFESSION_track / PROFESSION_escape)。
+// 若 skill_level < 10 则返回 0。
+// 若 is_track 为 true，返回 +per；若为 false (escape)，返回 -per。
+std::int32_t computeHunterEncounterFix(int skill_level, int rate = 10, bool is_track = true) noexcept;
+
 // 属性点分配纯函数。
 // 1:1 移植 CHAR_SkillUp 核心计算段 (char/char.c:2550-2660)。
 // 换算规则: 1 属性点 = 100 内部定点数 (CHAR_getInt + points * 100)。
@@ -257,13 +280,15 @@ struct StatAllocationResult
 // 契约:
 //   ① points_to_allocate 必须 >= 1，且 skillup_points >= points_to_allocate；
 //   ② category 必须在 [kVital, kDex] 范围内；
-//   ③ 校验不通过时返回 success = false，原数值保持不变；
-//   ④ 校验通过时返回 success = true，扣减技能点数，对应四维增加 points * 100。
+//   ③ 若指定职业且目标属性超出职业上限，返回 success = false，原数值保持不变；
+//   ④ 校验不通过时返回 success = false，原数值保持不变；
+//   ⑤ 校验通过时返回 success = true，扣减技能点数，对应四维增加 points * 100。
 StatAllocationResult applyStatAllocation(std::int32_t vital, std::int32_t str,
                                          std::int32_t tough, std::int32_t dex,
                                          std::int32_t skillup_points,
                                          StatCategory category,
-                                         std::int32_t points_to_allocate = 1) noexcept;
+                                         std::int32_t points_to_allocate = 1,
+                                         ProfessionClass profession = ProfessionClass::kNone) noexcept;
 
 } // namespace SA::Rules
 

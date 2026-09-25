@@ -370,3 +370,39 @@ shared-v0.8.0 + 客户端 `d2-only` 复验**,两仓 × 两远端一起推 tag(§
 ④ **`COM:防御` 分支的指令改写未复刻**:原版该支还会把宠物自己的 COM1 改成 `BATTLE_COM_GUARD`(原地防御,`pet_skill.c:746`)。本仓 PET_SKILL 指令不就地改写指令种类 ⇒ 只建链、不改行动方式。⚠️ **投产数据不触发该分支**(实测 `petskill2.txt` 全表只有第 9 行带 `COM:`,值为"攻击")⇒ 无可观察差异;若将来导入带 `COM:防御` 的行,这里会变成真实差异。
 ⑤ `countAlive` 与 World 侧 `sideWipedOut` 是**两套判据**(前者排除宠物且只读死亡标志,后者读 `hp > 0` 且不排除宠物)—— 前者 1:1 照 `BATTLE_CountAlive`,后者是既有的终局判定。**本批不改 `sideWipedOut`**(它不在本批锚点内),但已在 `countAlive` 处记明差异,避免后续批次误当同义。
 ⑥ **shared/rules 有实质改动 ⇒ 须打 tag 前推 + 客户端换 pin**(与 A-β 后续子批合窗口执行)。
+
+---
+
+### 9.0.84 批次 A-γ2 —— 职业宿主与职业属性上限 / 非战斗职技 / 64 职技映射表与直攻宿主执行闭环 (2026-09-25)
+
+> **本批聚焦**: 承接 9.0.83 (批次 P.2) 属性点分配系统，依据原版石器 8.0 权威源码与架构裁定，补全职业系统骨干（A-γ2 子批）。
+> 涵盖三职四门禁属性上限纯函数（勇士锁敏 200，巫师锁攻防 200，猎人锁攻防 200/敏 400）、猎人非战斗遇敌率纯函数与世界层判定挂接、64 项权威职业技能映射全表（53 项薄包装/9 项被动空指令/2 项非战斗技能归并）、直攻系职技纯函数计算（爆击、连环、双重、弱点、混乱）以及战场宿主执行闭环。
+
+#### ① 核心真源与领域规则兑现
+1. **职业属性上限门禁与加点约束 (`shared/rules/Progression.h` / `Progression.cpp`)**:
+   - `ProfessionClass` 枚举（`kNone=0, kFighter=1, kWizard=2, kHunter=3`）；
+   - `getProfessionStatCap` 纯函数严格兑现原版 `char.c:2570` 职业上限：
+     - 勇士（Fighter）：`kDex` 上限 20000（200 点）；
+     - 巫师（Wizard）：`kStr`, `kTough` 上限 20000（200 点）；
+     - 猎人（Hunter）：`kStr`, `kTough` 上限 20000（200 点），`kDex` 上限 40000（400 点）；
+     - 无限制职业默认上限为 60000（600 点）；
+   - 加点纯函数 `applyStatAllocation` 接入 `ProfessionClass` 校验，前置阻断突破职业上限的加点请求。
+2. **猎人非战斗职技与遇敌修正 (`shared/rules/Progression.h` / `src/world/World.cpp`)**:
+   - `computeHunterEncounterFix` 纯函数忠实复刻原版公式 `(skill_level / 10) * rate`（诱敌加深遇敌率、回避减少遇敌率）；
+   - 玩家实体增加 `encounter_rate_fix` 与 `encounter_rate_expire_ms`，世界层暴露 `castHunterEncounterSkill`，走路遇敌判定挂接修正系数与过期自动清零。
+3. **权威 64 项职业技能映射全表 (`shared/rules/ProfessionSkill.h` / `ProfessionSkill.cpp`)**:
+   - 建立 8.0 权威 64 项原版职业技能映射表，涵盖勇士/巫师/猎人全系技能；
+   - 严格落实 53 包装、9 被动、2 非战斗的归并架构；
+   - 纯函数 `computeProfSkillDirectParams` 针对直攻系（爆击、连环攻击、双重攻击、弱点攻击、混乱攻击）计算段数、伤害加成与状态附着参数。
+4. **战斗宿主直攻执行闭环 (`shared/rules/Battle.cpp` / `shared/rules/Combatant.h`)**:
+   - `CombatModifiers` 扩展职业技能直接投影字段；
+   - 战斗指令 `CommandKind::PROF_SKILL` 驱动直攻管线，复用标准 strike 计算（破防、闪避、暴击等），打上 `ATTACK_KIND_PROF_SKILL` 事件标记；
+   - 支持混乱攻击多段打击与状态施加、双重攻击固定 2 段伤害衰减、爆击高额攻倍率结算。
+
+#### ② 验证与工程纪律
+- 服务端 22 项全量 CTest 100% 通过（`rules_progression` 增补职业属性上限与加点门禁、`rules_battle` 增补 64 技能全表及直攻结算测试、`world_map` 增补职业与遇敌率时钟集成测试）。
+- 双向反向验证：
+  - 1) 篡改 `getProfessionStatCap` 期望为 19999 -> 断言失败转红，恢复 20000 -> 回绿；
+  - 2) 篡改 64 技能表大小期望为 65 -> 断言失败转红，恢复 64 -> 回绿。
+- `ci_verify.py` 全量通过（6/6 项全绿）。
+

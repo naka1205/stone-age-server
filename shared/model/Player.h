@@ -20,6 +20,7 @@
 #include "model/Handle.h"
 #include "model/Item.h"
 #include "model/Pet.h"
+#include "rules/Progression.h"
 
 namespace SA::Model
 {
@@ -101,6 +102,12 @@ struct Player
 	std::int32_t exp = 0;
 	// Persistent character attributes (char.c creation; derived stats remain transient).
 	std::int32_t level = 1;
+	// 职业类别与职业等级 (原 PROFESSION_CLASS / PROFESSION_LEVEL)
+	SA::Rules::ProfessionClass profession_class = SA::Rules::ProfessionClass::kNone;
+	std::int32_t profession_level = 0;
+	// 猎人遇敌率修正 (原 CHAR_ENCOUNT_FIX / CHAR_ENCOUNT_NUM)
+	std::int32_t encounter_rate_fix = 0;
+	std::int64_t encounter_rate_expire_ms = 0;
 	// 未分配属性点 (原 CHAR_SKILLUPPOINT，每次升级 +3 点，批次 P.1)
 	std::int32_t skillup_points = 0;
 	std::int32_t hp = 0;

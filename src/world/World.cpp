@@ -23,6 +23,7 @@
 #include "model/EntityPool.h"
 #include "model/Player.h"
 #include "rules/CaptureItem.h"
+#include "rules/ProfessionSkill.h"
 #include "rules/Progression.h"
 #include "rules/Status.h"
 
@@ -1230,6 +1231,71 @@ void projectPetSkill(BattleInstance &b, const std::vector<PetSkillEffect> &effec
 			atk.mods.pet_skill_charge_turns =
 			    (e->charge_turns < 1 || e->charge_turns > 10) ? 1 : e->charge_turns;
 			atk.mods.pet_skill_charge_percent = e->charge_attack_percent;
+		}
+	}
+}
+
+// 投影职业技能参数至战斗单位快照 (批次 A-γ2)
+void projectProfSkill(BattleInstance &b, const PlayerPool &players)
+{
+	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+	{
+		SA::Rules::Combatant &atk = b.field.at(slot);
+		if (!atk.occupied)
+			continue;
+
+		// 归零 = 回到"无技能"
+		atk.mods.prof_skill_direct = false;
+		atk.mods.prof_skill_hits = 0;
+		atk.mods.prof_skill_damage_percent = 100;
+		atk.mods.prof_skill_attack_percent = 0;
+		atk.mods.prof_skill_quick_percent = 0;
+		atk.mods.prof_skill_apply_status = 0;
+		atk.mods.prof_skill_status_turns = 0;
+
+		if (!b.commands.present[slot])
+			continue;
+		const SA::Domain::BattleCommand &cmd = b.commands.commands[slot];
+		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::PROF_SKILL)
+			continue;
+
+		const auto skill_id = cmd.command.prof_skill.skill_id;
+		const auto *info = SA::Rules::findProfessionSkillById(skill_id);
+		if (info == nullptr)
+			continue;
+
+		// 目标槽单位族
+		const int target_slot = static_cast<int>(cmd.command.prof_skill.target);
+		const SA::Rules::CombatantKind target_kind =
+		    (target_slot >= 0 && target_slot < SA::Rules::kSlotCount && b.field.at(target_slot).occupied)
+		        ? b.field.at(target_slot).kind
+		        : SA::Rules::CombatantKind::kEnemy;
+
+		// 技能等级：优先读玩家实体的 profession_level，未设置时兜底为 10
+		int skill_level = 10;
+		if (slot < SA::Rules::kBattlePlayerMax)
+		{
+			const auto ph = b.player_of_slot[static_cast<std::size_t>(slot)];
+			if (ph.valid())
+			{
+				if (const auto *player = players.resolve(ph))
+				{
+					if (player->profession_level > 0)
+						skill_level = player->profession_level;
+				}
+			}
+		}
+
+		const auto params = SA::Rules::computeProfSkillDirectParams(skill_id, skill_level, target_kind, b.rng);
+		if (params.is_direct)
+		{
+			atk.mods.prof_skill_direct = true;
+			atk.mods.prof_skill_hits = params.hits;
+			atk.mods.prof_skill_damage_percent = params.damage_percent;
+			atk.mods.prof_skill_attack_percent = params.attack_percent;
+			atk.mods.prof_skill_quick_percent = params.quick_percent;
+			atk.mods.prof_skill_apply_status = params.apply_status;
+			atk.mods.prof_skill_status_turns = params.status_turns;
 		}
 	}
 }
@@ -3901,6 +3967,8 @@ void World::tick()
 				// 宠技参数同样逐行动重投影(B1):宠物换了指令 / 指令被状态清空后,
 				// 旧技能参数不能残留(见 projectPetSkill 卷首的"逐行动重算"注记)。
 				projectPetSkill(b, s.pet_skill_effects);
+				// 职技参数逐行动重投影 (A-γ2): 查表投影直攻系参数
+				projectProfSkill(b, s.players);
 				// 集气态投影(B2b)在宠技表投影**之后**:完成击要覆盖表投影的
 				// direct=false / attack_percent=0(见 projectChargeState 卷首)。
 				projectChargeState(b, actor);
@@ -4308,10 +4376,26 @@ void World::tick()
 					c.cep = lo;
 				if (c.cep > hi)
 					c.cep = hi;
+				// 检查猎人遇敌率修正 (原 CHAR_ENCOUNT_FIX / CHAR_ENCOUNT_NUM, char_walk.c:558-575)
+				std::int32_t eff_cep = c.cep;
+				if (p->encounter_rate_fix != 0)
+				{
+					if (s.now_ms > p->encounter_rate_expire_ms)
+					{
+						p->encounter_rate_fix = 0;
+						p->encounter_rate_expire_ms = 0;
+					}
+					else
+					{
+						eff_cep = c.cep * (100 + p->encounter_rate_fix) / 100;
+						if (eff_cep < 0)
+							eff_cep = 0;
+					}
+				}
 				// 遇敌骰子 rand()%(120*getEnemyAction()) < temp(char_walk.c:585)。
 				//   ★ 用**世界 rng**(遇敌是世界事件,不是战斗内可回放序列)。
 				const int denom = 120 * clampEnemyAction(s.config.enemy_action);
-				if (s.world_rng.randMod(denom) < c.cep)
+				if (s.world_rng.randMod(denom) < eff_cep)
 				{
 					// 命中 ⇒ 清走路串(EN_recv:WALKARRAY="")+ cep 重置 prob_min(:594)+ 开战。
 					//   ⚠️ 清串后本 conn 剩余方向作废(原版遇敌即中断走路);triggerEncounter
@@ -6854,6 +6938,60 @@ int World::playerDex(SA::Net::SessionId session) const
 	return p == nullptr ? -1 : static_cast<int>(p->dex);
 }
 
+SA::Rules::ProfessionClass World::playerProfessionClass(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? SA::Rules::ProfessionClass::kNone : p->profession_class;
+}
+
+int World::playerProfessionLevel(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? -1 : static_cast<int>(p->profession_level);
+}
+
+bool World::setPlayerProfession(SA::Net::SessionId session, SA::Rules::ProfessionClass profession, int level)
+{
+	SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return false;
+	p->profession_class = profession;
+	p->profession_level = std::max(0, level);
+	return true;
+}
+
+int World::playerEncounterRateFix(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return 0;
+	if (_impl->now_ms > p->encounter_rate_expire_ms)
+		return 0;
+	return static_cast<int>(p->encounter_rate_fix);
+}
+
+bool World::castHunterEncounterSkill(SA::Net::SessionId session, bool is_track, int skill_level,
+                                     int rate, std::int64_t duration_ms)
+{
+	Impl &s = *_impl;
+	SA::Model::Player *player = s.players.resolve(s.player_of_session.find(session));
+	if (player == nullptr || player->hp <= 0)
+		return false;
+
+	// 仅猎人允许施放猎人非战斗职技 (profession_skill.c:1332)
+	if (player->profession_class != SA::Rules::ProfessionClass::kHunter)
+		return false;
+
+	const int fix = SA::Rules::computeHunterEncounterFix(skill_level, rate, is_track);
+	player->encounter_rate_fix = fix;
+	player->encounter_rate_expire_ms = s.now_ms + duration_ms;
+	return true;
+}
+
 bool World::allocateStatPoint(SA::Net::SessionId session, int stat_index, int points)
 {
 	if (stat_index < 0 || stat_index > 3)
@@ -6885,7 +7023,7 @@ bool World::allocateStatPoint(SA::Net::SessionId session, SA::Rules::StatCategor
 
 	const auto res = SA::Rules::applyStatAllocation(
 	    player->vital, player->str, player->tough, player->dex,
-	    player->skillup_points, category, points);
+	    player->skillup_points, category, points, player->profession_class);
 	if (!res.success)
 		return false;
 

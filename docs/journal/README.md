@@ -13,7 +13,7 @@
 | [`02-infra-d2-crosscompile.md`](02-infra-d2-crosscompile.md) | D2 两端编译实证 · 跨编译器出清 · Windows 验证 · CI 覆盖 GCC/MSVC | 5 |
 | [`03-infra-ci-guards.md`](03-infra-ci-guards.md) | CI 挂载 · 五个守卫脚本的立案与它们抓到的真问题 | 6 |
 | [`04-infra-naming.md`](04-infra-naming.md) | 项目定位澄清 · SA/SG 前缀 · P0–P6 命名改造 | 2 |
-| [`10-battle-core.md`](10-battle-core.md) | L3 战斗:批次 0.5 调度 · A.1 逃跑 · A.2 捕获 · A.3 暴击 · A.4 打飞 · A-β d1 尾摇 · A-β d2 目标判定族与忠犬守护 | 7 |
+| [`10-battle-core.md`](10-battle-core.md) | L3 战斗:批次 0.5 调度 · A.1 逃跑 · A.2 捕获 · A.3 暴击 · A.4 打飞 · A-β d1 尾摇 · A-β d2 目标判定族与忠犬守护 · A-γ2 职业宿主与64职技映射 | 8 |
 | [`11-model-attr.md`](11-model-attr.md) | L2 实体池与实体族 · M.1–M.4b 属性推导与四维公式 · 换宠 · P.1/P.2 成长装备加点 | 9 |
 | [`12-encounter.md`](12-encounter.md) | M.5 敌人表 · R.1 随机源 · M.6/M.7 遇敌链 · 战果结算 · A-α 战果总装 | 6 |
 | [`13-world.md`](13-world.md) | W.1 移动视野 · W.2/W.3 刷怪游荡 · W.4 暗雷 · W.5 明雷 · W.6 传送点 · W.7 NPC实体Healer · W.8 TownPeople对话与窗口 · W.9 任务旗标与ExChangeMan · W.10 道具宠物交付与奖励结算 · W.11 NPC巡逻与漫游 · W.12 NPC商店与买卖 · W.13 宠物商店与技能导师 · W.14 告示牌与传送员 · D.1 真实地图LS2MAP与萨伊那斯NPC · D.2 四大村庄多地图与NPC/Warp | 15 |
@@ -22,9 +22,9 @@
 | [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
 | [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
 | [`18-petskill.md`](18-petskill.md) | 宠技三连发:B1 直攻系 · B2 宠技槽 + CHARGE · B3 状态系 + 铁壁 | 3 |
-| [`90-push-windows.md`](90-push-windows.md) | 二十次 `shared-v0.x.0` 推送窗口的闭合核实 | 20 |
+| [`90-push-windows.md`](90-push-windows.md) | 二十一次 `shared-v0.x.0` 推送窗口的闭合核实 | 21 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **91** |
+| **合计** | | **93** |
 
 ## 全量映射表(按编号)
 
@@ -121,6 +121,8 @@
 | §9.0.82b | 推送窗口执行记录 —— `shared-v0.36.0`(批次 P.1;Progression/Item/Pet/Player 扩展与双端漂移消除) | 2026-09-25 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.83 | 批次 P.2 —— 属性点分配系统: SKILLUP 消费与四维加点闭环 | 2026-09-25 | [`11-model-attr.md`](11-model-attr.md) |
 | §9.0.83b | 推送窗口执行记录 —— `shared-v0.37.0`(批次 P.2;Progression 加点纯函数与双端漂移消除) | 2026-09-25 | [`90-push-windows.md`](90-push-windows.md) |
+| §9.0.84 | 批次 A-γ2 —— 职业宿主与职业属性上限 / 非战斗职技 / 64 职技映射表与直攻宿主执行闭环 | 2026-09-25 | [`10-battle-core.md`](10-battle-core.md) |
+| §9.0.84b | 推送窗口执行记录 —— `shared-v0.38.0`(批次 A-γ2;职业系统与 64 职技映射表 / 双端漂移消除) | 2026-09-25 | [`90-push-windows.md`](90-push-windows.md) |
 
 ---
 

@@ -27,6 +27,7 @@
 #include <doctest/doctest.h>
 
 #include "rules/Battle.h"
+#include "rules/ProfessionSkill.h"
 #include "rules/Status.h"
 #include "support/ScriptedRandom.h"
 
@@ -4751,4 +4752,187 @@ TEST_CASE("A-γ1★:混乱状态重定向普攻并打伤己方队友(battle.c:56
 		}
 	}
 	CHECK(hit_teammate);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  A-γ2: 64 职业技能映射表与直攻系参数纯函数及战斗执行
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("A-γ2★:64 项职业技能静态映射表与直攻系纯函数计算")
+{
+	// 1. 全表容量权威断言: 严格 64 项 (00-architecture.md §161-171)
+	CHECK(getProfessionSkillTableSize() == 64);
+	const auto *tbl = getProfessionSkillTable();
+	REQUIRE(tbl != nullptr);
+
+	// 2. 按 ID 查询权威性验证
+	const auto *volcano = findProfessionSkillById(static_cast<std::uint32_t>(ProfessionSkillId::kVolcanoSprings));
+	REQUIRE(volcano != nullptr);
+	CHECK(std::string(volcano->name) == "PROFESSION_VOLCANO_SPRINGS");
+	CHECK(volcano->profession == ProfessionClass::kWizard);
+	CHECK(volcano->category == ProfessionSkillCategory::kMagic);
+
+	const auto *brust = findProfessionSkillById(static_cast<std::uint32_t>(ProfessionSkillId::kBrust));
+	REQUIRE(brust != nullptr);
+	CHECK(std::string(brust->name) == "PROFESSION_BRUST");
+	CHECK(brust->profession == ProfessionClass::kFighter);
+	CHECK(brust->category == ProfessionSkillCategory::kDirectAttack);
+
+	const auto *track = findProfessionSkillById(static_cast<std::uint32_t>(ProfessionSkillId::kTrack));
+	REQUIRE(track != nullptr);
+	CHECK(std::string(track->name) == "PROFESSION_TRACK");
+	CHECK(track->profession == ProfessionClass::kHunter);
+	CHECK(track->category == ProfessionSkillCategory::kNonCombat);
+
+	// 3. 按名称查询验证
+	CHECK(findProfessionSkillByName("PROFESSION_CHAIN_ATK") != nullptr);
+	CHECK(findProfessionSkillByName("PROFESSION_CHAOS") != nullptr);
+	CHECK(findProfessionSkillByName("NON_EXISTENT_SKILL") == nullptr);
+
+	// 4. 直攻系纯函数参数计算验证 (computeProfSkillDirectParams)
+	ScriptedRandom rng({10, 80});
+
+	// (a) 爆击 (BRUST): attack_percent = skill_level * 3
+	{
+		const auto p = computeProfSkillDirectParams(static_cast<std::uint32_t>(ProfessionSkillId::kBrust),
+		                                            10, CombatantKind::kEnemy, rng);
+		CHECK(p.is_direct);
+		CHECK(p.hits == 1);
+		CHECK(p.attack_percent == 30);
+	}
+
+	// (b) 连环攻击 (CHAIN_ATK): 摇号 rand <= hit
+	{
+		// level 10: hit = 10 * 5 + 15 = 65, rand=10 <= 65 -> hits = 2
+		const auto p = computeProfSkillDirectParams(static_cast<std::uint32_t>(ProfessionSkillId::kChainAtk),
+		                                            10, CombatantKind::kEnemy, rng);
+		CHECK(p.is_direct);
+		CHECK(p.hits == 2);
+	}
+
+	// (c) 双重攻击 (CHAIN_ATK_2): 固定 2 段击与攻击力加成
+	{
+		const auto p = computeProfSkillDirectParams(static_cast<std::uint32_t>(ProfessionSkillId::kChainAtk2),
+		                                            10, CombatantKind::kEnemy, rng);
+		CHECK(p.is_direct);
+		CHECK(p.hits == 2);
+		CHECK(p.attack_percent == 20);
+	}
+
+	// (d) 弱点攻击 (ATTACK_WEAK): 对敌人加攻，自身降敏
+	{
+		const auto p_enemy = computeProfSkillDirectParams(static_cast<std::uint32_t>(ProfessionSkillId::kAttackWeak),
+		                                                  10, CombatantKind::kEnemy, rng);
+		CHECK(p_enemy.is_direct);
+		CHECK(p_enemy.attack_percent == 30); // 10*2 + 10
+		CHECK(p_enemy.quick_percent == -20); // -(10 + 10)
+
+		const auto p_player = computeProfSkillDirectParams(static_cast<std::uint32_t>(ProfessionSkillId::kAttackWeak),
+		                                                   10, CombatantKind::kPlayer, rng);
+		CHECK(p_player.attack_percent == 0); // 对玩家不触发弱点加攻
+	}
+
+	// (e) 混乱攻击 (CHAOS): 伤害 70%，段数 3~5 段，带混乱
+	{
+		const auto p = computeProfSkillDirectParams(static_cast<std::uint32_t>(ProfessionSkillId::kChaos),
+		                                            10, CombatantKind::kEnemy, rng);
+		CHECK(p.is_direct);
+		CHECK(p.damage_percent == 70);
+		CHECK(p.hits == 5);
+		CHECK(p.apply_status == 7);
+		CHECK(p.status_turns == 3);
+	}
+
+	// (f) 非直攻系技能 (如火山泉魔法或非战斗技能) 返回 is_direct = false
+	{
+		const auto p = computeProfSkillDirectParams(static_cast<std::uint32_t>(ProfessionSkillId::kVolcanoSprings),
+		                                            10, CombatantKind::kEnemy, rng);
+		CHECK_FALSE(p.is_direct);
+	}
+}
+
+TEST_CASE("A-γ2★:战斗指令 PROF_SKILL 驱动直攻、多段与状态施加闭环")
+{
+	// 1. 验证 PROF_SKILL 触发爆击 (BRUST): 伤害倍率与 ATTACK_KIND_PROF_SKILL
+	{
+		Duel d = makeB1Duel(1000, 100, /*pet_skill=*/false);
+		d.cmds.present[0] = true;
+		d.cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::PROF_SKILL;
+		d.cmds.commands[0].command.prof_skill.skill_id = static_cast<std::uint32_t>(ProfessionSkillId::kBrust);
+		d.cmds.commands[0].command.prof_skill.target = 10u;
+
+		d.field.at(0).mods.prof_skill_direct = true;
+		d.field.at(0).mods.prof_skill_attack_percent = 30; // +30% 攻击力加成
+		d.field.at(0).mods.no_duck = true;
+
+		SA::Domain::BattleEvents ev{};
+		MaxRandom rng;
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+		bool hit_prof = false;
+		for (const auto &e : ev.events)
+		{
+			if (e.body_kind == SA::Domain::BattleEvent::BodyKind::HIT)
+			{
+				if (e.body.hit.kind == SA::Domain::AttackKind::ATTACK_KIND_PROF_SKILL)
+					hit_prof = true;
+			}
+		}
+		CHECK(hit_prof);
+	}
+
+	// 2. 验证 PROF_SKILL 双重攻击 (CHAIN_ATK_2): 段数覆盖为 2 段
+	{
+		Duel d = makeB1Duel(1000, 100, /*pet_skill=*/false);
+		d.cmds.present[0] = true;
+		d.cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::PROF_SKILL;
+		d.cmds.commands[0].command.prof_skill.skill_id = static_cast<std::uint32_t>(ProfessionSkillId::kChainAtk2);
+		d.cmds.commands[0].command.prof_skill.target = 10u;
+
+		d.field.at(0).mods.prof_skill_direct = true;
+		d.field.at(0).mods.prof_skill_hits = 2; // 2 段攻击
+		d.field.at(0).mods.no_duck = true;
+
+		SA::Domain::BattleEvents ev{};
+		MaxRandom rng;
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+		int damage_count = 0;
+		for (const auto &e : ev.events)
+		{
+			if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+				++damage_count;
+		}
+		CHECK(damage_count == 2);
+	}
+
+	// 3. 验证 PROF_SKILL 混乱攻击 (CHAOS): 伤害附带混乱状态
+	{
+		Duel d = makeB1Duel(1000, 100, /*pet_skill=*/false);
+		d.cmds.present[0] = true;
+		d.cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::PROF_SKILL;
+		d.cmds.commands[0].command.prof_skill.skill_id = static_cast<std::uint32_t>(ProfessionSkillId::kChaos);
+		d.cmds.commands[0].command.prof_skill.target = 10u;
+
+		d.field.at(0).mods.prof_skill_direct = true;
+		d.field.at(0).mods.prof_skill_apply_status = static_cast<int>(BattleStatus::BATTLE_ST_CONFUSION);
+		d.field.at(0).mods.prof_skill_status_turns = 3;
+		d.field.at(0).mods.no_duck = true;
+
+		SA::Domain::BattleEvents ev{};
+		ScriptedRandom rng({0, 10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+		REQUIRE(resolveTurn(d.field, d.cmds, RulesConfig{}, rng, ev));
+
+		bool status_applied = false;
+		for (const auto &e : ev.events)
+		{
+			if (e.body_kind == SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE)
+			{
+				if (e.body.status_change.status == BattleStatus::BATTLE_ST_CONFUSION &&
+				    e.body.status_change.applied)
+					status_applied = true;
+			}
+		}
+		CHECK(status_applied);
+	}
 }

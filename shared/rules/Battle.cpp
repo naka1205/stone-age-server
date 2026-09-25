@@ -447,9 +447,12 @@ double elementCoefficient(const Combatant &attacker, const Combatant &defender) 
 //     (computeDamage / computeCriticalDamage / splitRideDamage 调用点,见下)。
 std::int32_t effectiveAttack(const Combatant &c) noexcept
 {
-	if (c.mods.pet_skill_attack_percent == 0)
+	const int pet_atk_per = c.mods.pet_skill_attack_percent;
+	const int prof_atk_per = c.mods.prof_skill_attack_percent;
+	if (pet_atk_per == 0 && prof_atk_per == 0)
 		return c.attack;
-	const f32 per = static_cast<f32>(c.mods.pet_skill_attack_percent) / 100.0f;
+	const int total_per = pet_atk_per + prof_atk_per;
+	const f32 per = static_cast<f32>(total_per) / 100.0f;
 	return c.str + static_cast<std::int32_t>(static_cast<f32>(c.str) * per);
 }
 
@@ -1910,6 +1913,9 @@ static bool resolveOrdered(BattleField field,
 		const bool pet_skill_direct =
 		    cmd.command_kind == SA::Domain::BattleCommand::CommandKind::PET_SKILL &&
 		    actor.mods.pet_skill_direct;
+		const bool prof_skill_direct =
+		    cmd.command_kind == SA::Domain::BattleCommand::CommandKind::PROF_SKILL &&
+		    actor.mods.prof_skill_direct;
 		// ★★ 新发的**蓄力指令 = 第一拍**(批次 B2b):原版 ChargeAttack 只把参数塞进
 		//    COM1/COM3(pet_skill.c:624-638),真正的拍发生在本行动位的
 		//    `BATTLE_Charge`(COM3 low=N>0 ⇒ 减一 + NoAction)⇒ 指令回合**不动手**:
@@ -1926,17 +1932,19 @@ static bool resolveOrdered(BattleField field,
 			continue;
 		}
 		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::ATTACK &&
-		    !pet_skill_direct)
+		    !pet_skill_direct && !prof_skill_direct)
 		{
 			// GUARD 与 WAIT 本身不产事件:防御的效果体现在**被攻击时**的减伤(§3.5),
 			// 由下方攻击链路读 `IsGuarding` 得到。
-			// 宠技(表外)/ 职技 / 咒术仍落这里被跳过；用药及换宠已在上方接入。
+			// 宠技(表外)/ 职技(非直攻)/ 咒术仍落这里被跳过；用药及换宠已在上方接入。
 			continue;
 		}
 
-		const int target_slot = static_cast<int>(pet_skill_direct
-		                                             ? cmd.command.pet_skill.target
-		                                             : cmd.command.attack.target);
+		const int target_slot = static_cast<int>(
+		    prof_skill_direct
+		        ? cmd.command.prof_skill.target
+		        : (pet_skill_direct ? cmd.command.pet_skill.target
+		                            : cmd.command.attack.target));
 		if (target_slot < 0 || target_slot >= kSlotCount)
 			continue;
 		const Combatant &target = field.at(target_slot);
@@ -1958,6 +1966,12 @@ static bool resolveOrdered(BattleField field,
 		{
 			staus_change = actor.mods.pet_skill_apply_status;
 			staus_turn = actor.mods.pet_skill_status_turns;
+			staus_from_skill = true;
+		}
+		else if (actor.mods.prof_skill_apply_status > 0)
+		{
+			staus_change = actor.mods.prof_skill_apply_status;
+			staus_turn = actor.mods.prof_skill_status_turns;
 			staus_from_skill = true;
 		}
 		// ⚠️ 完成击(CHARGE)的合成指令同样带宠技 id,但突击不是状态技
@@ -2104,6 +2118,12 @@ static bool resolveOrdered(BattleField field,
 				{
 					const float mult =
 					    static_cast<float>(striker.mods.pet_skill_damage_percent * 0.01);
+					damage = static_cast<int>(static_cast<float>(damage) * mult);
+				}
+				if (!counter && striker.mods.prof_skill_damage_percent != 100)
+				{
+					const float mult =
+					    static_cast<float>(striker.mods.prof_skill_damage_percent * 0.01);
 					damage = static_cast<int>(static_cast<float>(damage) * mult);
 				}
 				// ── RENZOKU 每段分摊(battle_event.c:2723-2726,BATTLE_Attack 内)──
@@ -2305,14 +2325,18 @@ static bool resolveOrdered(BattleField field,
 		//   非 PLAYER 直接 attack_max=1、不进 RAND,`:7144-7145`)。
 		//   ⚠️ DR-BT1 的空手多段是「各段全额」,RENZOKU 是「每段 /N」—— 两者**不是
 		//   同一件事**:分摊在 strike 里做(见上),这里只管段数覆盖。
-		const int hits = actor.mods.pet_skill_hits > 0
-		                     ? actor.mods.pet_skill_hits
-		                     : rollAttackCount(actor, config, rng);
+		const int hits = actor.mods.prof_skill_hits > 0
+		                     ? actor.mods.prof_skill_hits
+		                     : (actor.mods.pet_skill_hits > 0
+		                            ? actor.mods.pet_skill_hits
+		                            : rollAttackCount(actor, config, rng));
 		auto *hit_event = sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
 		if (hit_event == nullptr)
 			break;
 		hit_event->body.hit.attacker = static_cast<std::uint32_t>(actor_slot);
-		hit_event->body.hit.kind = SA::Domain::AttackKind::ATTACK_KIND_MELEE;
+		hit_event->body.hit.kind = prof_skill_direct
+		                               ? SA::Domain::AttackKind::ATTACK_KIND_PROF_SKILL
+		                               : SA::Domain::AttackKind::ATTACK_KIND_MELEE;
 		bool continue_counter = false;
 		for (int h = 0; h < hits && !dead[target_slot]; ++h)
 		{

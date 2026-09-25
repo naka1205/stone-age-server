@@ -4211,3 +4211,51 @@ TEST_CASE("成长与装备闭环: 装备穿脱、属性加成与战斗升级")
 		CHECK_FALSE(f.world.allocateStatPoint(id, SA::Rules::StatCategory::kTough, 1));
 	}
 }
+
+TEST_CASE("职业属性上限门禁与猎人非战斗职技全链路集成 (批次 A-γ2)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->hp = 100;
+
+	// 1. 初始职业状态验证
+	CHECK(f.world.playerProfessionClass(id) == SA::Rules::ProfessionClass::kNone);
+	CHECK(f.world.playerProfessionLevel(id) == 0);
+
+	// 2. 转职为勇士 (kFighter, level 10)
+	REQUIRE(f.world.setPlayerProfession(id, SA::Rules::ProfessionClass::kFighter, 10));
+	CHECK(f.world.playerProfessionClass(id) == SA::Rules::ProfessionClass::kFighter);
+	CHECK(f.world.playerProfessionLevel(id) == 10);
+
+	// 非猎人尝试施放猎人技能 -> 拦截
+	CHECK_FALSE(f.world.castHunterEncounterSkill(id, true, 10));
+
+	// 3. 转职为猎人 (kHunter, level 25)
+	REQUIRE(f.world.setPlayerProfession(id, SA::Rules::ProfessionClass::kHunter, 25));
+	CHECK(f.world.playerProfessionClass(id) == SA::Rules::ProfessionClass::kHunter);
+
+	// 阵亡状态拦截
+	p->hp = 0;
+	CHECK_FALSE(f.world.castHunterEncounterSkill(id, false, 25, 10, 180000));
+	p->hp = 100;
+
+	// 施放回避战斗 (escape): 25级 -> 2 * 10 = -20%
+	REQUIRE(f.world.castHunterEncounterSkill(id, false, 25, 10, 180000));
+	CHECK(f.world.playerEncounterRateFix(id) == -20);
+
+	// 推进 60 秒 -> 技能仍在有效期内
+	f.clock.advance(60000);
+	f.world.tick();
+	CHECK(f.world.playerEncounterRateFix(id) == -20);
+
+	// 推进 130 秒 (总计 190 秒 > 180 秒) -> 技能自然过期
+	f.clock.advance(130000);
+	f.world.tick();
+	CHECK(f.world.playerEncounterRateFix(id) == 0);
+
+	// 重新施放追寻敌踪 (track): 30级 -> 3 * 10 = +30%
+	REQUIRE(f.world.castHunterEncounterSkill(id, true, 30, 10, 180000));
+	CHECK(f.world.playerEncounterRateFix(id) == 30);
+}

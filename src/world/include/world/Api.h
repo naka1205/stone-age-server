@@ -1262,6 +1262,12 @@ class World final : public SA::Net::TransportEvents,
 	int playerStr(SA::Net::SessionId session) const;
 	int playerTough(SA::Net::SessionId session) const;
 	int playerDex(SA::Net::SessionId session) const;
+	SA::Rules::ProfessionClass playerProfessionClass(SA::Net::SessionId session) const;
+	int playerProfessionLevel(SA::Net::SessionId session) const;
+	bool setPlayerProfession(SA::Net::SessionId session, SA::Rules::ProfessionClass profession, int level = 1);
+	int playerEncounterRateFix(SA::Net::SessionId session) const;
+	bool castHunterEncounterSkill(SA::Net::SessionId session, bool is_track, int skill_level,
+	                              int rate = 10, std::int64_t duration_ms = 180000);
 
 	// ── 属性点分配 (批次 P.2)────────────────────────────────────────────
 	// 将角色升级未分配点数分配至指定四维属性 (原 CHAR_SkillUp / lssproto_SKUP_recv)。

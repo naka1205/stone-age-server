@@ -32,6 +32,7 @@ endif()
 
 add_library(sa_shared STATIC
     rules/Battle.cpp
+    rules/ProfessionSkill.cpp
     rules/Progression.cpp
     rules/Status.cpp
 )

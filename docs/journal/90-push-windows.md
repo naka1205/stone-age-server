@@ -726,4 +726,33 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 - **守卫闭环**:
   - 服务端打附注 tag `shared-v0.37.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.37.0`，消除 D2 漂移告警，保持双端 CI 100% 绿灯。
 
+---
+
+### 9.0.84b ★ 推送窗口执行记录 —— `shared-v0.38.0`(2026-09-25)
+
+> **本窗口前推范围**: 批次 A-γ2 职业宿主与职业属性上限 / 非战斗职技 / 64 职技映射表与直攻宿主执行闭环（§9.0.84），涉及 `shared/rules/Progression.{h,cpp}`, `shared/rules/ProfessionSkill.{h,cpp}`, `shared/rules/Combatant.h`, `shared/rules/Battle.cpp`, `shared/model/Player.h`。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `shared-v0.38.0`(**附注** tag，subject「release: shared-v0.38.0 (batch A-gamma2 profession host, stat caps, 64 prof skill table, direct execution)」) |
+| client master | pin v0.37.0 → **v0.38.0**(`cmake/SaShared.cmake`) |
+| client 本机 ci_verify | **8 项全过**(清洁构建 · 锁定 ref 与源码一致 · shared/ 与锁定 ref 一致无漂移 · 7 条全部注册 · ctest 7/7) |
+| server 本机 ci_verify | **6 项全过**(22 条全部注册 · ctest 22/22 · 断言防线反向验证通过) |
+| 两端用例集一致性 | D2「一份规则两端编译」本批闭环 |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/rules/Progression.h` / `Progression.cpp`: 增加职业类型枚举 `ProfessionClass`、职业属性上限纯函数 `getProfessionStatCap`、加点校验传入 `ProfessionClass` 门禁、猎人非战斗遇敌率修正纯函数 `computeHunterEncounterFix`。
+  - `shared/rules/ProfessionSkill.h` / `ProfessionSkill.cpp`: 增加原版 8.0 权威 64 项职业技能静态映射表（`getProfessionSkillTable`, `findProfessionSkillById`, `findProfessionSkillByName`）、直攻系职技纯函数计算 `computeProfSkillDirectParams`。
+  - `shared/rules/Combatant.h`: `CombatModifiers` 增加职业技能直攻投影字段（`prof_skill_direct`, `prof_skill_hits`, `prof_skill_damage_percent`, `prof_skill_attack_percent`, `prof_skill_quick_percent`, `prof_skill_apply_status`, `prof_skill_status_turns`）。
+  - `shared/rules/Battle.cpp`: 接入 `CommandKind::PROF_SKILL` 且 `prof_skill_direct` 直攻管线，支持伤害倍率、多段连击、状态施加，事件标记 `ATTACK_KIND_PROF_SKILL`。
+  - `shared/model/Player.h`: 增加 `profession_class`, `profession_level`, `encounter_rate_fix`, `encounter_rate_expire_ms`。
+  - `shared/CMakeLists.txt`: 引入 `rules/ProfessionSkill.cpp` 编译入 `sa_shared`。
+- **守卫闭环**:
+  - 服务端打附注 tag `shared-v0.38.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.38.0`，消除 D2 漂移告警，保持双端 CI 100% 绿灯。
+
+
 
