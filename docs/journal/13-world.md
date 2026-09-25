@@ -472,5 +472,43 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证 (RV-2)**: 篡改出售石币上限检查逻辑（绕过 `maxHaveGold` 检查）⇒ `W.12: 商店回收出售石币超上限拦截` 测试精准报红（4 失败 / 61 通过）；恢复后回绿。
 - **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py`、22 项 ctest 全量绿灯。
 
+---
+
+### 9.0.78 批次 W.13 —— 宠物商店与宠物技能商人 (2026-09-25)
+
+2026-09-25 交付。世界系统中落地石器 8.0 规范的宠物商店与宠物技能商人系统（`npc_petshop.c`、`npc_petskillshop.c`、`07-npc-quest.md` §0.1、`08-economy.md` §7.2），实现了从玩家触发宠物商店/技能导师对话、在售宠物列表与技能导师下发（`WindowOpen::ShopBody`）、买入宠物（`buyPetFromShop`）、出售宠物回收（`sellPetToShop`）到向导师学习宠物技能（`learnPetSkill`）的全流程闭环。
+
+#### 1. 源码事实与裁定
+
+1. **实体与协议契约 (`src/world/include/world/Api.h`, `idl/schema/domain/window.proto`)**:
+   - `NpcType::kPetShop`（4）与 `NpcType::kPetSkillShop`（5）确立为一等 NPC 类型（原版 `CHAR_TYPESTONESHOP` 中细分子类，对应原版 `npc_petshop.c` 与 `npc_petskillshop.c`）；
+   - 数据结构定义：
+     - `PetProduct`（在售宠物：`pet_id`, `name`, `level`, `cost`, `image`, `hp`, `mp`, `vital`, `str`, `tough`, `dex`）；
+     - `PetSkillProduct`（教授技能：`skill_id`, `name`, `cost`, `level` 需求等级）；
+     - `NpcEntity` 扩展对应配置列表及提示语（`pet_full_msg`, `level_low_msg`, `skill_full_msg` 等）；
+   - 协议复用：利用已生成的 `WindowOpen::ShopBody` 结构化下发，宠物商店下发 `WINDOW_KIND_ITEM_SHOP`，技能导师下发 `WINDOW_KIND_PET_SKILL_SHOP`（13）。
+2. **宠物商店购买与出售状态机 (`World::buyPetFromShop`, `World::sellPetToShop`, `npc_petshop.c:210-900`)**:
+   - 购买宠物门槛：石币是否充足（门 1）、宠物栏是否有空位（门 2，`findFreePetSlot() >= 0`）、宠物池分配（门 3，`pets.allocate()`）；
+   - 购买结算：经 `GoldLedger` 扣除 `kPetShopBuy` 费用，填充宠物完整四维、名字与外观图号，反向挂接主人句柄并插入玩家宠物槽；
+   - 回收出售门槛：距离检查 $\le 3$ 格，有效宠物槽与有效实体；
+   - 回收定价与上限：以在售基准价（或 `level * 100`）$\times sell\_rate$ 计价；若 `p->gold + price > maxHaveGold(0)`，下发 `stone_full_msg` 并拒绝交易（DR-EC3 拒绝原则：宠物不释放、金币零改动）；
+   - 出售结算：释放宠物实体（`clearPetSlot` + `pets.release`），经 `GoldLedger` 增加 `kPetShopSell` 石币。
+3. **宠物技能学习与导师机制 (`World::learnPetSkill`, `npc_petskillshop.c:83-168`)**:
+   - 门 1（等级门）：`pet->level >= skill.level`，等级不足下发 `level_low_msg` 阻断；
+   - 门 2（重复门）：检查宠物现有 7 个技能槽，已习得该技能不可重复学习；
+   - 门 3（槽位门）：支持指定槽位或自动寻址首个空槽位（`pet_skills[i] <= 0`），槽满下发 `skill_full_msg` 阻断；
+   - 门 4（学费门）：石币检查与 `delGold(kPetSkillFee)` 严格记账；
+   - 学习结算：技能 ID 原子写入 `pet->pet_skills[target_slot]`，下发成功提示。
+4. **经济账本纪律 (`check_gold_writes.py`)**:
+   - `GoldReason` 追加 `kPetShopBuy`（汇）、`kPetShopSell`（源）与 `kPetSkillFee`（汇），`gold_writes` 门禁 100% 保持通过。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 62 增至 **67**（+5 专项用例），断言数从 1689 增至 **1766**（+77 断言）。
+- **反向验证 (RV-1)**: 篡改学技能等级判定逻辑（绕过 `pet->level < target_prod->level`）⇒ `W.13: 宠物学习技能等级不足与学满拦截` 测试精准报红（7 失败 / 9 通过）；恢复后回绿。
+- **反向验证 (RV-2)**: 篡改买宠宠物槽满判定逻辑（绕过 `pet_slot < 0`）⇒ `W.13: 宠物商店购买宠物栏已满拦截` 测试精准报红（2 失败 / 10 通过）；恢复后回绿。
+- **全套静态守卫**: `check_format.py`、`check_shared_purity.py`、`check_module_boundaries.py`、`check_gold_writes.py`、`check_dr_table.py`、`check_docs_index.py`、22 项 ctest 全量绿灯。
+
+
 
 

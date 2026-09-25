@@ -2199,6 +2199,20 @@ struct World::Impl : GoldAuditSink
 			std::uint64_t npc_id = 0;
 		};
 		PendingShop pending_shop{};
+
+		// ── PetShop 待决宠物商店交互 (批次 W.13) ─────────────────────
+		struct PendingPetShop
+		{
+			std::uint64_t npc_id = 0;
+		};
+		PendingPetShop pending_pet_shop{};
+
+		// ── PetSkillShop 待决技能导师交互 (批次 W.13) ─────────────────
+		struct PendingPetSkillShop
+		{
+			std::uint64_t npc_id = 0;
+		};
+		PendingPetSkillShop pending_pet_skill_shop{};
 	};
 
 	Impl(const SA::Platform::ServerConfig &cfg, SA::Platform::Clock &clk,
@@ -5547,6 +5561,114 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 					s.sendTo(id, win);
 					ok = true;
 				}
+				else if (npc.type == NpcType::kPetShop)
+				{
+					// 宠物商店 NPC 交互 (批次 W.13, 移植 npc_petshop.c)
+					SA::Domain::WindowOpen win{};
+					win.window_id = ++s.next_window_id;
+					win.kind = SA::Domain::WindowKind::WINDOW_KIND_ITEM_SHOP;
+					win.buttons = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_CANCEL);
+					win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+					win.source.entity_id = static_cast<std::uint32_t>(npc.id);
+					win.body_kind = SA::Domain::WindowOpen::BodyKind::SHOP;
+
+					auto &shop = win.body.shop;
+					shop.header.can_buy = true;
+					shop.header.reuse_previous = false;
+
+					std::string shop_name = npc.shop_name.empty() ? "宠物商店" : npc.shop_name;
+					if (shop_name.size() > 63)
+						shop_name.resize(63);
+					shop.header.shop_name.assign(shop_name.data(), shop_name.size());
+
+					std::string msg = npc.main_msg.empty() ? "欢迎光临宠物商店！请挑选您心仪的宠物。" : npc.main_msg;
+					if (msg.size() > 255)
+						msg.resize(255);
+					shop.header.message.assign(msg.data(), msg.size());
+
+					std::string full_msg = npc.pet_full_msg.empty() ? "宠物栏已满！" : npc.pet_full_msg;
+					if (full_msg.size() > 255)
+						full_msg.resize(255);
+					shop.header.item_full_message.assign(full_msg.data(), full_msg.size());
+
+					// 填充在售宠物列表 (最多 32 个)
+					const std::size_t limit = std::min<std::size_t>(npc.pet_products.size(), 32);
+					for (std::size_t i = 0; i < limit; ++i)
+					{
+						const auto &prod = npc.pet_products[i];
+						if (auto *entry = shop.entries.push_back())
+						{
+							entry->entry_id = static_cast<std::uint32_t>(i + 1); // 1-based ID
+							entry->item_id = static_cast<std::uint32_t>(prod.pet_id);
+							entry->image_id = static_cast<std::uint32_t>(prod.image);
+							entry->level = static_cast<std::uint32_t>(prod.level);
+							entry->price = std::max(1, static_cast<std::int32_t>(prod.cost * npc.buy_rate));
+							entry->purchasable = (p->gold >= entry->price);
+						}
+					}
+
+					it->second.active_window_id = win.window_id;
+					it->second.active_window_npc_id = npc.id;
+					it->second.last_window_text = msg;
+					it->second.pending_pet_shop.npc_id = npc.id;
+
+					s.sendTo(id, win);
+					ok = true;
+				}
+				else if (npc.type == NpcType::kPetSkillShop)
+				{
+					// 宠物技能导师 NPC 交互 (批次 W.13, 移植 npc_petskillshop.c)
+					SA::Domain::WindowOpen win{};
+					win.window_id = ++s.next_window_id;
+					win.kind = SA::Domain::WindowKind::WINDOW_KIND_PET_SKILL_SHOP;
+					win.buttons = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_CANCEL);
+					win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+					win.source.entity_id = static_cast<std::uint32_t>(npc.id);
+					win.body_kind = SA::Domain::WindowOpen::BodyKind::SHOP;
+
+					auto &shop = win.body.shop;
+					shop.header.can_buy = true;
+					shop.header.reuse_previous = false;
+
+					std::string shop_name = npc.shop_name.empty() ? "宠物技能导师" : npc.shop_name;
+					if (shop_name.size() > 63)
+						shop_name.resize(63);
+					shop.header.shop_name.assign(shop_name.data(), shop_name.size());
+
+					std::string msg = npc.main_msg.empty() ? "你好！我可以传授你的宠物强大的技能。" : npc.main_msg;
+					if (msg.size() > 255)
+						msg.resize(255);
+					shop.header.message.assign(msg.data(), msg.size());
+
+					std::string full_msg = npc.skill_full_msg.empty() ? "宠物技能栏已满！" : npc.skill_full_msg;
+					if (full_msg.size() > 255)
+						full_msg.resize(255);
+					shop.header.item_full_message.assign(full_msg.data(), full_msg.size());
+
+					// 填充教授技能列表 (最多 32 个)
+					const std::size_t limit = std::min<std::size_t>(npc.pet_skill_products.size(), 32);
+					for (std::size_t i = 0; i < limit; ++i)
+					{
+						const auto &prod = npc.pet_skill_products[i];
+						if (auto *entry = shop.entries.push_back())
+						{
+							entry->entry_id = static_cast<std::uint32_t>(i + 1); // 1-based ID
+							entry->item_id = static_cast<std::uint32_t>(prod.skill_id);
+							entry->image_id = 0;
+							entry->level = static_cast<std::uint32_t>(prod.level);
+							entry->price = std::max(1, static_cast<std::int32_t>(prod.cost * npc.buy_rate));
+							entry->purchasable = (p->gold >= entry->price);
+						}
+					}
+
+					it->second.active_window_id = win.window_id;
+					it->second.active_window_npc_id = npc.id;
+					it->second.last_window_text = msg;
+					it->second.pending_pet_skill_shop.npc_id = npc.id;
+
+					s.sendTo(id, win);
+					ok = true;
+				}
 			}
 		}
 	}
@@ -5691,6 +5813,58 @@ void World::onWindowReply(SA::Net::SessionId id, const SA::Domain::WindowReply &
 			}
 		}
 
+		// 检查是否存在待决 PetShop 宠物商店交互 (批次 W.13)
+		if (it->second.pending_pet_shop.npc_id != 0 &&
+		    it->second.pending_pet_shop.npc_id == reply.source.entity_id)
+		{
+			const std::uint64_t shop_npc_id = it->second.pending_pet_shop.npc_id;
+			it->second.pending_pet_shop = {};
+
+			const bool is_cancel = (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_CANCEL)) != 0 ||
+			                       (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO)) != 0;
+
+			if (!is_cancel && reply.result_kind == SA::Domain::WindowReply::ResultKind::ENTRY_ID)
+			{
+				(void)buyPetFromShop(id, shop_npc_id, reply.result.entry_id);
+				return;
+			}
+		}
+
+		// 检查是否存在待决 PetSkillShop 技能导师交互 (批次 W.13)
+		if (it->second.pending_pet_skill_shop.npc_id != 0 &&
+		    it->second.pending_pet_skill_shop.npc_id == reply.source.entity_id)
+		{
+			const std::uint64_t shop_npc_id = it->second.pending_pet_skill_shop.npc_id;
+			it->second.pending_pet_skill_shop = {};
+
+			const bool is_cancel = (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_CANCEL)) != 0 ||
+			                       (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO)) != 0;
+
+			if (!is_cancel && reply.result_kind == SA::Domain::WindowReply::ResultKind::ENTRY_ID)
+			{
+				const NpcEntity *npc = findNpc(shop_npc_id);
+				const std::uint32_t entry_id = reply.result.entry_id;
+				if (npc != nullptr && entry_id >= 1 && entry_id <= npc->pet_skill_products.size())
+				{
+					const auto &prod = npc->pet_skill_products[entry_id - 1];
+					int chosen_pet_slot = -1;
+					for (std::size_t i = 0; i < SA::Model::kMaxPetHave; ++i)
+					{
+						if (p->pets[i].valid())
+						{
+							chosen_pet_slot = static_cast<int>(i);
+							break;
+						}
+					}
+					if (chosen_pet_slot >= 0)
+					{
+						(void)learnPetSkill(id, shop_npc_id, chosen_pet_slot, prod.skill_id, /*skill_slot=*/-1);
+						return;
+					}
+				}
+			}
+		}
+
 		it->second.active_window_id = 0;
 		it->second.active_window_npc_id = 0;
 	}
@@ -5760,6 +5934,256 @@ bool World::sellItemToShop(SA::Net::SessionId id, std::uint64_t npc_id, int slot
 
 	(void)addGold(*p, GoldReason::kShopSell, total_price,
 	              /*trans=*/0, static_cast<std::uint64_t>(id), s);
+	return true;
+}
+
+bool World::buyPetFromShop(SA::Net::SessionId id, std::uint64_t npc_id, std::uint32_t entry_id)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(id);
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(id));
+	if (it == s.conns.end() || p == nullptr)
+		return false;
+
+	const NpcEntity *npc = findNpc(npc_id);
+	if (npc == nullptr || npc->type != NpcType::kPetShop)
+		return false;
+
+	// 距离检查: 玩家与 NPC 距离 <= 3 格 (原版 NPC_Util_CharDistance <= 3)
+	if (std::abs(p->x - npc->x) > 3 || std::abs(p->y - npc->y) > 3)
+		return false;
+
+	if (entry_id < 1 || entry_id > npc->pet_products.size())
+		return false;
+
+	const auto &prod = npc->pet_products[entry_id - 1];
+	const std::int32_t price = std::max(1, static_cast<std::int32_t>(prod.cost * npc->buy_rate));
+
+	// 门 ①: 石币是否充足 (DR-EC3 余额不足拒绝)
+	if (p->gold < price)
+	{
+		std::string less_msg = npc->stone_less_msg.empty() ? "石币不足！" : npc->stone_less_msg;
+		s.sendExChangeWindow(id, npc->id, less_msg,
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 门 ②: 宠物栏是否有空槽
+	const int pet_slot = p->findFreePetSlot();
+	if (pet_slot < 0)
+	{
+		std::string full_msg = npc->pet_full_msg.empty() ? "宠物栏已满！" : npc->pet_full_msg;
+		s.sendExChangeWindow(id, npc->id, full_msg,
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 门 ③: 宠物池分配
+	const auto h = s.pets.allocate();
+	if (!h.valid())
+		return false;
+
+	auto *dst = s.pets.resolve(h);
+	if (dst == nullptr)
+	{
+		s.pets.release(h);
+		return false;
+	}
+
+	// 扣除石币 (走 GoldLedger, 汇 kPetShopBuy)
+	(void)delGold(*p, GoldReason::kPetShopBuy, price,
+	              /*trans=*/0, static_cast<std::uint64_t>(id), s);
+
+	// 填充新宠物数据并落池
+	dst->uid = ++s.next_window_id;
+	dst->pet_id = prod.pet_id;
+	dst->name.assign(prod.name.c_str());
+	dst->level = prod.level;
+	dst->hp = prod.hp;
+	dst->mp = prod.mp;
+	dst->max_mp = prod.mp;
+	dst->vital = prod.vital;
+	dst->str = prod.str;
+	dst->tough = prod.tough;
+	dst->dex = prod.dex;
+	dst->origin_image = prod.image;
+	dst->base_image = prod.image;
+	dst->owner = s.player_of_session.find(id);
+	dst->owner_char_name = p->name;
+
+	p->pets[static_cast<std::size_t>(pet_slot)] = h;
+
+	s.sendExChangeWindow(id, npc->id, "购买宠物成功！好好照顾它哦。",
+	                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+	return true;
+}
+
+bool World::sellPetToShop(SA::Net::SessionId id, std::uint64_t npc_id, int pet_slot)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(id);
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(id));
+	if (it == s.conns.end() || p == nullptr)
+		return false;
+
+	const NpcEntity *npc = findNpc(npc_id);
+	if (npc == nullptr || npc->type != NpcType::kPetShop)
+		return false;
+
+	// 距离检查: 玩家与 NPC 距离 <= 3 格 (原版 NPC_Util_CharDistance <= 3)
+	if (std::abs(p->x - npc->x) > 3 || std::abs(p->y - npc->y) > 3)
+		return false;
+
+	// 槽位有效性与宠物存在性检查
+	if (pet_slot < 0 || static_cast<std::size_t>(pet_slot) >= SA::Model::kMaxPetHave)
+		return false;
+
+	const auto h = p->pets[static_cast<std::size_t>(pet_slot)];
+	if (!h.valid())
+		return false;
+
+	auto *pet = s.pets.resolve(h);
+	if (pet == nullptr)
+		return false;
+
+	// 计算回购价格: 宠物原价 * sell_rate (保底 1 石币)
+	std::int32_t base_cost = 0;
+	for (const auto &prod : npc->pet_products)
+	{
+		if (prod.pet_id == pet->pet_id && prod.cost > 0)
+		{
+			base_cost = prod.cost;
+			break;
+		}
+	}
+	if (base_cost <= 0)
+	{
+		base_cost = std::max(1, pet->level * 100);
+	}
+
+	const std::int32_t unit_price = std::max(1, static_cast<std::int32_t>(base_cost * npc->sell_rate));
+
+	// 门: 随身石币上限检查 (DR-EC3 拒绝, 零改动)
+	const std::int32_t cap = maxHaveGold(0);
+	if (static_cast<std::int64_t>(p->gold) + unit_price > cap)
+	{
+		std::string full_msg = npc->stone_full_msg.empty() ? "钱包装不下这么多石币！" : npc->stone_full_msg;
+		s.sendExChangeWindow(id, npc->id, full_msg,
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 执行出售原子操作: 扣除并释放宠物 + 增加石币 (走 GoldLedger, 源 kPetShopSell)
+	p->clearPetSlot(pet_slot);
+	s.pets.release(h);
+
+	(void)addGold(*p, GoldReason::kPetShopSell, unit_price,
+	              /*trans=*/0, static_cast<std::uint64_t>(id), s);
+	return true;
+}
+
+bool World::learnPetSkill(SA::Net::SessionId id, std::uint64_t npc_id, int pet_slot,
+                          std::int32_t skill_id, int skill_slot)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(id);
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(id));
+	if (it == s.conns.end() || p == nullptr)
+		return false;
+
+	const NpcEntity *npc = findNpc(npc_id);
+	if (npc == nullptr || npc->type != NpcType::kPetSkillShop)
+		return false;
+
+	// 距离检查: 玩家与 NPC 距离 <= 3 格 (原版 NPC_Util_CharDistance <= 3)
+	if (std::abs(p->x - npc->x) > 3 || std::abs(p->y - npc->y) > 3)
+		return false;
+
+	// 槽位有效性检查
+	if (pet_slot < 0 || static_cast<std::size_t>(pet_slot) >= SA::Model::kMaxPetHave)
+		return false;
+
+	const auto h = p->pets[static_cast<std::size_t>(pet_slot)];
+	if (!h.valid())
+		return false;
+
+	auto *pet = s.pets.resolve(h);
+	if (pet == nullptr)
+		return false;
+
+	// 查找导师技能条目
+	const PetSkillProduct *target_prod = nullptr;
+	for (const auto &prod : npc->pet_skill_products)
+	{
+		if (prod.skill_id == skill_id)
+		{
+			target_prod = &prod;
+			break;
+		}
+	}
+	if (target_prod == nullptr)
+		return false;
+
+	// 门 ①: 宠物等级是否达标 (移植 npc_petskillshop.c 门槛)
+	if (pet->level < target_prod->level)
+	{
+		std::string low_msg = npc->level_low_msg.empty() ? "宠物等级不足以学习此技能！" : npc->level_low_msg;
+		s.sendExChangeWindow(id, npc->id, low_msg,
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 门 ②: 是否已习得该技能 (不可重复学同一技能)
+	for (std::size_t i = 0; i < SA::Model::Pet::kPetSkillSlots; ++i)
+	{
+		if (pet->pet_skills[i] == skill_id)
+			return false;
+	}
+
+	// 门 ③: 目标技能槽位解析
+	int target_slot = -1;
+	if (skill_slot >= 0 && static_cast<std::size_t>(skill_slot) < SA::Model::Pet::kPetSkillSlots)
+	{
+		target_slot = skill_slot;
+	}
+	else
+	{
+		for (std::size_t i = 0; i < SA::Model::Pet::kPetSkillSlots; ++i)
+		{
+			if (pet->pet_skills[i] <= 0) // 0 或 -1 表示空槽
+			{
+				target_slot = static_cast<int>(i);
+				break;
+			}
+		}
+	}
+	if (target_slot < 0)
+	{
+		std::string full_msg = npc->skill_full_msg.empty() ? "宠物技能栏已满！" : npc->skill_full_msg;
+		s.sendExChangeWindow(id, npc->id, full_msg,
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 门 ④: 石币是否充足
+	const std::int32_t price = std::max(1, static_cast<std::int32_t>(target_prod->cost * npc->buy_rate));
+	if (p->gold < price)
+	{
+		std::string less_msg = npc->stone_less_msg.empty() ? "石币不足！" : npc->stone_less_msg;
+		s.sendExChangeWindow(id, npc->id, less_msg,
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 执行扣除石币 (走 GoldLedger, 汇 kPetSkillFee)
+	(void)delGold(*p, GoldReason::kPetSkillFee, price,
+	              /*trans=*/0, static_cast<std::uint64_t>(id), s);
+
+	// 写入宠物技能槽
+	pet->pet_skills[static_cast<std::size_t>(target_slot)] = skill_id;
+
+	s.sendExChangeWindow(id, npc->id, "宠物成功学会了新技能！",
+	                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
 	return true;
 }
 

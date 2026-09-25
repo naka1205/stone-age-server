@@ -2783,3 +2783,318 @@ TEST_CASE("W.12: 商店回收出售石币超上限拦截 (金币超上限时拒�
 	CHECK(p->gold == 999900);
 	CHECK(f.world.playerLastWindowText(id) == "钱包太沉了，装不下更多石币啦！");
 }
+
+TEST_CASE("W.13: 宠物商店购买宠物成功 (扣减石币, 新宠物落池且属性图号正确挂入槽位)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->gold = 5000;
+	CHECK(f.world.playerPetSlotsUsed(id) == 0);
+
+	NpcEntity npc{};
+	npc.id = 7006;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kPetShop;
+	PetProduct prod{};
+	prod.pet_id = 77;
+	prod.name = "红暴";
+	prod.level = 1;
+	prod.cost = 1000;
+	prod.image = 10077;
+	prod.hp = 120;
+	prod.mp = 50;
+	prod.vital = 25;
+	prod.str = 30;
+	prod.tough = 20;
+	prod.dex = 15;
+	npc.pet_products = {prod};
+	f.world.loadNpcEntities({npc});
+
+	// 打开宠物商店
+	SA::Domain::EventRequest req{};
+	req.dir = 2;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req.seqno = 2006;
+	f.world.onEvent(id, req);
+	f.world.tick();
+
+	const std::uint32_t wid = f.world.playerActiveWindowId(id);
+	CHECK(wid > 0);
+
+	// 购买宠物 (entry_id = 1)
+	SA::Domain::WindowReply rep{};
+	rep.window_id = wid;
+	rep.source.entity_id = 7006;
+	rep.result_kind = SA::Domain::WindowReply::ResultKind::ENTRY_ID;
+	rep.result.entry_id = 1;
+	f.world.onWindowReply(id, rep);
+
+	// 结算断言:
+	// - 弹出成功提示
+	// - 石币扣除: 5000 - 1000 = 4000
+	// - 宠物栏新增 1 只
+	// - 宠物各项数值图号正确
+	CHECK(f.world.playerLastWindowText(id) == "购买宠物成功！好好照顾它哦。");
+	CHECK(p->gold == 4000);
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+
+	const auto *pet = f.world.playerPetAt(id, 0);
+	REQUIRE(pet != nullptr);
+	CHECK(pet->pet_id == 77);
+	CHECK(std::string_view(pet->name.c_str()) == "红暴");
+	CHECK(pet->level == 1);
+	CHECK(pet->origin_image == 10077);
+	CHECK(pet->base_image == 10077);
+	CHECK(pet->hp == 120);
+	CHECK(pet->mp == 50);
+	CHECK(pet->vital == 25);
+	CHECK(pet->str == 30);
+	CHECK(pet->tough == 20);
+	CHECK(pet->dex == 15);
+}
+
+TEST_CASE("W.13: 宠物商店购买宠物栏已满拦截 (满栏时下发 pet_full_msg 且零扣款)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->gold = 5000;
+
+	// 填满 5 个宠物槽
+	for (int i = 0; i < 5; ++i)
+	{
+		CHECK(f.world.givePetToPlayer(id, makeTestPet(3000 + i)) >= 0);
+	}
+	CHECK(f.world.playerPetSlotsUsed(id) == 5);
+
+	NpcEntity npc{};
+	npc.id = 7007;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kPetShop;
+	npc.pet_full_msg = "你的宠物太多了，装不下更多宠物啦！";
+	PetProduct prod{};
+	prod.pet_id = 78;
+	prod.name = "蓝暴";
+	prod.cost = 1000;
+	npc.pet_products = {prod};
+	f.world.loadNpcEntities({npc});
+
+	// 打开宠物商店
+	SA::Domain::EventRequest req{};
+	req.dir = 2;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req.seqno = 2007;
+	f.world.onEvent(id, req);
+	f.world.tick();
+
+	const std::uint32_t wid = f.world.playerActiveWindowId(id);
+
+	// 尝试购买
+	SA::Domain::WindowReply rep{};
+	rep.window_id = wid;
+	rep.source.entity_id = 7007;
+	rep.result_kind = SA::Domain::WindowReply::ResultKind::ENTRY_ID;
+	rep.result.entry_id = 1;
+	f.world.onWindowReply(id, rep);
+
+	// 拦截断言:
+	// - 下发满宠提示
+	// - 石币保持 5000 零扣款
+	// - 宠物栏保持 5 只
+	CHECK(f.world.playerLastWindowText(id) == "你的宠物太多了，装不下更多宠物啦！");
+	CHECK(p->gold == 5000);
+	CHECK(f.world.playerPetSlotsUsed(id) == 5);
+}
+
+TEST_CASE("W.13: 宠物技能导师教授技能成功 (扣除学费并正确写入宠物技能槽)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->gold = 3000;
+
+	// 玩家持有一只 10 级宠物
+	const int pet_slot = f.world.givePetToPlayer(id, makeTestPet(50, /*level=*/10));
+	REQUIRE(pet_slot >= 0);
+
+	NpcEntity npc{};
+	npc.id = 7008;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kPetSkillShop;
+	PetSkillProduct skill_prod{};
+	skill_prod.skill_id = 10;
+	skill_prod.name = "连续攻击";
+	skill_prod.cost = 500;
+	skill_prod.level = 5;
+	npc.pet_skill_products = {skill_prod};
+	f.world.loadNpcEntities({npc});
+
+	// 打开技能导师窗口
+	SA::Domain::EventRequest req{};
+	req.dir = 2;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req.seqno = 2008;
+	f.world.onEvent(id, req);
+	f.world.tick();
+
+	const std::uint32_t wid = f.world.playerActiveWindowId(id);
+
+	// 确认学习 (entry_id = 1)
+	SA::Domain::WindowReply rep{};
+	rep.window_id = wid;
+	rep.source.entity_id = 7008;
+	rep.result_kind = SA::Domain::WindowReply::ResultKind::ENTRY_ID;
+	rep.result.entry_id = 1;
+	f.world.onWindowReply(id, rep);
+
+	// 结算断言:
+	// - 提示成功
+	// - 石币扣除: 3000 - 500 = 2500
+	// - 宠物的技能槽 0 被写入 skill_id 10
+	CHECK(f.world.playerLastWindowText(id) == "宠物成功学会了新技能！");
+	CHECK(p->gold == 2500);
+
+	const auto *pet = f.world.playerPetAt(id, pet_slot);
+	REQUIRE(pet != nullptr);
+	CHECK(pet->pet_skills[0] == 10);
+	for (std::size_t i = 1; i < SA::Model::Pet::kPetSkillSlots; ++i)
+	{
+		CHECK(pet->pet_skills[i] == 0);
+	}
+}
+
+TEST_CASE("W.13: 宠物学习技能等级不足与学满拦截 (等级不足下发 level_low_msg; 重复不可学; 学满下发 skill_full_msg)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->gold = 5000;
+
+	// 玩家持有一只 2 级宠物
+	const int pet_slot = f.world.givePetToPlayer(id, makeTestPet(51, /*level=*/2));
+	REQUIRE(pet_slot >= 0);
+
+	NpcEntity npc{};
+	npc.id = 7009;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kPetSkillShop;
+	npc.level_low_msg = "小家伙等级太低了，还学不会这么高级的技能！";
+	npc.skill_full_msg = "宠物脑子塞满了，装不下新技能了！";
+	PetSkillProduct skill1{};
+	skill1.skill_id = 20;
+	skill1.name = "高级撕咬";
+	skill1.cost = 300;
+	skill1.level = 10; // 需要 10 级，当前宠物只有 2 级
+	PetSkillProduct skill2{};
+	skill2.skill_id = 21;
+	skill2.name = "初级防御";
+	skill2.cost = 100;
+	skill2.level = 1;
+	npc.pet_skill_products = {skill1, skill2};
+	f.world.loadNpcEntities({npc});
+
+	// ① 等级不足拦截
+	const bool learn1 = f.world.learnPetSkill(id, 7009, pet_slot, 20);
+	CHECK_FALSE(learn1);
+	CHECK(p->gold == 5000); // 零扣费
+	CHECK(f.world.playerLastWindowText(id) == "小家伙等级太低了，还学不会这么高级的技能！");
+
+	// ② 成功学习低级技能 21
+	const bool learn2 = f.world.learnPetSkill(id, 7009, pet_slot, 21);
+	CHECK(learn2);
+	CHECK(p->gold == 4900); // 扣 100
+	const auto *pet = f.world.playerPetAt(id, pet_slot);
+	REQUIRE(pet != nullptr);
+	CHECK(pet->pet_skills[0] == 21);
+
+	// ③ 重复技能拦截
+	const bool learn_dup = f.world.learnPetSkill(id, 7009, pet_slot, 21);
+	CHECK_FALSE(learn_dup);
+	CHECK(p->gold == 4900); // 零扣费
+
+	// ④ 技能栏已满拦截: 将剩余 6 个槽位填满
+	auto *mutable_pet = const_cast<SA::Model::Pet *>(pet);
+	for (std::size_t i = 1; i < SA::Model::Pet::kPetSkillSlots; ++i)
+	{
+		mutable_pet->pet_skills[i] = static_cast<std::int32_t>(100 + i);
+	}
+
+	// 导师新增技能 22 (等级 1)
+	npc.pet_skill_products.push_back({22, "敏捷提升", 100, 1});
+	f.world.loadNpcEntities({npc});
+
+	const bool learn_full = f.world.learnPetSkill(id, 7009, pet_slot, 22);
+	CHECK_FALSE(learn_full);
+	CHECK(p->gold == 4900); // 零扣费
+	CHECK(f.world.playerLastWindowText(id) == "宠物脑子塞满了，装不下新技能了！");
+}
+
+TEST_CASE("W.13: 宠物商店回收出售宠物成功与石币上限保护 (回收宠物增加石币并释放池; 金币超上限时拒绝交易且保留宠物)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->gold = 200;
+
+	// 玩家持有一只 5 级宠物 (pet_id = 90)
+	const int pet_slot = f.world.givePetToPlayer(id, makeTestPet(90, /*level=*/5));
+	REQUIRE(pet_slot >= 0);
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+
+	NpcEntity npc{};
+	npc.id = 7010;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kPetShop;
+	npc.sell_rate = 0.5;
+	npc.stone_full_msg = "钱包满了，石币放不下了！";
+	// 在售列表中配置 90 号宠物原价 1200 石币 ⇒ 回收价 1200 * 0.5 = 600
+	PetProduct prod{};
+	prod.pet_id = 90;
+	prod.cost = 1200;
+	npc.pet_products = {prod};
+	f.world.loadNpcEntities({npc});
+
+	// ① 成功出售
+	const bool sold = f.world.sellPetToShop(id, 7010, pet_slot);
+	CHECK(sold);
+	// 结算断言:
+	// - 宠物栏清空并释放
+	// - 金币入账: 200 + 600 = 800
+	CHECK(f.world.playerPetSlotsUsed(id) == 0);
+	CHECK(f.world.playerPetAt(id, pet_slot) == nullptr);
+	CHECK(p->gold == 800);
+
+	// ② 石币超上限保护拦截
+	// 给玩家一只新宠物，并将金币设为 999,900
+	const int slot2 = f.world.givePetToPlayer(id, makeTestPet(90, /*level=*/5));
+	REQUIRE(slot2 >= 0);
+	p->gold = 999900; // 回收得 600; 999,900 + 600 = 1,000,500 > 1,000,000
+
+	const bool sold_overflow = f.world.sellPetToShop(id, 7010, slot2);
+	CHECK_FALSE(sold_overflow);
+	// 拦截断言:
+	// - 拒绝出售 (返回 false)
+	// - 宠物依然完好保存在槽位中
+	// - 金币保持 999,900 零改动 (DR-EC3 拒绝)
+	// - 下发超上限提示语
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+	CHECK(f.world.playerPetAt(id, slot2) != nullptr);
+	CHECK(p->gold == 999900);
+	CHECK(f.world.playerLastWindowText(id) == "钱包满了，石币放不下了！");
+}

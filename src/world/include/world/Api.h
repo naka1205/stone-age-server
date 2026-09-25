@@ -677,14 +677,16 @@ struct EventCheckContext
 int evaluateEventCondition(std::string_view condition, const SA::Model::Player &player);
 int evaluateEventCondition(std::string_view condition, const EventCheckContext &ctx);
 
-// NPC 实体类型(批次 W.7「NPC 实体框架与 Healer」; 批次 W.8「城镇居民 TownPeople」; 批次 W.9「任务兑换 ExChangeMan」; 批次 W.12「商店 NPC ShopMan」)
+// NPC 实体类型(批次 W.7「Healer」; 批次 W.8「TownPeople」; 批次 W.9「ExChangeMan」; 批次 W.12「ShopMan」; 批次 W.13「PetShop / PetSkillShop」)
 enum class NpcType : std::uint8_t
 {
 	kHealer = 0,
 	kTownPeople = 1,
 	kExChangeMan = 2,
 	kShop = 3,
-	kOther = 4,
+	kPetShop = 4,
+	kPetSkillShop = 5,
+	kOther = 6,
 };
 
 // 商店商品条目 (批次 W.12)
@@ -697,6 +699,31 @@ struct ShopProduct
 	std::string name{};         // 道具名称
 };
 
+// 宠物商店在售宠物条目 (批次 W.13)
+struct PetProduct
+{
+	std::int32_t pet_id = 0; // 宠物 ID (Pet::pet_id)
+	std::string name{};      // 宠物名称
+	std::int32_t level = 1;  // 等级
+	std::int32_t cost = 0;   // 售价 (石币)
+	std::int32_t image = 0;  // 图号外观
+	std::int32_t hp = 100;   // 初始生命
+	std::int32_t mp = 100;   // 初始法力
+	std::int32_t vital = 20; // 体力
+	std::int32_t str = 20;   // 力量
+	std::int32_t tough = 20; // 防御
+	std::int32_t dex = 20;   // 敏捷
+};
+
+// 宠物技能导师教授技能条目 (批次 W.13)
+struct PetSkillProduct
+{
+	std::int32_t skill_id = 0; // 技能 ID
+	std::string name{};        // 技能名称
+	std::int32_t cost = 0;     // 学习所需石币
+	std::int32_t level = 1;    // 宠物最低需求等级
+};
+
 // NPC 巡逻路点 (批次 W.11)
 struct NpcPoint
 {
@@ -704,8 +731,8 @@ struct NpcPoint
 	std::int32_t y = 0;
 };
 
-// 世界 NPC 实体配置/状态(批次 W.7/W.8/W.9/W.11/W.12)
-// ⚠️ 原版 npc_healer.c / npc_townpeople.c / npc_exchangeman.c / npc_itemshop.c
+// 世界 NPC 实体配置/状态(批次 W.7/W.8/W.9/W.11/W.12/W.13)
+// ⚠️ 原版 npc_healer.c / npc_townpeople.c / npc_exchangeman.c / npc_itemshop.c / npc_petshop.c / npc_petskillshop.c
 //   CHAR_WHICHTYPE = CHAR_TYPEHEALER / CHAR_TYPETOWNPEOPLE / CHAR_TYPESHOP, CHAR_ISOVERED = 0 (不可穿透阻挡)
 struct NpcEntity
 {
@@ -739,6 +766,13 @@ struct NpcEntity
 	std::string stone_less_msg{};             // 石币不足提示语
 	std::string item_full_msg{};              // 背包已满提示语
 	std::string stone_full_msg{};             // 出售时石币超上限提示语
+
+	// ── 批次 W.13: 宠物商店与宠物技能商人 (移植 npc_petshop.c / npc_petskillshop.c) ──
+	std::vector<PetProduct> pet_products{};            // 宠物商店在售宠物列表
+	std::vector<PetSkillProduct> pet_skill_products{}; // 技能导师教授技能列表
+	std::string pet_full_msg{};                        // 宠物栏已满提示语
+	std::string level_low_msg{};                       // 等级不足提示语
+	std::string skill_full_msg{};                      // 技能栏已满提示语
 };
 
 // 世界态敌人的位置快照(批次 W.2 / W.3 的观察面)。
@@ -1012,6 +1046,16 @@ class World final : public SA::Net::TransportEvents,
 
 	// 向商店 NPC 出售指定背包槽位的道具 (批次 W.12, 移植 npc_itemshop.c 逻辑)
 	bool sellItemToShop(SA::Net::SessionId session, std::uint64_t npc_id, int slot);
+
+	// 从宠物商店 NPC 购买在售宠物 (批次 W.13, 移植 npc_petshop.c 逻辑)
+	bool buyPetFromShop(SA::Net::SessionId session, std::uint64_t npc_id, std::uint32_t entry_id);
+
+	// 向宠物商店 NPC 出售指定槽位的宠物 (批次 W.13, 移植 npc_petshop.c 逻辑)
+	bool sellPetToShop(SA::Net::SessionId session, std::uint64_t npc_id, int pet_slot);
+
+	// 宠物向技能导师 NPC 学习宠物技能 (批次 W.13, 移植 npc_petskillshop.c 逻辑)
+	bool learnPetSkill(SA::Net::SessionId session, std::uint64_t npc_id, int pet_slot,
+	                   std::int32_t skill_id, int skill_slot = -1);
 
 	// ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
 	void requestShutdown() noexcept;
@@ -1519,6 +1563,12 @@ enum class GoldReason : std::uint8_t
 	kShopBuy,
 	// 商店回收道具给予石币 (源, 批次 W.12)
 	kShopSell,
+	// 宠物商店购买宠物扣除石币 (汇, 批次 W.13)
+	kPetShopBuy,
+	// 宠物商店回收宠物给予石币 (源, 批次 W.13)
+	kPetShopSell,
+	// 技能导师学习宠物技能扣除石币 (汇, 批次 W.13)
+	kPetSkillFee,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -1625,6 +1675,12 @@ inline const char *goldReasonName(GoldReason r) noexcept
 		return "shop_buy";
 	case GoldReason::kShopSell:
 		return "shop_sell";
+	case GoldReason::kPetShopBuy:
+		return "pet_shop_buy";
+	case GoldReason::kPetShopSell:
+		return "pet_shop_sell";
+	case GoldReason::kPetSkillFee:
+		return "pet_skill_fee";
 	}
 	return "unknown";
 }

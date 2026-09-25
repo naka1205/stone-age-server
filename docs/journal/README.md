@@ -16,7 +16,7 @@
 | [`10-battle-core.md`](10-battle-core.md) | L3 战斗:批次 0.5 调度 · A.1 逃跑 · A.2 捕获 · A.3 暴击 · A.4 打飞 · A-β d1 尾摇 · A-β d2 目标判定族与忠犬守护 | 7 |
 | [`11-model-attr.md`](11-model-attr.md) | L2 实体池与实体族 · M.1–M.4b 属性推导与四维公式 · 换宠 | 7 |
 | [`12-encounter.md`](12-encounter.md) | M.5 敌人表 · R.1 随机源 · M.6/M.7 遇敌链 · 战果结算 · A-α 战果总装 | 6 |
-| [`13-world.md`](13-world.md) | W.1 移动视野 · W.2/W.3 刷怪游荡 · W.4 暗雷 · W.5 明雷 · W.6 传送点 · W.7 NPC实体Healer · W.8 TownPeople对话与窗口 · W.9 任务旗标与ExChangeMan · W.10 道具宠物交付与奖励结算 · W.11 NPC巡逻与漫游 · W.12 NPC商店与买卖 | 11 |
+| [`13-world.md`](13-world.md) | W.1 移动视野 · W.2/W.3 刷怪游荡 · W.4 暗雷 · W.5 明雷 · W.6 传送点 · W.7 NPC实体Healer · W.8 TownPeople对话与窗口 · W.9 任务旗标与ExChangeMan · W.10 道具宠物交付与奖励结算 · W.11 NPC巡逻与漫游 · W.12 NPC商店与买卖 · W.13 宠物商店与技能导师 | 12 |
 | [`14-item.md`](14-item.md) | 道具域 I.1 背包 · I.2 扣道具 · I.3 掉落 · I.4 使用 · I\| 指令入口校验 | 5 |
 | [`15-status.md`](15-status.md) | L4.1 状态异常系统 · A-γ1 混乱重定向 | 2 |
 | [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
@@ -24,7 +24,7 @@
 | [`18-petskill.md`](18-petskill.md) | 宠技三连发:B1 直攻系 · B2 宠技槽 + CHARGE · B3 状态系 + 铁壁 | 3 |
 | [`90-push-windows.md`](90-push-windows.md) | 十八次 `shared-v0.x.0` 推送窗口的闭合核实 | 18 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **83** |
+| **合计** | | **84** |
 
 ## 全量映射表(按编号)
 
@@ -113,6 +113,7 @@
 | §9.0.75b | 推送窗口执行记录 —— `shared-v0.35.0`(批次 W.10;Pet.h 增加 pet_id 与双端漂移消除) | 2026-09-25 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.76 | 批次 W.11 —— 世界 NPC 巡逻与随机移动漫游(npc_wanderer/NPC_walk/route/wander_radius) | 2026-09-25 | [`13-world.md`](13-world.md) |
 | §9.0.77 | 批次 W.12 —— NPC 商店与道具交易系统(ShopMan/Buy/Sell/sellItemToShop) | 2026-09-25 | [`13-world.md`](13-world.md) |
+| §9.0.78 | 批次 W.13 —— 宠物商店与宠物技能商人(PetShop/PetSkillShop/buyPet/sellPet/learnSkill) | 2026-09-25 | [`13-world.md`](13-world.md) |
 
 ---
 
