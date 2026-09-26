@@ -741,6 +741,59 @@ enum class NpcType : std::uint8_t
 	kPetFusionMan = 9,
 	kPetTransMan = 10,
 	kFameShop = 11,
+	kCraftsman = 12,
+};
+
+// 制造与生活技能类型 (批次 §9.0.99)
+enum class CraftingType : std::uint8_t
+{
+	kCooking = 0,   // 料理系统 (原版 ITEM_DISH 食物烹饪)
+	kSynthesis = 1, // 合成系统 (原版 ITEM_MERGEFLG 装备与素材合成精炼)
+};
+
+// 制造原材料需求 (批次 §9.0.99)
+struct IngredientRequirement
+{
+	std::int32_t item_id = 0; // 道具 ID
+	std::int32_t count = 1;   // 所需数量 (堆叠数或单件数 >= 1)
+	std::string name{};       // 材料名称
+};
+
+// 制造配方 (批次 §9.0.99)
+struct CraftingRecipe
+{
+	std::int32_t recipe_id = 0;
+	CraftingType type = CraftingType::kCooking;
+	std::string name{};
+	std::vector<IngredientRequirement> ingredients{};
+	std::int32_t result_item_id = 0;
+	std::string result_name{};
+	std::int32_t result_count = 1;
+	std::int32_t failure_item_id = 0; // 0 表示失败完全碎裂消失，>0 生成失败副产物
+	std::string failure_name{};
+	std::int32_t min_player_level = 0;
+	std::int32_t success_rate = 100; // 基础成功率百分比 (0 ~ 100)
+	std::int32_t fame_reward = 0;    // 制作成功奖励声望 (原版 fooddp / syndp)
+	std::int32_t cost_gold = 0;      // 制作所需手续费 (石币)
+};
+
+// 制造执行结果码 (批次 §9.0.99)
+enum class CraftingResultCode : std::uint8_t
+{
+	kSuccess = 0,            // 制作成功
+	kFailedGarbage = 1,      // 制作失败 (产出碎料或材料损毁)
+	kSessionInvalid = 2,     // 会话无效
+	kPlayerDead = 3,         // 濒死禁止制造
+	kInBattle = 4,           // 战斗中禁止生活技能
+	kInVending = 5,          // 摆摊中禁止生活技能
+	kRecipeNotFound = 6,     // 配方未注册
+	kLevelTooLow = 7,        // 玩家等级未达标
+	kInsufficientGold = 8,   // 手续费不足
+	kInvalidSlots = 9,       // 槽位越界、空槽或重复提交 (防刷防刷作弊)
+	kSlotLocked = 10,        // 槽位被摆摊锁定或装备中
+	kMissingIngredient = 11, // 原材料不足或不匹配
+	kTypeMismatch = 12,      // 食材与非食材混杂 (原版 -10 互斥拦截)
+	kInventoryFull = 13,     // 背包已满无可用空间
 };
 
 // 称号属性加成 (批次 §9.0.98)
@@ -1698,6 +1751,12 @@ class World final : public SA::Net::TransportEvents,
 	};
 	FameShopResultCode buyFromFameShop(SA::Net::SessionId session, std::uint64_t npc_id, int entry_id);
 
+	// ── 道具制造与生活技能 (批次 §9.0.99) ─────────────────────────────────
+	bool registerCraftingRecipe(const CraftingRecipe &recipe);
+	const CraftingRecipe *findCraftingRecipe(int recipe_id) const;
+	CraftingResultCode craftItem(SA::Net::SessionId session, std::int32_t recipe_id,
+	                             const std::vector<int> &input_slots, int pet_slot = -1);
+
 	int playerEncounterRateFix(SA::Net::SessionId session) const;
 	bool castHunterEncounterSkill(SA::Net::SessionId session, bool is_track, int skill_level,
 	                              int rate = 10, std::int64_t duration_ms = 180000);
@@ -2291,6 +2350,8 @@ enum class GoldReason : std::uint8_t
 	kMarketSellEarn,
 	// 市场交易手续费/税费 (汇, 阶段 2 市场系统)
 	kMarketTaxFee,
+	// 制造与生活技能手续费 (汇, 阶段 2 制造系统)
+	kCraftingFee,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -2427,6 +2488,8 @@ inline const char *goldReasonName(GoldReason r) noexcept
 		return "market_sell_earn";
 	case GoldReason::kMarketTaxFee:
 		return "market_tax_fee";
+	case GoldReason::kCraftingFee:
+		return "crafting_fee";
 	}
 	return "unknown";
 }

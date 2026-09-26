@@ -2908,6 +2908,7 @@ struct World::Impl : GoldAuditSink
 	};
 	std::unordered_map<int, TitleDefinition> registered_titles{};
 	std::unordered_map<SA::Net::SessionId, PlayerTitleData> player_titles{};
+	std::unordered_map<int, CraftingRecipe> registered_recipes{};
 
 	const SA::Model::Pet *getRidingPet(SA::Net::SessionId sid) const
 	{
@@ -6883,6 +6884,14 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 				{
 					// 声望商城 / 荣誉兑换使者 NPC 交互 (批次 §9.0.98)
 					std::string msg = npc.message.empty() ? "欢迎来到荣誉殿堂！可以使用声望兑换珍稀称号与宝物。" : npc.message;
+					s.sendExChangeWindow(id, npc.id, msg,
+					                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+					ok = true;
+				}
+				else if (npc.type == NpcType::kCraftsman)
+				{
+					// 工匠 / 料理大师 NPC 交互 (批次 §9.0.99)
+					std::string msg = npc.message.empty() ? "欢迎来到工坊！在这里可以烹饪美味料理与合成精炼装备。" : npc.message;
 					s.sendExChangeWindow(id, npc.id, msg,
 					                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
 					ok = true;
@@ -13257,6 +13266,233 @@ World::FameShopResultCode World::buyFromFameShop(SA::Net::SessionId session, std
 	s.sendExChangeWindow(session, npc->id, "荣誉兑换成功！",
 	                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
 	return FameShopResultCode::kSuccess;
+}
+
+bool World::registerCraftingRecipe(const CraftingRecipe &recipe)
+{
+	if (recipe.recipe_id <= 0 || recipe.name.empty() || recipe.result_item_id <= 0)
+		return false;
+	_impl->registered_recipes[recipe.recipe_id] = recipe;
+	return true;
+}
+
+const CraftingRecipe *World::findCraftingRecipe(int recipe_id) const
+{
+	const auto it = _impl->registered_recipes.find(recipe_id);
+	if (it == _impl->registered_recipes.end())
+		return nullptr;
+	return &it->second;
+}
+
+CraftingResultCode World::craftItem(SA::Net::SessionId session, std::int32_t recipe_id,
+                                    const std::vector<int> &input_slots, int pet_slot)
+{
+	Impl &s = *_impl;
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (p == nullptr)
+		return CraftingResultCode::kSessionInvalid;
+
+	// 1. 状态门禁: 濒死、战斗中、摆摊中
+	if (p->hp <= 0)
+		return CraftingResultCode::kPlayerDead;
+	if (s.inBattle(session))
+		return CraftingResultCode::kInBattle;
+	if (isPlayerVending(session))
+		return CraftingResultCode::kInVending;
+
+	// 2. 配方查找与门槛检查
+	const CraftingRecipe *recipe = findCraftingRecipe(recipe_id);
+	if (recipe == nullptr)
+		return CraftingResultCode::kRecipeNotFound;
+
+	if (p->level < recipe->min_player_level)
+		return CraftingResultCode::kLevelTooLow;
+
+	if (recipe->cost_gold > 0 && p->gold < recipe->cost_gold)
+		return CraftingResultCode::kInsufficientGold;
+
+	// 3. 输入槽位合法性前置检查
+	if (input_slots.empty())
+		return CraftingResultCode::kInvalidSlots;
+
+	std::vector<int> seen_slots;
+	for (int slot : input_slots)
+	{
+		if (slot < static_cast<int>(SA::Model::kStartItemArray) || slot >= static_cast<int>(SA::Model::kMaxItemHave))
+			return CraftingResultCode::kInvalidSlots;
+		if (std::find(seen_slots.begin(), seen_slots.end(), slot) != seen_slots.end())
+			return CraftingResultCode::kInvalidSlots; // 重复槽位防御
+		seen_slots.push_back(slot);
+
+		if (!p->items[static_cast<std::size_t>(slot)].valid())
+			return CraftingResultCode::kInvalidSlots;
+		const auto *item = s.items.resolve(p->items[static_cast<std::size_t>(slot)]);
+		if (item == nullptr)
+			return CraftingResultCode::kInvalidSlots;
+	}
+
+	// 检查是否处于摆摊货架
+	auto stall_opt = getPlayerStall(session);
+	if (stall_opt.has_value())
+	{
+		for (const auto &stall_item : stall_opt->items)
+		{
+			if (std::find(seen_slots.begin(), seen_slots.end(), stall_item.item_slot) != seen_slots.end())
+				return CraftingResultCode::kSlotLocked;
+		}
+	}
+
+	// 4. 原材料类型互斥检查 (原版 item_type == ITEM_DISH 互斥)
+	for (int slot : input_slots)
+	{
+		const auto *item = s.items.resolve(p->items[static_cast<std::size_t>(slot)]);
+		if (recipe->type == CraftingType::kCooking)
+		{
+			// 料理只能使用食材 (type 20 为料理/食材) 或配方明确指定的食材
+			bool is_recipe_ingredient = false;
+			for (const auto &ing : recipe->ingredients)
+			{
+				if (ing.item_id == item->item_id)
+				{
+					is_recipe_ingredient = true;
+					break;
+				}
+			}
+			if (item->type != 20 && !is_recipe_ingredient)
+				return CraftingResultCode::kTypeMismatch;
+		}
+		else if (recipe->type == CraftingType::kSynthesis)
+		{
+			// 装备与道具合成严禁混入食材 (type 20)
+			if (item->type == 20)
+				return CraftingResultCode::kTypeMismatch;
+		}
+	}
+
+	// 5. 原材料充足性校验
+	std::unordered_map<int, int> provided_counts;
+	for (int slot : input_slots)
+	{
+		const auto *item = s.items.resolve(p->items[static_cast<std::size_t>(slot)]);
+		int count = item->current_pile > 0 ? item->current_pile : 1;
+		provided_counts[item->item_id] += count;
+	}
+
+	for (const auto &ing : recipe->ingredients)
+	{
+		if (provided_counts[ing.item_id] < ing.count)
+			return CraftingResultCode::kMissingIngredient;
+	}
+
+	// 6. 背包空间容量预检: 模拟扣除后释放的空槽 + 现有空槽 >= 1 (产物槽)
+	int freed_slots = 0;
+	auto needed_map = recipe->ingredients;
+	for (int slot : input_slots)
+	{
+		const auto *item = s.items.resolve(p->items[static_cast<std::size_t>(slot)]);
+		int slot_count = item->current_pile > 0 ? item->current_pile : 1;
+		for (auto &ing : needed_map)
+		{
+			if (ing.item_id == item->item_id && ing.count > 0)
+			{
+				int to_deduct = std::min(slot_count, ing.count);
+				slot_count -= to_deduct;
+				ing.count -= to_deduct;
+			}
+		}
+		if (slot_count <= 0)
+		{
+			freed_slots++;
+		}
+	}
+
+	int cur_free_slots = s.countFreeItemSlots(*p);
+	if (cur_free_slots + freed_slots < 1)
+		return CraftingResultCode::kInventoryFull;
+
+	// 7. 辅助宠物加成计算
+	int pet_bonus = 0;
+	if (pet_slot >= 0 && pet_slot < static_cast<int>(SA::Model::kMaxPetHave))
+	{
+		if (p->pets[static_cast<std::size_t>(pet_slot)].valid())
+		{
+			const auto *pet = s.pets.resolve(p->pets[static_cast<std::size_t>(pet_slot)]);
+			if (pet != nullptr && pet->hp > 0)
+			{
+				pet_bonus = 10; // 存活宠物协助 +10% 成功率
+			}
+		}
+	}
+
+	// 8. 成功率骰子判定
+	int effective_rate = std::clamp(recipe->success_rate + pet_bonus, 5, 100);
+	bool success = (static_cast<int>(s.world_rng.randMod(100)) < effective_rate);
+
+	// 9. 原子执行事务: 扣钱 -> 扣材料 -> 发放产出/碎料 -> 加声望
+	if (recipe->cost_gold > 0)
+	{
+		(void)delGold(*p, GoldReason::kCraftingFee, recipe->cost_gold, 0, 0, s);
+	}
+
+	// 扣除材料
+	auto remain_needed = recipe->ingredients;
+	for (int slot : input_slots)
+	{
+		auto *item = s.items.resolve(p->items[static_cast<std::size_t>(slot)]);
+		int slot_count = item->current_pile > 0 ? item->current_pile : 1;
+		for (auto &ing : remain_needed)
+		{
+			if (ing.item_id == item->item_id && ing.count > 0)
+			{
+				int to_deduct = std::min(slot_count, ing.count);
+				slot_count -= to_deduct;
+				ing.count -= to_deduct;
+			}
+		}
+		if (slot_count <= 0)
+		{
+			(void)s.items.release(p->items[static_cast<std::size_t>(slot)]);
+			p->items[static_cast<std::size_t>(slot)] = SA::Model::kNullHandle;
+		}
+		else
+		{
+			item->current_pile = slot_count;
+		}
+	}
+
+	// 产物发放
+	if (success)
+	{
+		SA::Model::Item out_item{};
+		out_item.uid = ++s.next_window_id;
+		out_item.item_id = recipe->result_item_id;
+		out_item.name.assign(recipe->result_name.empty() ? recipe->name.c_str() : recipe->result_name.c_str());
+		out_item.type = (recipe->type == CraftingType::kCooking) ? 20 : 1;
+		out_item.current_pile = recipe->result_count > 0 ? recipe->result_count : 1;
+		out_item.use_pile_nums = recipe->result_count > 1 ? recipe->result_count : 1;
+		(void)giveItemToPlayer(session, out_item);
+
+		if (recipe->fame_reward > 0)
+		{
+			setPlayerFame(session, playerFame(session) + recipe->fame_reward);
+		}
+		return CraftingResultCode::kSuccess;
+	}
+	else
+	{
+		if (recipe->failure_item_id > 0)
+		{
+			SA::Model::Item fail_item{};
+			fail_item.uid = ++s.next_window_id;
+			fail_item.item_id = recipe->failure_item_id;
+			fail_item.name.assign(recipe->failure_name.empty() ? "失败的碎料" : recipe->failure_name.c_str());
+			fail_item.type = (recipe->type == CraftingType::kCooking) ? 20 : 1;
+			fail_item.current_pile = 1;
+			fail_item.use_pile_nums = 1;
+			(void)giveItemToPlayer(session, fail_item);
+		}
+		return CraftingResultCode::kFailedGarbage;
+	}
 }
 
 } // namespace SA::World

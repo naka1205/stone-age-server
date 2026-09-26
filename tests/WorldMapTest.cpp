@@ -8393,3 +8393,336 @@ TEST_CASE("§9.0.98: [RV-2] 声望商城兑换原子事务一致性反向变异�
 	CHECK(f.world.playerFame(id) == 250); // 400 - 150
 	CHECK(f.world.playerPetSlotsUsed(id) == 5);
 }
+
+// ══ 阶段 2: 道具制造与生活技能（料理/合成系统与素材加工）(Cooking & Crafting / Synthesis) ═════
+
+TEST_CASE("§9.0.99: 道具制造与生活技能配方注册、料理烹饪与合成精炼全流程闭环")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 20;
+	p->gold = 5000;
+
+	// 1. 注册料理配方: 特制烤肉 (Recipe 101, 料理)
+	CraftingRecipe recipe_cook{};
+	recipe_cook.recipe_id = 101;
+	recipe_cook.type = CraftingType::kCooking;
+	recipe_cook.name = "特制烤肉";
+	recipe_cook.ingredients = {{501, 1, "恐龙肉"}, {502, 1, "纯水"}};
+	recipe_cook.result_item_id = 601;
+	recipe_cook.result_name = "极品特制烤肉";
+	recipe_cook.result_count = 1;
+	recipe_cook.min_player_level = 10;
+	recipe_cook.success_rate = 100;
+	recipe_cook.fame_reward = 10;
+	recipe_cook.cost_gold = 50;
+	REQUIRE(f.world.registerCraftingRecipe(recipe_cook));
+
+	// 注册合成配方: 强化骨矛 (Recipe 201, 合成)
+	CraftingRecipe recipe_synth{};
+	recipe_synth.recipe_id = 201;
+	recipe_synth.type = CraftingType::kSynthesis;
+	recipe_synth.name = "强化骨矛";
+	recipe_synth.ingredients = {{701, 2, "巨兽之骨"}, {702, 1, "坚硬石块"}};
+	recipe_synth.result_item_id = 801;
+	recipe_synth.result_name = "破甲强化骨矛";
+	recipe_synth.result_count = 1;
+	recipe_synth.min_player_level = 15;
+	recipe_synth.success_rate = 100;
+	recipe_synth.fame_reward = 15;
+	recipe_synth.cost_gold = 100;
+	REQUIRE(f.world.registerCraftingRecipe(recipe_synth));
+
+	// 2. 配方查询验证
+	CHECK(f.world.findCraftingRecipe(101) != nullptr);
+	CHECK(f.world.findCraftingRecipe(201) != nullptr);
+	CHECK(f.world.findCraftingRecipe(999) == nullptr);
+
+	// 3. 给予料理食材 (type = 20)
+	auto item_meat = makeTestItem(501);
+	item_meat.type = 20;
+	item_meat.name.assign("恐龙肉");
+	const int slot_meat = f.world.giveItemToPlayer(id, item_meat);
+	REQUIRE(slot_meat >= 0);
+
+	auto item_water = makeTestItem(502);
+	item_water.type = 20;
+	item_water.name.assign("纯水");
+	const int slot_water = f.world.giveItemToPlayer(id, item_water);
+	REQUIRE(slot_water >= 0);
+
+	CHECK(f.world.playerItemSlotsUsed(id) == 2);
+	CHECK(f.world.playerFame(id) == 0);
+	CHECK(p->gold == 5000);
+
+	// 执行料理烹饪
+	auto cook_res = f.world.craftItem(id, 101, {slot_meat, slot_water});
+	CHECK(cook_res == CraftingResultCode::kSuccess);
+	// 消耗 2 格食材，产出 1 格烤肉，剩余 1 格道具使用
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+	CHECK(p->gold == 4950); // 5000 - 50
+	CHECK(f.world.playerFame(id) == 10);
+	const auto *dish = f.world.playerItemAt(id, slot_meat);
+	REQUIRE(dish != nullptr);
+	CHECK(dish->item_id == 601);
+	CHECK(dish->type == 20);
+
+	// 4. 给予合成原材料 (type = 1 武器素材)
+	auto item_bone1 = makeTestItem(701);
+	item_bone1.type = 1;
+	const int slot_bone1 = f.world.giveItemToPlayer(id, item_bone1);
+	auto item_bone2 = makeTestItem(701);
+	item_bone2.type = 1;
+	const int slot_bone2 = f.world.giveItemToPlayer(id, item_bone2);
+	auto item_stone = makeTestItem(702);
+	item_stone.type = 1;
+	const int slot_stone = f.world.giveItemToPlayer(id, item_stone);
+	REQUIRE(slot_bone1 >= 0);
+	REQUIRE(slot_bone2 >= 0);
+	REQUIRE(slot_stone >= 0);
+
+	// 执行合成精炼
+	auto synth_res = f.world.craftItem(id, 201, {slot_bone1, slot_bone2, slot_stone});
+	CHECK(synth_res == CraftingResultCode::kSuccess);
+	CHECK(p->gold == 4850);              // 4950 - 100
+	CHECK(f.world.playerFame(id) == 25); // 10 + 15
+	// 消耗 3 格素材生成 1 格骨矛，加上之前的 1 格料理，当前共有 2 格道具
+	CHECK(f.world.playerItemSlotsUsed(id) == 2);
+	const auto *spear = f.world.playerItemAt(id, slot_bone1);
+	REQUIRE(spear != nullptr);
+	CHECK(spear->item_id == 801);
+	CHECK(spear->type == 1);
+}
+
+TEST_CASE("§9.0.99: 堆叠材料原子扣减与辅助宠物协助制造加成")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 30;
+
+	// 注册高级料理: 恐龙大餐 (需要恐龙肉 5 块)
+	CraftingRecipe recipe_feast{};
+	recipe_feast.recipe_id = 102;
+	recipe_feast.type = CraftingType::kCooking;
+	recipe_feast.name = "豪华恐龙大餐";
+	recipe_feast.ingredients = {{501, 5, "恐龙肉"}};
+	recipe_feast.result_item_id = 602;
+	recipe_feast.result_name = "极品豪华恐龙大餐";
+	recipe_feast.result_count = 1;
+	recipe_feast.min_player_level = 20;
+	recipe_feast.success_rate = 85;
+	recipe_feast.fame_reward = 20;
+	REQUIRE(f.world.registerCraftingRecipe(recipe_feast));
+
+	// 1. 放入 1 格堆叠有 8 块恐龙肉的食材
+	auto meat_pile = makeTestItem(501);
+	meat_pile.type = 20;
+	meat_pile.can_be_pile = 1;
+	meat_pile.current_pile = 8;
+	meat_pile.use_pile_nums = 10;
+	const int slot_pile = f.world.giveItemToPlayer(id, meat_pile);
+	REQUIRE(slot_pile >= 0);
+
+	// 2. 给予一只存活宠物提供辅助加成 (+10% 成功率)
+	auto pet = makeTestPet(100, 25);
+	pet.hp = 200;
+	const int pet_slot = f.world.givePetToPlayer(id, pet);
+	REQUIRE(pet_slot >= 0);
+
+	// 执行制作: 8 块肉消耗 5 块，剩余 3 块，未完全清空槽位，产物占据新的空槽
+	auto res = f.world.craftItem(id, 102, {slot_pile}, pet_slot);
+	CHECK(res == CraftingResultCode::kSuccess);
+
+	// 原槽位保留且堆叠数更新为 3
+	const auto *rem = f.world.playerItemAt(id, slot_pile);
+	REQUIRE(rem != nullptr);
+	CHECK(rem->item_id == 501);
+	CHECK(rem->current_pile == 3);
+
+	// 产物进入新槽位
+	CHECK(f.world.playerItemSlotsUsed(id) == 2);
+	CHECK(f.world.playerFame(id) == 20);
+}
+
+TEST_CASE("§9.0.99: 制作失败碎料/副产物生成与工匠大师 NPC 交互引导")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 30;
+
+	// 配置工匠 NPC
+	NpcEntity artisan{};
+	artisan.id = 8801;
+	artisan.floor = 0;
+	artisan.x = 33;
+	artisan.y = 32;
+	artisan.type = NpcType::kCraftsman;
+	artisan.message = "欢迎光临玛丽娜斯石器工坊！在这里可以打磨各种骨木工具。";
+	f.world.loadNpcEntities({artisan});
+
+	// 1. 面对工匠 NPC 交互，弹出引导窗口
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 3001;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "欢迎光临玛丽娜斯石器工坊！在这里可以打磨各种骨木工具。");
+
+	// 2. 注册一个 0% 成功率的高难配方，配置失败产出碎料 (799 焦黑的炭块)
+	CraftingRecipe recipe_fail{};
+	recipe_fail.recipe_id = 103;
+	recipe_fail.type = CraftingType::kCooking;
+	recipe_fail.name = "暗黑神秘料理";
+	recipe_fail.ingredients = {{501, 1, "恐龙肉"}};
+	recipe_fail.result_item_id = 603;
+	recipe_fail.failure_item_id = 799;
+	recipe_fail.failure_name = "焦黑的炭块";
+	recipe_fail.min_player_level = 10;
+	recipe_fail.success_rate = 0; // 必然失败
+	REQUIRE(f.world.registerCraftingRecipe(recipe_fail));
+
+	auto meat = makeTestItem(501);
+	meat.type = 20;
+	const int slot = f.world.giveItemToPlayer(id, meat);
+	REQUIRE(slot >= 0);
+
+	auto res = f.world.craftItem(id, 103, {slot});
+	CHECK(res == CraftingResultCode::kFailedGarbage);
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+	const auto *garbage = f.world.playerItemAt(id, slot);
+	REQUIRE(garbage != nullptr);
+	CHECK(garbage->item_id == 799); // 产出碎料
+	CHECK(std::string_view(garbage->name.c_str()) == "焦黑的炭块");
+}
+
+TEST_CASE("§9.0.99: [RV-1] 状态互斥（濒死/战斗/摆摊）、材料混杂与槽位作弊防御拦截与反向变异验证")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 30;
+
+	CraftingRecipe recipe_dish{};
+	recipe_dish.recipe_id = 104;
+	recipe_dish.type = CraftingType::kCooking;
+	recipe_dish.name = "原味烤肉";
+	recipe_dish.ingredients = {{501, 1, "恐龙肉"}};
+	recipe_dish.result_item_id = 601;
+	recipe_dish.success_rate = 100;
+	REQUIRE(f.world.registerCraftingRecipe(recipe_dish));
+
+	CraftingRecipe recipe_weapon{};
+	recipe_weapon.recipe_id = 204;
+	recipe_weapon.type = CraftingType::kSynthesis;
+	recipe_weapon.name = "石斧";
+	recipe_weapon.ingredients = {{702, 1, "坚硬石块"}};
+	recipe_weapon.result_item_id = 802;
+	recipe_weapon.success_rate = 100;
+	REQUIRE(f.world.registerCraftingRecipe(recipe_weapon));
+
+	// 准备食材 (type 20) 与武器素材 (type 1)
+	auto food = makeTestItem(501);
+	food.type = 20;
+	const int s_food = f.world.giveItemToPlayer(id, food);
+	REQUIRE(s_food >= 0);
+
+	auto mat = makeTestItem(702);
+	mat.type = 1;
+	const int s_mat = f.world.giveItemToPlayer(id, mat);
+	REQUIRE(s_mat >= 0);
+
+	// 1. 材料混杂拦截 [RV-1]
+	// 料理配方投入装备素材 -> kTypeMismatch
+	CHECK(f.world.craftItem(id, 104, {s_mat}) == CraftingResultCode::kTypeMismatch);
+	// 合成配方投入食材 -> kTypeMismatch
+	CHECK(f.world.craftItem(id, 204, {s_food}) == CraftingResultCode::kTypeMismatch);
+
+	// 2. 槽位重复提交作弊拦截 [RV-1]
+	CHECK(f.world.craftItem(id, 104, {s_food, s_food}) == CraftingResultCode::kInvalidSlots);
+
+	// 3. 摆摊状态互斥拦截 [RV-1]
+	REQUIRE(f.world.openStall(id, "我的摊位"));
+	REQUIRE(f.world.setStallItem(id, s_mat, 100));
+	REQUIRE(f.world.startStallVending(id));
+	CHECK(f.world.isPlayerVending(id));
+	CHECK(f.world.craftItem(id, 104, {s_food}) == CraftingResultCode::kInVending);
+	REQUIRE(f.world.closeStall(id));
+
+	// 4. 濒死状态互斥拦截 [RV-1]
+	p->hp = 0;
+	CHECK(f.world.craftItem(id, 104, {s_food}) == CraftingResultCode::kPlayerDead);
+	p->hp = 100;
+
+	// 5. 状态恢复后正常制造
+	CHECK(f.world.craftItem(id, 104, {s_food}) == CraftingResultCode::kSuccess);
+}
+
+TEST_CASE("§9.0.99: [RV-2] 制造资产事务一致性反向变异验证（材料不足/手续费不足/背包满严格0扣减）")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 30;
+	p->gold = 1000;
+
+	CraftingRecipe recipe{};
+	recipe.recipe_id = 301;
+	recipe.type = CraftingType::kSynthesis;
+	recipe.name = "精炼红晶剑";
+	recipe.ingredients = {{710, 2, "红水晶"}, {711, 1, "黑铁矿"}};
+	recipe.result_item_id = 810;
+	recipe.cost_gold = 300;
+	recipe.success_rate = 100;
+	recipe.fame_reward = 30;
+	REQUIRE(f.world.registerCraftingRecipe(recipe));
+
+	// 场景 A: 材料数量不足拦截 (仅给 1 个红水晶，需求 2 个)
+	auto cry = makeTestItem(710);
+	cry.type = 1;
+	const int s_cry = f.world.giveItemToPlayer(id, cry);
+	auto ore = makeTestItem(711);
+	ore.type = 1;
+	const int s_ore = f.world.giveItemToPlayer(id, ore);
+	REQUIRE(s_cry >= 0);
+	REQUIRE(s_ore >= 0);
+
+	auto res_miss = f.world.craftItem(id, 301, {s_cry, s_ore});
+	CHECK(res_miss == CraftingResultCode::kMissingIngredient);
+	CHECK(p->gold == 1000);                      // 严格 0 扣减
+	CHECK(f.world.playerItemSlotsUsed(id) == 2); // 材料 100% 保全
+
+	// 补足第 2 个红水晶
+	const int s_cry2 = f.world.giveItemToPlayer(id, cry);
+	REQUIRE(s_cry2 >= 0);
+	CHECK(f.world.playerItemSlotsUsed(id) == 3);
+
+	// 场景 B: 手续费不足拦截 [RV-2]
+	p->gold = 100; // 需求 300
+	auto res_gold = f.world.craftItem(id, 301, {s_cry, s_cry2, s_ore});
+	CHECK(res_gold == CraftingResultCode::kInsufficientGold);
+	CHECK(p->gold == 100);                       // 石币未变动
+	CHECK(f.world.playerItemSlotsUsed(id) == 3); // 3 样材料完好无损
+
+	// 场景 C: 恢复资金后制造成功，原子完成材料清除、手续费扣减与产物入包
+	p->gold = 1000;
+	auto res_ok = f.world.craftItem(id, 301, {s_cry, s_cry2, s_ore});
+	CHECK(res_ok == CraftingResultCode::kSuccess);
+	CHECK(p->gold == 700); // 1000 - 300
+	CHECK(f.world.playerFame(id) == 30);
+	// 消耗 3 格材料，产出 1 格武器，剩余 1 格
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+	const auto *weapon = f.world.playerItemAt(id, s_cry);
+	REQUIRE(weapon != nullptr);
+	CHECK(weapon->item_id == 810);
+}
