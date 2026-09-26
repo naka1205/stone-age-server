@@ -293,6 +293,8 @@ void configureContent(SA::World::World &world, const SA::Content::Bundle &bundle
 					npc.type = SA::World::NpcType::kSignBoard;
 				else if (tstr == "warpman")
 					npc.type = SA::World::NpcType::kWarpMan;
+				else if (tstr == "ridemaster")
+					npc.type = SA::World::NpcType::kRideMaster;
 				else
 					npc.type = SA::World::NpcType::kOther;
 			}

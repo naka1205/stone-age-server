@@ -1256,3 +1256,46 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - 篡改 `craftItem` 注释掉手续费充足性前置检查 `if (recipe->cost_gold > 0 && p->gold < recipe->cost_gold)` ⇒ 用例 5 中资金不足时的材料保全与阻断断言立即精准报红失败（`0 != 8`, `1 != 3`, `9 != 0`, `1000 != 700`）；恢复后回绿。
 - **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 8 项 CTest 全量通过（锁定 `shared-v0.42.0` 零漂移），双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
 
+### 9.0.100 Pet Advanced Growth & Ride Certification (阶段 2 宠物进阶成长与骑乘认证体系)
+
+> **对应架构设计**: 原版 `npc_riderman.c` (`NPC_Riderman`, `w.takegold / 5` 庄园分成), `char/char.c:3990-4075`, `10-world-map.md` 阶段 2 扩展  
+> **核心交付**: 庄园骑乘认证体系（`RideCertType` 包含基础、萨姆吉尔庄园暴龙、玛丽娜斯庄园绿暴、加加庄园飞龙、卡鲁它那庄园雷龙及宗师全能认证）、骑乘认证考核全流程闭环（`takeRideExam` 涵盖等级/声望/石币门槛校验）、考核学费 20% 原子注资庄园家族金库（原版 `npc_riderman.c:234` `takegold / 5` 一致性对齐）、骑乘门禁扩展（未拥有庄园特权的非家族成员凭借考取的认证合法骑乘专属宠）、骑宠契合度相性与属性共鸣推导（`calculateRideAffinity` 包含忠诚度、等级差、专精认证加成与攻防敏折算）、骑乘考官 NPC 实体扩展（`NpcType::kRideMaster = 13`）与交互弹窗、[RV-1] 庄园专属骑宠认证门禁与未授权拦截反向变异验证、[RV-2] 认证考核原子事务与庄园金库 20% 分成一致性反向变异验证。
+
+#### 1. 核心设计与落地产出
+
+1. **庄园骑乘认证类型 (`RideCertType`) 与考核门槛 (`RideExamRequirement`)**:
+   - `RideCertType`: 严格定义 `kBasic`（基础坐骑认证）、`kManorSamo`（萨姆吉尔庄园暴龙系专属认证）、`kManorMarina`（玛丽娜斯庄园绿暴/虎系认证）、`kJaja`（加加庄园飞龙/加美系认证）、`kKarutana`（卡鲁它那庄园雷龙系认证）与 `kMaster`（宗师全能认证，通骑全系专属宠）；
+   - `RideExamRequirement`: 为每种认证注册准入资质（等级需求 40/80/120 级、声望需求 50/200/1000 声望、考核学费 5,000/20,000/100,000 石币）及关联庄园（`associated_manor`）。
+2. **考核流程闭环与庄园金库 20% 原子分成 (`takeRideExam`)**:
+   - **状态与门槛前置检查**: 校验玩家存活（`hp > 0`）、战斗中互斥（`inBattle`）、摆摊中互斥（`isPlayerVending`）、重复考核防刷防扣费拦截（`kAlreadyCertified`），以及等级、声望与石币充足性检查；
+   - **原子扣费与庄园分成**:
+     - 严格通过 `delGold` 挂载 `GoldReason::kRideExamFee` 扣除学费；
+     - 对齐原版 `npc_riderman.c:234, 311, 388, 464`（`sprintf(buf2, "%d", w.takegold / 5)`），当所考认证关联有占领家族的庄园时，将实扣学费的 $20\%$（`share = tx.applied / 5`）原子注入占领家族金库（`family_gold += share`，严格受 1 亿上限保护）；其余资金由系统回收销毁；
+     - 考核成功激活认证，记录于玩家认证集 `player_ride_certs`。
+3. **骑乘门禁与进阶相性共鸣 (`canPlayerRide` & `calculateRideAffinity`)**:
+   - **门禁无缝接驳**: 在 `canPlayerRide` 中接驳认证查询，非占领家族成员凭借考取的专属认证亦可合法骑乘红暴、绿暴、飞龙与雷龙；宗师认证者享有一证通骑特权；
+   - **安全吊销解骑**: `revokeRideCert` 吊销认证时，若玩家当前处于骑乘状态且不再满足骑乘条件，自动调用 `dismountPet` 触发安全下马脱钩；
+   - **相性契合度与共鸣属性**:
+     - 基准契合度基于宠物忠诚度（`petLoyalty` 0~100）；
+     - 等级差驾驭修正：宠物等级高于角色时产生驾驭惩罚（每高 1 级 -2%），角色高等级提供驾驭增益（最高 +10%）；
+     - 专精认证加成：持有对应庄园认证 +15% 契合度，宗师全能认证 +20% 契合度（夹取于 10%~100%）；
+     - 属性共鸣折算：血量加成 $HP_{bonus} = (HP_{pet} \times rate)/100$，攻击折算 $Atk_{bonus} = (Atk_{pet} \times rate)/200$，防御折算 $Def_{bonus} = (Def_{pet} \times rate)/200$，综合敏捷 $Dex = (Dex_{player} \times 60 + Dex_{pet} \times 40 \times rate / 100) / 100$。
+4. **NPC 骑乘考官实体扩展**:
+   - 扩充 `NpcType::kRideMaster = 13`，支持服务端解析与大世界面对交互（`onEvent`）对话引导。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 140 组增至 **145 组**（+5 组庄园专属考官考核流程、宗师全能认证、契合度相性与属性共鸣推导、RV-1 门禁拦截与 RV-2 庄园分成变异实测），断言数从 4105 条增至 **4201 条**（+96 条断言，100% 成功）。
+- **实测用例矩阵**:
+  1. `§9.0.100: 庄园专属骑乘考官认证考核全流程 (门槛校验、资质发放与非家族成员骑乘解锁)`
+  2. `§9.0.100: 宗师全能认证 (Master Ride Cert) 与全系特权验证`
+  3. `§9.0.100: 骑宠契合度相性与属性共鸣加成 (calculateRideAffinity) 验证`
+  4. `§9.0.100: [RV-1] 庄园专属骑宠认证门禁与未授权拦截反向变异验证`
+  5. `§9.0.100: [RV-2] 认证考核原子事务与庄园金库 20% 分成一致性反向变异验证`
+- **反向验证 (RV-1)**:
+  - 篡改 `canPlayerRide` 中暴龙系认证校验，绕过萨姆吉尔专属认证门限 ⇒ 用例 4 中未获萨姆吉尔认证时的跨庄园拦截断言（`CHECK_FALSE(f.world.canPlayerRide(id, s_samo))`）立即精准报红失败（`CHECK_FALSE(true)`）；恢复后回绿。
+- **反向验证 (RV-2)**:
+  - 篡改 `takeRideExam` 庄园分成比例（将 `share = tx.applied / 5` 篡改为 `/ 2` 即 50% 错误分成）⇒ 用例 5 中金库 20% 增量核对断言（`CHECK(fam_info_after->family_gold == init_gold + 4000)`）立即精确报红失败（`CHECK(10000 == 4000)`）；恢复后回绿。
+- **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 8 项 CTest 全量通过（锁定 `shared-v0.42.0` 零漂移），双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
+
+

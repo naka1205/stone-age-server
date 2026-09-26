@@ -742,6 +742,7 @@ enum class NpcType : std::uint8_t
 	kPetTransMan = 10,
 	kFameShop = 11,
 	kCraftsman = 12,
+	kRideMaster = 13,
 };
 
 // 制造与生活技能类型 (批次 §9.0.99)
@@ -1315,6 +1316,53 @@ struct RideInfo
 	std::int32_t pet_level = 1;      // 骑乘宠等级
 	std::int32_t pet_hp = 0;         // 骑乘宠当前生命值
 	std::int32_t pet_max_hp = 0;     // 骑乘宠生命上限
+};
+
+// 骑乘认证类型 (批次 §9.0.100, 对齐原版 npc_riderman.c 庄园骑乘考官体系)
+enum class RideCertType : std::uint8_t
+{
+	kBasic = 0,       // 基础骑乘认证 (普通虎系/穿山甲系等基础坐骑)
+	kManorSamo = 1,   // 萨姆吉尔庄园认证 (暴龙系特许骑乘: 红暴/机暴等)
+	kManorMarina = 2, // 玛丽娜斯庄园认证 (绿暴/虎系进阶特许骑乘)
+	kJaja = 3,        // 加加庄园认证 (飞龙/加美系特许骑乘)
+	kKarutana = 4,    // 卡鲁它那庄园认证 (雷龙系特许骑乘)
+	kMaster = 5,      // 宗师全能骑乘认证 (全系特许骑乘)
+};
+
+// 骑乘认证考核门槛与消耗配置 (批次 §9.0.100)
+struct RideExamRequirement
+{
+	RideCertType cert_type = RideCertType::kBasic;
+	std::string cert_name{};                           // 认证名称
+	FamilyManor associated_manor = FamilyManor::kNone; // 关联庄园
+	std::int32_t required_level = 1;                   // 角色等级要求
+	std::int32_t required_fame = 0;                    // 角色声望要求
+	std::int32_t cost_gold = 0;                        // 考核费用 (石币)
+};
+
+// 骑乘认证考核结果码 (批次 §9.0.100)
+enum class RideExamResultCode : std::uint8_t
+{
+	kSuccess = 0,
+	kInvalidSession = 1,
+	kPlayerDead = 2,
+	kPlayerInBattle = 3,
+	kPlayerVending = 4,
+	kAlreadyCertified = 5,  // 已考取该认证
+	kInsufficientLevel = 6, // 等级未达门禁
+	kInsufficientFame = 7,  // 声望不足
+	kInsufficientGold = 8,  // 石币不足 (DR-EC3 拒绝)
+	kUnknownCert = 9,
+};
+
+// 骑乘相性契合度与属性共鸣折算 (批次 §9.0.100, 对齐 char.c/battle.c 骑宠属性加成)
+struct RideAffinityStats
+{
+	int affinity_rate = 0; // 契合度百分比 (0..100)
+	int bonus_hp = 0;      // 骑乘生命折算加成
+	int bonus_attack = 0;  // 骑乘攻击折算加成
+	int bonus_defense = 0; // 骑乘防御折算加成
+	int effective_dex = 0; // 骑乘综合敏捷
 };
 
 // ══ 宠物融合与转生系统 (Pet Fusion & Rebirth, 批次 §9.0.96) ════════════════════
@@ -1939,6 +1987,17 @@ class World final : public SA::Net::TransportEvents,
 	bool hasRidePermit(SA::Net::SessionId session, const std::string &permit_name) const;
 	std::vector<std::string> playerRidePermits(SA::Net::SessionId session) const;
 
+	// ── 庄园骑乘认证体系 (批次 §9.0.100) ──────────────────────────────────
+	RideExamRequirement getRideExamRequirement(RideCertType cert_type) const;
+	RideExamResultCode takeRideExam(SA::Net::SessionId session, RideCertType cert_type);
+	bool grantRideCert(SA::Net::SessionId session, RideCertType cert_type);
+	bool revokeRideCert(SA::Net::SessionId session, RideCertType cert_type);
+	bool hasRideCert(SA::Net::SessionId session, RideCertType cert_type) const;
+	std::vector<RideCertType> playerRideCerts(SA::Net::SessionId session) const;
+	std::optional<RideAffinityStats> calculateRideAffinity(SA::Net::SessionId session, int pet_slot) const;
+	int petLoyalty(std::uint64_t pet_uid) const;
+	void setPetLoyalty(std::uint64_t pet_uid, int loyalty);
+
 	// ── 选角流程与新手村出生地 (Character Selection & Hometown) ─────────────
 	struct HometownSpawn
 	{
@@ -2352,6 +2411,8 @@ enum class GoldReason : std::uint8_t
 	kMarketTaxFee,
 	// 制造与生活技能手续费 (汇, 阶段 2 制造系统)
 	kCraftingFee,
+	// 骑乘考核与认证学费 (汇, 阶段 2 骑乘认证系统)
+	kRideExamFee,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -2490,6 +2551,8 @@ inline const char *goldReasonName(GoldReason r) noexcept
 		return "market_tax_fee";
 	case GoldReason::kCraftingFee:
 		return "crafting_fee";
+	case GoldReason::kRideExamFee:
+		return "ride_exam_fee";
 	}
 	return "unknown";
 }

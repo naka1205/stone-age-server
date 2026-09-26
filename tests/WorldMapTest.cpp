@@ -8726,3 +8726,257 @@ TEST_CASE("§9.0.99: [RV-2] 制造资产事务一致性反向变异验证（材�
 	REQUIRE(weapon != nullptr);
 	CHECK(weapon->item_id == 810);
 }
+
+TEST_CASE("§9.0.100: 庄园专属骑乘考官认证考核全流程 (门槛校验、资质发放与非家族成员骑乘解锁)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 30; // 初始等级不足 (需求 80)
+	p->gold = 50000;
+	f.world.setPlayerFame(id, 100); // 初始声望不足 (需求 200)
+
+	// 赋予一只萨姆吉尔暴龙
+	auto pet = makeTestPet(501, 80);
+	pet.name.assign("萨姆吉尔暴龙");
+	pet.hp = 1000;
+	const int s0 = f.world.givePetToPlayer(id, pet);
+	REQUIRE(s0 >= 0);
+
+	// 1. 无认证且无庄园特权时，无法骑乘专属宠
+	CHECK_FALSE(f.world.canPlayerRide(id, s0));
+	CHECK_FALSE(f.world.mountPet(id, s0));
+
+	// 2. 考核门槛校验: 等级不足拦截
+	auto res_lv = f.world.takeRideExam(id, RideCertType::kManorSamo);
+	CHECK(res_lv == RideExamResultCode::kInsufficientLevel);
+	CHECK_FALSE(f.world.hasRideCert(id, RideCertType::kManorSamo));
+	CHECK(p->gold == 50000); // 严格 0 扣减
+
+	// 提升等级至 80，声望仍不足 (100 < 200)
+	p->level = 80;
+	auto res_fame = f.world.takeRideExam(id, RideCertType::kManorSamo);
+	CHECK(res_fame == RideExamResultCode::kInsufficientFame);
+	CHECK(p->gold == 50000);
+
+	// 提升声望至 250，费用不足 (将石币调低至 10000 < 20000)
+	f.world.setPlayerFame(id, 250);
+	p->gold = 10000;
+	auto res_gold = f.world.takeRideExam(id, RideCertType::kManorSamo);
+	CHECK(res_gold == RideExamResultCode::kInsufficientGold);
+	CHECK(p->gold == 10000);
+
+	// 3. 补足学费，考核成功，扣款 20000 石币并授予认证
+	p->gold = 50000;
+	auto res_ok = f.world.takeRideExam(id, RideCertType::kManorSamo);
+	CHECK(res_ok == RideExamResultCode::kSuccess);
+	CHECK(p->gold == 30000); // 50000 - 20000
+	CHECK(f.world.hasRideCert(id, RideCertType::kManorSamo));
+
+	// 4. 重复考核防刷防扣费拦截
+	auto res_dup = f.world.takeRideExam(id, RideCertType::kManorSamo);
+	CHECK(res_dup == RideExamResultCode::kAlreadyCertified);
+	CHECK(p->gold == 30000); // 无二次扣款
+
+	// 5. 获得认证后，非庄园家族成员合法解锁骑乘
+	CHECK(f.world.canPlayerRide(id, s0));
+	CHECK(f.world.mountPet(id, s0));
+	CHECK(f.world.isPlayerRiding(id));
+	CHECK(f.world.playerRidePetSlot(id) == s0);
+}
+
+TEST_CASE("§9.0.100: 宗师全能认证 (Master Ride Cert) 与全系特权验证")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 125;
+	p->gold = 200000;
+	f.world.setPlayerFame(id, 1500);
+
+	// 赋予各类庄园特权宠
+	auto samo_pet = makeTestPet(501, 80);
+	samo_pet.name.assign("巴朵兰恩");
+	samo_pet.hp = 800;
+	const int s_samo = f.world.givePetToPlayer(id, samo_pet);
+
+	auto jaja_pet = makeTestPet(502, 80);
+	jaja_pet.name.assign("朵拉比斯");
+	jaja_pet.hp = 700;
+	const int s_jaja = f.world.givePetToPlayer(id, jaja_pet);
+
+	auto karu_pet = makeTestPet(503, 80);
+	karu_pet.name.assign("布拉奇多斯");
+	karu_pet.hp = 900;
+	const int s_karu = f.world.givePetToPlayer(id, karu_pet);
+
+	REQUIRE(s_samo >= 0);
+	REQUIRE(s_jaja >= 0);
+	REQUIRE(s_karu >= 0);
+
+	// 考核宗师全能认证 (需 100,000 石币)
+	auto res = f.world.takeRideExam(id, RideCertType::kMaster);
+	CHECK(res == RideExamResultCode::kSuccess);
+	CHECK(p->gold == 100000);
+	CHECK(f.world.hasRideCert(id, RideCertType::kMaster));
+
+	// 宗师特权: 一证通骑全系庄园骑宠
+	CHECK(f.world.canPlayerRide(id, s_samo));
+	CHECK(f.world.canPlayerRide(id, s_jaja));
+	CHECK(f.world.canPlayerRide(id, s_karu));
+
+	// 成功换乘
+	CHECK(f.world.mountPet(id, s_jaja));
+	CHECK(f.world.isPlayerRiding(id));
+	CHECK(f.world.playerRidePetSlot(id) == s_jaja);
+}
+
+TEST_CASE("§9.0.100: 骑宠契合度相性与属性共鸣加成 (calculateRideAffinity) 验证")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 80;
+	p->dex = 50;
+
+	// 创建骑宠: 80 级加加飞龙
+	auto pet = makeTestPet(601, 80);
+	pet.name.assign("朵拉比斯");
+	pet.vital = 40;
+	pet.str = 40;
+	pet.tough = 30;
+	pet.dex = 35;
+	pet.hp = 400;
+	const int s0 = f.world.givePetToPlayer(id, pet);
+	REQUIRE(s0 >= 0);
+
+	const auto *live_pet = f.world.playerPetAt(id, s0);
+	REQUIRE(live_pet != nullptr);
+	const auto pet_stats = SA::Rules::deriveBaseStats(live_pet->vital, live_pet->str, live_pet->tough, live_pet->dex);
+
+	// 场景 A: 默认满忠诚 (100)，无庄园认证 (等级差 0) -> affinity = 100
+	auto aff_default = f.world.calculateRideAffinity(id, s0);
+	REQUIRE(aff_default.has_value());
+	CHECK(aff_default->affinity_rate == 100);
+	CHECK(aff_default->bonus_hp == pet_stats.max_hp);
+	CHECK(aff_default->bonus_attack == (pet_stats.attack * 100) / 200);
+	CHECK(aff_default->bonus_defense == (pet_stats.defense * 100) / 200);
+
+	// 场景 B: 忠诚度受损 (调为 40)，大宠物等级压制 (宠物 80 级，玩家 70 级，差距 10 级扣 20%) -> 40 - 20 = 20%
+	p->level = 70;
+	f.world.setPetLoyalty(live_pet->uid, 40);
+	auto aff_low = f.world.calculateRideAffinity(id, s0);
+	REQUIRE(aff_low.has_value());
+	CHECK(aff_low->affinity_rate == 20);
+	CHECK(aff_low->bonus_hp == (pet_stats.max_hp * 20) / 100);
+
+	// 场景 C: 考取加加庄园认证，相性获得 +15% 专精共鸣 (20 + 15 = 35%)
+	REQUIRE(f.world.grantRideCert(id, RideCertType::kJaja));
+	auto aff_cert = f.world.calculateRideAffinity(id, s0);
+	REQUIRE(aff_cert.has_value());
+	CHECK(aff_cert->affinity_rate == 35);
+	CHECK(aff_cert->bonus_hp == (pet_stats.max_hp * 35) / 100);
+}
+
+TEST_CASE("§9.0.100: [RV-1] 庄园专属骑宠认证门禁与未授权拦截反向变异验证")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 90;
+
+	// 赋予红暴与雷龙
+	auto samo_pet = makeTestPet(701, 80);
+	samo_pet.name.assign("帖拉所伊朵");
+	samo_pet.hp = 850;
+	const int s_samo = f.world.givePetToPlayer(id, samo_pet);
+
+	auto karu_pet = makeTestPet(702, 80);
+	karu_pet.name.assign("斯天多斯");
+	karu_pet.hp = 950;
+	const int s_karu = f.world.givePetToPlayer(id, karu_pet);
+
+	REQUIRE(s_samo >= 0);
+	REQUIRE(s_karu >= 0);
+
+	// 1. [RV-1 反向变异实证]: 未获得萨姆吉尔庄园认证时，强行上马红暴严格被阻断
+	CHECK_FALSE(f.world.hasRideCert(id, RideCertType::kManorSamo));
+	CHECK_FALSE(f.world.canPlayerRide(id, s_samo));
+	CHECK_FALSE(f.world.mountPet(id, s_samo));
+	CHECK_FALSE(f.world.isPlayerRiding(id));
+
+	// 持有卡鲁它那雷龙认证，依然严格禁止越权骑乘萨姆吉尔暴龙
+	REQUIRE(f.world.grantRideCert(id, RideCertType::kKarutana));
+	CHECK_FALSE(f.world.hasRideCert(id, RideCertType::kManorSamo));
+	CHECK_FALSE(f.world.canPlayerRide(id, s_samo));
+	REQUIRE(f.world.revokeRideCert(id, RideCertType::kKarutana));
+
+	// 2. 授予仅萨姆吉尔认证后，暴龙允许骑乘，但雷龙仍然被拦截
+	REQUIRE(f.world.grantRideCert(id, RideCertType::kManorSamo));
+	CHECK(f.world.canPlayerRide(id, s_samo));
+	CHECK_FALSE(f.world.canPlayerRide(id, s_karu)); // 雷龙仍未授权
+
+	// 3. 正常骑乘红暴
+	REQUIRE(f.world.mountPet(id, s_samo));
+	CHECK(f.world.isPlayerRiding(id));
+	CHECK(f.world.playerRidePetSlot(id) == s_samo);
+
+	// 4. [RV-1 资质吊销下马防御]: 吊销萨姆吉尔认证，触发防御式自动安全下马
+	REQUIRE(f.world.revokeRideCert(id, RideCertType::kManorSamo));
+	CHECK_FALSE(f.world.hasRideCert(id, RideCertType::kManorSamo));
+	CHECK_FALSE(f.world.canPlayerRide(id, s_samo));
+	CHECK_FALSE(f.world.isPlayerRiding(id)); // 自动下马脱钩
+	CHECK(f.world.playerRidePetSlot(id) == -1);
+}
+
+TEST_CASE("§9.0.100: [RV-2] 认证考核原子事务与庄园金库 20% 分成一致性反向变异验证")
+{
+	MoveFixture f;
+	const auto id_student = spawnHandshaked(f);
+	const auto id_leader = spawnHandshaked(f);
+
+	auto *student = f.world.playerForTest(id_student);
+	auto *leader = f.world.playerForTest(id_leader);
+	REQUIRE(student != nullptr);
+	REQUIRE(leader != nullptr);
+
+	student->level = 85;
+	f.world.setPlayerFame(id_student, 300);
+
+	// 创建并占领萨姆吉尔庄园
+	leader->level = 50;
+	leader->gold = 20000;
+	const auto fid = f.world.createFamily(id_leader, "萨姆吉尔卫队", "保卫萨姆吉尔");
+	REQUIRE(fid > 0);
+	REQUIRE(f.world.occupyManor(fid, FamilyManor::kSamo));
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kSamo) == fid);
+
+	const auto fam_info_before = f.world.getFamilyInfo(fid);
+	REQUIRE(fam_info_before.has_value());
+	const std::int32_t init_gold = fam_info_before->family_gold;
+
+	// 场景 A: [RV-2 反向变异实证] 资金不足时，严格 0 扣减且庄园金库 0 注资 (原子拒绝)
+	student->gold = 15000; // 考核需 20000
+	auto res_fail = f.world.takeRideExam(id_student, RideCertType::kManorSamo);
+	CHECK(res_fail == RideExamResultCode::kInsufficientGold);
+	CHECK(student->gold == 15000); // 学员石币未被扣除
+	CHECK_FALSE(f.world.hasRideCert(id_student, RideCertType::kManorSamo));
+	const auto fam_info_fail = f.world.getFamilyInfo(fid);
+	CHECK(fam_info_fail->family_gold == init_gold); // 庄园金库无任何虚假注资
+
+	// 场景 B: 补足学费，原子完成学费划扣与 20% (w.takegold / 5 = 4000) 庄园金库注资
+	student->gold = 50000;
+	auto res_ok = f.world.takeRideExam(id_student, RideCertType::kManorSamo);
+	CHECK(res_ok == RideExamResultCode::kSuccess);
+	CHECK(student->gold == 30000); // 50000 - 20000
+	CHECK(f.world.hasRideCert(id_student, RideCertType::kManorSamo));
+
+	// 对齐原版 npc_riderman.c:234 w.takegold / 5: 20000 / 5 = 4000
+	const auto fam_info_after = f.world.getFamilyInfo(fid);
+	REQUIRE(fam_info_after.has_value());
+	CHECK(fam_info_after->family_gold == init_gold + 4000);
+}
