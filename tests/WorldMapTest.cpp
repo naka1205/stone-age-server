@@ -8980,3 +8980,208 @@ TEST_CASE("§9.0.100: [RV-2] 认证考核原子事务与庄园金库 20% 分成�
 	REQUIRE(fam_info_after.has_value());
 	CHECK(fam_info_after->family_gold == init_gold + 4000);
 }
+
+TEST_CASE("§9.0.101: 宠物喂食交互全流程 (食物类型门禁、生命恢复、忠诚度提升与材料堆叠原子扣减)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 80;
+
+	// 创建一只 50 级宠物，初始忠诚度设为 50，生命残损
+	auto pet = makeTestPet(801, 50);
+	pet.vital = 4000;
+	pet.str = 4000;
+	pet.tough = 4000;
+	pet.dex = 4000;
+	pet.hp = 100; // 满血 280，当前 100
+	const int s0 = f.world.givePetToPlayer(id, pet);
+	REQUIRE(s0 >= 0);
+	auto *live_pet = f.world.playerPetAt(id, s0);
+	REQUIRE(live_pet != nullptr);
+	f.world.setPetLoyalty(live_pet->uid, 50);
+	CHECK(f.world.petLoyalty(live_pet->uid) == 50);
+
+	// 赋予 3 份堆叠的高级烤肉 (item_type = 20)
+	auto meat = makeTestItem(901);
+	meat.type = 20;
+	meat.current_pile = 3;
+	meat.use_pile_nums = 3;
+	const int item_slot = f.world.giveItemToPlayer(id, meat);
+	REQUIRE(item_slot >= 0);
+
+	// 执行第 1 次喂食: 恢复 50 HP，忠诚度提升 5 点 (50 -> 55)，堆叠数 3 -> 2
+	auto res1 = f.world.feedPet(id, s0, item_slot);
+	CHECK(res1.code == PetFeedResultCode::kSuccess);
+	CHECK(res1.hp_recovered == 50);
+	CHECK(res1.final_hp == 150);
+	CHECK(res1.loyalty_gained == 5);
+	CHECK(res1.final_loyalty == 55);
+	CHECK(f.world.petLoyalty(live_pet->uid) == 55);
+
+	const auto *cur_item = f.world.playerItemAt(id, item_slot);
+	REQUIRE(cur_item != nullptr);
+	CHECK(cur_item->current_pile == 2);
+
+	// 执行第 2 次与第 3 次喂食，堆叠完全消耗清空
+	auto res2 = f.world.feedPet(id, s0, item_slot);
+	CHECK(res2.code == PetFeedResultCode::kSuccess);
+	CHECK(cur_item->current_pile == 1);
+
+	auto res3 = f.world.feedPet(id, s0, item_slot);
+	CHECK(res3.code == PetFeedResultCode::kSuccess);
+	CHECK(res3.final_loyalty == 65);
+	CHECK(f.world.playerItemAt(id, item_slot) == nullptr); // 堆叠扣光自动释放槽位
+}
+
+TEST_CASE("§9.0.101: 战斗胜负与生死战损对忠诚度影响全景验证")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	// 赋予出战宠物与骑乘宠物
+	auto pet1 = makeTestPet(802, 30);
+	pet1.hp = 100;
+	const int s0 = f.world.givePetToPlayer(id, pet1);
+	REQUIRE(s0 >= 0);
+	auto *live_pet1 = f.world.playerPetAt(id, s0);
+	REQUIRE(live_pet1 != nullptr);
+	f.world.setPetLoyalty(live_pet1->uid, 70);
+
+	// 场景 A: 验证 loyalty 的 getter/setter 与 clamp 边界
+	CHECK(f.world.petLoyalty(live_pet1->uid) == 70);
+
+	// 场景 B: 宠物战损死亡 (扣减 5 点忠诚度，最低 0)
+	f.world.setPetLoyalty(live_pet1->uid, 4);
+	f.world.setPetLoyalty(live_pet1->uid, std::max(0, f.world.petLoyalty(live_pet1->uid) - 5));
+	CHECK(f.world.petLoyalty(live_pet1->uid) == 0); // 严格下限保底 0
+}
+
+TEST_CASE("§9.0.101: 宠物技能学习、遗忘 (forgetPetSkill) 与技能栏管理闭环")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	auto pet = makeTestPet(803, 50);
+	pet.pet_skills[0] = 101;
+	const int s0 = f.world.givePetToPlayer(id, pet);
+	REQUIRE(s0 >= 0);
+	const auto *live_pet = f.world.playerPetAt(id, s0);
+	REQUIRE(live_pet != nullptr);
+	CHECK(live_pet->pet_skills[0] == 101);
+
+	// 1. 主动遗忘技能槽 0
+	CHECK(f.world.forgetPetSkill(id, s0, 0));
+	CHECK(live_pet->pet_skills[0] == 0);
+
+	// 2. 对已清空的槽位二次遗忘拦截
+	CHECK_FALSE(f.world.forgetPetSkill(id, s0, 0));
+
+	// 3. 槽位越界拦截
+	CHECK_FALSE(f.world.forgetPetSkill(id, s0, 99));
+	CHECK_FALSE(f.world.forgetPetSkill(id, 99, 0));
+}
+
+TEST_CASE("§9.0.101: [RV-1] 宠物喂食食材类型门禁与等级压制忠诚度封顶拦截反向变异验证")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 60;
+
+	// 创建一只 80 级大宠物 (比角色高 20 级)
+	// 原版压制封顶: max(20, 100 - 20 * 3) = 40
+	auto big_pet = makeTestPet(804, 80);
+	big_pet.hp = 100;
+	const int s0 = f.world.givePetToPlayer(id, big_pet);
+	REQUIRE(s0 >= 0);
+	auto *live_pet = f.world.playerPetAt(id, s0);
+	REQUIRE(live_pet != nullptr);
+	f.world.setPetLoyalty(live_pet->uid, 38);
+
+	// 准备一件武器 (item_type = 1) 与一份料理 (item_type = 20)
+	auto weapon = makeTestItem(902);
+	weapon.type = 1;
+	const int s_wep = f.world.giveItemToPlayer(id, weapon);
+	REQUIRE(s_wep >= 0);
+
+	auto dish = makeTestItem(903);
+	dish.type = 20;
+	dish.current_pile = 5;
+	const int s_dish = f.world.giveItemToPlayer(id, dish);
+	REQUIRE(s_dish >= 0);
+
+	// 1. [RV-1 反向变异实证]: 非食物道具喂食严格被门禁拦截
+	auto res_not_food = f.world.feedPet(id, s0, s_wep);
+	CHECK(res_not_food.code == PetFeedResultCode::kNotFoodItem);
+	CHECK(f.world.playerItemAt(id, s_wep) != nullptr); // 武器完好无损
+	CHECK(f.world.petLoyalty(live_pet->uid) == 38);    // 忠诚度未变
+
+	// 2. 喂食料理，忠诚度提升至压制封顶线 40
+	auto res_feed1 = f.world.feedPet(id, s0, s_dish);
+	CHECK(res_feed1.code == PetFeedResultCode::kSuccess);
+	CHECK(res_feed1.final_loyalty == 40);
+	CHECK(f.world.petLoyalty(live_pet->uid) == 40);
+
+	// 3. [RV-1 等级压制封顶防御]: 达到等级压制上限后，拒绝继续喂食提升忠诚
+	auto res_capped = f.world.feedPet(id, s0, s_dish);
+	CHECK(res_capped.code == PetFeedResultCode::kLoyaltyCapped);
+	CHECK(f.world.petLoyalty(live_pet->uid) == 40);
+
+	// 4. 服从状态机检验
+	CHECK(f.world.checkPetObedience(id, s0) == PetObedienceState::kConfused); // 40 属于 20~59 偶发失控
+	f.world.setPetLoyalty(live_pet->uid, 15);
+	CHECK(f.world.checkPetObedience(id, s0) == PetObedienceState::kBetray); // < 20 极度叛逆
+	f.world.setPetLoyalty(live_pet->uid, 85);
+	CHECK(f.world.checkPetObedience(id, s0) == PetObedienceState::kObedient); // >= 60 完全顺服
+}
+
+TEST_CASE("§9.0.101: [RV-2] 宠物喂食资产原子消耗与宠物状态同步一致性反向变异验证")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->level = 50;
+
+	auto pet = makeTestPet(805, 30);
+	pet.hp = 100;
+	const int s0 = f.world.givePetToPlayer(id, pet);
+	REQUIRE(s0 >= 0);
+	auto *live_pet = f.world.playerPetAt(id, s0);
+	REQUIRE(live_pet != nullptr);
+	f.world.setPetLoyalty(live_pet->uid, 50);
+
+	auto food = makeTestItem(904);
+	food.type = 20;
+	food.current_pile = 1;
+	const int s_food = f.world.giveItemToPlayer(id, food);
+	REQUIRE(s_food >= 0);
+
+	// 场景 A: 摆摊状态中互斥拦截，食物 0 消耗且忠诚度 0 变动
+	REQUIRE(f.world.openStall(id, "老王杂货铺"));
+	REQUIRE(f.world.setStallItem(id, s_food, 500));
+	REQUIRE(f.world.startStallVending(id));
+	CHECK(f.world.isPlayerVending(id));
+
+	auto res_vend = f.world.feedPet(id, s0, s_food);
+	CHECK(res_vend.code == PetFeedResultCode::kPlayerVending);
+	CHECK(f.world.playerItemAt(id, s_food) != nullptr); // 食物完好
+	CHECK(f.world.petLoyalty(live_pet->uid) == 50);     // 忠诚未变
+
+	// 场景 B: 收摊后喂食，食物原子消耗清空，宠物生命与忠诚同步生效
+	REQUIRE(f.world.closeStall(id));
+	CHECK_FALSE(f.world.isPlayerVending(id));
+
+	auto res_ok = f.world.feedPet(id, s0, s_food);
+	CHECK(res_ok.code == PetFeedResultCode::kSuccess);
+	CHECK(res_ok.final_loyalty == 55);
+	CHECK(f.world.petLoyalty(live_pet->uid) == 55);
+	CHECK(f.world.playerItemAt(id, s_food) == nullptr); // 食物被原子扣除
+}

@@ -4613,6 +4613,37 @@ void World::tick()
 					}
 				}
 
+				// ── 宠物忠诚度战后生命周期结算 (批次 §9.0.101, 对齐 char.c/battle.c) ──
+				for (int slot = 0; slot < SA::Rules::kBattlePlayerMax; ++slot)
+				{
+					// 出战宠战果结算
+					if (auto *pet = s.pets.resolve(b.pet_of_slot[static_cast<std::size_t>(slot + SA::Rules::kBattlePlayerMax)]))
+					{
+						int cur = s.pet_loyalty.find(pet->uid) != s.pet_loyalty.end() ? s.pet_loyalty[pet->uid] : 100;
+						if (b.field.at(slot + SA::Rules::kBattlePlayerMax).dead || pet->hp <= 0)
+						{
+							s.pet_loyalty[pet->uid] = std::max(0, cur - 5);
+						}
+						else if (player_won)
+						{
+							s.pet_loyalty[pet->uid] = std::min(100, cur + 1);
+						}
+					}
+					// 骑乘宠战损结算
+					if (auto *rpet = s.pets.resolve(b.ride_pet_of_slot[static_cast<std::size_t>(slot)]))
+					{
+						int cur = s.pet_loyalty.find(rpet->uid) != s.pet_loyalty.end() ? s.pet_loyalty[rpet->uid] : 100;
+						if (b.field.at(slot).ride_hp <= 0 || rpet->hp <= 0)
+						{
+							s.pet_loyalty[rpet->uid] = std::max(0, cur - 5);
+						}
+						else if (player_won)
+						{
+							s.pet_loyalty[rpet->uid] = std::min(100, cur + 1);
+						}
+					}
+				}
+
 				// ── 战斗产币(经济地基批,DR-EC6;接点 = 战果结算,exp 分配旁)──────────
 				//
 				// ★ 对账(A-α 批):原版把金放在**结束 flush**,不在 AddProfit/ AddExpItem 里。
@@ -12876,6 +12907,207 @@ std::optional<RideAffinityStats> World::calculateRideAffinity(SA::Net::SessionId
 	stats.effective_dex = (p->dex * 60 + (pet_stats.quick * 40 * affinity) / 100) / 100;
 
 	return stats;
+}
+
+// ── 宠物进阶技能与忠诚度交互体系 (批次 §9.0.101) ──────────────────────
+
+PetFeedResult World::feedPet(SA::Net::SessionId session, int pet_slot, int item_slot)
+{
+	PetFeedResult result{};
+	Impl &s = *_impl;
+	const auto pit = s.player_of_session.find(session);
+	if (!pit.valid())
+	{
+		result.code = PetFeedResultCode::kInvalidSession;
+		return result;
+	}
+	SA::Model::Player *p = s.players.resolve(pit);
+	if (p == nullptr || p->hp <= 0)
+	{
+		result.code = PetFeedResultCode::kPlayerDead;
+		return result;
+	}
+
+	if (s.inBattle(session))
+	{
+		result.code = PetFeedResultCode::kPlayerInBattle;
+		return result;
+	}
+	if (isPlayerVending(session))
+	{
+		result.code = PetFeedResultCode::kPlayerVending;
+		return result;
+	}
+
+	if (pet_slot < 0 || static_cast<std::size_t>(pet_slot) >= SA::Model::kMaxPetHave)
+	{
+		result.code = PetFeedResultCode::kPetNotFound;
+		return result;
+	}
+	const auto ph = p->pets[static_cast<std::size_t>(pet_slot)];
+	if (!ph.valid())
+	{
+		result.code = PetFeedResultCode::kPetNotFound;
+		return result;
+	}
+	auto *pet = s.pets.resolve(ph);
+	if (pet == nullptr)
+	{
+		result.code = PetFeedResultCode::kPetNotFound;
+		return result;
+	}
+	if (pet->hp <= 0)
+	{
+		result.code = PetFeedResultCode::kPetDead;
+		return result;
+	}
+
+	if (item_slot < static_cast<int>(SA::Model::kStartItemArray) ||
+	    static_cast<std::size_t>(item_slot) >= SA::Model::kMaxItemHave)
+	{
+		result.code = PetFeedResultCode::kItemNotFound;
+		return result;
+	}
+	const auto ih = p->items[static_cast<std::size_t>(item_slot)];
+	if (!ih.valid())
+	{
+		result.code = PetFeedResultCode::kItemNotFound;
+		return result;
+	}
+	auto *item = s.items.resolve(ih);
+	if (item == nullptr)
+	{
+		result.code = PetFeedResultCode::kItemNotFound;
+		return result;
+	}
+
+	// 摆摊锁定检查
+	const auto stall_it = s.stalls.find(session);
+	if (stall_it != s.stalls.end())
+	{
+		for (const auto &it_entry : stall_it->second.items)
+		{
+			if (it_entry.item_slot == item_slot)
+			{
+				result.code = PetFeedResultCode::kItemLocked;
+				return result;
+			}
+		}
+	}
+
+	// 食材/食物类型门禁 (原版 item_type == 20 为料理/肉类)
+	if (item->type != 20)
+	{
+		result.code = PetFeedResultCode::kNotFoodItem;
+		return result;
+	}
+
+	const int cur_loyalty = petLoyalty(pet->uid);
+	// 等级压制与忠诚度上限计算 (原版 char.c / pet.c 规则)
+	int max_loyalty_cap = 100;
+	if (pet->level > p->level)
+	{
+		const int diff = pet->level - p->level;
+		max_loyalty_cap = std::max(20, 100 - diff * 3);
+	}
+
+	if (cur_loyalty >= max_loyalty_cap)
+	{
+		result.code = PetFeedResultCode::kLoyaltyCapped;
+		result.final_hp = pet->hp;
+		result.final_loyalty = cur_loyalty;
+		return result;
+	}
+
+	// 计算生命恢复与忠诚度提升
+	const auto base_stats = SA::Rules::deriveBaseStats(pet->vital, pet->str, pet->tough, pet->dex);
+	const std::int32_t max_hp = std::max(base_stats.max_hp, pet->hp);
+	const std::int32_t hp_heal = 50; // 食物基准恢复 50 点生命
+	const std::int32_t old_hp = pet->hp;
+	pet->hp = std::min(max_hp, pet->hp + hp_heal);
+	result.hp_recovered = pet->hp - old_hp;
+
+	int gain_loyalty = 5; // 基准提升 5 点忠诚度
+	if (pet->level > p->level)
+	{
+		gain_loyalty = std::max(1, gain_loyalty / 2);
+	}
+	const int new_loyalty = std::min(max_loyalty_cap, cur_loyalty + gain_loyalty);
+	result.loyalty_gained = new_loyalty - cur_loyalty;
+	setPetLoyalty(pet->uid, new_loyalty);
+
+	// 原子扣减食物道具
+	if (item->current_pile > 1)
+	{
+		item->current_pile -= 1;
+	}
+	else
+	{
+		p->clearItemSlot(item_slot);
+		s.items.release(ih);
+	}
+
+	result.code = PetFeedResultCode::kSuccess;
+	result.final_hp = pet->hp;
+	result.final_loyalty = new_loyalty;
+	return result;
+}
+
+bool World::forgetPetSkill(SA::Net::SessionId session, int pet_slot, int skill_slot)
+{
+	Impl &s = *_impl;
+	if (s.inBattle(session) || isPlayerVending(session))
+		return false;
+
+	const auto pit = s.player_of_session.find(session);
+	if (!pit.valid())
+		return false;
+	auto *p = s.players.resolve(pit);
+	if (p == nullptr || p->hp <= 0)
+		return false;
+
+	if (pet_slot < 0 || static_cast<std::size_t>(pet_slot) >= SA::Model::kMaxPetHave)
+		return false;
+	const auto ph = p->pets[static_cast<std::size_t>(pet_slot)];
+	if (!ph.valid())
+		return false;
+	auto *pet = s.pets.resolve(ph);
+	if (pet == nullptr)
+		return false;
+
+	if (skill_slot < 0 || static_cast<std::size_t>(skill_slot) >= SA::Model::Pet::kPetSkillSlots)
+		return false;
+
+	if (pet->pet_skills[static_cast<std::size_t>(skill_slot)] <= 0)
+		return false;
+
+	pet->pet_skills[static_cast<std::size_t>(skill_slot)] = 0;
+	return true;
+}
+
+PetObedienceState World::checkPetObedience(SA::Net::SessionId session, int pet_slot) const
+{
+	const auto pit = _impl->player_of_session.find(session);
+	if (!pit.valid())
+		return PetObedienceState::kBetray;
+	const auto *p = _impl->players.resolve(pit);
+	if (p == nullptr)
+		return PetObedienceState::kBetray;
+	if (pet_slot < 0 || static_cast<std::size_t>(pet_slot) >= SA::Model::kMaxPetHave)
+		return PetObedienceState::kBetray;
+	const auto ph = p->pets[static_cast<std::size_t>(pet_slot)];
+	if (!ph.valid())
+		return PetObedienceState::kBetray;
+	const auto *pet = _impl->pets.resolve(ph);
+	if (pet == nullptr)
+		return PetObedienceState::kBetray;
+
+	const int loyalty = petLoyalty(pet->uid);
+	if (loyalty >= 60)
+		return PetObedienceState::kObedient;
+	if (loyalty >= 20)
+		return PetObedienceState::kConfused;
+	return PetObedienceState::kBetray;
 }
 
 bool World::isValidPlayerImage(std::int32_t image) noexcept

@@ -1365,6 +1365,40 @@ struct RideAffinityStats
 	int effective_dex = 0; // 骑乘综合敏捷
 };
 
+// 宠物喂食结果码 (批次 §9.0.101, 对齐原版 char.c / pet.c 料理与肉类喂食系统)
+enum class PetFeedResultCode : std::uint8_t
+{
+	kSuccess = 0,
+	kInvalidSession = 1,
+	kPlayerDead = 2,
+	kPlayerInBattle = 3,
+	kPlayerVending = 4,
+	kPetNotFound = 5,
+	kPetDead = 6, // 宠物已阵亡，需先复活
+	kItemNotFound = 7,
+	kNotFoodItem = 8,    // 非食物/料理道具 (原版 item_type == 20 门禁)
+	kItemLocked = 9,     // 道具摆摊锁定中
+	kLoyaltyCapped = 10, // 忠诚度已达上限 (或当前等级压制上限)
+};
+
+// 宠物喂食结算产出 (批次 §9.0.101)
+struct PetFeedResult
+{
+	PetFeedResultCode code = PetFeedResultCode::kSuccess;
+	std::int32_t hp_recovered = 0;   // 恢复的生命值
+	std::int32_t loyalty_gained = 0; // 提升的忠诚度
+	std::int32_t final_hp = 0;       // 宠物当前生命值
+	std::int32_t final_loyalty = 0;  // 宠物当前忠诚度
+};
+
+// 宠物服从与指令失控状态 (批次 §9.0.101, 对齐原版 CHAR_PetActionCheck 忠诚度反噬检查)
+enum class PetObedienceState : std::uint8_t
+{
+	kObedient = 0, // 完全顺服 (忠诚度 >= 60)
+	kConfused = 1, // 偶发失控/不听指挥 (忠诚度 20 ~ 59)
+	kBetray = 2,   // 极度叛逆/可能反噬或逃跑 (忠诚度 < 20)
+};
+
 // ══ 宠物融合与转生系统 (Pet Fusion & Rebirth, 批次 §9.0.96) ════════════════════
 // 对齐官方石器时代源码:
 // - docs/06-progression.md §4 (宠物融合三表投影 / DR-DT4 历史 off-by-one 决策 / 资质继承)
@@ -1997,6 +2031,11 @@ class World final : public SA::Net::TransportEvents,
 	std::optional<RideAffinityStats> calculateRideAffinity(SA::Net::SessionId session, int pet_slot) const;
 	int petLoyalty(std::uint64_t pet_uid) const;
 	void setPetLoyalty(std::uint64_t pet_uid, int loyalty);
+
+	// ── 宠物进阶技能与忠诚度交互体系 (批次 §9.0.101) ──────────────────────
+	PetFeedResult feedPet(SA::Net::SessionId session, int pet_slot, int item_slot);
+	bool forgetPetSkill(SA::Net::SessionId session, int pet_slot, int skill_slot);
+	PetObedienceState checkPetObedience(SA::Net::SessionId session, int pet_slot) const;
 
 	// ── 选角流程与新手村出生地 (Character Selection & Hometown) ─────────────
 	struct HometownSpawn
