@@ -5920,3 +5920,404 @@ TEST_CASE("分级聊天频道广播: 视野说话(<=9格)、组队频道跨图�
 	CHECK_FALSE(f.world.sendChat(id1, ChatChannel::kTalkTell, "能收到吗？", "Bob"));
 	CHECK(f.world.pendingChatMessageCount(id2) == 0); // Bob 未收到任何消息
 }
+
+// ══ 阶段 2: 家族管理与庄园系统 (Family System) ═════════════════════════════
+
+TEST_CASE("家族创建门禁: 30级门限、10000石币扣除、重名与名称合法性校验")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	auto *p1 = f.world.playerForTest(id1);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+
+	p1->level = 20;
+	p1->gold = 20000;
+
+	// 1. 等级不足 30 级拦截 (FMLEADERLV = 30)
+	CHECK(f.world.createFamily(id1, "尼斯部落", "团结互助") == 0);
+
+	// 2. 等级达 30 级，但石币不足 10000
+	p1->level = 30;
+	p1->gold = 5000;
+	CHECK(f.world.createFamily(id1, "尼斯部落", "团结互助") == 0);
+
+	// 3. 名称非法拦截 (空名、超长、含空格)
+	p1->gold = 20000;
+	CHECK(f.world.createFamily(id1, "", "简介") == 0);
+	CHECK(f.world.createFamily(id1, "尼斯 部落", "简介") == 0);
+	CHECK(f.world.createFamily(id1, std::string(35, 'A'), "简介") == 0);
+
+	// 4. 正常创建成功: 扣除 10000 石币，返回有效 family_id
+	const auto fid = f.world.createFamily(id1, "尼斯部落", "石器第一家");
+	REQUIRE(fid > 0);
+	CHECK(p1->gold == 10000); // 20000 - 10000
+	CHECK(f.world.familyCount() == 1);
+	CHECK(f.world.playerFamilyId(id1) == fid);
+	CHECK(f.world.playerFamilyRole(id1) == FamilyRole::kLeader);
+
+	auto fam_opt = f.world.getFamilyInfo(fid);
+	REQUIRE(fam_opt.has_value());
+	CHECK(fam_opt->name == "尼斯部落");
+	CHECK(fam_opt->rule == "石器第一家");
+	CHECK(fam_opt->leader_name == "Alice");
+	CHECK(fam_opt->family_fame == 100);
+	REQUIRE(fam_opt->members.size() == 1);
+	CHECK(fam_opt->members[0].charname == "Alice");
+	CHECK(fam_opt->members[0].role == FamilyRole::kLeader);
+	CHECK(fam_opt->members[0].contribution == 100);
+	CHECK(fam_opt->members[0].online);
+
+	// 5. 重名拦截与已有家族重复创建拦截
+	const auto id2 = spawnHandshaked(f);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+	p2->level = 40;
+	p2->gold = 50000;
+
+	// Bob 尝试创建同名家族 "尼斯部落" 必须被拒
+	CHECK(f.world.createFamily(id2, "尼斯部落", "仿冒家族") == 0);
+
+	// Alice 尝试再次创建家族必须被拒 (已属于家族)
+	CHECK(f.world.createFamily(id1, "新部落", "另起炉灶") == 0);
+}
+
+TEST_CASE("家族申请与审批及满员门禁 [RV-1]")
+{
+	MoveFixture f;
+	const auto id_leader = spawnHandshaked(f);
+	const auto id_bob = spawnHandshaked(f);
+	auto *p_leader = f.world.playerForTest(id_leader);
+	auto *p_bob = f.world.playerForTest(id_bob);
+	REQUIRE(p_leader != nullptr);
+	REQUIRE(p_bob != nullptr);
+	REQUIRE(f.world.setPlayerName(id_leader, "Alice"));
+	REQUIRE(f.world.setPlayerName(id_bob, "Bob"));
+	p_leader->level = 30;
+	p_leader->gold = 20000;
+	p_bob->level = 15;
+
+	const auto fid = f.world.createFamily(id_leader, "萨姆吉尔勇士", "征战加鲁卡");
+	REQUIRE(fid > 0);
+
+	// 1. Bob 申请加入家族
+	REQUIRE(f.world.applyJoinFamily(id_bob, fid));
+	// 重复申请拦截
+	CHECK_FALSE(f.world.applyJoinFamily(id_bob, fid));
+
+	auto fam = f.world.getFamilyInfo(fid);
+	REQUIRE(fam.has_value());
+	REQUIRE(fam->applicants.size() == 1);
+	CHECK(fam->applicants[0].charname == "Bob");
+	CHECK(fam->applicants[0].role == FamilyRole::kApply);
+
+	// 2. 非管理人员无法审批 (Bob 自身审批)
+	CHECK_FALSE(f.world.acceptFamilyMember(id_bob, fid, "Bob", true));
+
+	// 3. 族长拒绝申请
+	REQUIRE(f.world.acceptFamilyMember(id_leader, fid, "Bob", false));
+	fam = f.world.getFamilyInfo(fid);
+	CHECK(fam->applicants.empty());
+	CHECK(f.world.playerFamilyId(id_bob) == 0);
+
+	// 4. Bob 重新申请并由族长批准入族
+	REQUIRE(f.world.applyJoinFamily(id_bob, fid));
+	REQUIRE(f.world.acceptFamilyMember(id_leader, fid, "Bob", true));
+	CHECK(f.world.playerFamilyId(id_bob) == fid);
+	CHECK(f.world.playerFamilyRole(id_bob) == FamilyRole::kMember);
+	fam = f.world.getFamilyInfo(fid);
+	REQUIRE(fam->members.size() == 2);
+	CHECK(fam->applicants.empty());
+
+	// 5. 满员门禁拦截 [RV-1]
+	// 模拟满员 50 人
+	const auto id_extra = spawnHandshaked(f);
+	auto *p_extra = f.world.playerForTest(id_extra);
+	REQUIRE(p_extra != nullptr);
+	REQUIRE(f.world.setPlayerName(id_extra, "ExtraPlayer"));
+
+	// 内部将成员补满至 50 人进行门限阻断断言
+	auto *fam_info = f.world.familyForTest(fid);
+	REQUIRE(fam_info != nullptr);
+	while (fam_info->members.size() < kMaxFamilyMembers)
+	{
+		FamilyMember m{};
+		m.charname = "Dummy_" + std::to_string(fam_info->members.size() + 1);
+		m.level = 20;
+		m.role = FamilyRole::kMember;
+		fam_info->members.push_back(m);
+	}
+	CHECK(f.world.getFamilyInfo(fid)->members.size() == 50);
+
+	// 第 51 人申请入族，必须被满员门禁阻断拒绝 [RV-1]
+	CHECK_FALSE(f.world.applyJoinFamily(id_extra, fid));
+}
+
+TEST_CASE("家族职位任免、族长转让与请离成员")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f); // Alice (族长)
+	const auto id2 = spawnHandshaked(f); // Bob
+	const auto id3 = spawnHandshaked(f); // Charlie
+	const auto id4 = spawnHandshaked(f); // David
+	auto *p1 = f.world.playerForTest(id1);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+	REQUIRE(f.world.setPlayerName(id3, "Charlie"));
+	REQUIRE(f.world.setPlayerName(id4, "David"));
+	p1->level = 30;
+	p1->gold = 20000;
+
+	const auto fid = f.world.createFamily(id1, "玛丽娜斯水友会", "钓鱼与聊天");
+	REQUIRE(fid > 0);
+
+	// 添加 Bob, Charlie, David 入族
+	REQUIRE(f.world.applyJoinFamily(id2, fid));
+	REQUIRE(f.world.applyJoinFamily(id3, fid));
+	REQUIRE(f.world.applyJoinFamily(id4, fid));
+	REQUIRE(f.world.acceptFamilyMember(id1, fid, "Bob", true));
+	REQUIRE(f.world.acceptFamilyMember(id1, fid, "Charlie", true));
+	REQUIRE(f.world.acceptFamilyMember(id1, fid, "David", true));
+
+	// 1. 族长任命 Bob 为长老
+	REQUIRE(f.world.setFamilyMemberRole(id1, fid, "Bob", FamilyRole::kElder));
+	CHECK(f.world.playerFamilyRole(id2) == FamilyRole::kElder);
+
+	// 2. 长老 Bob 请离普通成员 Charlie (成功)
+	REQUIRE(f.world.kickFamilyMember(id2, fid, "Charlie"));
+	CHECK(f.world.playerFamilyId(id3) == 0);
+	CHECK(f.world.getFamilyInfo(fid)->members.size() == 3);
+
+	// 3. 长老 Bob 尝试请离族长 Alice (拦截)
+	CHECK_FALSE(f.world.kickFamilyMember(id2, fid, "Alice"));
+
+	// 4. 族长 Alice 任命 David 为长老
+	REQUIRE(f.world.setFamilyMemberRole(id1, fid, "David", FamilyRole::kElder));
+	// 长老 Bob 尝试请离同级长老 David (拦截)
+	CHECK_FALSE(f.world.kickFamilyMember(id2, fid, "David"));
+
+	// 5. 族长转让: Alice 将族长转给 Bob
+	REQUIRE(f.world.setFamilyMemberRole(id1, fid, "Bob", FamilyRole::kLeader));
+	CHECK(f.world.playerFamilyRole(id2) == FamilyRole::kLeader);
+	CHECK(f.world.playerFamilyRole(id1) == FamilyRole::kElder); // Alice 变为长老
+	CHECK(f.world.getFamilyInfo(fid)->leader_name == "Bob");
+
+	// 6. 族长修改家族宗旨
+	REQUIRE(f.world.setFamilyRule(id2, fid, "新族长上任，福利多多！"));
+	CHECK(f.world.getFamilyInfo(fid)->rule == "新族长上任，福利多多！");
+
+	// 7. 解散家族 (非族长无法解散)
+	CHECK_FALSE(f.world.disbandFamily(id1, fid)); // Alice 现为长老，无权解散
+	REQUIRE(f.world.disbandFamily(id2, fid));     // Bob 族长解散
+	CHECK(f.world.familyCount() == 0);
+	CHECK(f.world.playerFamilyId(id1) == 0);
+	CHECK(f.world.playerFamilyId(id2) == 0);
+	CHECK(f.world.playerFamilyId(id4) == 0);
+}
+
+TEST_CASE("家族主动退出门禁: 族长不可退与普通成员解绑")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+	p1->level = 30;
+	p1->gold = 20000;
+
+	const auto fid = f.world.createFamily(id1, "加加猎人团", "打猎专精");
+	REQUIRE(fid > 0);
+	REQUIRE(f.world.applyJoinFamily(id2, fid));
+	REQUIRE(f.world.acceptFamilyMember(id1, fid, "Bob", true));
+
+	// 1. 族长 Alice 尝试直接退出家族 (阻断，必须转让或解散)
+	CHECK_FALSE(f.world.leaveFamily(id1));
+	CHECK(f.world.playerFamilyId(id1) == fid);
+
+	// 2. 普通成员 Bob 主动退出家族 (成功)
+	REQUIRE(f.world.leaveFamily(id2));
+	CHECK(f.world.playerFamilyId(id2) == 0);
+	CHECK(f.world.getFamilyInfo(fid)->members.size() == 1);
+}
+
+TEST_CASE("家族金库存储、提取与容量双向校验 [RV-2]")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f); // 族长
+	const auto id2 = spawnHandshaked(f); // 成员
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+	p1->level = 30;
+	p1->gold = 50000;
+	p2->gold = 10000;
+
+	const auto fid = f.world.createFamily(id1, "金库先锋", "积累财富");
+	REQUIRE(fid > 0);
+	REQUIRE(f.world.applyJoinFamily(id2, fid));
+	REQUIRE(f.world.acceptFamilyMember(id1, fid, "Bob", true));
+
+	// 1. 成员 Bob 存入 4000 石币
+	REQUIRE(f.world.depositFamilyGold(id2, 4000));
+	CHECK(p2->gold == 6000); // 10000 - 4000
+	auto fam = f.world.getFamilyInfo(fid);
+	CHECK(fam->family_gold == 4000);
+	CHECK(fam->family_fame == 104); // 初始 100 + 4
+	for (const auto &m : fam->members)
+	{
+		if (m.charname == "Bob")
+		{
+			CHECK(m.contribution == 14); // 初始 10 + 4
+		}
+	}
+
+	// 2. 普通成员 Bob 尝试取款 (拦截，无权限)
+	CHECK_FALSE(f.world.withdrawFamilyGold(id2, 1000));
+
+	// 3. 族长 Alice 取款 2000 石币
+	const auto alice_gold_before = p1->gold;
+	REQUIRE(f.world.withdrawFamilyGold(id1, 2000));
+	CHECK(p1->gold == alice_gold_before + 2000);
+	CHECK(f.world.getFamilyInfo(fid)->family_gold == 2000);
+
+	// 4. [RV-2] 家族金库上限检查 (上限 1 亿石币)
+	// 将金库石币提升至 99,995,000
+	auto *fam_info = f.world.familyForTest(fid);
+	REQUIRE(fam_info != nullptr);
+	fam_info->family_gold = 99995000;
+	p2->gold = 20000;
+	// 尝试存入 10,000 石币，因 99,995,000 + 10,000 > 100,000,000 触发金库满员阻断 [RV-2]
+	CHECK_FALSE(f.world.depositFamilyGold(id2, 10000));
+	CHECK(p2->gold == 20000); // 玩家资产分文未少
+
+	// 5. [RV-2] 玩家随身容量预检: 随身石币上限防溢出阻断
+	p1->gold = SA::World::maxHaveGold(0) - 500; // 随身仅剩 500 容量即达上限
+	// 从金库取款 1000 石币，由于会导致随身石币溢出损失，触发容量前置校验阻断 [RV-2]
+	CHECK_FALSE(f.world.withdrawFamilyGold(id1, 1000));
+	CHECK(f.world.getFamilyInfo(fid)->family_gold == 99995000); // 金库未受损
+}
+
+TEST_CASE("家族四大庄园据点占领与争夺")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+	p1->level = 30;
+	p1->gold = 20000;
+	p2->level = 30;
+	p2->gold = 20000;
+
+	const auto fid1 = f.world.createFamily(id1, "庄园战盟", "一统尼斯");
+	const auto fid2 = f.world.createFamily(id2, "挑战者军团", "夺取庄园");
+	REQUIRE(fid1 > 0);
+	REQUIRE(fid2 > 0);
+
+	// 1. 初始四大庄园无归属
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kSamo) == 0);
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kMarina) == 0);
+	CHECK(f.world.familyManor(fid1) == FamilyManor::kNone);
+
+	// 2. 家族 1 占领萨姆吉尔庄园 (kSamo)
+	REQUIRE(f.world.occupyManor(fid1, FamilyManor::kSamo));
+	CHECK(f.world.familyManor(fid1) == FamilyManor::kSamo);
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kSamo) == fid1);
+
+	// 3. 家族 1 随后占领加加庄园 (kJaja) -> 旧庄园 kSamo 自动释放
+	REQUIRE(f.world.occupyManor(fid1, FamilyManor::kJaja));
+	CHECK(f.world.familyManor(fid1) == FamilyManor::kJaja);
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kJaja) == fid1);
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kSamo) == 0);
+
+	// 4. 家族 2 夺取加加庄园 (kJaja) -> 家族 1 失去庄园，家族 2 入主
+	REQUIRE(f.world.occupyManor(fid2, FamilyManor::kJaja));
+	CHECK(f.world.familyManor(fid2) == FamilyManor::kJaja);
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kJaja) == fid2);
+	CHECK(f.world.familyManor(fid1) == FamilyManor::kNone);
+}
+
+TEST_CASE("家族跨图专属聊天频道 (kTalkFamily) 与上下线感知")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f); // Alice (家族 1)
+	const auto id2 = spawnHandshaked(f); // Bob (家族 1)
+	const auto id3 = spawnHandshaked(f); // Charlie (家族 2)
+	const auto id4 = spawnHandshaked(f); // David (无家族)
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	auto *p3 = f.world.playerForTest(id3);
+	auto *p4 = f.world.playerForTest(id4);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(p3 != nullptr);
+	REQUIRE(p4 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+	REQUIRE(f.world.setPlayerName(id3, "Charlie"));
+	REQUIRE(f.world.setPlayerName(id4, "David"));
+	p1->level = 30;
+	p1->gold = 20000;
+	p3->level = 30;
+	p3->gold = 20000;
+
+	// 分布在不同地图
+	p1->floor = 100;
+	p1->x = 10;
+	p1->y = 10;
+	p2->floor = 200;
+	p2->x = 50;
+	p2->y = 50;
+	p3->floor = 100;
+	p3->x = 10;
+	p3->y = 10;
+	p4->floor = 100;
+	p4->x = 11;
+	p4->y = 10;
+
+	const auto fid1 = f.world.createFamily(id1, "星辰阁", "跨界联动");
+	const auto fid2 = f.world.createFamily(id3, "青云门", "隐世清修");
+	REQUIRE(fid1 > 0);
+	REQUIRE(fid2 > 0);
+
+	REQUIRE(f.world.applyJoinFamily(id2, fid1));
+	REQUIRE(f.world.acceptFamilyMember(id1, fid1, "Bob", true));
+
+	// 1. 无家族玩家 David 发送家族频道消息拦截
+	CHECK_FALSE(f.world.sendChat(id4, ChatChannel::kTalkFamily, "有人吗？"));
+
+	// 2. 家族 1 族长 Alice 发送家族消息
+	REQUIRE(f.world.sendChat(id1, ChatChannel::kTalkFamily, "今晚 8 点庄园集合！"));
+	// 家族 1 成员 Alice 与 Bob (即使不同地图) 均收到
+	CHECK(f.world.pendingChatMessageCount(id1) == 1);
+	CHECK(f.world.pendingChatMessageCount(id2) == 1);
+	// 家族 2 成员 Charlie 与无家族 David (即使同图身旁) 未收到
+	CHECK(f.world.pendingChatMessageCount(id3) == 0);
+	CHECK(f.world.pendingChatMessageCount(id4) == 0);
+
+	auto b_chats = f.world.pollChatMessages(id2);
+	REQUIRE(b_chats.size() == 1);
+	CHECK(b_chats[0].sender_name == "Alice");
+	CHECK(b_chats[0].text == "今晚 8 点庄园集合！");
+	CHECK(b_chats[0].channel == ChatChannel::kTalkFamily);
+
+	(void)f.world.pollChatMessages(id1);
+
+	// 3. 成员上下线状态感知
+	CHECK(f.world.getFamilyInfo(fid1)->members[1].online);
+	f.world.onSessionClosed(id2);
+	CHECK_FALSE(f.world.getFamilyInfo(fid1)->members[1].online);
+}

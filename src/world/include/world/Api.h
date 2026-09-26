@@ -1026,6 +1026,93 @@ enum class ChatChannel : std::uint8_t
 	kTalkParty = 1,  // 队伍频道 (仅全队成员接收, 跨图/全地图可达)
 	kTalkShout = 2,  // 世界/大喊广播 (全地图或全服在线玩家)
 	kTalkTell = 3,   // 私聊/密聊 (指定玩家名称, 需目标在线且未拉黑)
+	kTalkFamily = 4, // 家族频道 (仅本家族成员接收, 跨图/全地图可达)
+};
+
+// ══ 家族系统 (阶段 2: 家族管理与庄园, 对齐官方 family.c / include/family.h) ══
+enum class FamilyRole : std::int8_t
+{
+	kNone = -1,  // 无家族
+	kMember = 1, // 普通成员 (FMMEMBER_MEMBER)
+	kApply = 2,  // 申请加入中 (FMMEMBER_APPLY)
+	kLeader = 3, // 族长 (FMMEMBER_LEADER)
+	kElder = 4,  // 长老/副族长 (FMMEMBER_ELDER)
+};
+
+inline const char *familyRoleName(FamilyRole role) noexcept
+{
+	switch (role)
+	{
+	case FamilyRole::kNone:
+		return "None";
+	case FamilyRole::kMember:
+		return "Member";
+	case FamilyRole::kApply:
+		return "Apply";
+	case FamilyRole::kLeader:
+		return "Leader";
+	case FamilyRole::kElder:
+		return "Elder";
+	}
+	return "Unknown";
+}
+
+enum class FamilyManor : std::uint8_t
+{
+	kNone = 0,     // 无庄园
+	kSamo = 1,     // 萨姆吉尔庄园 (庄园 1)
+	kMarina = 2,   // 玛丽娜斯庄园 (庄园 2)
+	kJaja = 3,     // 加加庄园 (庄园 3)
+	kKarutana = 4, // 卡鲁它那庄园 (庄园 4)
+};
+
+inline const char *familyManorName(FamilyManor manor) noexcept
+{
+	switch (manor)
+	{
+	case FamilyManor::kNone:
+		return "None";
+	case FamilyManor::kSamo:
+		return "SamoManor";
+	case FamilyManor::kMarina:
+		return "MarinaManor";
+	case FamilyManor::kJaja:
+		return "JajaManor";
+	case FamilyManor::kKarutana:
+		return "KarutanaManor";
+	}
+	return "Unknown";
+}
+
+inline constexpr std::size_t kMaxFamilyMembers = 50;      // 官方 FAMILY_MAXMEMBER = 50
+inline constexpr std::int32_t kFamilyCreateLevel = 30;    // 官方 FMLEADERLV = 30
+inline constexpr std::int32_t kFamilyCreateFee = 10000;   // 创建家族消耗随身石币 10,000
+inline constexpr std::int32_t kMaxFamilyGold = 100000000; // 家族银行金库上限 1 亿
+inline constexpr std::size_t kMaxManors = 4;
+
+struct FamilyMember
+{
+	std::string charname{};
+	SA::Net::SessionId session = 0;
+	std::int32_t level = 1;
+	std::int32_t graphicsno = 0;
+	FamilyRole role = FamilyRole::kMember;
+	std::int32_t contribution = 0; // 个人家族贡献点
+	bool online = false;
+};
+
+struct FamilyInfo
+{
+	std::uint32_t family_id = 0;
+	std::string name{};
+	std::string rule{};
+	std::string leader_name{};
+	std::int32_t badge = 0;
+	std::int32_t family_gold = 0;           // 家族银行金库石币
+	std::int32_t family_fame = 0;           // 家族总声望
+	FamilyManor manor = FamilyManor::kNone; // 当前占领庄园
+	std::vector<FamilyMember> members{};    // 正式成员列表 (上限 50 人)
+	std::vector<FamilyMember> applicants{}; // 申请入族名单
 };
 
 struct ChatMessage
@@ -1189,6 +1276,9 @@ class World final : public SA::Net::TransportEvents,
 
 	// 获取某会话背后的 Player 实体指针 (批次 W.9 测试注入 seam)
 	SA::Model::Player *playerForTest(SA::Net::SessionId session) noexcept;
+
+	// 获取家族实体指针供测试验证 (阶段 2 家族系统测试注入 seam)
+	FamilyInfo *familyForTest(std::uint32_t family_id) noexcept;
 
 	// 供测试直接触发 warpPlayer 逻辑 (批次 D.2)
 	void warpPlayerForTest(SA::Net::SessionId session, std::int32_t floor, std::int32_t x, std::int32_t y);
@@ -1478,6 +1568,30 @@ class World final : public SA::Net::TransportEvents,
 	              std::uint32_t color = 0);
 	std::vector<ChatMessage> pollChatMessages(SA::Net::SessionId session);
 	std::size_t pendingChatMessageCount(SA::Net::SessionId session) const;
+
+	// ── 家族系统 (Family System) ──────────────────────────────────────────
+	std::uint32_t createFamily(SA::Net::SessionId leader, const std::string &family_name,
+	                           const std::string &rule);
+	bool disbandFamily(SA::Net::SessionId leader, std::uint32_t family_id);
+	bool applyJoinFamily(SA::Net::SessionId session, std::uint32_t family_id);
+	bool acceptFamilyMember(SA::Net::SessionId operator_session, std::uint32_t family_id,
+	                        const std::string &applicant_name, bool accept);
+	bool kickFamilyMember(SA::Net::SessionId operator_session, std::uint32_t family_id,
+	                      const std::string &target_name);
+	bool leaveFamily(SA::Net::SessionId session);
+	bool setFamilyMemberRole(SA::Net::SessionId operator_session, std::uint32_t family_id,
+	                         const std::string &target_name, FamilyRole new_role);
+	bool setFamilyRule(SA::Net::SessionId operator_session, std::uint32_t family_id,
+	                   const std::string &new_rule);
+	bool depositFamilyGold(SA::Net::SessionId session, std::uint32_t amount);
+	bool withdrawFamilyGold(SA::Net::SessionId session, std::uint32_t amount);
+	bool occupyManor(std::uint32_t family_id, FamilyManor manor);
+	FamilyManor familyManor(std::uint32_t family_id) const;
+	std::uint32_t manorOwnerFamily(FamilyManor manor) const;
+	std::optional<FamilyInfo> getFamilyInfo(std::uint32_t family_id) const;
+	std::uint32_t playerFamilyId(SA::Net::SessionId session) const;
+	FamilyRole playerFamilyRole(SA::Net::SessionId session) const;
+	std::size_t familyCount() const;
 
 	// 某会话背后 Player 的位置(批次 W.1)。valid == false ⇒ 该会话无 L2 实体。
 	//   ★ 移动用例的观察面:走一步坐标变化 / 撞墙不变 / 转身只改 dir。
@@ -1860,6 +1974,12 @@ enum class GoldReason : std::uint8_t
 	kMailSend,
 	// 邮件提取附加石币 (源, 阶段 2 邮件系统)
 	kMailReceive,
+	// 创建家族扣除石币 (汇, 阶段 2 家族系统)
+	kFamilyCreate,
+	// 存入家族金库扣除石币 (汇, 阶段 2 家族系统)
+	kFamilyDeposit,
+	// 提取家族金库给予石币 (源, 阶段 2 家族系统)
+	kFamilyWithdraw,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -1982,6 +2102,12 @@ inline const char *goldReasonName(GoldReason r) noexcept
 		return "mail_send";
 	case GoldReason::kMailReceive:
 		return "mail_receive";
+	case GoldReason::kFamilyCreate:
+		return "family_create";
+	case GoldReason::kFamilyDeposit:
+		return "family_deposit";
+	case GoldReason::kFamilyWithdraw:
+		return "family_withdraw";
 	}
 	return "unknown";
 }
