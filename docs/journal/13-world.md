@@ -635,6 +635,45 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证 (RV-2)**: 篡改 `kCharLoop` 的 Warp 触发条件（强制为 false）⇒ 传送瞬移断言（未瞬移，停留在 (100, 638, 491)）立即失败；恢复后回绿。
 - **全套静态守卫**: 22 项 CTest 全量通过，`python3 tools/ci_verify.py` 全部 6 项门禁通过。
 
+---
+
+### 9.0.88 批次 D.3: 加鲁卡南岛、附属村庄与深渊地下城多地图深化与客户端窗口/战斗表现补齐 (2026-09-26)
+
+2026-09-26 交付。在批次 D.2 基础上推进世界地图全景深化与客户端交互演进（`World Map Depth & Client Scene Enhancement`），实现了石器时代核心世界版图南岛加鲁卡（Floor 200，800×1200 巨幅主岛）、南岛四大附属村庄（3100 塔姆塔姆村、3200 多多村、3300 乌鲁力村、3400 奇喀喀村）以及多层深渊地下城（20801..20807 琉璃地下城 / 龙的巢穴 1F..7F、21201 & 21215 碧青的洞窟地下 1F 与 15F）共 18 张地图的离线构建与运行时统一纳管。离线管线 `tools/build_playable_content.py` 完成了全量 311 个 Warp 传送点与 399 个世界 NPC 实体的全量扫描与属性提取，解决了官方历史脚本中 `enemy=npcgen_warp|60341|28|3d` 格式污染容错与非数值过滤。在客户端侧，新增零引擎依赖的 `WindowDispatcher` 统一派发 NPC 文本对话、传送选项选择与商店买卖，并在 `BattlePresenter` 中补齐自爆、畏惧、落马、偷盗、换宠、求援、属性反转等宠物特殊技能表现。
+
+#### 1. 源码事实与裁定
+
+1. **多地图大容量资产与 Bundle 读取扩展 (`runtime/content/Bundle.cpp`)**:
+   - 随 18 张地图扩展（包含 800×1200 巨幅地图与地下城），`world.json` 体积自 320KB 增长至 1.9MB；
+   - 将 `Bundle::load` 中 `world.json` 静态上限安全提升至 16MB，严格防范溢出并满足全量地图扩展诉求。
+2. **离线管线全量 18 图层深度抽取 (`tools/build_playable_content.py`)**:
+   - `extract_world_content` 扩展目标图集合至 18 个核心 Floor：`{200, 1000, 2000, 3000, 3100, 3200, 3300, 3400, 4000, 20801..20807, 21201, 21215}`；
+   - 抽取 311 个 Warp 传送点与 399 个世界 NPC（包含 TownPeople、Shop、Healer、SignBoard、WarpMan 等）；
+   - 防御性解析修复：增加 `.isdigit()` 严格校验，滤除官方脚本中偶现的脏字段（如 `3d` 坐标）。
+3. **客户端场景窗口分发器 (`stone-age-client/src/scenes/WindowDispatcher.{h,cpp}`)**:
+   - 贯彻零引擎依赖与 D2 纯粹性（仅依赖 IDL 与标准库，可在无图形 CI 环境下直接运行）；
+   - 统一承接 `WindowOpen`（`MESSAGE`、`SHOP`、`SELECT`），结构化拆解行文本、商店条目与选择项；
+   - 封装 `createButtonReply`、`createChoiceReply`、`createShopBuyReply` 构建标准 `WindowReply` 并闭环会话。
+4. **客户端战斗宠物特殊技能表现 (`stone-age-client/src/battle/BattlePresenter.cpp`)**:
+   - 映射 `BattleStatus` 异常状态文本（FEAR、POISON、PARALYSIS、SLEEP、STONE、DRUNK、CONFUSION、WEAKEN、DEEPPOISON、BARRIER、NOCAST）；
+   - 完善 `DAMAGE_FLAG_EXPLODE`（自爆）、`KNOCKBACK_STATE`（击退/落马）、`SUMMON`（召唤）、`CALL_COMPANIONS`（求援）、`STEAL`（偷盗）、`PET_SWITCH`（换宠）、`STATUS_TICK`（状态结算）、`REVERSE`（属性反转）的日志格式化与表现层更新。
+5. **客户端会话与场景接线 (`ClientSession.cpp`, `GameScene.{h,cpp}`)**:
+   - `ClientSession` 接入 `WindowOpen` 解码派发至 `ClientSessionHost::onWindowOpen`，并提供 `sendWindowReply` 发送通道；
+   - `GameScene` 在画面正中渲染互动弹窗面板，支持点击选项传送、点击商品购买、点击确认/关闭。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 75 增至 **78**（+3 组大型南岛与深渊地下城实测用例），断言数从 1952 增至 **2094**（+142 断言）。
+- **南岛加鲁卡与多多村多地图管理实证**:
+   - 验证加鲁卡主岛（Floor 200，800×1200 尺寸）与 18 张地图独立加载（`floorMapCount() == 18`）；
+   - 验证加鲁卡南岛与多多村（Floor 3200）之间跨图双向 Warp 传送闭环；
+   - 验证琉璃地下城龙的巢穴跨层连环传送（200 -> 20801 -> 20802）；
+   - 验证多多村真实村民 NPC 对话触发。
+- **反向验证 (RV-1)**: 篡改 `world.floorMapCount()` 预期断言为 99 ⇒ `加鲁卡南岛、附属村庄与深渊地下城` 立即报红失败；恢复后回绿。
+- **反向验证 (RV-2)**: 篡改反向 Warp 目标 Floor 校验（将 200 篡改为 999）⇒ 双向跨图传送测试立即报红失败；恢复后回绿。
+- **客户端测试闭环**: `sa_client_net_test` 增补宠物技能与 NPC 窗口交互用例，CTest 7/7 100% 绿灯。
+- **全套静态守卫**: 22 项服务端 CTest + 7 项客户端 CTest 全量通过，双端代码格式校验 100% 绿灯。
+
 
 
 

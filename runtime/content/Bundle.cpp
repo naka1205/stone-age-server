@@ -109,7 +109,7 @@ Bundle load(const std::string &directory, bool verify_graphics)
 			throw std::invalid_argument("invalid collision value");
 		out.walkable.push_back(walkable);
 	}
-	const auto world = read(directory + "/world.json", 4u * 1024u * 1024u);
+	const auto world = read(directory + "/world.json", 16u * 1024u * 1024u);
 	verify(world, text(field(out.manifest, "world_sha256")));
 	const auto parsed = SA::Data::Json::parse(world);
 	if (!parsed.ok || integer(field(parsed.value, "schema_ver")) != 1 || integer(field(parsed.value, "floor")) != out.floor)

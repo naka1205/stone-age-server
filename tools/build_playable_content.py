@@ -109,15 +109,29 @@ def extract_world_content(data, attributes, used_sources):
                     'cost': int(parts[18]) if parts[18].isdigit() else 0
                 }
 
-    # 1. 四大村庄全量地图抽取 (1000, 2000, 3000, 4000)
-    village_maps = {
+    # 1. 地图多层可走阻挡图全量抽取 (批次 D.2 / D.3: 加鲁卡南岛、主要附属村庄、核心地下城)
+    expansion_maps = {
+        200: data / 'map/jyaruga/jalga',
         1000: data / 'map/sainasu/samugiru/samugiru',
         2000: data / 'map/sainasu/marinasu/marinasu',
         3000: data / 'map/jyaruga/jaja/jaja',
+        3100: data / 'map/jyaruga/tamtam/tamtam',
+        3200: data / 'map/jyaruga/toto/toto',
+        3300: data / 'map/jyaruga/ururi/ururi',
+        3400: data / 'map/jyaruga/kikuku/kikuku',
         4000: data / 'map/jyaruga/karutana/karutana',
+        20801: data / 'map/jyaruga/dungeon/20801',
+        20802: data / 'map/jyaruga/dungeon/20802',
+        20803: data / 'map/jyaruga/dungeon/20803',
+        20804: data / 'map/jyaruga/dungeon/20804',
+        20805: data / 'map/jyaruga/dungeon/20805',
+        20806: data / 'map/jyaruga/dungeon/20806',
+        20807: data / 'map/jyaruga/dungeon/20807',
+        21201: data / 'map/jyaruga/dungeon/hekisei/dan_2-12-01',
+        21215: data / 'map/jyaruga/dungeon/hekisei/dan_2-12-15',
     }
     floors = []
-    for fl_id, mpath in sorted(village_maps.items()):
+    for fl_id, mpath in sorted(expansion_maps.items()):
         if not mpath.exists():
             continue
         used_sources.append(mpath)
@@ -140,8 +154,8 @@ def extract_world_content(data, attributes, used_sources):
             'walkable': b64
         })
 
-    # 2. 五大区域全量 NPC 与 Warp 抽取 (100, 1000, 2000, 3000, 4000)
-    target_floors = {100, 1000, 2000, 3000, 4000}
+    # 2. 全量 NPC 与 Warp 抽取 (批次 D.3: 包含 Floor 100, 200, 核心村庄与地下城)
+    target_floors = set(expansion_maps.keys()) | {100}
     npc_dir = data / 'npc'
     crates = []
     for p in sorted(npc_dir.rglob('*.create')):
@@ -190,7 +204,7 @@ def extract_world_content(data, attributes, used_sources):
         parts = enemy.split('|')
         kind = parts[0]
         if kind == 'npcgen_warp':
-            if len(parts) >= 4:
+            if len(parts) >= 4 and parts[1].isdigit() and parts[2].isdigit() and parts[3].isdigit():
                 dst_floor = int(parts[1])
                 dst_x = int(parts[2])
                 dst_y = int(parts[3])
