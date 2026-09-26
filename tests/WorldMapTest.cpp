@@ -7201,3 +7201,401 @@ TEST_CASE("庄园骑宠特权与庄园易主联动")
 	REQUIRE(f.world.mountPet(id1, slot));
 	CHECK(f.world.isPlayerRiding(id1));
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 阶段 2 宠物融合与转生系统 (Pet Fusion & Rebirth, 批次 §9.0.96)
+// ══════════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("宠物融合与转生: 三表投影矩阵与目标宠物模板匹配")
+{
+	// 1. PetTable[29][29] 边界与数值测试
+	CHECK(getPetFusionBase2(-1, 0) == -1);
+	CHECK(getPetFusionBase2(0, 29) == -1);
+	CHECK(getPetFusionBase2(0, 0) == 1);
+	CHECK(getPetFusionBase2(8, 0) == 10);
+	CHECK(getPetFusionBase2(28, 28) == 6);
+
+	// 2. PropertyTable[4][4] 边界与数值测试
+	CHECK(getPetFusionBase1(-1, 0) == -1);
+	CHECK(getPetFusionBase1(0, 4) == -1);
+	CHECK(getPetFusionBase1(0, 0) == 0);  // 地 x 地
+	CHECK(getPetFusionBase1(1, 1) == 1);  // 水 x 水
+	CHECK(getPetFusionBase1(2, 2) == 2);  // 火 x 火
+	CHECK(getPetFusionBase1(3, 3) == 3);  // 风 x 风
+	CHECK(getPetFusionBase1(0, 1) == 4);  // 地 x 水
+	CHECK(getPetFusionBase1(2, 0) == 10); // 火 x 地
+
+	// 3. FusionTable[11][16] 边界与数值测试
+	CHECK(lookupPetFusionTarget(-1, 0) == -1);
+	CHECK(lookupPetFusionTarget(11, 0) == -1);
+	CHECK(lookupPetFusionTarget(0, 16) == -1);
+	CHECK(lookupPetFusionTarget(0, 0) == 989);
+	CHECK(lookupPetFusionTarget(1, 0) == 1001);
+	CHECK(lookupPetFusionTarget(10, 15) == 1016);
+
+	// 4. resolvePetFusionResultId 组合投影全链验证
+	CHECK(resolvePetFusionResultId(0, 0, 0, 0) == 1001); // base2=1, base1=0 -> 1001
+	CHECK(resolvePetFusionResultId(8, 0, 2, 0) == 1015); // base2=10, base1=10 -> 1015
+	CHECK(resolvePetFusionResultId(-1, 0, 0, 0) == -1);
+}
+
+TEST_CASE("宠物融合与转生: 资质继承算法与等级削弱惩罚")
+{
+	// 1. 无惩罚正常融合 (两宠等级均 >= 80)
+	PetGrowth main_g{30, 30, 30, 30};
+	PetGrowth sub1_g{20, 20, 20, 20};
+	// 期望: main * 0.6 = 18, sub * 0.4 = 8, 合计 26
+	const PetGrowth res1 = calculateFusionGrowth(main_g, 80, sub1_g, 80);
+	CHECK(res1.vital == 26);
+	CHECK(res1.str == 26);
+	CHECK(res1.tough == 26);
+	CHECK(res1.dex == 26);
+
+	// 2. 等级惩罚融合 (main < 80, sub1 < 80)
+	// main: 30 * 0.8 = 24 -> 24 * 0.6 = 14.4
+	// sub1: 20 * 0.8 = 16 -> 16 * 0.4 = 6.4
+	// 合计: 14.4 + 6.4 = 20.8 -> round = 21
+	const PetGrowth res2 = calculateFusionGrowth(main_g, 75, sub1_g, 50);
+	CHECK(res2.vital == 21);
+	CHECK(res2.str == 21);
+	CHECK(res2.tough == 21);
+	CHECK(res2.dex == 21);
+
+	// 3. 双副宠融合 (sub1={20,20,20,20}, sub2={40,40,40,40})
+	// sub 平均 = 30 -> 30 * 0.4 = 12
+	// main(80级) = 30 * 0.6 = 18 -> 合计 30
+	PetGrowth sub2_g{40, 40, 40, 40};
+	const PetGrowth res3 = calculateFusionGrowth(main_g, 80, sub1_g, 80, &sub2_g, 80);
+	CHECK(res3.vital == 30);
+	CHECK(res3.str == 30);
+	CHECK(res3.tough == 30);
+	CHECK(res3.dex == 30);
+
+	// 4. 技能继承与去重过滤 (过滤非法技能 41 与空槽 0)
+	std::int32_t m_skills[7] = {101, 102, 0, 0, 0, 0, 0};
+	std::int32_t s1_skills[7] = {102, 103, 41, 0, 0, 0, 0};
+	std::int32_t s2_skills[7] = {104, 52, 0, 0, 0, 0, 0};
+	const auto fused_sk = calculateFusionSkills(m_skills, s1_skills, s2_skills);
+	CHECK(fused_sk[0] == 101);
+	CHECK(fused_sk[1] == 102);
+	CHECK(fused_sk[2] == 103);
+	CHECK(fused_sk[3] == 104);
+	CHECK(fused_sk[4] == 0);
+	CHECK(fused_sk[5] == 0);
+	CHECK(fused_sk[6] == 0);
+}
+
+TEST_CASE("宠物融合与转生: [RV-2] 转生五次方公式与 Fx 档位算力精确验证")
+{
+	// 测试 NPC_PetTransManGetAns 原版公式精确算力
+	// 场景 1: lv=100 (零等级额外收益), rank=0 (Fx=11), total1=100 (total=1.3), total2=100
+	// ans = floor(1.3) + 100 + (100 - 100)/11 = 1 + 100 + 0 = 101
+	CHECK(calculatePetTransAns(100, 100, 100, 0, 0) == 101);
+
+	// 场景 2: lv=130 (满等级额外收益 30 点), rank=0 (Fx=11)
+	// ans = 1 + 100 + 30/11 = 1 + 100 + 2 = 103
+	CHECK(calculatePetTransAns(100, 100, 130, 0, 0) == 103);
+
+	// 场景 3: lv=130, rank=5 (Fx=(5-5)*1.2 + 5 = 5)
+	// ans = 1 + 100 + 30/5 = 1 + 100 + 6 = 107
+	CHECK(calculatePetTransAns(100, 100, 130, 5, 0) == 107);
+
+	// 场景 4: lv=130, rank=5, 满成长辅助宠 (total1=150, total=(1.5)^5 * 1.3 = 9.87)
+	// ans = floor(9.87) + 100 + 6 = 9 + 100 + 6 = 115
+	CHECK(calculatePetTransAns(150, 100, 130, 5, 0) == 115);
+
+	// 场景 5: 钳位上限 (0 转上限 150，1 转上限 200)
+	CHECK(calculatePetTransAns(200, 160, 130, 5, 0) == 150);
+	CHECK(calculatePetTransAns(200, 160, 130, 5, 1) == 200);
+}
+
+TEST_CASE("宠物融合与转生: 大世界两宠与三宠融合全流程闭环")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	// 赋予主宠 (slot 0): 85 级红暴, 四维成长各 30, fusion_code = 0, 地属性 10
+	auto p0 = makeTestPet(100, 85);
+	p0.earth = 10;
+	p0.vital = 30;
+	p0.str = 30;
+	p0.tough = 30;
+	p0.dex = 30;
+	p0.growth_vital = 30;
+	p0.growth_str = 30;
+	p0.growth_tough = 30;
+	p0.growth_dex = 30;
+	p0.pet_skills[0] = 101;
+	const int s0 = f.world.givePetToPlayer(id, p0);
+	REQUIRE(s0 == 0);
+	f.world.registerPetTemplateFusionCode(100, 0);
+
+	// 赋予副宠 1 (slot 1): 80 级蓝暴, 四维成长各 20, fusion_code = 0, 地属性 10
+	auto p1 = makeTestPet(101, 80);
+	p1.earth = 10;
+	p1.vital = 20;
+	p1.str = 20;
+	p1.tough = 20;
+	p1.dex = 20;
+	p1.growth_vital = 20;
+	p1.growth_str = 20;
+	p1.growth_tough = 20;
+	p1.growth_dex = 20;
+	p1.pet_skills[0] = 102;
+	const int s1 = f.world.givePetToPlayer(id, p1);
+	REQUIRE(s1 == 1);
+	f.world.registerPetTemplateFusionCode(101, 0);
+
+	CHECK(f.world.playerPetSlotsUsed(id) == 2);
+
+	// 执行两宠融合: 主宠 slot 0, 副宠 slot 1
+	const auto res = f.world.fusePets(id, 0, 1);
+	REQUIRE(res == PetFusionResultCode::kSuccess);
+
+	// 校验融合后结果:
+	// - 副宠槽位 slot 1 已被清空释放
+	// - 随身宠物数由 2 只变为 1 只
+	// - 主宠槽位 slot 0 诞生新融合宠
+	CHECK_FALSE(p->pets[1].valid());
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+
+	const auto *fused = f.world.playerPetAt(id, 0);
+	REQUIRE(fused != nullptr);
+	CHECK(fused->level == 1);
+	CHECK(fused->exp == 0);
+	// 查表: base2=PetTable[0][0]=1, base1=PropertyTable[0][0]=0 -> FusionTable[1][0]=1001
+	CHECK(fused->pet_id == 1001);
+	CHECK(f.world.isPetFusion(fused->uid));
+
+	// 资质检验: 30*0.6 + 20*0.4 = 18 + 8 = 26
+	CHECK(fused->growth_vital == 26);
+	CHECK(fused->growth_str == 26);
+	CHECK(fused->growth_tough == 26);
+	CHECK(fused->growth_dex == 26);
+	CHECK(fused->vital == 26);
+	CHECK(fused->str == 26);
+	CHECK(fused->tough == 26);
+	CHECK(fused->dex == 26);
+	CHECK(fused->hp == SA::Rules::deriveBaseStats(26, 26, 26, 26).max_hp);
+
+	// 技能继承校验: 101, 102
+	CHECK(fused->pet_skills[0] == 101);
+	CHECK(fused->pet_skills[1] == 102);
+}
+
+TEST_CASE("宠物融合与转生: [RV-1] 融合资格门限与状态互斥防御拦截")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	auto p0 = makeTestPet(100, 80);
+	auto p1 = makeTestPet(101, 80);
+	auto p2 = makeTestPet(102, 80);
+	const int s0 = f.world.givePetToPlayer(id, p0);
+	const int s1 = f.world.givePetToPlayer(id, p1);
+	const int s2 = f.world.givePetToPlayer(id, p2);
+	REQUIRE(s0 == 0);
+	REQUIRE(s1 == 1);
+	REQUIRE(s2 == 2);
+
+	f.world.registerPetTemplateFusionCode(100, 0);
+	f.world.registerPetTemplateFusionCode(101, 0);
+	f.world.registerPetTemplateFusionCode(102, 0);
+
+	// 1. 无效槽位防御
+	CHECK(f.world.fusePets(id, 0, 0) == PetFusionResultCode::kInvalidSlot);
+	CHECK(f.world.fusePets(id, -1, 1) == PetFusionResultCode::kInvalidSlot);
+	CHECK(f.world.fusePets(id, 0, 5) == PetFusionResultCode::kInvalidSlot);
+	CHECK(f.world.fusePets(id, 0, 1, 1) == PetFusionResultCode::kInvalidSlot);
+
+	// 2. 出战中状态互斥防御: slot 0 设为出战宠
+	p->default_pet = 0;
+	CHECK(f.world.fusePets(id, 0, 1) == PetFusionResultCode::kPetInBattleOrRide);
+	p->default_pet = 1;
+	CHECK(f.world.fusePets(id, 0, 1) == PetFusionResultCode::kPetInBattleOrRide);
+	p->default_pet = -1; // 解除出战
+
+	// 3. 骑乘中状态互斥防御: 骑乘 slot 0
+	REQUIRE(f.world.grantRidePermit(id, "骑乘学习证"));
+	REQUIRE(f.world.mountPet(id, 0));
+	CHECK(f.world.fusePets(id, 0, 1) == PetFusionResultCode::kPetInBattleOrRide);
+	REQUIRE(f.world.dismountPet(id)); // 下马
+
+	// 4. 摆摊货架状态互斥防御: slot 1 上架
+	REQUIRE(f.world.openStall(id, "小摊"));
+	REQUIRE(f.world.setStallPet(id, 1, 100));
+	CHECK(f.world.fusePets(id, 0, 1) == PetFusionResultCode::kPetInTradeOrStall);
+	REQUIRE(f.world.closeStall(id));
+
+	// 5. 融合码非法防御: 将 slot 1 的融合码设为 -1 (不可融合)
+	const auto *pet1 = f.world.playerPetAt(id, 1);
+	REQUIRE(pet1 != nullptr);
+	f.world.setPetFusionCode(pet1->uid, -1);
+	CHECK(f.world.fusePets(id, 0, 1) == PetFusionResultCode::kIneligibleFusionCode);
+	f.world.setPetFusionCode(pet1->uid, 0); // 恢复合法
+
+	// 6. 已是融合宠防御: 成功融合一次后，该融合宠禁止再次作为主宠或副宠
+	REQUIRE(f.world.fusePets(id, 0, 1) == PetFusionResultCode::kSuccess);
+	// 此时 slot 0 为融合宠，尝试用 slot 0 作为主宠与 slot 2 融合，被严格阻断
+	CHECK(f.world.fusePets(id, 0, 2) == PetFusionResultCode::kAlreadyFused);
+	// 尝试用 slot 2 作为主宠，slot 0 作为副宠，同样被严格阻断
+	CHECK(f.world.fusePets(id, 2, 0) == PetFusionResultCode::kAlreadyFused);
+}
+
+TEST_CASE("宠物融合与转生: [RV-1] 转生等级门禁、最大转生次数与状态互斥")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	// 赋予一只 99 级的未达标宠物
+	auto p0 = makeTestPet(200, 99);
+	p0.vital = 30;
+	p0.str = 30;
+	p0.tough = 30;
+	p0.dex = 30;
+	const int s0 = f.world.givePetToPlayer(id, p0);
+	REQUIRE(s0 == 0);
+
+	// 1. 等级 < 100 级转生拦截
+	CHECK(f.world.reincarnatePet(id, 0) == PetTransResultCode::kInsufficientLevel);
+
+	// 2. 提升至 100 级
+	auto *pet = f.world.playerPetForTest(id, 0);
+	REQUIRE(pet != nullptr);
+	pet->level = 100;
+
+	// 3. 出战中阻断
+	p->default_pet = 0;
+	CHECK(f.world.reincarnatePet(id, 0) == PetTransResultCode::kPetInBattleOrRide);
+	p->default_pet = -1;
+
+	// 4. 骑乘中阻断
+	REQUIRE(f.world.grantRidePermit(id, "骑乘学习证"));
+	REQUIRE(f.world.mountPet(id, 0));
+	CHECK(f.world.reincarnatePet(id, 0) == PetTransResultCode::kPetInBattleOrRide);
+	REQUIRE(f.world.dismountPet(id));
+
+	// 5. 首次转生成功 (0 转 -> 1 转)
+	CHECK(f.world.petTransCount(pet->uid) == 0);
+	REQUIRE(f.world.reincarnatePet(id, 0) == PetTransResultCode::kSuccess);
+	CHECK(f.world.petTransCount(pet->uid) == 1);
+	CHECK(pet->level == 1);
+	CHECK(pet->exp == 0);
+
+	// 6. 二次转生门禁: 必须再次升满 100 级
+	CHECK(f.world.reincarnatePet(id, 0) == PetTransResultCode::kInsufficientLevel);
+	pet->level = 100;
+	REQUIRE(f.world.reincarnatePet(id, 0) == PetTransResultCode::kSuccess);
+	CHECK(f.world.petTransCount(pet->uid) == 2);
+
+	// 7. 转生次数达上限 (2 转) 拦截
+	pet->level = 100;
+	CHECK(f.world.reincarnatePet(id, 0) == PetTransResultCode::kMaxTransReached);
+}
+
+TEST_CASE("宠物融合与转生: 转生消耗辅助宠与资质大幅重构飞跃")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	// 被转生主宠 (slot 0): 130 级, 初始成长各 20 (total=80)
+	auto p0 = makeTestPet(300, 130);
+	p0.vital = 20;
+	p0.str = 20;
+	p0.tough = 20;
+	p0.dex = 20;
+	p0.growth_vital = 20;
+	p0.growth_str = 20;
+	p0.growth_tough = 20;
+	p0.growth_dex = 20;
+	const int s0 = f.world.givePetToPlayer(id, p0);
+	REQUIRE(s0 == 0);
+
+	// 极品玛蕾辅助宠 (slot 1): 79 级, 成长各 45 (total=180)
+	auto p1 = makeTestPet(301, 79);
+	p1.vital = 45;
+	p1.str = 45;
+	p1.tough = 45;
+	p1.dex = 45;
+	p1.growth_vital = 45;
+	p1.growth_str = 45;
+	p1.growth_tough = 45;
+	p1.growth_dex = 45;
+	const int s1 = f.world.givePetToPlayer(id, p1);
+	REQUIRE(s1 == 1);
+
+	CHECK(f.world.playerPetSlotsUsed(id) == 2);
+
+	// 执行转生: slot 0 为目标宠, slot 1 为辅助宠
+	REQUIRE(f.world.reincarnatePet(id, 0, 1) == PetTransResultCode::kSuccess);
+
+	// 校验辅助宠已被消耗
+	CHECK_FALSE(p->pets[1].valid());
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+
+	// 校验主宠资质飞跃提升:
+	const auto *pet = f.world.playerPetAt(id, 0);
+	REQUIRE(pet != nullptr);
+	CHECK(pet->level == 1);
+	CHECK(pet->growth_vital > 20);
+	CHECK(pet->growth_str > 20);
+	CHECK(pet->growth_tough > 20);
+	CHECK(pet->growth_dex > 20);
+	CHECK(pet->hp == SA::Rules::deriveBaseStats(pet->vital, pet->str, pet->tough, pet->dex).max_hp);
+}
+
+TEST_CASE("宠物融合与转生: 融合师与转生师 NPC 对白与交互")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	// 加载两名功能 NPC
+	NpcEntity fusion_npc{};
+	fusion_npc.id = 8801;
+	fusion_npc.floor = 0;
+	fusion_npc.x = 33;
+	fusion_npc.y = 32;
+	fusion_npc.type = NpcType::kPetFusionMan;
+	fusion_npc.message = "欢迎光临宠物融合所！让我为你创造全新的恐龙伙伴！";
+
+	NpcEntity trans_npc{};
+	trans_npc.id = 8802;
+	trans_npc.floor = 0;
+	trans_npc.x = 35;
+	trans_npc.y = 34;
+	trans_npc.type = NpcType::kPetTransMan;
+	trans_npc.message = "我是漆黑的转生导师，带上达到100级的宠物来觉醒潜能吧！";
+
+	f.world.loadNpcEntities({fusion_npc, trans_npc});
+
+	// 对话融合师
+	SA::Domain::EventRequest req1{};
+	req1.dir = 2;
+	req1.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req1.seqno = 3001;
+	f.world.onEvent(id, req1);
+	f.world.tick();
+	CHECK(f.world.playerLastWindowText(id) == "欢迎光临宠物融合所！让我为你创造全新的恐龙伙伴！");
+
+	// 移动至转生师身旁并对话 (玩家在 35,33, NPC在 35,34, 面向南 dir=4)
+	p->x = 35;
+	p->y = 33;
+	p->dir = 4;
+	SA::Domain::EventRequest req2{};
+	req2.dir = 4;
+	req2.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	req2.seqno = 3002;
+	f.world.onEvent(id, req2);
+	f.world.tick();
+	CHECK(f.world.playerLastWindowText(id) == "我是漆黑的转生导师，带上达到100级的宠物来觉醒潜能吧！");
+}

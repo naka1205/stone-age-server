@@ -718,6 +718,8 @@ enum class NpcType : std::uint8_t
 	kSignBoard = 6,
 	kWarpMan = 7,
 	kOther = 8,
+	kPetFusionMan = 9,
+	kPetTransMan = 10,
 };
 
 // 商店商品条目 (批次 W.12)
@@ -1198,6 +1200,66 @@ struct RideInfo
 	std::int32_t pet_max_hp = 0;     // 骑乘宠生命上限
 };
 
+// ══ 宠物融合与转生系统 (Pet Fusion & Rebirth, 批次 §9.0.96) ════════════════════
+// 对齐官方石器时代源码:
+// - docs/06-progression.md §4 (宠物融合三表投影 / DR-DT4 历史 off-by-one 决策 / 资质继承)
+// - docs/06-progression.md §6 (宠物转生公式 NPC_PetTransManGetAns / 五次方算力 / Fx档位)
+// - 原版 char_base.c:509-567 (PetTable[29][29], PropertyTable[4][4], FusionTable[11][16])
+// - 原版 char_data.c:1550-1618 (PETFUSION_FusionPetMain / PETFUSION_FusionPetSub 资质继承与技能过滤)
+// - 原版 char_data.c:1701-1804 (PETTRANS_getPetBase / NPC_PetTransManGetAns / PETTRANS_PetTransManStatus)
+struct PetGrowth
+{
+	int vital = 0;
+	int str = 0;
+	int tough = 0;
+	int dex = 0;
+};
+
+enum class PetFusionResultCode : std::uint8_t
+{
+	kSuccess = 0,
+	kInvalidSession = 1,
+	kInvalidSlot = 2,
+	kDuplicatePet = 3,
+	kPetNotFound = 4,
+	kAlreadyFused = 5,         // 已是融合宠，不可再次融合
+	kIneligibleFusionCode = 6, // 融合码非法 (-1)
+	kPetInBattleOrRide = 7,    // 参战中或骑乘中
+	kPetInTradeOrStall = 8,    // 交易中或摆摊寄售中
+	kPoolFull = 9,
+};
+
+enum class PetTransResultCode : std::uint8_t
+{
+	kSuccess = 0,
+	kInvalidSession = 1,
+	kInvalidSlot = 2,
+	kPetNotFound = 3,
+	kInsufficientLevel = 4, // 等级未达 100 级门禁
+	kMaxTransReached = 5,   // 已达最大转生次数 (2转)
+	kPetInBattleOrRide = 6, // 参战中或骑乘中
+	kPetInTradeOrStall = 7, // 交易中或摆摊寄售中
+	kInvalidSacrifice = 8,  // 辅助宠/祭品不合法
+	kPoolFull = 9,
+};
+
+int getPetFusionBase2(int sub_code, int main_code) noexcept;
+int getPetFusionBase1(int sub_elem, int main_elem) noexcept;
+int lookupPetFusionTarget(int base2, int base1) noexcept;
+int resolvePetFusionResultId(int sub_code, int main_code, int sub_elem, int main_elem) noexcept;
+
+PetGrowth calculateFusionGrowth(PetGrowth main_growth, int main_level,
+                                PetGrowth sub1_growth, int sub1_level,
+                                const PetGrowth *sub2_growth = nullptr, int sub2_level = 0) noexcept;
+
+std::array<std::int32_t, 7> calculateFusionSkills(const std::int32_t main_skills[7],
+                                                  const std::int32_t sub1_skills[7],
+                                                  const std::int32_t *sub2_skills = nullptr) noexcept;
+
+int calculatePetTransAns(int total1, int total2, int pet_level, int pet_rank, int current_trans = 0) noexcept;
+
+PetGrowth calculatePetTransStats(PetGrowth base, PetGrowth work, int pet_level, int pet_rank, int current_trans = 0) noexcept;
+
 class World final : public SA::Net::TransportEvents,
 
                     public SA::Net::SessionHost
@@ -1349,6 +1411,9 @@ class World final : public SA::Net::TransportEvents,
 	// 获取某会话背后的 Player 实体指针 (批次 W.9 测试注入 seam)
 	SA::Model::Player *playerForTest(SA::Net::SessionId session) noexcept;
 
+	// 获取某会话背后的 Pet 实体指针 (批次 §9.0.96 测试注入 seam)
+	SA::Model::Pet *playerPetForTest(SA::Net::SessionId session, int pet_slot) noexcept;
+
 	// 获取家族实体指针供测试验证 (阶段 2 家族系统测试注入 seam)
 	FamilyInfo *familyForTest(std::uint32_t family_id) noexcept;
 
@@ -1370,6 +1435,18 @@ class World final : public SA::Net::TransportEvents,
 
 	// 传送员 NPC 触发玩家传送 (批次 W.14, 移植 npc_warpman.c 逻辑)
 	bool warpPlayerByNpc(SA::Net::SessionId session, std::uint64_t npc_id, std::size_t dest_idx = 0);
+
+	// ── 宠物融合与转生系统 (批次 §9.0.96) ──
+	PetFusionResultCode fusePets(SA::Net::SessionId session, int main_slot, int sub1_slot, int sub2_slot = -1);
+	PetTransResultCode reincarnatePet(SA::Net::SessionId session, int target_slot, int sacrifice_slot = -1);
+
+	bool isPetFusion(std::uint64_t pet_uid) const noexcept;
+	void setPetFusion(std::uint64_t pet_uid, bool is_fusion) noexcept;
+	std::int32_t petTransCount(std::uint64_t pet_uid) const noexcept;
+	void setPetTransCount(std::uint64_t pet_uid, std::int32_t count) noexcept;
+	std::int32_t petFusionCode(std::uint64_t pet_uid) const noexcept;
+	void setPetFusionCode(std::uint64_t pet_uid, std::int32_t code) noexcept;
+	void registerPetTemplateFusionCode(std::int32_t pet_id, std::int32_t code) noexcept;
 
 	// ⚠️ 这两个不能写成内联 —— 状态在 pimpl 的 Impl 里,头文件看不见它。
 	void requestShutdown() noexcept;

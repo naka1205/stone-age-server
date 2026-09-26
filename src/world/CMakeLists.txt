@@ -7,6 +7,7 @@ add_library(sa_world STATIC
     Map.cpp
     GoldLedger.cpp
     ExChangeMan.cpp
+    PetProgression.cpp
 )
 
 target_include_directories(sa_world

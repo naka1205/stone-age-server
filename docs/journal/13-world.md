@@ -1078,12 +1078,56 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证 (RV-2)**: 篡改四维总和校验门禁（如放行 `points == 22`）⇒ 用例 4 中 15 处断言立即集体变红失败；恢复后回绿。
 - **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 8 项 CTest 全量通过（锁定 `shared-v0.42.0` 零漂移），双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
 
+---
 
+### 9.0.96 阶段 2: 宠物融合与转生系统 (Pet Fusion & Rebirth) (2026-09-26)
 
+2026-09-26 交付。对齐官方石器时代源码（`char_base.c:509-567`、`char_data.c:1550-1618`、`char_data.c:1701-1804`、`enemy.c:1851-1960`、`npc_petfusion.c`、`docs/06-progression.md` §4 与 §6、`docs/11-decision-register.md` DR-DT4），落地实现了经典石器时代的**宠物融合 (Pet Fusion)** 与 **宠物转生 (Pet Rebirth / Transmigration)** 两大成长进阶系统，涵盖三表投影算法、历史 off-by-one 属性决策、四维成长继承、等级惩罚、技能遗传过滤、转生五次方公式与 Fx 档位衰减算力、全状态互斥拦截门禁与 NPC 交互闭环。
 
+#### 1. 源码事实与裁定
 
+1. **三表串联投影目标宠物 (`getPetFusionBase2`, `getPetFusionBase1`, `lookupPetFusionTarget`, `resolvePetFusionResultId`)**:
+   - `PetTable[29][29]`（`char_base.c:509`）：以副宠 1 与主宠的融合码 `fusion_code` 投影出 `base2`（取值域 $0..10$）；
+   - `PropertyTable[4][4]`（`char_base.c:547`）：以副宠 1 与主宠的属性（地水火风）投影出 `base1`（取值域 $0..15$）；遵守 DR-DT4 历史 off-by-one 决策（`k1 <= 1 ? Property[0] : Property[rand() % (k1-1)]`），双属性宠第 2 属性不参与融合判定；
+   - `FusionTable[11][16]`（`char_base.c:555`，`csa8.0/gmsv/data/oldfusion.txt` 11×16 逐元素副本）：由 `[base2][base1]` 索引查出产物融合宠模板 ID（$989..1033$）。
+2. **四维成长继承算法与技能遗传过滤 (`calculateFusionGrowth`, `calculateFusionSkills`)**:
+   - **等级惩罚**：参与融合的宠物等级若 $< 80$ 级，其基础四维成长系数乘以 $0.8$（原版 `base[i] = base[i] * 0.8`）；
+   - **权重融合**：单副宠贡献为 $40\%$（`sub1 * 0.4`），双副宠贡献为平均值的 $40\%$（`((sub1 + sub2)/2) * 0.4`），主宠贡献为 $60\%$（`main * 0.6`），合成最终成长并 clamp 在 $[5, 60]$；
+   - **技能遗传**：主宠 7 槽技能优先遗传，副宠技能去重填补剩余空槽；过滤不可遗传非法技能（`illegalpetskill[15]`：41, 52, 600..604, 614, 617, 628, 630, 631, 635, 638, 641）以及 0 与空槽。
+3. **[RV-1] 融合/转生资格与状态互斥防御拦截 (`fusePets`, `reincarnatePet`)**:
+   - **已融合宠拦截**：已是融合宠（`is_fusion == true`）禁止再次作为主宠或副宠参与融合，返回 `kAlreadyFused`；
+   - **融合码非法拦截**：融合码为 $-1$ 的宠物禁止融合，返回 `kIneligibleFusionCode`；
+   - **出战/骑乘互斥拦截**：当前出战宠（`default_pet`）或正在骑乘中的宠物禁止参与融合或转生，返回 `kPetInBattleOrRide`；
+   - **摆摊货架互斥拦截**：摆摊货架上的宠物禁止参与融合或转生，返回 `kPetInTradeOrStall`；
+   - **转生等级门禁**：转生宠物等级必须 $\ge 100$ 级，未达标返回 `kInsufficientLevel`；
+   - **转生上限门禁**：最多允许 2 转（0 转升 1 转，1 转升 2 转），已达 2 转再次转生返回 `kMaxTransReached`。
+4. **[RV-2] 转生五次方公式与 Fx 档位算力精确还原 (`calculatePetTransAns`, `calculatePetTransStats`)**:
+   - 原版 `NPC_PetTransManGetAns` 1:1 算力：
+     $$\text{total} = \left(\frac{\text{total1}}{100}\right)^5 \times 1.3$$
+     $$\text{Fx} = \lfloor(5 - \text{pet\_rank}) \times 1.2\rfloor + 5$$
+     $$\text{ans} = \lfloor\text{total}\rfloor + \text{total2} + \frac{\min(130, \text{level}) - 100}{\text{Fx}}$$
+   - 0 转上限 150，1 转上限 200；
+   - 原版 `PETTRANS_PetTransManStatus` 1:1 加权四维重构：
+     $$\text{growth}[i] = \frac{\text{ans} \times (\text{base}[i] + \text{work}[i] \times 4)}{\text{total1} + \text{work\_total} \times 4}$$
+   - 转生后等级重置为 1 级，经验清零，生命值按 `deriveBaseStats` 重新推导生成，转生次数 $+1$；若有辅助宠（如玛蕾菲雅），辅助宠被原子消耗扣除。
+5. **NPC 对白与交互闭环**:
+   - 增加 NPC 类型 `kPetFusionMan = 9`（宠物融合师）与 `kPetTransMan = 10`（宠物转生师），支持大世界对话与操作引导。
 
+#### 2. 验证与指标
 
-
-
+- `world_map` 用例数从 117 组增至 **125 组**（+8 组宠物融合与转生全流程实测用例），断言数从 3512 条增至 **3650 条**（+138 条断言，100% 成功）。
+- **实测用例矩阵**:
+  1. `宠物融合与转生: 三表投影矩阵与目标宠物模板匹配`
+  2. `宠物融合与转生: 资质继承算法与等级削弱惩罚`
+  3. `宠物融合与转生: [RV-2] 转生五次方公式与 Fx 档位算力精确验证`
+  4. `宠物融合与转生: 大世界两宠与三宠融合全流程闭环`
+  5. `宠物融合与转生: [RV-1] 融合资格门限与状态互斥防御拦截`
+  6. `宠物融合与转生: [RV-1] 转生等级门禁、最大转生次数与状态互斥`
+  7. `宠物融合与转生: 转生消耗辅助宠与资质大幅重构飞跃`
+  8. `宠物融合与转生: 融合师与转生师 NPC 对白与交互`
+- **反向验证 (RV-1)**:
+  - 篡改放行已融合宠再次融合与放行未满 100 级转生 ⇒ 用例 5 与 6 中 7 处防御断言立即全部报红失败；恢复后回绿。
+- **反向验证 (RV-2)**:
+  - 篡改 `FusionTable` 查表结果与 `calculatePetTransAns` 五次方倍率 ⇒ 用例 3 与相关断言立即精准报红失败；恢复后回绿。
+- **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 8 项 CTest 全量通过（锁定 `shared-v0.42.0` 零漂移），双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
 
