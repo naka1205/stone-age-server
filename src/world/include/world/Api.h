@@ -678,13 +678,27 @@ struct ExChangeBlock
 	std::string pet_full_msg{};   // 宠物满提示 (PetFullMsg)
 	std::string stone_less_msg{}; // 石币不足提示 (StoneLessMsg)
 	std::string stone_full_msg{}; // 石币超限提示 (StoneFullMsg)
+
+	// ── 阶段 2: 任务引擎脚本全景扩展 (批次 §9.0.97, 09 §5.1/§5.2) ──
+	std::string set_now_flg{};         // 置 NOWEV (SetNowEvent / EvNow: 10,11)
+	std::string clean_now_flg{};       // 清 NOWEV (ClearNowEvent: 10,11)
+	std::string clean_end_flg{};       // 清 ENDEV (ClearEndEvent: 10,11)
+	std::int32_t add_exp = 0;          // 奖励经验 (AddExps / AddExp: 500)
+	std::int32_t add_skill_points = 0; // 奖励点数 (AddSkillPoint / AddPFSkillPoint)
+	std::int32_t heal_hp = 0;          // 恢复生命 (HealHp / Heal: 100)
+	std::int32_t heal_mp = 0;          // 恢复法力 (HealMp: 50)
+	std::string npc_warp{};            // 传送玩家 (NpcWarp / Warp: floor,x,y)
+	std::int32_t add_fame = 0;         // 奖励声望 (AddFame: 10)
+	std::int32_t del_fame = 0;         // 扣除声望 (DelFame: 5)
+	int next_block_index = -1;         // 多步对话树跳转 (-1 为默认完成)
+	std::string request_msg{};         // REQUEST 委托接取文案 (RequestMsg)
 };
 
 // 解析 ExChangeMan 脚本文本 (按 EventEnd 切分块, 提取 EventNo, TYPE, EVENT, 文案与旗标指令)
 // 依据 09 §2.3 C5, §3.1 C9, §4 C20
 std::vector<ExChangeBlock> parseExChangeBlocks(std::string_view argstr);
 
-// 条件表达式扩展求值上下文 (批次 W.10)
+// 条件表达式扩展求值上下文 (批次 W.10, 阶段 2 扩展 §9.0.97)
 struct EventCheckContext
 {
 	const SA::Model::Player &player;
@@ -698,6 +712,12 @@ struct EventCheckContext
 	std::int32_t (*count_free_item_slots)(const SA::Model::Player &p, void *userdata) = nullptr;
 	// 统计空闲宠物槽数 (nullptr 时默认统计 Player::pets 空槽)
 	std::int32_t (*count_free_pet_slots)(const SA::Model::Player &p, void *userdata) = nullptr;
+	// 获取玩家转生数 (nullptr 时默认 0)
+	std::int32_t (*get_transmigration)(const SA::Model::Player &p, void *userdata) = nullptr;
+	// 获取玩家声望 (nullptr 时默认 0)
+	std::int32_t (*get_fame)(const SA::Model::Player &p, void *userdata) = nullptr;
+	// 获取玩家家族 ID (nullptr 时默认 0)
+	std::uint32_t (*get_family_id)(const SA::Model::Player &p, void *userdata) = nullptr;
 	void *userdata = nullptr;
 };
 
@@ -1597,6 +1617,10 @@ class World final : public SA::Net::TransportEvents,
 	SA::Rules::ProfessionClass playerProfessionClass(SA::Net::SessionId session) const;
 	int playerProfessionLevel(SA::Net::SessionId session) const;
 	bool setPlayerProfession(SA::Net::SessionId session, SA::Rules::ProfessionClass profession, int level = 1);
+	int playerTransmigration(SA::Net::SessionId session) const;
+	bool setPlayerTransmigration(SA::Net::SessionId session, int trans);
+	int playerFame(SA::Net::SessionId session) const;
+	bool setPlayerFame(SA::Net::SessionId session, int fame);
 	int playerEncounterRateFix(SA::Net::SessionId session) const;
 	bool castHunterEncounterSkill(SA::Net::SessionId session, bool is_track, int skill_level,
 	                              int rate = 10, std::int64_t duration_ms = 180000);

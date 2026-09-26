@@ -2778,7 +2778,7 @@ struct World::Impl : GoldAuditSink
 	std::int32_t countFreePetSlots(const SA::Model::Player &p) const;
 	void sendExChangeWindow(SA::Net::SessionId id, std::uint64_t npc_id,
 	                        const std::string &raw_text, std::uint32_t buttons);
-	bool checkExChangePreconditions(const SA::Model::Player &p, const ExChangeBlock &blk, int branch_idx, std::string &msg_out);
+	bool checkExChangePreconditions(const SA::Model::Player &p, const ExChangeBlock &blk, int branch_idx, std::string &msg_out, SA::Net::SessionId session_id = 0);
 	void applyExChangeEffects(SA::Net::SessionId id, SA::Model::Player &p, const ExChangeBlock &blk, int branch_idx);
 
 	// ── 组队系统 (阶段 2: 队伍与协同) ──────────────────────────
@@ -2892,6 +2892,13 @@ struct World::Impl : GoldAuditSink
 	};
 	std::unordered_map<std::uint64_t, PetProgressionState> pet_progression{};
 	std::unordered_map<std::int32_t, std::int32_t> pet_template_fusion_codes{};
+
+	struct PlayerExtraStats
+	{
+		std::int32_t transmigration = 0;
+		std::int32_t fame = 0;
+	};
+	std::unordered_map<SA::Net::SessionId, PlayerExtraStats> player_extra_stats{};
 
 	const SA::Model::Pet *getRidingPet(SA::Net::SessionId sid) const
 	{
@@ -3196,7 +3203,8 @@ void World::Impl::warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std:
 
 bool World::Impl::checkExChangePreconditions(const SA::Model::Player &p,
                                              const ExChangeBlock &blk, int branch_idx,
-                                             std::string &msg_out)
+                                             std::string &msg_out,
+                                             SA::Net::SessionId session_id)
 {
 	// 1. 石币不足门 (DelStone vs p.gold)
 	if (blk.del_stone > 0 && p.gold < blk.del_stone)
@@ -3215,7 +3223,43 @@ bool World::Impl::checkExChangePreconditions(const SA::Model::Player &p,
 		}
 	}
 
-	// 3. 背包容量门 (ItemFullCheck, 09 §4)
+	// 3. 声望不足门 (DelFame)
+	if (blk.del_fame > 0)
+	{
+		int fame = 0;
+		const auto fit = player_extra_stats.find(session_id);
+		if (fit != player_extra_stats.end())
+			fame = fit->second.fame;
+		if (fame < blk.del_fame)
+		{
+			msg_out = "声望不足。";
+			return false;
+		}
+	}
+
+	// 4. 交付道具持有校验 (必须在背包中拥有足够的道具)
+	const auto req_dels = resolveDelItems(blk, branch_idx);
+	for (const auto &d : req_dels)
+	{
+		if (countPlayerItems(p, d.item_id) < d.count)
+		{
+			msg_out = "缺少所需道具。";
+			return false;
+		}
+	}
+
+	// 5. 交付宠物持有校验 (必须在随行宠物中拥有足够的宠物)
+	const auto req_del_pets = resolveDelPets(blk, branch_idx);
+	for (const auto &d : req_del_pets)
+	{
+		if (countPlayerPets(p, d.pet_id, 0) < d.count)
+		{
+			msg_out = "缺少所需宠物。";
+			return false;
+		}
+	}
+
+	// 6. 背包容量门 (ItemFullCheck, 09 §4)
 	if (!blk.get_item.empty())
 	{
 		const auto gets = parseExchangeItems(blk.get_item);
@@ -3223,7 +3267,7 @@ bool World::Impl::checkExChangePreconditions(const SA::Model::Player &p,
 		for (const auto &g : gets)
 			get_slots += g.count;
 
-		const auto dels = resolveDelItems(blk, branch_idx);
+		const auto dels = req_dels;
 		std::int32_t del_slots = 0;
 		for (const auto &d : dels)
 		{
@@ -3253,7 +3297,7 @@ bool World::Impl::checkExChangePreconditions(const SA::Model::Player &p,
 		}
 	}
 
-	// 4. 宠物槽容量门 (PetFullCheck, 09 §4)
+	// 7. 宠物槽容量门 (PetFullCheck, 09 §4)
 	if (!blk.get_pet.empty())
 	{
 		const auto gets = parseExchangePets(blk.get_pet);
@@ -3261,7 +3305,7 @@ bool World::Impl::checkExChangePreconditions(const SA::Model::Player &p,
 		for (const auto &g : gets)
 			get_pet_slots += g.count;
 
-		const auto dels = resolveDelPets(blk, branch_idx);
+		const auto dels = req_del_pets;
 		std::int32_t del_pet_slots = 0;
 		for (const auto &d : dels)
 		{
@@ -3308,7 +3352,44 @@ void World::Impl::applyExChangeEffects(SA::Net::SessionId id, SA::Model::Player 
 		(void)addGold(p, GoldReason::kQuestReward, blk.get_stone, /*trans=*/0, /*corr=*/0, *this);
 	}
 
-	// ③ 扣除道具
+	// ③ 声望结算
+	if (blk.del_fame > 0)
+	{
+		player_extra_stats[id].fame = std::max(0, player_extra_stats[id].fame - blk.del_fame);
+	}
+	if (blk.add_fame > 0)
+	{
+		player_extra_stats[id].fame += blk.add_fame;
+	}
+
+	// ④ 经验与属性点奖励
+	if (blk.add_exp > 0)
+	{
+		p.exp += blk.add_exp;
+	}
+	if (blk.add_skill_points > 0)
+	{
+		p.skillup_points += blk.add_skill_points;
+	}
+
+	// ⑤ 生命与法力恢复
+	if (blk.heal_hp > 0)
+	{
+		const auto max_hp = SA::Rules::deriveBaseStats(p.vital, p.str, p.tough, p.dex).max_hp;
+		if (max_hp > 0)
+			p.hp = std::min(max_hp, p.hp + blk.heal_hp);
+		else
+			p.hp += blk.heal_hp;
+	}
+	if (blk.heal_mp > 0)
+	{
+		if (p.max_mp > 0)
+			p.mp = std::min(p.max_mp, p.mp + blk.heal_mp);
+		else
+			p.mp += blk.heal_mp;
+	}
+
+	// ⑥ 扣除道具
 	const auto dels = resolveDelItems(blk, branch_idx);
 	for (const auto &d : dels)
 	{
@@ -3338,7 +3419,7 @@ void World::Impl::applyExChangeEffects(SA::Net::SessionId id, SA::Model::Player 
 		}
 	}
 
-	// ④ 给予道具
+	// ⑦ 给予道具
 	if (!blk.get_item.empty())
 	{
 		const auto gets = parseExchangeItems(blk.get_item);
@@ -3356,7 +3437,7 @@ void World::Impl::applyExChangeEffects(SA::Net::SessionId id, SA::Model::Player 
 		}
 	}
 
-	// ⑤ 扣除宠物
+	// ⑧ 扣除宠物
 	const auto del_pets = resolveDelPets(blk, branch_idx);
 	for (const auto &d : del_pets)
 	{
@@ -3377,7 +3458,7 @@ void World::Impl::applyExChangeEffects(SA::Net::SessionId id, SA::Model::Player 
 		}
 	}
 
-	// ⑥ 给予宠物
+	// ⑨ 给予宠物
 	if (!blk.get_pet.empty())
 	{
 		const auto gets = parseExchangePets(blk.get_pet);
@@ -3408,46 +3489,61 @@ void World::Impl::applyExChangeEffects(SA::Net::SessionId id, SA::Model::Player 
 		}
 	}
 
-	// ⑦ 旗标副作用
-	if (!blk.end_set_flg.empty())
+	// ⑩ 旗标操作
+	auto parse_and_apply_flags = [](std::string_view flg_str, auto &&func)
 	{
+		if (flg_str.empty())
+			return;
 		std::size_t start = 0;
-		while (start < blk.end_set_flg.size())
+		while (start < flg_str.size())
 		{
-			const std::size_t comma = blk.end_set_flg.find(',', start);
+			const std::size_t comma = flg_str.find(',', start);
 			const std::string s_flag =
-			    (comma == std::string::npos) ? blk.end_set_flg.substr(start)
-			                                 : blk.end_set_flg.substr(start, comma - start);
+			    (comma == std::string_view::npos) ? std::string(flg_str.substr(start))
+			                                      : std::string(flg_str.substr(start, comma - start));
 			const int f = std::atoi(s_flag.c_str());
-			p.setEndEvent(f);
-			if (comma == std::string::npos)
+			if (f >= 0 && f < 256)
+				func(f);
+			if (comma == std::string_view::npos)
 				break;
 			start = comma + 1;
 		}
-	}
-	if (!blk.clean_flg.empty())
-	{
-		std::size_t start = 0;
-		while (start < blk.clean_flg.size())
-		{
-			const std::size_t comma = blk.clean_flg.find(',', start);
-			const std::string s_flag =
-			    (comma == std::string::npos) ? blk.clean_flg.substr(start)
-			                                 : blk.clean_flg.substr(start, comma - start);
-			const int f = std::atoi(s_flag.c_str());
-			p.clearNowEvent(f);
-			p.clearEndEvent(f);
-			if (comma == std::string::npos)
-				break;
-			start = comma + 1;
-		}
-	}
+	};
+
+	parse_and_apply_flags(blk.end_set_flg, [&](int f)
+	                      { p.setEndEvent(f); });
+	parse_and_apply_flags(blk.set_now_flg, [&](int f)
+	                      { p.setNowEvent(f); });
+	parse_and_apply_flags(blk.clean_flg, [&](int f)
+	                      { p.clearNowEvent(f); p.clearEndEvent(f); });
+	parse_and_apply_flags(blk.clean_now_flg, [&](int f)
+	                      { p.clearNowEvent(f); });
+	parse_and_apply_flags(blk.clean_end_flg, [&](int f)
+	                      { p.clearEndEvent(f); });
+
 	if (blk.event_no != -1)
 	{
 		if (!blk.end_set_flg.empty())
 			p.clearNowEvent(blk.event_no);
 		else
 			p.setNowEvent(blk.event_no);
+	}
+
+	// ⑪ 传送效果 (NpcWarp: floor,x,y)
+	if (!blk.npc_warp.empty())
+	{
+		const std::size_t c1 = blk.npc_warp.find(',');
+		if (c1 != std::string::npos)
+		{
+			const std::size_t c2 = blk.npc_warp.find(',', c1 + 1);
+			if (c2 != std::string::npos)
+			{
+				const int wf = std::atoi(blk.npc_warp.substr(0, c1).c_str());
+				const int wx = std::atoi(blk.npc_warp.substr(c1 + 1, c2 - c1 - 1).c_str());
+				const int wy = std::atoi(blk.npc_warp.substr(c2 + 1).c_str());
+				warpSinglePlayer(id, wf, wx, wy);
+			}
+		}
 	}
 }
 
@@ -6311,30 +6407,57 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 					int matched_block_idx = -1;
 					int matched_branch_idx = 0;
 
+					struct ExChangeEvalUserData
+					{
+						const World::Impl *impl = nullptr;
+						const World *world = nullptr;
+						SA::Net::SessionId session = 0;
+					};
+					ExChangeEvalUserData eval_ud{&s, this, id};
+
 					auto count_item_cb = [](const SA::Model::Player &pl, std::int32_t item_id,
 					                        void *userdata) -> std::int32_t
 					{
-						return static_cast<const World::Impl *>(userdata)->countPlayerItems(
+						return static_cast<const ExChangeEvalUserData *>(userdata)->impl->countPlayerItems(
 						    pl, item_id);
 					};
 					auto count_pet_cb = [](const SA::Model::Player &pl, std::int32_t pet_id,
 					                       std::int32_t min_lvl, void *userdata) -> std::int32_t
 					{
-						return static_cast<const World::Impl *>(userdata)->countPlayerPets(
+						return static_cast<const ExChangeEvalUserData *>(userdata)->impl->countPlayerPets(
 						    pl, pet_id, min_lvl);
 					};
 					auto count_free_items_cb = [](const SA::Model::Player &pl,
 					                              void *userdata) -> std::int32_t
 					{
-						return static_cast<const World::Impl *>(userdata)->countFreeItemSlots(pl);
+						return static_cast<const ExChangeEvalUserData *>(userdata)->impl->countFreeItemSlots(pl);
 					};
 					auto count_free_pets_cb = [](const SA::Model::Player &pl,
 					                             void *userdata) -> std::int32_t
 					{
-						return static_cast<const World::Impl *>(userdata)->countFreePetSlots(pl);
+						return static_cast<const ExChangeEvalUserData *>(userdata)->impl->countFreePetSlots(pl);
 					};
+					auto get_trans_cb = [](const SA::Model::Player &, void *userdata) -> std::int32_t
+					{
+						const auto *ud = static_cast<const ExChangeEvalUserData *>(userdata);
+						const auto it = ud->impl->player_extra_stats.find(ud->session);
+						return (it != ud->impl->player_extra_stats.end()) ? it->second.transmigration : 0;
+					};
+					auto get_fame_cb = [](const SA::Model::Player &, void *userdata) -> std::int32_t
+					{
+						const auto *ud = static_cast<const ExChangeEvalUserData *>(userdata);
+						const auto it = ud->impl->player_extra_stats.find(ud->session);
+						return (it != ud->impl->player_extra_stats.end()) ? it->second.fame : 0;
+					};
+					auto get_fm_cb = [](const SA::Model::Player &, void *userdata) -> std::uint32_t
+					{
+						const auto *ud = static_cast<const ExChangeEvalUserData *>(userdata);
+						return ud->world->playerFamilyId(ud->session);
+					};
+
 					const EventCheckContext check_ctx{*p, count_item_cb, count_pet_cb,
-					                                  count_free_items_cb, count_free_pets_cb, &s};
+					                                  count_free_items_cb, count_free_pets_cb,
+					                                  get_trans_cb, get_fame_cb, get_fm_cb, &eval_ud};
 
 					for (std::size_t bi = 0; bi < npc.exchange_blocks.size(); ++bi)
 					{
@@ -6356,7 +6479,7 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 					{
 						const auto &blk = npc.exchange_blocks[static_cast<std::size_t>(matched_block_idx)];
 						std::string door_msg;
-						if (!s.checkExChangePreconditions(*p, blk, matched_branch_idx, door_msg))
+						if (!s.checkExChangePreconditions(*p, blk, matched_branch_idx, door_msg, id))
 						{
 							it->second.pending_exchange = {};
 							s.sendExChangeWindow(id, npc.id, door_msg,
@@ -6365,7 +6488,7 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 						}
 						else if (blk.type == ExChangeType::kMessage)
 						{
-							// 立即结算全部副作用 (石币/道具/宠物/旗标)
+							// 立即结算全部副作用 (石币/道具/宠物/旗标/经验/点数/血蓝/传送)
 							s.applyExChangeEffects(id, *p, blk, matched_branch_idx);
 
 							std::string msg = blk.nomal_window_msg;
@@ -6374,7 +6497,14 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 							if (msg.empty())
 								msg = blk.thanks_msg;
 
-							it->second.pending_exchange = {};
+							if (blk.next_block_index >= 0)
+							{
+								it->second.pending_exchange = {npc.id, matched_block_idx, matched_branch_idx};
+							}
+							else
+							{
+								it->second.pending_exchange = {};
+							}
 							s.sendExChangeWindow(id, npc.id, msg,
 							                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
 							ok = true;
@@ -6387,6 +6517,56 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 								msg = blk.nomal_window_msg;
 							if (msg.empty())
 								msg = blk.nomal_msg;
+
+							const std::uint32_t buttons =
+							    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES) |
+							    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO);
+							s.sendExChangeWindow(id, npc.id, msg, buttons);
+							it->second.pending_exchange = {npc.id, matched_block_idx, matched_branch_idx};
+							ok = true;
+						}
+						else if (blk.type == ExChangeType::kRequest)
+						{
+							// 09 §4: 委托型。已在进行中走进度文案(OK)，未接取走接取文案(YES/NO)
+							if (blk.event_no != -1 && p->hasNowEvent(blk.event_no))
+							{
+								std::string msg = blk.nomal_window_msg;
+								if (msg.empty())
+									msg = blk.nomal_msg;
+								if (msg.empty())
+									msg = "任务正在进行中，请加油！";
+
+								it->second.pending_exchange = {};
+								s.sendExChangeWindow(id, npc.id, msg,
+								                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+								ok = true;
+							}
+							else
+							{
+								std::string msg = blk.request_msg;
+								if (msg.empty())
+									msg = blk.accept_msg;
+								if (msg.empty())
+									msg = blk.nomal_window_msg;
+								if (msg.empty())
+									msg = blk.nomal_msg;
+
+								const std::uint32_t buttons =
+								    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES) |
+								    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO);
+								s.sendExChangeWindow(id, npc.id, msg, buttons);
+								it->second.pending_exchange = {npc.id, matched_block_idx, matched_branch_idx};
+								ok = true;
+							}
+						}
+						else if (blk.type == ExChangeType::kClean)
+						{
+							// 09 §4: 清除旗标型
+							std::string msg = blk.nomal_window_msg;
+							if (msg.empty())
+								msg = blk.nomal_msg;
+							if (msg.empty())
+								msg = "是否确定放弃任务并清除任务记录？";
 
 							const std::uint32_t buttons =
 							    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES) |
@@ -6713,9 +6893,9 @@ void World::onWindowReply(SA::Net::SessionId id, const SA::Domain::WindowReply &
 	// 校验 window_id 是否匹配当前会话开启的活动窗口 (DR-PR3 / DR-PR8)
 	if (it->second.active_window_id != 0 && it->second.active_window_id == reply.window_id)
 	{
-		// 检查是否存在待决 ExChange 上下文 (批次 W.9)
+		// 检查是否存在待决 ExChange 上下文 (批次 W.9, 阶段 2 扩展 §9.0.97)
 		if (it->second.pending_exchange.npc_id != 0 &&
-		    it->second.pending_exchange.npc_id == reply.source.entity_id)
+		    (reply.source.entity_id == 0 || it->second.pending_exchange.npc_id == reply.source.entity_id))
 		{
 			const auto pending = it->second.pending_exchange;
 			it->second.pending_exchange = {};
@@ -6730,26 +6910,138 @@ void World::onWindowReply(SA::Net::SessionId id, const SA::Domain::WindowReply &
 
 				if (is_yes)
 				{
-					std::string door_msg;
-					if (!s.checkExChangePreconditions(*p, blk, pending.branch_idx, door_msg))
+					if (blk.type == ExChangeType::kAccept)
 					{
-						s.sendExChangeWindow(id, npc->id, door_msg,
+						std::string door_msg;
+						if (!s.checkExChangePreconditions(*p, blk, pending.branch_idx, door_msg, id))
+						{
+							s.sendExChangeWindow(id, npc->id, door_msg,
+							                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+							return;
+						}
+
+						// 执行全部副作用 (石币/道具/宠物/旗标/经验/点数/血蓝/传送)
+						s.applyExChangeEffects(id, *p, blk, pending.branch_idx);
+
+						// 多步对话树跳转 (next_block_index)
+						if (blk.next_block_index >= 0 &&
+						    static_cast<std::size_t>(blk.next_block_index) < npc->exchange_blocks.size())
+						{
+							const auto &next_blk = npc->exchange_blocks[static_cast<std::size_t>(blk.next_block_index)];
+							std::string next_msg = next_blk.nomal_window_msg;
+							if (next_msg.empty())
+								next_msg = next_blk.accept_msg;
+							if (next_msg.empty())
+								next_msg = next_blk.nomal_msg;
+
+							if (next_blk.type == ExChangeType::kAccept)
+							{
+								const std::uint32_t buttons =
+								    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES) |
+								    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO);
+								s.sendExChangeWindow(id, npc->id, next_msg, buttons);
+								it->second.pending_exchange = {npc->id, blk.next_block_index, 1};
+							}
+							else
+							{
+								s.applyExChangeEffects(id, *p, next_blk, 1);
+								if (next_blk.next_block_index >= 0)
+									it->second.pending_exchange = {npc->id, blk.next_block_index, 1};
+								s.sendExChangeWindow(id, npc->id, next_msg,
+								                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+							}
+							return;
+						}
+
+						std::string thanks = blk.thanks_msg;
+						if (thanks.empty())
+							thanks = blk.nomal_window_msg;
+
+						if (!thanks.empty())
+						{
+							s.sendExChangeWindow(id, npc->id, thanks,
+							                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+							return; // 保持活动新窗口
+						}
+					}
+					else if (blk.type == ExChangeType::kRequest)
+					{
+						// 接取委托任务
+						if (blk.event_no != -1)
+							p->setNowEvent(blk.event_no);
+
+						s.applyExChangeEffects(id, *p, blk, pending.branch_idx);
+
+						if (blk.next_block_index >= 0 &&
+						    static_cast<std::size_t>(blk.next_block_index) < npc->exchange_blocks.size())
+						{
+							const auto &next_blk = npc->exchange_blocks[static_cast<std::size_t>(blk.next_block_index)];
+							std::string next_msg = next_blk.nomal_window_msg;
+							if (next_msg.empty())
+								next_msg = next_blk.nomal_msg;
+
+							if (next_blk.next_block_index >= 0)
+								it->second.pending_exchange = {npc->id, blk.next_block_index, 1};
+							s.sendExChangeWindow(id, npc->id, next_msg,
+							                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+							return;
+						}
+
+						std::string thanks = blk.thanks_msg;
+						if (thanks.empty())
+							thanks = "委托任务已接受，请前往完成！";
+						s.sendExChangeWindow(id, npc->id, thanks,
 						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
 						return;
 					}
-
-					// 执行全部副作用 (石币/道具/宠物/旗标)
-					s.applyExChangeEffects(id, *p, blk, pending.branch_idx);
-
-					std::string thanks = blk.thanks_msg;
-					if (thanks.empty())
-						thanks = blk.nomal_window_msg;
-
-					if (!thanks.empty())
+					else if (blk.type == ExChangeType::kClean)
 					{
+						// 清除任务旗标
+						if (blk.event_no != -1)
+						{
+							p->clearNowEvent(blk.event_no);
+							p->clearEndEvent(blk.event_no);
+						}
+						s.applyExChangeEffects(id, *p, blk, pending.branch_idx);
+
+						std::string thanks = blk.thanks_msg;
+						if (thanks.empty())
+							thanks = "任务记录已清除。";
 						s.sendExChangeWindow(id, npc->id, thanks,
 						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
-						return; // 保持活动新窗口
+						return;
+					}
+					else if (blk.type == ExChangeType::kMessage)
+					{
+						// 多步推进中的 kMessage
+						if (blk.next_block_index >= 0 &&
+						    static_cast<std::size_t>(blk.next_block_index) < npc->exchange_blocks.size())
+						{
+							const auto &next_blk = npc->exchange_blocks[static_cast<std::size_t>(blk.next_block_index)];
+							std::string next_msg = next_blk.nomal_window_msg;
+							if (next_msg.empty())
+								next_msg = next_blk.accept_msg;
+							if (next_msg.empty())
+								next_msg = next_blk.nomal_msg;
+
+							if (next_blk.type == ExChangeType::kAccept)
+							{
+								const std::uint32_t buttons =
+								    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES) |
+								    static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO);
+								s.sendExChangeWindow(id, npc->id, next_msg, buttons);
+								it->second.pending_exchange = {npc->id, blk.next_block_index, 1};
+							}
+							else
+							{
+								s.applyExChangeEffects(id, *p, next_blk, 1);
+								if (next_blk.next_block_index >= 0)
+									it->second.pending_exchange = {npc->id, blk.next_block_index, 1};
+								s.sendExChangeWindow(id, npc->id, next_msg,
+								                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+							}
+							return;
+						}
 					}
 				}
 			}
@@ -12681,6 +12973,32 @@ PetTransResultCode World::reincarnatePet(SA::Net::SessionId session, int target_
 	setPetTransCount(pet->uid, cur_trans + 1);
 	_impl->pet_progression[pet->uid].pet_id = pet->pet_id;
 	return PetTransResultCode::kSuccess;
+}
+
+int World::playerTransmigration(SA::Net::SessionId session) const
+{
+	const auto it = _impl->player_extra_stats.find(session);
+	return (it != _impl->player_extra_stats.end()) ? it->second.transmigration : 0;
+}
+
+bool World::setPlayerTransmigration(SA::Net::SessionId session, int trans)
+{
+	if (trans < 0 || trans > 10)
+		return false;
+	_impl->player_extra_stats[session].transmigration = trans;
+	return true;
+}
+
+int World::playerFame(SA::Net::SessionId session) const
+{
+	const auto it = _impl->player_extra_stats.find(session);
+	return (it != _impl->player_extra_stats.end()) ? it->second.fame : 0;
+}
+
+bool World::setPlayerFame(SA::Net::SessionId session, int fame)
+{
+	_impl->player_extra_stats[session].fame = fame;
+	return true;
 }
 
 } // namespace SA::World

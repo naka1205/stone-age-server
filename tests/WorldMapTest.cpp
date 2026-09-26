@@ -7599,3 +7599,499 @@ TEST_CASE("宠物融合与转生: 融合师与转生师 NPC 对白与交互")
 	f.world.tick();
 	CHECK(f.world.playerLastWindowText(id) == "我是漆黑的转生导师，带上达到100级的宠物来觉醒潜能吧！");
 }
+
+// ══ 阶段 2: 任务引擎脚本全景扩展 (批次 §9.0.97, 09 §5.1/§5.2) ══════════════
+
+TEST_CASE("§9.0.97: ExChangeMan 全量条件表达式求值 (复合条件/括号优先级/关系运算符/变量全集)")
+{
+	SA::Model::Player p{};
+	p.level = 80;
+	p.gold = 50000;
+	p.hp = 250;
+	p.mp = 120;
+	p.vital = 30;
+	p.setNowEvent(10);
+	p.setEndEvent(20);
+
+	EventCheckContext ctx{
+	    .player = p,
+	    .count_item = [](const SA::Model::Player &, std::int32_t item_id, void *) -> std::int32_t
+	    {
+		    if (item_id == 1001)
+			    return 3;
+		    if (item_id == 1002)
+			    return 1;
+		    return 0;
+	    },
+	    .count_pet = [](const SA::Model::Player &, std::int32_t pet_id, std::int32_t min_lvl, void *) -> std::int32_t
+	    {
+		    if (pet_id == 2001)
+			    return (min_lvl <= 50) ? 2 : 0;
+		    return 0;
+	    },
+	    .count_free_item_slots = [](const SA::Model::Player &, void *) -> std::int32_t
+	    { return 4; },
+	    .count_free_pet_slots = [](const SA::Model::Player &, void *) -> std::int32_t
+	    { return 2; },
+	    .get_transmigration = [](const SA::Model::Player &, void *) -> std::int32_t
+	    { return 5; },
+	    .get_fame = [](const SA::Model::Player &, void *) -> std::int32_t
+	    { return 150; },
+	    .get_family_id = [](const SA::Model::Player &, void *) -> std::uint32_t
+	    { return 10086; },
+	    .userdata = nullptr};
+
+	// 1. 变量全集覆盖与关系运算符 (=, !=, <, >, <=, >=)
+	CHECK(evaluateEventCondition("LV=80", ctx) == 1);
+	CHECK(evaluateEventCondition("LV>=80 & LV<=80", ctx) == 1);
+	CHECK(evaluateEventCondition("LV>79 & LV<81", ctx) == 1);
+	CHECK(evaluateEventCondition("LV!=80", ctx) == 0);
+
+	CHECK(evaluateEventCondition("TRANS=5", ctx) == 1);
+	CHECK(evaluateEventCondition("TRANS7=5", ctx) == 1);
+	CHECK(evaluateEventCondition("TRANS>=6", ctx) == 0);
+
+	CHECK(evaluateEventCondition("FAME>=150 & FAME>100 & FAME!=100", ctx) == 1);
+	CHECK(evaluateEventCondition("FM=10086 & FAMILY=10086", ctx) == 1);
+	CHECK(evaluateEventCondition("GOLD>=50000 & gold<=50000", ctx) == 1);
+	CHECK(evaluateEventCondition("HP=250 & MP=120", ctx) == 1);
+	CHECK(evaluateEventCondition("reITEM=4 & rePET=2", ctx) == 1);
+
+	// ITEM 语法 (* 数量>=, ^ 数量==, 无修饰默认==1)
+	CHECK(evaluateEventCondition("ITEM=1002", ctx) == 1);
+	CHECK(evaluateEventCondition("ITEM*2=1001", ctx) == 1);
+	CHECK(evaluateEventCondition("ITEM^3=1001", ctx) == 1);
+	CHECK(evaluateEventCondition("ITEM^2=1001", ctx) == 0);
+	CHECK(evaluateEventCondition("ITEM*4=1001", ctx) == 0);
+
+	// PET 语法
+	CHECK(evaluateEventCondition("PET*2=2001", ctx) == 1);
+	CHECK(evaluateEventCondition("PET^2=2001", ctx) == 1);
+	CHECK(evaluateEventCondition("PET=2001*50*2", ctx) == 1);
+	CHECK(evaluateEventCondition("PET=2001*60*2", ctx) == 0);
+
+	// NOWEV / ENDEV 语法 (冒号语法与直接比较)
+	CHECK(evaluateEventCondition("NOWEV=10", ctx) == 1);
+	CHECK(evaluateEventCondition("NOWEV:10=1", ctx) == 1);
+	CHECK(evaluateEventCondition("NOWEV:10=0", ctx) == 0);
+	CHECK(evaluateEventCondition("!NOWEV=10", ctx) == 0);
+	CHECK(evaluateEventCondition("ENDEV=20 & ENDEV:20=1", ctx) == 1);
+	CHECK(evaluateEventCondition("!ENDEV=21 & ENDEV:21=0", ctx) == 1);
+
+	// 2. 复合条件与括号优先级 & / | / ! / (...)
+	CHECK(evaluateEventCondition("(LV>10 & GOLD>=1000) | (TRANS>=6)", ctx) == 1);
+	CHECK(evaluateEventCondition("(LV<10 & GOLD>=1000) | (TRANS>=6)", ctx) == 0);
+	CHECK(evaluateEventCondition("!(LV<10) & !(TRANS<5)", ctx) == 1);
+	CHECK(evaluateEventCondition("!((LV<10 | TRANS<1) & FAME>0)", ctx) == 1);
+	CHECK(evaluateEventCondition("((LV>=80 & FAME>=150) | TRANS=0) & (reITEM>0 & rePET>0)", ctx) == 1);
+
+	// 3. 顶层逗号分支（括号内的逗号不会被切分为顶层分支）
+	CHECK(evaluateEventCondition("LV<10, LV=80, LV>100", ctx) == 2);
+}
+
+TEST_CASE("§9.0.97: ExChangeMan 脚本解析与全动作集执行闭环 (经验/点数/血蓝/声望/传送/旗标)")
+{
+	const std::string script = R"(
+EventNo:200|TYPE:ACCEPT
+EVENT:(LV>=10 & GOLD>=1000)
+DelGold:1000
+AddExps:2500
+AddSkillPoint:5
+HealHp:150
+HealMp:80
+AddFame:30
+NpcWarp:0,40,42
+SetNowEvent:15
+EndSetFlg:25
+CleanFlg:5
+NextBlock:201
+NomalWindowMsg:请确认接收勇者祝福？
+ThanksMsg:祝福已降临！
+EventEnd
+)";
+
+	const auto blocks = parseExChangeBlocks(script);
+	REQUIRE(blocks.size() == 1);
+	const auto &blk = blocks[0];
+	CHECK(blk.event_no == 200);
+	CHECK(blk.type == ExChangeType::kAccept);
+	CHECK(blk.del_stone == 1000);
+	CHECK(blk.add_exp == 2500);
+	CHECK(blk.add_skill_points == 5);
+	CHECK(blk.heal_hp == 150);
+	CHECK(blk.heal_mp == 80);
+	CHECK(blk.add_fame == 30);
+	CHECK(blk.npc_warp == "0,40,42");
+	CHECK(blk.set_now_flg == "15");
+	CHECK(blk.end_set_flg == "25");
+	CHECK(blk.clean_flg == "5");
+	CHECK(blk.next_block_index == 201);
+
+	// 在 World 中执行闭环验证
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	p->level = 15;
+	p->gold = 5000;
+	p->hp = 50;
+	p->mp = 10;
+	f.world.setPlayerFame(id, 10);
+	p->setEndEvent(5); // 供 CleanFlg:5 清除
+
+	NpcEntity npc{};
+	npc.id = 6001;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kExChangeMan;
+	npc.exchange_blocks = blocks;
+	f.world.loadNpcEntities({npc});
+
+	// 交互触发 TYPE:ACCEPT 提示窗口
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 801;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "请确认接收勇者祝福？");
+
+	// 点击 YES 确认
+	const std::uint32_t wid = f.world.playerActiveWindowId(id);
+	SA::Domain::WindowReply rep{};
+	rep.window_id = wid;
+	rep.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES);
+	f.world.onWindowReply(id, rep);
+	f.world.tick();
+
+	// 验证效果全量生效
+	CHECK(p->gold == 4000);
+	CHECK(p->exp == 2500);
+	CHECK(p->skillup_points == 5);
+	CHECK(p->hp == 200);                 // 50 + 150
+	CHECK(p->mp == 90);                  // 10 + 80
+	CHECK(f.world.playerFame(id) == 40); // 10 + 30
+	CHECK(p->floor == 0);
+	CHECK(p->x == 40);
+	CHECK(p->y == 42);
+	CHECK(p->hasNowEvent(15));
+	CHECK(p->hasEndEvent(25));
+	CHECK_FALSE(p->hasEndEvent(5)); // CleanFlg 成功清除
+}
+
+TEST_CASE("§9.0.97: ExChangeMan 多步对话树与委托/清除状态机闭环 (REQUEST / CLEAN / NextBlock)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	// 构造一个包含 REQUEST(接取/进行中), NextBlock(多步)与 CLEAN 的任务体系
+	// Block 0: 交付信件，带 NextBlock:2 推进多步
+	ExChangeBlock b1{};
+	b1.event_no = 31;
+	b1.type = ExChangeType::kMessage;
+	b1.condition = "NOWEV=30 & ITEM=1001";
+	b1.del_item = "1001";
+	b1.end_set_flg = "30";
+	b1.clean_now_flg = "30";
+	b1.nomal_window_msg = "村长: 谢谢你！请收下这枚勋章。";
+	b1.next_block_index = 2; // 指向 b2 在 exchange_blocks 中的下标
+
+	// Block 1: REQUEST 接取任务 30 与进行中提示
+	ExChangeBlock b0{};
+	b0.event_no = 30;
+	b0.type = ExChangeType::kRequest;
+	b0.condition = "!ENDEV=30";
+	b0.request_msg = "村长: 你愿意帮我寻找迷失的信件吗？";
+	b0.nomal_window_msg = "村长: 信件还没找到吗？就在村外草原。";
+	b0.set_now_flg = "30";
+
+	// Block 2: 后续奖励对话树
+	ExChangeBlock b2{};
+	b2.event_no = 32;
+	b2.type = ExChangeType::kMessage;
+	b2.condition = "ENDEV=30";
+	b2.nomal_window_msg = "村长: 以后多为村子效力吧！";
+
+	// Block 3: 重置清除 NPC
+	ExChangeBlock b_clean{};
+	b_clean.event_no = 33;
+	b_clean.type = ExChangeType::kClean;
+	b_clean.condition = "ENDEV=30";
+	b_clean.nomal_window_msg = "时光老人: 要重置村长任务吗？";
+	b_clean.clean_end_flg = "30";
+
+	NpcEntity npc_chief{};
+	npc_chief.id = 7001;
+	npc_chief.floor = 0;
+	npc_chief.x = 33;
+	npc_chief.y = 32;
+	npc_chief.type = NpcType::kExChangeMan;
+	npc_chief.exchange_blocks = {b1, b0, b2};
+
+	NpcEntity npc_cleaner{};
+	npc_cleaner.id = 7002;
+	npc_cleaner.floor = 0;
+	npc_cleaner.x = 33;
+	npc_cleaner.y = 34;
+	npc_cleaner.type = NpcType::kExChangeMan;
+	npc_cleaner.exchange_blocks = {b_clean};
+
+	f.world.loadNpcEntities({npc_chief, npc_cleaner});
+
+	// 1. 初次对话村长 (未接取) -> 弹出 YESNO 对话框
+	SA::Domain::EventRequest ev1{};
+	ev1.dir = 2;
+	ev1.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev1.seqno = 901;
+	f.world.onEvent(id, ev1);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "村长: 你愿意帮我寻找迷失的信件吗？");
+
+	// 点击 YES 接取任务
+	SA::Domain::WindowReply rep1{};
+	rep1.window_id = f.world.playerActiveWindowId(id);
+	rep1.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES);
+	f.world.onWindowReply(id, rep1);
+	f.world.tick();
+
+	CHECK(p->hasNowEvent(30));
+
+	// 关闭接取成功确认窗
+	SA::Domain::WindowReply rep1_ack{};
+	rep1_ack.window_id = f.world.playerActiveWindowId(id);
+	rep1_ack.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, rep1_ack);
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
+
+	// 2. 再次对话村长 (进行中但无信件) -> 弹出 request_msg 并且只给 OK 按钮
+	ev1.seqno = 902;
+	f.world.onEvent(id, ev1);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "村长: 信件还没找到吗？就在村外草原。");
+	// 关闭提示
+	SA::Domain::WindowReply rep2{};
+	rep2.window_id = f.world.playerActiveWindowId(id);
+	rep2.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, rep2);
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
+
+	// 3. 获得道具 1001 后再次对话 -> 命中 b1，完成任务并自动推进至 b2 (NextBlock:2)
+	const int slot = f.world.giveItemToPlayer(id, makeTestItem(1001));
+	REQUIRE(slot >= 0);
+
+	ev1.seqno = 903;
+	f.world.onEvent(id, ev1);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "村长: 谢谢你！请收下这枚勋章。");
+	CHECK_FALSE(p->hasNowEvent(30));
+	CHECK(p->hasEndEvent(30));
+
+	// 点击 OK，触发 next_block_index: 2 的自动连续窗口推进
+	SA::Domain::WindowReply rep3{};
+	rep3.window_id = f.world.playerActiveWindowId(id);
+	rep3.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, rep3);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "村长: 以后多为村子效力吧！");
+
+	// 关闭最终窗口
+	SA::Domain::WindowReply rep4{};
+	rep4.window_id = f.world.playerActiveWindowId(id);
+	rep4.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, rep4);
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
+
+	// 4. 对话时光老人 (kClean)
+	p->x = 33;
+	p->y = 33;
+	p->dir = 4;
+	SA::Domain::EventRequest ev2{};
+	ev2.dir = 4; // 面向 y=34 (33, 34)
+	ev2.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev2.seqno = 904;
+	f.world.onEvent(id, ev2);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "时光老人: 要重置村长任务吗？");
+
+	SA::Domain::WindowReply rep_clean{};
+	rep_clean.window_id = f.world.playerActiveWindowId(id);
+	rep_clean.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES);
+	f.world.onWindowReply(id, rep_clean);
+	f.world.tick();
+
+	// 验证 ENDEV=30 被成功清空，任务可再次接取
+	CHECK_FALSE(p->hasEndEvent(30));
+}
+
+TEST_CASE("§9.0.97: [RV-1] 复合条件门禁防御拦截与反向变异验证")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	// 设置高门槛复合条件 NPC:
+	// 需要 (LV>=80 & TRANS>=1) & (FAME>=100 & reITEM>=2)
+	NpcEntity npc{};
+	npc.id = 8001;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kExChangeMan;
+
+	ExChangeBlock blk{};
+	blk.event_no = 50;
+	blk.type = ExChangeType::kMessage;
+	blk.condition = "(LV>=80 & TRANS>=1) & (FAME>=100 & reITEM>=2)";
+	blk.nomal_window_msg = "通过圣殿考验！";
+	npc.exchange_blocks = {blk};
+	f.world.loadNpcEntities({npc});
+
+	p->level = 85;
+	f.world.setPlayerTransmigration(id, 0); // 转生不足！
+	f.world.setPlayerFame(id, 120);
+
+	// 交互拦截测试 1: 转生不足被严格阻断
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 1001;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+	CHECK_FALSE(f.world.playerHasActiveWindow(id)); // 无匹配块，不弹窗
+
+	// 满足转生，但将背包塞至只剩 1 个空位 (reITEM < 2)
+	f.world.setPlayerTransmigration(id, 1);
+	for (int i = 0; i < 44; ++i)
+	{
+		REQUIRE(f.world.giveItemToPlayer(id, makeTestItem(999)) >= 0);
+	}
+	CHECK(f.world.playerItemSlotsUsed(id) == 44); // 45 - 44 = 1 空位
+
+	ev.seqno = 1002;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+	CHECK_FALSE(f.world.playerHasActiveWindow(id)); // reITEM>=2 不满足被阻断
+
+	// 清理出一个空位，空位为 2 (reITEM=2)，全部满足
+	p->items[SA::Model::kStartItemArray] = {};
+	CHECK(f.world.playerItemSlotsUsed(id) == 43); // 2 空位
+
+	ev.seqno = 1003;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "通过圣殿考验！");
+}
+
+TEST_CASE("§9.0.97: [RV-2] 动作原子执行与资产事务一致性反向变异验证")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	// 复杂事务块：扣 500 石币，扣道具 1001*2，扣宠物 2001，给道具 1002，给宠物 2002
+	NpcEntity npc{};
+	npc.id = 8002;
+	npc.floor = 0;
+	npc.x = 33;
+	npc.y = 32;
+	npc.type = NpcType::kExChangeMan;
+
+	ExChangeBlock blk{};
+	blk.event_no = 60;
+	blk.type = ExChangeType::kAccept;
+	blk.condition = "LV>=1";
+	blk.del_stone = 500;
+	blk.del_item = "1001*2";
+	blk.del_pet = "2001";
+	blk.get_item = "1002";
+	blk.get_pet = "2002";
+	blk.nomal_window_msg = "确认进行古代献祭置换吗？";
+	blk.thanks_msg = "献祭置换完成！";
+	npc.exchange_blocks = {blk};
+	f.world.loadNpcEntities({npc});
+
+	p->level = 10;
+	p->gold = 1000;
+	// 玩家只有 1 个道具 1001 (不足 2 个)
+	REQUIRE(f.world.giveItemToPlayer(id, makeTestItem(1001)) >= 0);
+	// 玩家有 1 只宠物 2001
+	f.world.givePetToPlayer(id, makeTestPet(2001));
+
+	// 交互弹出确认窗口
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 1101;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+	CHECK(f.world.playerHasActiveWindow(id));
+
+	// 点击 YES 进行兑换 -> 由于道具不足 2 个，前置事务检查必须彻底阻断
+	SA::Domain::WindowReply rep{};
+	rep.window_id = f.world.playerActiveWindowId(id);
+	rep.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES);
+	f.world.onWindowReply(id, rep);
+	f.world.tick();
+
+	// 严格断言：事务零副作用
+	CHECK(p->gold == 1000); // 500 石币未扣
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+	// 宠物 2001 完好无损
+	const auto *pet = f.world.playerPetAt(id, 0);
+	REQUIRE(pet != nullptr);
+	CHECK(pet->pet_id == 2001);
+
+	// 补齐第 2 个道具 1001
+	REQUIRE(f.world.giveItemToPlayer(id, makeTestItem(1001)) >= 0);
+	CHECK(f.world.playerItemSlotsUsed(id) == 2);
+
+	// 再次交互并确认
+	ev.seqno = 1102;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+	CHECK(f.world.playerHasActiveWindow(id));
+
+	rep.window_id = f.world.playerActiveWindowId(id);
+	rep.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES);
+	f.world.onWindowReply(id, rep);
+	f.world.tick();
+
+	// 严格断言：原子执行成功，旧资产精确扣除，新资产全部到账
+	CHECK(p->gold == 500); // 1000 - 500
+	// 道具 1001 扣除 2 个，获得 1 个 1002，道具总占用为 1
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+	bool has_1002 = false;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		const auto *it = f.world.playerItemAt(id, static_cast<int>(i));
+		if (it != nullptr && it->item_id == 1002)
+			has_1002 = true;
+	}
+	CHECK(has_1002);
+
+	// 宠物 2001 扣除，获得 2002，宠物槽仍为 1
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+	const auto *new_pet = f.world.playerPetAt(id, 0);
+	REQUIRE(new_pet != nullptr);
+	CHECK(new_pet->pet_id == 2002);
+}

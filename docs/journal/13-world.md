@@ -1131,3 +1131,50 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - 篡改 `FusionTable` 查表结果与 `calculatePetTransAns` 五次方倍率 ⇒ 用例 3 与相关断言立即精准报红失败；恢复后回绿。
 - **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 8 项 CTest 全量通过（锁定 `shared-v0.42.0` 零漂移），双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
 
+### 9.0.97 ExChangeMan Script Expansion (阶段 2 任务引擎脚本全景扩展)
+
+> **对应架构设计**: `stoneage-plan/docs/09-npc-event-dsl.md` §2-§5，`10-world-map.md` 阶段 2 扩展  
+> **核心交付**: 任务引擎复合条件解析器 (Recursive Descent Parser)、全量条件变量求值上下文 (`EventCheckContext`)、全动作集执行闭环 (`applyExChangeEffects`)、多步对话树推进 (`next_block_index`) 与委托/清除状态机 (`kRequest` / `kClean`)。
+
+#### 1. 核心设计与落地产出
+
+1. **递归下降复合条件解析器 (`ExprParser`)**:
+   - 彻底超越扁平原子合取，实现完整的递归下降语法分析器，支持 `&`（合取）、`|`（析取）、`!`（非）与任意嵌套深度的圆括号优先级 `(...)`；
+   - 顶层逗号分支扫描（`splitTopLevelBranches`）保护圆括号内逗号，严防参数切分误伤；
+   - 关系运算符全量支持：`=`、`!=`、`<`、`>`、`<=`、`>=`（优先匹配双字符运算符再匹配单字符，彻底消除前缀贪婪匹配错位）。
+2. **变量表全面扩展 (`evaluateAtom`)**:
+   - **角色基础与成长**: 等级（`LV`）、转生（`TRANS`/`TRANS7`）、声望（`FAME`）、家族（`FM`/`FAMILY`）、职业（`PROF`/`CLASS`/`PROFESSION`）、石币（`GOLD`/`gold`）、生命法力点数（`HP`/`MP`/`SP`/`SKCP`）；
+   - **背包与宠物容量**: 道具空槽（`reITEM`）、宠物空槽（`rePET`）；
+   - **道具数量语法**: `ITEM=id*count` (持有 $\ge count$)、`ITEM=id^count` (持有 $== count$)，并兼容 `ITEM*count=id` 与 `ITEM^count=id`；
+   - **宠物持有语法**: 官方三段式 `PET<op><level>-<petid>[*<count>]` 与 `PET=id*level*count`，以及数量关系 `PET*count=id`、`PET^count=id`，并严格排除 `rePET` 前缀误判；
+   - **任务旗标 256 位空间**: `NOWEV=bit`、`!NOWEV=bit`、`ENDEV=bit`、`!ENDEV=bit`，以及冒号语法 `NOWEV:bit=val`、`ENDEV:bit=val`，并带越界安全防护。
+3. **全动作集（Action / Effect）原子执行闭环 (`applyExChangeEffects`)**:
+   - 经验奖励（`AddExps`/`AddExp`）、技能点奖励（`AddSkillPoint`/`AddPFSkillPoint`）；
+   - 生命与法力恢复（`Heal`/`HealHp`/`HealMp`，基于 `deriveBaseStats` 约束且防御 0 上限）；
+   - 声望奖扣（`AddFame`/`DelFame`）；
+   - 空间传送（`NpcWarp`/`Warp`，调用 `warpSinglePlayer`）；
+   - 旗标增删（`SetNowEvent`/`EvNow`、`ClearNowEvent`、`ClearEndEvent`、`EndSetFlg`、`CleanFlg`）。
+4. **多步对话树推进与委托/清除状态机 (`onEvent` & `onWindowReply`)**:
+   - **`kRequest` (委托型)**: 未接取时弹出 `request_msg` (YES/NO)，点击 YES 接取任务并置位 NOWEV；进行中时弹出 `nomal_window_msg` (OK)，友好提示进度并阻断重复接取；
+   - **`kClean` (清除型)**: 弹出放弃确认窗 (YES/NO)，确认后原子清除 NOWEV 与 ENDEV，重置任务状态；
+   - **`next_block_index` (多步推进)**: 窗口回复后无缝自动触发推进链条，支持连续对话树与多阶段交互跳转。
+5. **防御机制与反向变异验证**:
+   - **[RV-1] 复合条件门禁防御拦截**: 验证 `(LV>=80 & TRANS>=1) & (FAME>=100 & reITEM>=2)` 门禁体系，转生不足或空位不足严格阻断弹窗与执行；
+   - **[RV-2] 动作原子执行与资产事务一致性**: 复杂多资产置换（扣石币、道具、宠物，给道具、宠物），在条件或资产不足时前置阻断，绝对保持 0 副作用；成功时原子完成置换。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 125 组增至 **130 组**（+5 组全量条件、全动作执行、多步对话树及 RV-1/RV-2 变异用例），断言数从 3650 条增至 **3807 条**（+157 条断言，100% 成功）。
+- **实测用例矩阵**:
+  1. `§9.0.97: ExChangeMan 全量条件表达式求值 (复合条件/括号优先级/关系运算符/变量全集)`
+  2. `§9.0.97: ExChangeMan 脚本解析与全动作集执行闭环 (经验/点数/血蓝/声望/传送/旗标)`
+  3. `§9.0.97: ExChangeMan 多步对话树与委托/清除状态机闭环 (REQUEST / CLEAN / NextBlock)`
+  4. `§9.0.97: [RV-1] 复合条件门禁防御拦截与反向变异验证`
+  5. `§9.0.97: [RV-2] 动作原子执行与资产事务一致性反向变异验证`
+- **反向验证 (RV-1)**:
+  - 篡改 `parseAnd` 将合取 `&` 降级为 `||` ⇒ 用例 4 中转生未达标的拦截断言立即报红失败；恢复后回绿。
+- **反向验证 (RV-2)**:
+  - 篡改 `checkExChangePreconditions` 绕过道具持有充足性检查 ⇒ 用例 5 中石币扣减一致性断言（500 != 1000）立即精准报红失败；恢复后回绿。
+- **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 8 项 CTest 全量通过（锁定 `shared-v0.42.0` 零漂移），双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
+
+
