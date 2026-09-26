@@ -2709,7 +2709,52 @@ struct World::Impl : GoldAuditSink
 	bool checkExChangePreconditions(const SA::Model::Player &p, const ExChangeBlock &blk, int branch_idx, std::string &msg_out);
 	void applyExChangeEffects(SA::Net::SessionId id, SA::Model::Player &p, const ExChangeBlock &blk, int branch_idx);
 
+	// ── 组队系统 (阶段 2: 队伍与协同) ──────────────────────────
+	struct Party
+	{
+		std::uint64_t party_id = 0;
+		SA::Net::SessionId leader = 0;
+		std::vector<SA::Net::SessionId> members{};
+	};
+	std::unordered_map<std::uint64_t, Party> parties{};
+	std::unordered_map<SA::Net::SessionId, std::uint64_t> party_of_session{};
+	std::uint64_t next_party_id = 1;
+
+	PartyMode partyModeOf(SA::Net::SessionId session) const noexcept
+	{
+		auto it = party_of_session.find(session);
+		if (it == party_of_session.end())
+			return PartyMode::kNone;
+		auto pit = parties.find(it->second);
+		if (pit == parties.end())
+			return PartyMode::kNone;
+		return (pit->second.leader == session) ? PartyMode::kLeader : PartyMode::kMember;
+	}
+
+	SA::Net::SessionId partyLeaderOf(SA::Net::SessionId session) const noexcept
+	{
+		auto it = party_of_session.find(session);
+		if (it == party_of_session.end())
+			return 0;
+		auto pit = parties.find(it->second);
+		if (pit == parties.end())
+			return 0;
+		return pit->second.leader;
+	}
+
+	std::vector<SA::Net::SessionId> partyMembersOf(SA::Net::SessionId session) const
+	{
+		auto it = party_of_session.find(session);
+		if (it == party_of_session.end())
+			return {};
+		auto pit = parties.find(it->second);
+		if (pit == parties.end())
+			return {};
+		return pit->second.members;
+	}
+
 	// ── 瞬移与传送底层 (批次 W.6 / W.14: 移除旧 olink, 视野广播, 更新坐标, 挂接新 olink) ──
+	void warpSinglePlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y);
 	void warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y);
 };
 
@@ -2831,7 +2876,7 @@ void World::Impl::sendExChangeWindow(SA::Net::SessionId id, std::uint64_t npc_id
 	sendTo(id, win);
 }
 
-void World::Impl::warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y)
+void World::Impl::warpSinglePlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y)
 {
 	const auto it = conns.find(id);
 	SA::Model::Player *p = players.resolve(player_of_session.find(id));
@@ -2907,6 +2952,31 @@ void World::Impl::warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std:
 	self_mv.dir = static_cast<std::uint32_t>(p->dir);
 	self_mv.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER);
 	sendTo(id, self_mv);
+}
+
+void World::Impl::warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y)
+{
+	std::vector<SA::Net::SessionId> followers{};
+	auto pit = party_of_session.find(id);
+	if (pit != party_of_session.end())
+	{
+		auto party_it = parties.find(pit->second);
+		if (party_it != parties.end() && party_it->second.leader == id)
+		{
+			for (std::size_t idx = 1; idx < party_it->second.members.size(); ++idx)
+			{
+				followers.push_back(party_it->second.members[idx]);
+			}
+		}
+	}
+
+	warpSinglePlayer(id, dst_floor, dst_x, dst_y);
+
+	// 队长传送时全队队员一同同步传送 (移植 map_warppoint.c:270-278 / npc_warpman.c:705-715)
+	for (auto fid : followers)
+	{
+		warpSinglePlayer(fid, dst_floor, dst_x, dst_y);
+	}
 }
 
 bool World::Impl::checkExChangePreconditions(const SA::Model::Player &p,
@@ -3205,6 +3275,28 @@ bool decodeDirChar(char moji, std::uint8_t &dir, bool &is_turn)
 		return false;
 	dir = static_cast<std::uint8_t>(d);
 	return true;
+}
+
+// 两点相对方向计算 —— 移植 NPC_Util_getDirFromTwoPoint(npcutil.c:280):
+//   返回 sx, sy 到 ex, ey 的 8 方向 dir (0-7); 若坐标重合返回 -1。
+inline int getDirFromTwoPoints(std::int32_t sx, std::int32_t sy, std::int32_t ex, std::int32_t ey) noexcept
+{
+	static constexpr int dirtable[3][3] = {
+	    {7, 0, 1},
+	    {6, -1, 2},
+	    {5, 4, 3},
+	};
+	int difx = ex - sx;
+	int dify = ey - sy;
+	if (difx < 0)
+		difx = -1;
+	else if (difx > 0)
+		difx = 1;
+	if (dify < 0)
+		dify = -1;
+	else if (dify > 0)
+		dify = 1;
+	return dirtable[dify + 1][difx + 1];
 }
 
 // 走一步 —— 移植 CHAR_walk_move(char_walk.c:195)的**地图碰撞 + 坐标更新**核心。
@@ -4292,6 +4384,11 @@ void World::tick()
 			c.walk_seq.clear();
 			continue;
 		}
+		if (s.partyModeOf(kv.first) == PartyMode::kMember)
+		{
+			c.walk_seq.clear();
+			continue;
+		}
 		if (c.session == nullptr || c.walk_seq.empty() || (s.storage && (c.pending || c.detached || c.save_failed)))
 			continue;
 		// 间隔门(CHAR_walk_check:4590):到点才走一步,走完把下次时刻推后 kWalkIntervalMs。
@@ -4391,6 +4488,60 @@ void World::tick()
 			s.refreshEnemyView(kv.first, *p, ox, oy);
 			// W.7:玩家移动后补发视野内**世界 NPC** 的 appear / disappear。
 			s.refreshNpcView(kv.first, *p, ox, oy);
+
+			// ── 队伍跟随 (贪吃蛇跟随): 队员沿前一人足迹前进一步 (移植 char_walk.c:689-705) ──
+			if (s.partyModeOf(kv.first) == PartyMode::kLeader)
+			{
+				auto pit = s.party_of_session.find(kv.first);
+				if (pit != s.party_of_session.end())
+				{
+					auto party_it = s.parties.find(pit->second);
+					if (party_it != s.parties.end())
+					{
+						std::int32_t end_x = ox;
+						std::int32_t end_y = oy;
+						for (std::size_t idx = 1; idx < party_it->second.members.size(); ++idx)
+						{
+							const auto mid = party_it->second.members[idx];
+							SA::Model::Player *mp = s.players.resolve(s.player_of_session.find(mid));
+							if (mp == nullptr || mp->floor != p->floor)
+								continue;
+							const std::int32_t start_x = mp->x;
+							const std::int32_t start_y = mp->y;
+							const int fdir = getDirFromTwoPoints(start_x, start_y, end_x, end_y);
+							end_x = start_x;
+							end_y = start_y;
+							if (fdir >= 0)
+							{
+								mp->dir = static_cast<std::uint8_t>(fdir);
+								const std::int32_t target_x = start_x + kDirDelta[fdir].dx;
+								const std::int32_t target_y = start_y + kDirDelta[fdir].dy;
+								mp->x = target_x;
+								mp->y = target_y;
+								if (cur_map.inBounds(start_x, start_y))
+								{
+									const auto idx_old = cur_map.index(start_x, start_y);
+									if (idx_old < cur_olink.size())
+									{
+										auto &oldcell = cur_olink[idx_old];
+										oldcell.erase(std::remove(oldcell.begin(), oldcell.end(), mid),
+										              oldcell.end());
+									}
+								}
+								if (cur_map.inBounds(mp->x, mp->y))
+								{
+									const auto idx_new = cur_map.index(mp->x, mp->y);
+									if (idx_new < cur_olink.size())
+										cur_olink[idx_new].push_back(mid);
+								}
+								s.broadcastMove(mid, start_x, start_y, *mp);
+								s.refreshEnemyView(mid, *mp, start_x, start_y);
+								s.refreshNpcView(mid, *mp, start_x, start_y);
+							}
+						}
+					}
+				}
+			}
 
 			// ── 遇敌判定(批次 W.4。原 char_walk.c:585,展开视图基准)────────────
 			//   ★ 只在真移动(moved)后判:转身 / 撞墙不触发(原版遇敌在 walk_move 成功后)。
@@ -4952,6 +5103,8 @@ bool World::triggerEncounter(SA::Net::SessionId session, std::int32_t area_row)
 	Impl &s = *_impl;
 	if (s.inBattle(session))
 		return false;
+	if (s.partyModeOf(session) == PartyMode::kMember)
+		return false;
 	if (area_row < 0 ||
 	    static_cast<std::size_t>(area_row) >= s.encount_areas.size())
 		return false;
@@ -4975,20 +5128,37 @@ bool World::triggerEncounter(SA::Net::SessionId session, std::int32_t area_row)
 	if (rows.empty())
 		return false; // 无候选 ⇒ 本次不遇敌
 
-	// ── 建场 + 玩家入场(Side[0] 首位)─────────────────────────────────
+	// ── 建场 + 玩家与队伍入场 (Side[0]) ──────────────────────────────
 	SA::Rules::BattleField field{};
-	field.at(0) = makePlayerCombatant(s.players.resolve(s.player_of_session.find(session)),
-	                                  playerEquipModifiers(session));
-	const BattleId battle = startBattle(field);
-	if (!joinBattle(battle, session, 0))
+	std::vector<SA::Net::SessionId> battle_party_members{};
+	if (s.partyModeOf(session) == PartyMode::kLeader)
 	{
-		// ⚠️ 进不去 ⇒ 刚建的 battle 成孤儿(同 onSessionReady demo 分支):报出来。
-		s.logger.log(SA::Platform::LogLevel::kError,
-		             SA::Platform::LogEvent::kBattleJoinFailed,
-		             {{"battle_id", battle},
-		              {"session_id", session},
-		              {"reason", std::string_view("encounter_join_failed")}});
-		return false;
+		battle_party_members = s.partyMembersOf(session);
+	}
+	else
+	{
+		battle_party_members = {session};
+	}
+
+	for (std::size_t idx = 0; idx < battle_party_members.size() && idx < SA::Rules::kBattlePlayerMax; ++idx)
+	{
+		const auto mid = battle_party_members[idx];
+		field.at(static_cast<int>(idx)) = makePlayerCombatant(s.players.resolve(s.player_of_session.find(mid)),
+		                                                      playerEquipModifiers(mid));
+	}
+
+	const BattleId battle = startBattle(field);
+	for (std::size_t idx = 0; idx < battle_party_members.size() && idx < SA::Rules::kBattlePlayerMax; ++idx)
+	{
+		const auto mid = battle_party_members[idx];
+		if (!joinBattle(battle, mid, static_cast<std::uint8_t>(idx)))
+		{
+			s.logger.log(SA::Platform::LogLevel::kError,
+			             SA::Platform::LogEvent::kBattleJoinFailed,
+			             {{"battle_id", battle},
+			              {"session_id", mid},
+			              {"reason", std::string_view("encounter_party_join_failed")}});
+		}
 	}
 
 	// ── 逐只敌人入场(Side[1] 起,baselevel=-1 野外摇号)──────────────────
@@ -5037,6 +5207,8 @@ bool World::triggerNpcEnemyBattle(SA::Net::SessionId session, std::size_t world_
 	Impl &s = *_impl;
 	if (s.inBattle(session))
 		return false;
+	if (s.partyModeOf(session) == PartyMode::kMember)
+		return false;
 	if (world_enemy_idx >= s.world_enemies.size())
 		return false;
 	// ★ 拷一份 WorldEnemy:下面要 erase(world_enemies),持有引用会失效。
@@ -5048,19 +5220,37 @@ bool World::triggerNpcEnemyBattle(SA::Net::SessionId session, std::size_t world_
 	const std::int32_t ex = enemy->x;
 	const std::int32_t ey = enemy->y;
 
-	// ── 建场 + 玩家入场(Side[0] 首位,同 triggerEncounter)──────────────────
+	// ── 建场 + 玩家与队伍入场 (Side[0], 同 triggerEncounter) ──────────────────
 	SA::Rules::BattleField field{};
-	field.at(0) = makePlayerCombatant(s.players.resolve(s.player_of_session.find(session)),
-	                                  playerEquipModifiers(session));
-	const BattleId battle = startBattle(field);
-	if (!joinBattle(battle, session, 0))
+	std::vector<SA::Net::SessionId> battle_party_members{};
+	if (s.partyModeOf(session) == PartyMode::kLeader)
 	{
-		s.logger.log(SA::Platform::LogLevel::kError,
-		             SA::Platform::LogEvent::kBattleJoinFailed,
-		             {{"battle_id", battle},
-		              {"session_id", session},
-		              {"reason", std::string_view("npcenemy_join_failed")}});
-		return false;
+		battle_party_members = s.partyMembersOf(session);
+	}
+	else
+	{
+		battle_party_members = {session};
+	}
+
+	for (std::size_t idx = 0; idx < battle_party_members.size() && idx < SA::Rules::kBattlePlayerMax; ++idx)
+	{
+		const auto mid = battle_party_members[idx];
+		field.at(static_cast<int>(idx)) = makePlayerCombatant(s.players.resolve(s.player_of_session.find(mid)),
+		                                                      playerEquipModifiers(mid));
+	}
+
+	const BattleId battle = startBattle(field);
+	for (std::size_t idx = 0; idx < battle_party_members.size() && idx < SA::Rules::kBattlePlayerMax; ++idx)
+	{
+		const auto mid = battle_party_members[idx];
+		if (!joinBattle(battle, mid, static_cast<std::uint8_t>(idx)))
+		{
+			s.logger.log(SA::Platform::LogLevel::kError,
+			             SA::Platform::LogEvent::kBattleJoinFailed,
+			             {{"battle_id", battle},
+			              {"session_id", mid},
+			              {"reason", std::string_view("npcenemy_party_join_failed")}});
+		}
 	}
 
 	// ── 明雷入场(敌方首槽 kSideOffset)——★ 用**已存在**的敌人实体,转移所有权 ──────────
@@ -5202,6 +5392,7 @@ void World::detachBattles(SA::Net::SessionId id)
 
 void World::removeSession(SA::Net::ConnectionId id)
 {
+	leaveParty(id);
 	Impl &s = *_impl;
 	const auto it = s.conns.find(id);
 	if (it == s.conns.end())
@@ -5317,6 +5508,12 @@ void World::onSessionReady(SA::Net::SessionId id)
 					np->floor = 0;
 					np->x = s.map.width / 2;
 					np->y = s.map.height / 2;
+					if (np->hp <= 0)
+						np->hp = 100;
+					if (np->max_mp <= 0)
+						np->max_mp = 100;
+					if (np->mp <= 0)
+						np->mp = 100;
 				}
 				// 里程碑②:入 olink + 与视野内玩家双向 CharAppear(原版进图 sendCToArround)。
 				auto *fl = s.getFloor(np->floor);
@@ -5539,6 +5736,21 @@ void World::onWalk(SA::Net::SessionId id, const SA::Domain::WalkRequest &req)
 	//   ⚠️ 划外(各有归属):nuke 反作弊(:517,自由服魔改)· 交易模式门(:513,交易系统)·
 	//      组队分支(walk_init:947,组队系统)。
 	Impl &s = *_impl;
+	if (s.partyModeOf(id) == PartyMode::kMember)
+	{
+		// 队员自主移动被禁止 (移植 char_walk.c:924)
+		bool has_move = false;
+		for (char ch : std::string_view(req.direction.c_str()))
+		{
+			if (ch >= 'a' && ch <= 'z')
+			{
+				has_move = true;
+				break;
+			}
+		}
+		if (has_move)
+			return;
+	}
 	const auto it = s.conns.find(id); // 1.5:SessionId == ConnectionId
 	if (it == s.conns.end())
 		return;
@@ -5589,6 +5801,8 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 	//   算面前格 → 扫该格事件对象 → 命中明雷则开战。★ 本批只接 ENTITY_ENEMY 一路
 	//   (原版 functbl[event] 是通用派发,传送点 warppoint 等其他事件族为后续预留)。
 	Impl &s = *_impl;
+	if (s.partyModeOf(id) == PartyMode::kMember)
+		return; // 队员不能自主触发事件与明雷开战 (移植 npc_npcenemy.c:358)
 	bool ok = false;
 
 	// 只处理明雷(ENTITY_ENEMY);其他 event_type ⇒ ok=false(未接的事件族,不报错、不断连)。
@@ -6756,10 +6970,175 @@ bool World::warpPlayerByNpc(SA::Net::SessionId id, std::uint64_t npc_id, std::si
 
 void World::onSessionClosed(SA::Net::SessionId id)
 {
+	leaveParty(id);
 	_impl->logger.log(SA::Platform::LogLevel::kDebug,
 	                  SA::Platform::LogEvent::kSessionStateChanged,
 	                  {{"session_id", id},
 	                   {"state", std::string_view("closed")}});
+}
+
+// ══ 组队系统 (阶段 2: 队伍与协同) ══════════════════════════════════
+bool World::joinParty(SA::Net::SessionId requester, SA::Net::SessionId target)
+{
+	Impl &s = *_impl;
+	if (requester == target)
+		return false;
+
+	// 1. 会话有效性与 L2 Player 实体检查
+	if (s.conns.find(requester) == s.conns.end() || s.conns.find(target) == s.conns.end())
+		return false;
+
+	SA::Model::Player *req_p = s.players.resolve(s.player_of_session.find(requester));
+	SA::Model::Player *tar_p = s.players.resolve(s.player_of_session.find(target));
+	if (req_p == nullptr || tar_p == nullptr)
+		return false;
+
+	// 2. 存活与非战斗态检查 (移植 char_party.c:220)
+	if (req_p->hp <= 0 || tar_p->hp <= 0)
+		return false;
+	if (s.inBattle(requester) || s.inBattle(target))
+		return false;
+
+	// 3. requester 必须处于无队伍状态 (char_party.c:152)
+	if (s.partyModeOf(requester) != PartyMode::kNone)
+		return false;
+
+	// 4. 地图与距离检查: 同一地图且切比雪夫距离 <= 2 (移植 char_party.c:215 / npcutil.c:575)
+	if (req_p->floor != tar_p->floor)
+		return false;
+	const int dx = std::abs(req_p->x - tar_p->x);
+	const int dy = std::abs(req_p->y - tar_p->y);
+	if (std::max(dx, dy) > 2)
+		return false;
+
+	// 5. 加入目标队伍或创建新队伍
+	auto tar_it = s.party_of_session.find(target);
+	if (tar_it == s.party_of_session.end())
+	{
+		// target 未组队，target 成为 leader，requester 成为 member (char_party.c:88-91)
+		const std::uint64_t pid = s.next_party_id++;
+		Impl::Party party{};
+		party.party_id = pid;
+		party.leader = target;
+		party.members = {target, requester};
+		s.parties[pid] = std::move(party);
+		s.party_of_session[target] = pid;
+		s.party_of_session[requester] = pid;
+		return true;
+	}
+
+	// target 已在队伍中: 加入 target 所在队伍
+	auto pit = s.parties.find(tar_it->second);
+	if (pit == s.parties.end())
+		return false;
+
+	Impl::Party &party = pit->second;
+	if (party.members.size() >= kPartyMaxMembers)
+		return false; // 人数达上限 (CHAR_PARTYMAX = 5)
+
+	party.members.push_back(requester);
+	s.party_of_session[requester] = party.party_id;
+	return true;
+}
+
+bool World::leaveParty(SA::Net::SessionId session)
+{
+	Impl &s = *_impl;
+	auto it = s.party_of_session.find(session);
+	if (it == s.party_of_session.end())
+		return false;
+
+	if (s.inBattle(session))
+		return false;
+
+	const std::uint64_t pid = it->second;
+	auto pit = s.parties.find(pid);
+	if (pit == s.parties.end())
+	{
+		s.party_of_session.erase(it);
+		return false;
+	}
+
+	Impl::Party &party = pit->second;
+	if (party.leader == session)
+	{
+		// 队长离开: 队伍整体解散 (移植 char_party.c:377 CHAR_DischargePartySub)
+		for (auto mid : party.members)
+		{
+			s.party_of_session.erase(mid);
+		}
+		s.parties.erase(pit);
+		return true;
+	}
+
+	// 队员离开: 从成员列表中移除 (char_party.c:485)
+	auto mit = std::find(party.members.begin(), party.members.end(), session);
+	if (mit != party.members.end())
+	{
+		party.members.erase(mit);
+	}
+	s.party_of_session.erase(it);
+
+	// 若剩余成员仅剩队长一人，队伍解散 (char_party.c:534-545)
+	if (party.members.size() <= 1)
+	{
+		s.party_of_session.erase(party.leader);
+		s.parties.erase(pit);
+	}
+	return true;
+}
+
+bool World::kickPartyMember(SA::Net::SessionId leader, SA::Net::SessionId member)
+{
+	Impl &s = *_impl;
+	if (leader == member)
+		return false;
+
+	if (s.inBattle(leader) || s.inBattle(member))
+		return false;
+
+	auto lit = s.party_of_session.find(leader);
+	if (lit == s.party_of_session.end())
+		return false;
+
+	auto pit = s.parties.find(lit->second);
+	if (pit == s.parties.end() || pit->second.leader != leader)
+		return false; // 只有队长能踢人
+
+	Impl::Party &party = pit->second;
+	auto mit = std::find(party.members.begin(), party.members.end(), member);
+	if (mit == party.members.end())
+		return false; // 队员不在队伍中
+
+	party.members.erase(mit);
+	s.party_of_session.erase(member);
+
+	if (party.members.size() <= 1)
+	{
+		s.party_of_session.erase(party.leader);
+		s.parties.erase(pit);
+	}
+	return true;
+}
+
+PartyMode World::playerPartyMode(SA::Net::SessionId session) const noexcept
+{
+	return _impl->partyModeOf(session);
+}
+
+SA::Net::SessionId World::playerPartyLeader(SA::Net::SessionId session) const noexcept
+{
+	return _impl->partyLeaderOf(session);
+}
+
+std::vector<SA::Net::SessionId> World::playerPartyMembers(SA::Net::SessionId session) const
+{
+	return _impl->partyMembersOf(session);
+}
+
+std::size_t World::partyCount() const noexcept
+{
+	return _impl->parties.size();
 }
 
 // ══ 观察面 ═══════════════════════════════════════════════════════

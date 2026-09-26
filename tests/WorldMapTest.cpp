@@ -4497,3 +4497,396 @@ TEST_CASE("职业属性上限门禁与猎人非战斗职技全链路集成 (批�
 	REQUIRE(f.world.castHunterEncounterSkill(id, true, 30, 10, 180000));
 	CHECK(f.world.playerEncounterRateFix(id) == 30);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  组队系统全链路集成与反向验证 (阶段 2: 队伍与协同)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("组队生命周期: 建队、加入、5人上限门禁、踢出与解散")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	const auto id3 = spawnHandshaked(f);
+	const auto id4 = spawnHandshaked(f);
+	const auto id5 = spawnHandshaked(f);
+	const auto id6 = spawnHandshaked(f);
+
+	// 初始所有人均未组队
+	CHECK(f.world.playerPartyMode(id1) == PartyMode::kNone);
+	CHECK(f.world.playerPartyLeader(id1) == 0);
+	CHECK(f.world.partyCount() == 0);
+
+	// 1. 距离过远拦截 (跨图或切比雪夫距离 > 2)
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p2->floor = 0;
+	p2->x = 30;
+	p2->y = 30; // dx=10 > 2
+	CHECK_FALSE(f.world.joinParty(id2, id1));
+
+	// 跨地图拦截
+	p2->x = 20;
+	p2->y = 21;
+	p2->floor = 100;
+	CHECK_FALSE(f.world.joinParty(id2, id1));
+	p2->floor = 0;
+
+	// 阵亡拦截
+	p2->hp = 0;
+	CHECK_FALSE(f.world.joinParty(id2, id1));
+	p2->hp = 100;
+
+	// 不能加入自己
+	CHECK_FALSE(f.world.joinParty(id1, id1));
+
+	// 2. 正常加入: id2 加入 id1, id1 成为队长, id2 成为队员
+	REQUIRE(f.world.joinParty(id2, id1));
+	CHECK(f.world.partyCount() == 1);
+	CHECK(f.world.playerPartyMode(id1) == PartyMode::kLeader);
+	CHECK(f.world.playerPartyMode(id2) == PartyMode::kMember);
+	CHECK(f.world.playerPartyLeader(id2) == id1);
+	auto members = f.world.playerPartyMembers(id1);
+	REQUIRE(members.size() == 2);
+	CHECK(members[0] == id1);
+	CHECK(members[1] == id2);
+
+	// 已有队伍不能再申请加入
+	CHECK_FALSE(f.world.joinParty(id2, id3));
+
+	// 3. 加入第 3, 4, 5 名队员
+	auto *p3 = f.world.playerForTest(id3);
+	auto *p4 = f.world.playerForTest(id4);
+	auto *p5 = f.world.playerForTest(id5);
+	p3->floor = 0;
+	p3->x = 21;
+	p3->y = 20;
+	p4->floor = 0;
+	p4->x = 20;
+	p4->y = 19;
+	p5->floor = 0;
+	p5->x = 19;
+	p5->y = 20;
+	REQUIRE(f.world.joinParty(id3, id1));
+	REQUIRE(f.world.joinParty(id4, id1));
+	REQUIRE(f.world.joinParty(id5, id1));
+	CHECK(f.world.playerPartyMembers(id1).size() == 5);
+
+	// 4. [RV-1] 满员门禁: 第 6 人无法加入队伍 (CHAR_PARTYMAX = 5)
+	auto *p6 = f.world.playerForTest(id6);
+	p6->floor = 0;
+	p6->x = 21;
+	p6->y = 21;
+	CHECK_FALSE(f.world.joinParty(id6, id1));
+	CHECK(f.world.playerPartyMembers(id1).size() == 5);
+	CHECK(f.world.playerPartyMode(id6) == PartyMode::kNone);
+
+	// 5. 队长踢出队员 (kickPartyMember)
+	// 非队长不能踢人
+	CHECK_FALSE(f.world.kickPartyMember(id2, id3));
+	// 队长不能踢自己
+	CHECK_FALSE(f.world.kickPartyMember(id1, id1));
+	// 队长踢出不在队伍中的人
+	CHECK_FALSE(f.world.kickPartyMember(id1, id6));
+	// 队长踢出 id5
+	REQUIRE(f.world.kickPartyMember(id1, id5));
+	CHECK(f.world.playerPartyMode(id5) == PartyMode::kNone);
+	CHECK(f.world.playerPartyMembers(id1).size() == 4);
+
+	// 6. 队员主动离队 (leaveParty)
+	REQUIRE(f.world.leaveParty(id4));
+	CHECK(f.world.playerPartyMode(id4) == PartyMode::kNone);
+	CHECK(f.world.playerPartyMembers(id1).size() == 3);
+
+	REQUIRE(f.world.leaveParty(id3));
+	CHECK(f.world.playerPartyMembers(id1).size() == 2);
+
+	// 当队员仅剩 1 人 (id2) 时，id2 离队 -> 队伍仅剩队长一人 -> 队伍自动解散
+	REQUIRE(f.world.leaveParty(id2));
+	CHECK(f.world.playerPartyMode(id2) == PartyMode::kNone);
+	CHECK(f.world.playerPartyMode(id1) == PartyMode::kNone);
+	CHECK(f.world.partyCount() == 0);
+
+	// 7. 队长离队解散全队验证
+	REQUIRE(f.world.joinParty(id2, id1));
+	REQUIRE(f.world.joinParty(id3, id1));
+	CHECK(f.world.partyCount() == 1);
+	REQUIRE(f.world.leaveParty(id1)); // 队长解散
+	CHECK(f.world.playerPartyMode(id1) == PartyMode::kNone);
+	CHECK(f.world.playerPartyMode(id2) == PartyMode::kNone);
+	CHECK(f.world.playerPartyMode(id3) == PartyMode::kNone);
+	CHECK(f.world.partyCount() == 0);
+
+	// 8. 队员下线断开连接清理验证
+	REQUIRE(f.world.joinParty(id2, id1));
+	REQUIRE(f.world.joinParty(id3, id1));
+	CHECK(f.world.partyCount() == 1);
+	f.world.onSessionClosed(id3);
+	CHECK(f.world.playerPartyMembers(id1).size() == 2);
+	f.world.onSessionClosed(id1); // 队长断线 -> 全队解散
+	CHECK(f.world.playerPartyMode(id2) == PartyMode::kNone);
+	CHECK(f.world.partyCount() == 0);
+}
+
+TEST_CASE("组队协同移动: 队员自主转向/位移限制与队长贪吃蛇足迹跟随")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	const auto id3 = spawnHandshaked(f);
+
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	auto *p3 = f.world.playerForTest(id3);
+
+	// 初始排布: 队长在 (30, 30), 队员1在 (29, 30), 队员2在 (28, 30) (一条直线向东)
+	p1->floor = 0;
+	p1->x = 30;
+	p1->y = 30;
+	p1->dir = 2; // 东
+	p2->floor = 0;
+	p2->x = 29;
+	p2->y = 30;
+	p2->dir = 2;
+	p3->floor = 0;
+	p3->x = 28;
+	p3->y = 30;
+	p3->dir = 2;
+
+	REQUIRE(f.world.joinParty(id2, id1));
+	REQUIRE(f.world.joinParty(id3, id1));
+
+	// 1. 队员自主移动拦截: 发送位移方向字符被拒绝，坐标不改变
+	f.sendWalk(id2, "c"); // 尝试向东移动
+	f.world.tick();
+	CHECK(f.world.playerPos(id2).x == 29);
+	CHECK(f.world.playerPos(id2).y == 30);
+
+	// 2. 队长前进一步 (东 'c'): 队长 (30,30)->(31,30)
+	// 队员1跟随至队长原位 (30,30)
+	// 队员2跟随至队员1原位 (29,30)
+	f.sendWalk(id1, "c");
+	f.world.tick();
+
+	CHECK(f.world.playerPos(id1).x == 31);
+	CHECK(f.world.playerPos(id1).y == 30);
+	CHECK(f.world.playerPos(id2).x == 30);
+	CHECK(f.world.playerPos(id2).y == 30);
+	CHECK(f.world.playerPos(id3).x == 29);
+	CHECK(f.world.playerPos(id3).y == 30);
+
+	// 3. 队长转弯向南前进一步 (南 'e'): 队长 (31,30)->(31,31)
+	// 队员1跟随至队长原位 (31,30)
+	// 队员2跟随至队员1原位 (30,30)
+	f.clock.advance(300);
+	f.sendWalk(id1, "e");
+	f.world.tick();
+
+	CHECK(f.world.playerPos(id1).x == 31);
+	CHECK(f.world.playerPos(id1).y == 31);
+	CHECK(f.world.playerPos(id2).x == 31);
+	CHECK(f.world.playerPos(id2).y == 30);
+	CHECK(f.world.playerPos(id3).x == 30);
+	CHECK(f.world.playerPos(id3).y == 30);
+
+	// 4. 再前进一步 (南 'e'): 队长 (31,31)->(31,32)
+	// 队员1跟随至 (31,31)
+	// 队员2跟随至 (31,30) (进入转角弯道)
+	f.clock.advance(300);
+	f.sendWalk(id1, "e");
+	f.world.tick();
+
+	CHECK(f.world.playerPos(id1).x == 31);
+	CHECK(f.world.playerPos(id1).y == 32);
+	CHECK(f.world.playerPos(id2).x == 31);
+	CHECK(f.world.playerPos(id2).y == 31);
+	CHECK(f.world.playerPos(id3).x == 31);
+	CHECK(f.world.playerPos(id3).y == 30);
+}
+
+TEST_CASE("组队协同传送 [RV-2]: 队长传送点触发与 WarpMan 传送同步拉取全队队员")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	const auto id3 = spawnHandshaked(f);
+
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	auto *p3 = f.world.playerForTest(id3);
+
+	p1->floor = 0;
+	p1->x = 10;
+	p1->y = 10;
+	p2->floor = 0;
+	p2->x = 10;
+	p2->y = 11;
+	p3->floor = 0;
+	p3->x = 10;
+	p3->y = 12;
+
+	REQUIRE(f.world.joinParty(id2, id1));
+	REQUIRE(f.world.joinParty(id3, id1));
+
+	// 1. 测试直接瞬移 (warpPlayerForTest)
+	f.world.warpPlayerForTest(id1, /*floor=*/100, /*x=*/25, /*y=*/35);
+
+	// 验证队长与全部队员均同步传送至新地图与目标坐标
+	auto pos1 = f.world.playerPos(id1);
+	auto pos2 = f.world.playerPos(id2);
+	auto pos3 = f.world.playerPos(id3);
+	CHECK(pos1.floor == 100);
+	CHECK(pos1.x == 25);
+	CHECK(pos1.y == 35);
+	CHECK(pos2.floor == 100);
+	CHECK(pos2.x == 25);
+	CHECK(pos2.y == 35);
+	CHECK(pos3.floor == 100);
+	CHECK(pos3.x == 25);
+	CHECK(pos3.y == 35);
+
+	// 2. 传送员 NPC (kWarpMan) 传送验证
+	NpcEntity warpman{};
+	warpman.id = 9901;
+	warpman.type = NpcType::kWarpMan;
+	warpman.floor = 100;
+	warpman.x = 25;
+	warpman.y = 36; // 与队长距离 1 格
+	WarpDestination dest{};
+	dest.name = "渔村大厅";
+	dest.floor = 200;
+	dest.x = 50;
+	dest.y = 60;
+	dest.cost = 0;
+	warpman.warp_destinations.push_back(dest);
+	f.world.loadNpcEntities({warpman});
+
+	// 队长与 WarpMan 对话传送
+	REQUIRE(f.world.warpPlayerByNpc(id1, 9901, 0));
+
+	pos1 = f.world.playerPos(id1);
+	pos2 = f.world.playerPos(id2);
+	pos3 = f.world.playerPos(id3);
+	CHECK(pos1.floor == 200);
+	CHECK(pos1.x == 50);
+	CHECK(pos1.y == 60);
+	CHECK(pos2.floor == 200);
+	CHECK(pos2.x == 50);
+	CHECK(pos2.y == 60);
+	CHECK(pos3.floor == 200);
+	CHECK(pos3.x == 50);
+	CHECK(pos3.y == 60);
+}
+
+TEST_CASE("组队战斗闭环: 队长遇敌全队切入、宠物站位(5..9)、协同出招与全员经验分配")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 21;
+
+	// 为两名玩家各配置一只战斗宠
+	SA::Model::Pet pet1{};
+	pet1.pet_id = 1;
+	pet1.hp = 100;
+	pet1.vital = 100;
+	pet1.level = 1;
+	pet1.str = 200;
+	const int s1 = f.world.givePetToPlayer(id1, pet1);
+	REQUIRE(s1 >= 0);
+	p1->default_pet = s1;
+
+	SA::Model::Pet pet2{};
+	pet2.pet_id = 2;
+	pet2.hp = 120;
+	pet2.vital = 120;
+	pet2.level = 1;
+	pet2.str = 250;
+	const int s2 = f.world.givePetToPlayer(id2, pet2);
+	REQUIRE(s2 >= 0);
+	p2->default_pet = s2;
+
+	// 组队
+	REQUIRE(f.world.joinParty(id2, id1));
+
+	// 载入暗雷遇敌
+	loadEncounterFixture(f.world, /*prob=*/120, /*enc_exp=*/10);
+
+	// 队长移动触发遇敌
+	f.sendWalk(id1, "c");
+	f.world.tick();
+
+	REQUIRE(f.world.battleCount() == 1);
+	const BattleId battle = 1;
+	const auto *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+
+	// 站位断言: 队长在 slot 0, 队员在 slot 1; 队长宠在 slot 5, 队员宠在 slot 6
+	CHECK(fld->at(0).occupied);
+	CHECK(fld->at(1).occupied);
+	CHECK_FALSE(fld->at(2).occupied);
+	CHECK(fld->at(5).occupied);
+	CHECK(fld->at(6).occupied);
+	CHECK_FALSE(fld->at(7).occupied);
+
+	// 战斗中禁止组队变更
+	CHECK_FALSE(f.world.leaveParty(id2));
+	CHECK_FALSE(f.world.kickPartyMember(id1, id2));
+
+	// 两名玩家协同发出攻击指令击败敌人
+	const int exp1_before = f.world.playerExp(id1);
+	const int exp2_before = f.world.playerExp(id2);
+
+	for (int turn = 0; turn < 20; ++turn)
+	{
+		const auto *cur_fld = f.world.battleField(battle);
+		if (cur_fld == nullptr)
+			break;
+		const auto *st = f.world.stats(battle);
+		if (st != nullptr && st->finished)
+			break;
+
+		// 队长出招攻击敌方 slot 10
+		SA::Domain::BattleCommand cmd1{};
+		cmd1.battle_id = battle;
+		cmd1.turn = cur_fld->turn;
+		cmd1.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd1.command.attack.target = static_cast<std::uint32_t>(SA::Rules::kSideOffset);
+		f.world.onBattleCommand(id1, cmd1);
+
+		// 队员出招攻击敌方 slot 10
+		SA::Domain::BattleCommand cmd2{};
+		cmd2.battle_id = battle;
+		cmd2.turn = cur_fld->turn;
+		cmd2.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd2.command.attack.target = static_cast<std::uint32_t>(SA::Rules::kSideOffset);
+		f.world.onBattleCommand(id2, cmd2);
+
+		f.clock.advance(1000);
+		f.world.tick();
+	}
+
+	REQUIRE(f.world.stats(battle) != nullptr);
+	CHECK(f.world.stats(battle)->finished);
+
+	// 战斗胜利结算: 击杀单位获得经验且队伍状态依然完好保留
+	CHECK(f.world.playerExp(id1) + f.world.playerExp(id2) > exp1_before + exp2_before);
+	CHECK(f.world.playerPartyMode(id1) == PartyMode::kLeader);
+	CHECK(f.world.playerPartyMode(id2) == PartyMode::kMember);
+	CHECK(f.world.partyCount() == 1);
+}

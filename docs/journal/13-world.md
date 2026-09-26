@@ -674,6 +674,60 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **客户端测试闭环**: `sa_client_net_test` 增补宠物技能与 NPC 窗口交互用例，CTest 7/7 100% 绿灯。
 - **全套静态守卫**: 22 项服务端 CTest + 7 项客户端 CTest 全量通过，双端代码格式校验 100% 绿灯。
 
+---
+
+### 9.0.89 阶段 2: 队伍系统与组队协同 (Party System) (2026-09-26)
+
+2026-09-26 交付。在批次 D.3 真实世界大地图深化与 NPC 交互闭环基础上，实现石器时代原汁原味的队伍系统与组队全域协同（`Party System & World Coordination`）。严格对齐官方 GMSV C 源码（`char_party.c`、`char_walk.c`、`battle.c`），建立了包含队长（Leader）与至多 4 名队员（Member，整队上限 5 人 `kPartyMaxMembers = 5`）的队伍数据结构与生命周期状态机（建队、入队、离队、踢出、队长解散、掉线级联清理）。实现了经典的贪吃蛇足迹跟随算法（`char_walk.c:689-705`）与位移门禁（队员禁止自主移动与独立踩点），完善了队长触发传送点及 WarpMan NPC 传送时全队同步拉取（`map_warppoint.c:270-278`），以及队长触发暗雷与 NPC 明雷时全队无缝切入战斗、5..9 号位宠物默认参战出击、回合指令协同提交与经验结算全员分配的完整闭环。
+
+#### 1. 源码事实与裁定
+
+1. **队伍核心生命周期与数据结构 (`src/world/include/world/Api.h`, `src/world/World.cpp`)**:
+   - 对齐 `char_party.c:88-91` 与 `char_party.c:534-545`：
+     - 定义 `PartyMode` 枚举（`kNone = 0`, `kLeader = 1`, `kMember = 2`）与队伍容量上限常量 `kPartyMaxMembers = 5`；
+     - 引入 `Party` 运行时聚合（`party_id`、`leader`、`members` 变长容器）及 `party_of_session` 双向哈希索引；
+     - `joinParty(requester, target)`：若目标为游离玩家，目标自动升格为队长（Leader），发起者成为队员（Member）；若目标已为队长，校验 `members.size() < kPartyMaxMembers` 门禁，满员拒绝；
+     - `leaveParty(session)` / `kickPartyMember(leader, member)`：队员主动离队或被踢，若队伍仅剩队长一人则自动解散，队长降格为 `kNone`；若队长离队或掉线（`removeSession` / `onSessionClosed`），整队安全解散，所有队员降格为 `kNone`，杜绝悬挂指针与孤儿队员状态。
+2. **贪吃蛇足迹跟随算法与队员自主位移门禁 (`src/world/World.cpp`)**:
+   - 对齐 `char_walk.c:924`：在 `onWalk` 与 `kCharLoop` 玩家移动入口处，校验 `partyModeOf(session) == PartyMode::kMember`，严格拦截队员自主位移与转向指令；
+   - 对齐 `char_walk.c:689-705` 与 `npcutil.c:280`：
+     - 移植 `getDirFromTwoPoints(sx, sy, ex, ey)` 八方向向量推导纯函数；
+     - 队长移动时，按入队顺序级联推进队员：前驱者旧坐标作为后继者的移动目标点（`end` 链条传递），各队员依次从当前坐标朝目标点前进一步并更新朝向；
+     - 队员移动严格维护地图 `olink` 空间拓扑索引与增量九宫格视野广播（`broadcastMove`、`collectVisible`、`collectVisiblePlayers`），视野外与视野内进出平滑同步。
+3. **组队协同传送 (`src/world/World.cpp`)**:
+   - 对齐 `map_warppoint.c:270-278`：
+     - 重构 `warpPlayer` 为单人原子底层 `warpSinglePlayer` 与组队协调器 `warpPlayer`；
+     - 队长踩踏 Warp 传送点或通过 WarpMan NPC 对话传送时，原子校验目标 Floor 与坐标合法性，随后同步将全队队员传送至队长目标点（同一 Floor 及坐标），完成旧图 `olink` 摘除、新图 `olink` 挂接及跨图视野完全重置。
+4. **组队战斗无缝切入与全员出战闭环 (`src/world/World.cpp`)**:
+   - 对齐 `battle.c:1759-1772`（`BATTLE_PartyNewEntry`）：
+     - 队长在野外漫步踩中暗雷（`triggerEncounter`）或与明雷战斗 NPC 交互（`triggerNpcEnemyBattle`）时，自动拉取队伍内全部成员；
+     - 队长占据己方 0 号位，队员依次进入 1..4 号位；同时检索各成员当前出战宠物（`findActiveCombatPet`），按官方规则部署至 `slot + 5`（即 5..9 号位）；
+     - 将全队成员会话绑定至该战斗实例（`joinBattle` 并广播 `BattleInit`）；战斗中各成员协同提交回合指令，战胜后结算经验值（`playerExp` 递增）并携宠完好返回大世界，队伍关系保持不变。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 78 增至 **82**（+4 组完整组队体系实测用例），断言数从 2094 增至 **2236**（+142 断言）。
+- **组队生命周期全流程实证**:
+  - 验证游离玩家组队、队长升格、队员入队（2 人队）；
+  - 验证队伍逐人扩充至 5 人上限；
+  - 验证第 6 人申请加入被绝对拒绝（`joinParty == false`，RV-1 容量硬防线）；
+  - 验证队长踢人、队员主动离队与解散全链路；
+  - 验证队长离线/断开连接时，队伍级联解散且余下队员状态安全恢复为 `kNone`。
+- **贪吃蛇足迹跟随移动与位移门禁实证**:
+  - 验证队员自主调用 `onWalk` 时被安全拒止，坐标原封不动；
+  - 验证 3 人队伍在地图上漫步时，队长向东走一步，队员 1 进驻队长原位，队员 2 进驻队员 1 原位，贪吃蛇足迹传递与朝向推导完全准确；
+  - 验证队员视野广播与 `olink` 坐标严密同步。
+- **组队协同传送验证**:
+  - 验证队长踩萨伊那斯村口传送点传送至萨姆吉尔村时，全队队员同步瞬移至目标图与目标坐标，队员旧图视野注销并接入新图。
+- **组队战斗全流程验证**:
+  - 验证队长遇敌切入战斗后，两名玩家分别位于战场 0、1 号位，双方宠物位于 5、6 号位；
+  - 验证双方协同下达战斗指令，击倒敌人完成战斗结算，全员经验值累加并安然返回大世界。
+- **反向验证 (RV-1)**: 篡改队伍最大人数上限（如 `kPartyMaxMembers = 6`）或允许第 6 人入队 ⇒ 满员门禁与边界断言立即变红失败；恢复后回绿。
+- **反向验证 (RV-2)**: 篡改组队传送逻辑（仅瞬移队长、不协同瞬移队员）⇒ 队员坐标停留在旧图的断言立即变红失败；恢复后回绿。
+- **全套静态守卫**: 22 项服务端 CTest + 7 项客户端 CTest 全量通过，双端代码格式校验 100% 绿灯。
+
+
+
 
 
 

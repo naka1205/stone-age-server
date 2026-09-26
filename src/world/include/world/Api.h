@@ -952,6 +952,16 @@ struct PetSkillEffect
 	std::int32_t special_param3 = 0;
 };
 
+// ── 组队模式 (阶段 2: 队伍与协同, 依据原版 char_base.h: CHAR_PARTY_NONE, CHAR_PARTY_LEADER, CHAR_PARTY_CLIENT) ──
+enum class PartyMode : std::uint8_t
+{
+	kNone = 0,
+	kLeader = 1,
+	kMember = 2,
+};
+
+inline constexpr std::size_t kPartyMaxMembers = 5;
+
 class World final : public SA::Net::TransportEvents,
 
                     public SA::Net::SessionHost
@@ -1297,6 +1307,35 @@ class World final : public SA::Net::TransportEvents,
 
 	// 某会话玩家指定宠物槽的当前等级。-1 = 会话无实体 / 槽无宠物。
 	int petLevel(SA::Net::SessionId session, int pet_slot) const;
+
+	// ── 组队系统 (阶段 2: 队伍生命周期与协同) ──────────────────────────
+	// 申请加入队伍: requester 加入 target 所在的队伍。
+	// 若 target 未组队，target 成为 leader，requester 成为 member；
+	// 若 target 已在队伍中，requester 加入该队伍。
+	// 校验门:
+	//   1. requester 与 target 均为有效存活玩家实体 (hp > 0)，且均未在战斗中；
+	//   2. requester 与 target 在同一地图 (floor 相等)，且切比雪夫距离 <= 2；
+	//   3. requester 当前未加入任何队伍 (PartyMode::kNone)；
+	//   4. target 所在队伍人数未达上限 (< kPartyMaxMembers 即 5 人)；
+	// 返回是否成功加入队伍。
+	bool joinParty(SA::Net::SessionId requester, SA::Net::SessionId target);
+
+	// 退出队伍:
+	// - 若为队员: 离开队伍，若队伍仅剩队长一人则队伍解散；
+	// - 若为队长: 队伍整体解散 (移植 char_party.c:377 CHAR_DischargePartySub)；
+	// - 若在战斗中或未组队: 返回 false。
+	bool leaveParty(SA::Net::SessionId session);
+
+	// 队长踢出队员:
+	// - leader 必须为当前队伍队长，member 必须为该队伍队员，且均非战斗态；
+	// - 踢出后若队伍仅剩队长一人则队伍解散。
+	bool kickPartyMember(SA::Net::SessionId leader, SA::Net::SessionId member);
+
+	// 组队状态与观察面
+	PartyMode playerPartyMode(SA::Net::SessionId session) const noexcept;
+	SA::Net::SessionId playerPartyLeader(SA::Net::SessionId session) const noexcept;
+	std::vector<SA::Net::SessionId> playerPartyMembers(SA::Net::SessionId session) const;
+	std::size_t partyCount() const noexcept;
 
 	// 某会话背后 Player 的位置(批次 W.1)。valid == false ⇒ 该会话无 L2 实体。
 	//   ★ 移动用例的观察面:走一步坐标变化 / 撞墙不变 / 转身只改 dir。
