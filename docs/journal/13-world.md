@@ -1017,6 +1017,68 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证 (RV-2)**: 篡改战后状态回写（绕过 `syncPetState` 中 `ride_pet->hp` 写回）⇒ 用例 5 与用例 6 断言立即变红失败（`CHECK(500 < 500)` 与 `CHECK(1 == 0)`）；恢复后回绿。
 - **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 8 项 CTest 全量通过（锁定 `shared-v0.42.0` 零漂移），双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
 
+---
+
+### 9.0.95 阶段 2: 选角流程与多角色槽位系统: 2槽位查询与选角 · 槽位超限拦截 · 12种原型与48种外观头像映射 · 初始四维与属性分配校验 · 四大新手村出生地 · 跨图恢复登入 (Multi-character Slots & Creation Flow) (2026-09-26)
+
+- **日期**: 2026-09-26
+- **模块**: world / session_storage / net
+- **源码依据**:
+  - `char/char.c:118-195` (`CHAR_makeCharFromOptionAtCreate`)
+  - `char/char.c:254-370` (`CHAR_createNewChar`)
+  - `char/char_data.c:228-268` (`CHAR_playerImageNumber`, `CHAR_checkPlayerImageNumber`)
+  - `char/char_data.c:285-310` (`CHAR_checkFaceImageNumber`)
+  - `char/char_data.c:932-965` (`CHAR_getInitElderPosition`, `elders`)
+  - `callfromcli.c:186-296` (`lssproto_CreateNewChar_recv`)
+  - `include/anim_tbl.h:7-55` (`SPR_001em..SPR_114em`, `CG_CHR_MAKE_FACE`)
+
+#### 1. 业务逻辑与规则对齐
+
+1. **账号多角色槽位管理与查询/进入 (`LoginResult`, `SelectCharacterRequest`, `CharacterSummary`)**:
+   - 契约 `FixedVec<CharacterSummary, 2>` 原生支持单账号至多 2 个角色槽位；
+   - 登录成功返回已创建角色列表（`char_id`, `name`, `level`, `image`）；
+   - 客户端展示多角色并按 `char_id` 选择进入大世界，支持重登与角色切换。
+
+2. **[RV-1] 槽位已满新建角色拦截**:
+   - 对齐 MySQL 存储层 `slot >= 2` 阻断规则，当账号已拥有 2 个角色时，客户端再次发起 `CreateCharacterRequest` 时由存储层返回 `ACCOUNT_CONFLICT`，并在 `World::processStorage` 中精确转送给客户端，保持会话停留在 `kSelectingChar` 选角态，大世界玩家数保持为 0。
+
+3. **12 种角色原型与 48 种配色外观校验与头像映射 (`isValidPlayerImage`, `computeFaceImage`)**:
+   - 12 种人物原型（小男孩、少年1/2/3、青年、壮汉、小女孩、少女1/2/3、御姐、熟女），每种 4 种颜色变种（绿/黄/蓝/红等），共计 48 种合法基础形象：`100000 + k * 5`（`0 <= k < 48`，范围 `100000..100235`）；
+   - 动态头像映射公式：`30000 + (k / 4) * 100 + (k % 4) * 25`，生成对应 48 种人物头像（`30000..31175`）；
+   - 门禁校验：提交非 48 种合法形象且非配置默认图号时，服务端本地直接拦截返回 `ACCOUNT_INVALID`，不向存储层提交。
+
+4. **[RV-2] 初始四维与地水火风属性点分配校验**:
+   - 初始四维自由分配：体力 `vital`、腕力 `str`、耐力 `tough`、敏捷 `dex`；
+   - 门禁规则：单项属性范围 `[0, 20]`，且四项点数总和必须严格等于 20（`points == 20`）；换算系数 `* 100`，初始生命值严格按 `Rules::deriveBaseStats` 推导计算；
+   - 元素属性自由分配：地水火风四属性单项范围 `[0, 10]`，四项总和严格等于 10（`elements == 10`），互克属性不可同时存在（`!(earth > 0 && fire > 0) && !(water > 0 && wind > 0)`），最多选择 2 项属性；换算系数 `* 10`；
+   - 违规分配（点数超标、点数不足、负数、超过 20、相克共存、超过 2 种属性）服务端本地立即拦截返回 `ACCOUNT_INVALID`。
+
+5. **四大新手村出生地分配与兜底 (`setHometownSpawn`, `hometownSpawn`, `setSessionHometown`, `sessionHometown`)**:
+   - 支持设置与查询四大新手村初始出生点：玛丽娜斯村 (0: Floor 1000/1006)、萨姆吉尔村 (1: Floor 2000/2006)、加加村 (2: Floor 3000/3006)、卡鲁它那村 (3: Floor 4000/4006)；
+   - 创建角色时若设置新手村且目标楼层可通行，角色初始落点自动设定至对应村庄；未设置或越界时平滑兜底至 `character_defaults`。
+
+6. **在线中禁止选角与建角防护**:
+   - 针对在线角色状态（`conn.char_id != 0` 或 `kOnline`），若收到选角或建角请求，直接拦截返回 `ACCOUNT_CONFLICT`，且协议层状态机对越权报文进行拦截与保护。
+
+7. **多楼层大世界跨图角色恢复登入 (`World::Impl::install`)**:
+   - 消除单一楼层硬编码限制，支持在已注册的多楼层大世界地图（如 Floor 1000、Floor 2000 等）恢复登录并载入视野索引。
+
+#### 2. 验证与指标
+
+- `world_persistence` 用例数从 8 组增至 **15 组**（+7 组选角流程实测用例），断言数从 194 条增至 **377 条**（+183 条断言）。
+- **实测用例矩阵**:
+  1. `选角流程: 账号多角色槽位查询与按 ID 选角进入`
+  2. `选角流程: [RV-1] 槽位已满新建角色被阻断 (ACCOUNT_CONFLICT)`
+  3. `角色创建: 12 种原型与 48 种配色外观合法性与头像映射`
+  4. `角色创建: [RV-2] 初始四维与地水火风属性点分配合法性校验`
+  5. `选角流程: 四大新手村出生地分配与兜底`
+  6. `选角流程: 在线中收到选角/建角请求被冲突阻断 (ACCOUNT_CONFLICT)`
+  7. `选角流程: 多楼层大世界跨图角色恢复登入`
+- **反向验证 (RV-1)**: 篡改模拟槽位满时错误放行（返回 `ACCOUNT_OK`）⇒ 用例 2 中 `CHECK(res->code == Code::ACCOUNT_CONFLICT)` 与会话状态断言立即变红失败（`CHECK(1 == 5)` 与 `CHECK(5 == 3)`）；恢复后回绿。
+- **反向验证 (RV-2)**: 篡改四维总和校验门禁（如放行 `points == 22`）⇒ 用例 4 中 15 处断言立即集体变红失败；恢复后回绿。
+- **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 8 项 CTest 全量通过（锁定 `shared-v0.42.0` 零漂移），双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
+
+
 
 
 

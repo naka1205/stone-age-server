@@ -26,7 +26,8 @@ class PendingStorage final : public SA::SessionStorage::Service
 		return out;
 	}
 	bool idle() const override { return pending == 0; }
-	void finish(Code code = Code::ACCOUNT_OK, SA::Domain::CharacterRecord record = {})
+	void finish(Code code = Code::ACCOUNT_OK, SA::Domain::CharacterRecord record = {},
+	            SA::IDL::FixedVec<SA::Transport::CharacterSummary, 2> chars = {})
 	{
 		REQUIRE(pending > 0);
 		const auto &request = requests.back();
@@ -37,6 +38,7 @@ class PendingStorage final : public SA::SessionStorage::Service
 		out.logout = request.logout;
 		out.code = code;
 		out.character = record;
+		out.characters = chars;
 		completions.push_back(out);
 		--pending;
 	}
@@ -137,6 +139,34 @@ struct Fixture
 			reader.pop();
 		}
 		return count;
+	}
+	template <typename Message>
+	std::optional<Message> decodeLast(SA::IDL::MsgId type) const
+	{
+		SA::Wire::FrameReader reader;
+		const auto &bytes = transport.sent(id);
+		if (!reader.push(bytes.data(), bytes.size()))
+			return std::nullopt;
+		const std::uint8_t *frame = nullptr;
+		std::uint32_t size = 0;
+		std::optional<Message> res;
+		while (reader.next(&frame, &size) == SA::Wire::FrameStatus::kOk)
+		{
+			SA::Wire::EnvelopeView envelope;
+			if (SA::Wire::decodeEnvelope(frame, size, envelope))
+			{
+				if (envelope.msg_id == static_cast<std::uint32_t>(type))
+				{
+					Message msg{};
+					SA::IDL::Reader r(envelope.body, envelope.body_len);
+					decode(r, msg);
+					if (r.ok())
+						res = msg;
+				}
+			}
+			reader.pop();
+		}
+		return res;
 	}
 };
 } // namespace
@@ -383,4 +413,416 @@ TEST_CASE("Economy: 重登一致 —— 战斗赚的钱落盘后原样回到实�
 	f.world.tick();
 	REQUIRE(f.world.playerCount() == 1);
 	CHECK(f.world.playerGold(f.id) == 15); // ★★ 重登一致
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  选角流程与多角色槽位系统 (阶段 2: 选角流程与多角色槽位)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("选角流程: 账号多角色槽位查询与按 ID 选角进入")
+{
+	Fixture f;
+	f.transport.clearSent(f.id);
+
+	SA::Transport::LoginRequest req{};
+	(void)req.login.assign("test_account");
+	(void)req.password.assign("pwd123456");
+	f.feed(req, 20);
+	REQUIRE(f.storage.requests.back().operation == Op::kLogin);
+
+	// 构造 2 角色摘要 (2 slots)
+	SA::IDL::FixedVec<SA::Transport::CharacterSummary, 2> chars{};
+	SA::Transport::CharacterSummary s1{};
+	s1.char_id = 101;
+	(void)s1.name.assign("石器小英雄");
+	s1.level = 1;
+	s1.image = 100000;
+	(void)chars.push_back(s1);
+
+	SA::Transport::CharacterSummary s2{};
+	s2.char_id = 102;
+	(void)s2.name.assign("尼斯老猎人");
+	s2.level = 20;
+	s2.image = 100020;
+	(void)chars.push_back(s2);
+
+	f.storage.finish(Code::ACCOUNT_OK, {}, chars);
+	f.world.tick();
+
+	auto login_res = f.decodeLast<SA::Transport::LoginResult>(SA::IDL::MsgId::LoginResult);
+	REQUIRE(login_res.has_value());
+	CHECK(login_res->code == Code::ACCOUNT_OK);
+	REQUIRE(login_res->characters.size() == 2);
+	CHECK(login_res->characters[0].char_id == 101);
+	CHECK(std::string(login_res->characters[0].name.c_str()) == "石器小英雄");
+	CHECK(login_res->characters[0].level == 1);
+	CHECK(login_res->characters[0].image == 100000);
+	CHECK(login_res->characters[1].char_id == 102);
+	CHECK(std::string(login_res->characters[1].name.c_str()) == "尼斯老猎人");
+	CHECK(login_res->characters[1].level == 20);
+	CHECK(login_res->characters[1].image == 100020);
+
+	// 选角 101 进入
+	SA::Transport::SelectCharacterRequest sel1{};
+	sel1.char_id = 101;
+	f.feed(sel1, 21);
+	REQUIRE(f.storage.requests.back().operation == Op::kSelect);
+	CHECK(f.storage.requests.back().character.char_id == 101);
+
+	SA::Domain::CharacterRecord rec1 = f.saved;
+	rec1.char_id = 101;
+	rec1.player.name = s1.name;
+	rec1.player.image = s1.image;
+	rec1.player.level = s1.level;
+
+	f.storage.finish(Code::ACCOUNT_OK, rec1);
+	f.world.tick();
+
+	CHECK(f.world.playerCount() == 1);
+	auto ppos1 = f.world.playerPos(f.id);
+	CHECK(ppos1.valid);
+
+	auto char_res1 = f.decodeLast<SA::Transport::CharacterResult>(SA::IDL::MsgId::CharacterResult);
+	REQUIRE(char_res1.has_value());
+	CHECK(char_res1->code == Code::ACCOUNT_OK);
+	CHECK(char_res1->character.char_id == 101);
+	CHECK(std::string(char_res1->character.player.name.c_str()) == "石器小英雄");
+
+	// 登出
+	SA::Transport::SaveRequest save_req{};
+	save_req.logout = true;
+	f.feed(save_req, 22);
+	auto durable1 = f.storage.requests.back().character;
+	++durable1.revision;
+	f.storage.finish(Code::ACCOUNT_OK, durable1);
+	f.world.tick();
+	f.world.tick();
+	CHECK(f.transport.closed(f.id));
+	CHECK(f.world.playerCount() == 0);
+
+	// 重登并选角 102 进入
+	f.id = f.transport.connect();
+	SA::Transport::HandshakeRequest hello{};
+	hello.protocol_version = f.config.protocol_version;
+	f.feed(hello, 1);
+	f.transport.clearSent(f.id);
+
+	f.feed(req, 23);
+	f.storage.finish(Code::ACCOUNT_OK, {}, chars);
+	f.world.tick();
+
+	SA::Transport::SelectCharacterRequest sel2{};
+	sel2.char_id = 102;
+	f.feed(sel2, 24);
+	REQUIRE(f.storage.requests.back().operation == Op::kSelect);
+	CHECK(f.storage.requests.back().character.char_id == 102);
+
+	SA::Domain::CharacterRecord rec2 = f.saved;
+	rec2.char_id = 102;
+	rec2.player.name = s2.name;
+	rec2.player.image = s2.image;
+	rec2.player.level = s2.level;
+
+	f.storage.finish(Code::ACCOUNT_OK, rec2);
+	f.world.tick();
+
+	CHECK(f.world.playerCount() == 1);
+	auto char_res2 = f.decodeLast<SA::Transport::CharacterResult>(SA::IDL::MsgId::CharacterResult);
+	REQUIRE(char_res2.has_value());
+	CHECK(char_res2->code == Code::ACCOUNT_OK);
+	CHECK(char_res2->character.char_id == 102);
+	CHECK(std::string(char_res2->character.player.name.c_str()) == "尼斯老猎人");
+	CHECK(char_res2->character.player.image == 100020);
+}
+
+TEST_CASE("选角流程: [RV-1] 槽位已满新建角色被阻断 (ACCOUNT_CONFLICT)")
+{
+	Fixture f;
+	f.login();
+
+	// 模拟已满 2 槽位，客户端再发起新建角色请求
+	SA::Transport::CreateCharacterRequest create_req{};
+	(void)create_req.name.assign("多余角色");
+	create_req.image = f.saved.player.image;
+	create_req.vital = 8;
+	create_req.str = 8;
+	create_req.tough = 2;
+	create_req.dex = 2;
+	create_req.earth = 10;
+	f.feed(create_req, 30);
+	REQUIRE(f.storage.requests.back().operation == Op::kCreate);
+
+	// Storage 返回 ACCOUNT_CONFLICT (对齐 MySQL 槽位超限回滚)
+	f.storage.finish(Code::ACCOUNT_CONFLICT);
+	f.world.tick();
+
+	auto res = f.decodeLast<SA::Transport::CharacterResult>(SA::IDL::MsgId::CharacterResult);
+	REQUIRE(res.has_value());
+	// ★ [RV-1] 变异验证断言: 槽位超限必须严格返回 ACCOUNT_CONFLICT 并拒绝入场
+	CHECK(res->code == Code::ACCOUNT_CONFLICT);
+	CHECK(f.world.playerCount() == 0);
+	CHECK(f.world.sessionState(f.id) == SA::Net::SessionState::kSelectingChar);
+}
+
+TEST_CASE("角色创建: 12 种原型与 48 种配色外观合法性与头像映射")
+{
+	Fixture f;
+
+	// 1. 静态合法性与头像映射验证 (48 种配色)
+	for (std::int32_t k = 0; k < 48; ++k)
+	{
+		const std::int32_t img = 100000 + k * 5;
+		CHECK(SA::World::World::isValidPlayerImage(img));
+		const std::int32_t expected_face = 30000 + (k / 4) * 100 + (k % 4) * 25;
+		CHECK(SA::World::World::computeFaceImage(img) == expected_face);
+	}
+
+	// 2. 非法图号拦截
+	CHECK_FALSE(SA::World::World::isValidPlayerImage(99999));
+	CHECK_FALSE(SA::World::World::isValidPlayerImage(100001)); // 武器帧不是空手裸模
+	CHECK_FALSE(SA::World::World::isValidPlayerImage(100004));
+	CHECK_FALSE(SA::World::World::isValidPlayerImage(100236));
+	CHECK_FALSE(SA::World::World::isValidPlayerImage(100240));
+	CHECK_FALSE(SA::World::World::isValidPlayerImage(-1));
+
+	f.login();
+
+	// 3. 提交非法图号 100001 创建角色被本地门禁拦截 (ACCOUNT_INVALID)
+	const auto req_count_before = f.storage.requests.size();
+	SA::Transport::CreateCharacterRequest bad_req{};
+	(void)bad_req.name.assign("非法外观");
+	bad_req.image = 100001;
+	bad_req.vital = 8;
+	bad_req.str = 8;
+	bad_req.tough = 2;
+	bad_req.dex = 2;
+	bad_req.earth = 10;
+	f.feed(bad_req, 31);
+
+	// 未向 storage 提交
+	CHECK(f.storage.requests.size() == req_count_before);
+	auto bad_res = f.decodeLast<SA::Transport::CharacterResult>(SA::IDL::MsgId::CharacterResult);
+	REQUIRE(bad_res.has_value());
+	CHECK(bad_res->code == Code::ACCOUNT_INVALID);
+
+	// 4. 提交合法原型 100140 (少女1, 绿色) 创建角色
+	SA::Transport::CreateCharacterRequest good_req{};
+	(void)good_req.name.assign("合法少女");
+	good_req.image = 100140; // k = 28, archetype = 7, color = 0
+	good_req.vital = 8;
+	good_req.str = 8;
+	good_req.tough = 2;
+	good_req.dex = 2;
+	good_req.wind = 10;
+	f.feed(good_req, 32);
+
+	REQUIRE(f.storage.requests.size() == req_count_before + 1);
+	const auto submitted = f.storage.requests.back().character;
+	CHECK(submitted.player.image == 100140);
+	CHECK(submitted.player.face_image == 30700); // 30000 + 7*100 + 0*25
+	CHECK(submitted.player.wind == 100);
+}
+
+TEST_CASE("角色创建: [RV-2] 初始四维与地水火风属性点分配合法性校验")
+{
+	Fixture f;
+	f.login();
+	const auto req_count_base = f.storage.requests.size();
+
+	auto tryCreate = [&](int v, int s, int t, int d, int ea, int wa, int fi, int wi) -> Code
+	{
+		SA::Transport::CreateCharacterRequest r{};
+		(void)r.name.assign("属性测试");
+		r.image = f.saved.player.image;
+		r.vital = v;
+		r.str = s;
+		r.tough = t;
+		r.dex = d;
+		r.earth = ea;
+		r.water = wa;
+		r.fire = fi;
+		r.wind = wi;
+		f.feed(r, 40);
+		auto res = f.decodeLast<SA::Transport::CharacterResult>(SA::IDL::MsgId::CharacterResult);
+		if (res.has_value())
+			return res->code;
+		return Code::ACCOUNT_OK;
+	};
+
+	// 1. 点数超标拦截: 10 + 8 + 2 + 2 = 22 > 20
+	CHECK(tryCreate(10, 8, 2, 2, 10, 0, 0, 0) == Code::ACCOUNT_INVALID);
+
+	// 2. 点数不足拦截: 5 + 5 + 2 + 2 = 14 < 20
+	CHECK(tryCreate(5, 5, 2, 2, 10, 0, 0, 0) == Code::ACCOUNT_INVALID);
+
+	// 3. 单项负数拦截
+	CHECK(tryCreate(-1, 15, 3, 3, 10, 0, 0, 0) == Code::ACCOUNT_INVALID);
+
+	// 4. 单项超 20 拦截
+	CHECK(tryCreate(21, 0, 0, -1, 10, 0, 0, 0) == Code::ACCOUNT_INVALID);
+
+	// 5. 属性点总和 != 10 拦截: 8 + 3 = 11
+	CHECK(tryCreate(8, 8, 2, 2, 8, 0, 0, 3) == Code::ACCOUNT_INVALID);
+
+	// 6. 相克属性共存拦截: 地 + 火
+	CHECK(tryCreate(8, 8, 2, 2, 5, 0, 5, 0) == Code::ACCOUNT_INVALID);
+
+	// 7. 相克属性共存拦截: 水 + 风
+	CHECK(tryCreate(8, 8, 2, 2, 0, 5, 0, 5) == Code::ACCOUNT_INVALID);
+
+	// 8. 超过 2 项属性拦截: 地 + 水 + 风
+	CHECK(tryCreate(8, 8, 2, 2, 4, 3, 0, 3) == Code::ACCOUNT_INVALID);
+
+	// ★ 均被本地前置防御拦截，无任何请求漏到 storage
+	CHECK(f.storage.requests.size() == req_count_base);
+
+	// 9. 合法分配通过: 体 5, 力 7, 耐 2, 敏 6 (总和 20); 地 5, 水 5 (总和 10)
+	SA::Transport::CreateCharacterRequest ok_req{};
+	(void)ok_req.name.assign("合格分配者");
+	ok_req.image = f.saved.player.image;
+	ok_req.vital = 5;
+	ok_req.str = 7;
+	ok_req.tough = 2;
+	ok_req.dex = 6;
+	ok_req.earth = 5;
+	ok_req.water = 5;
+	f.feed(ok_req, 41);
+
+	REQUIRE(f.storage.requests.size() == req_count_base + 1);
+	const auto sub = f.storage.requests.back().character.player;
+	CHECK(sub.vital == 500);
+	CHECK(sub.str == 700);
+	CHECK(sub.tough == 200);
+	CHECK(sub.dex == 600);
+	CHECK(sub.earth == 50);
+	CHECK(sub.water == 50);
+	CHECK(sub.fire == 0);
+	CHECK(sub.wind == 0);
+	// ★ [RV-2] 初始血量由四维精准换算
+	const auto expected_hp = SA::Rules::deriveBaseStats(500, 700, 200, 600).max_hp;
+	CHECK(sub.hp == expected_hp);
+}
+
+TEST_CASE("选角流程: 四大新手村出生地分配与兜底")
+{
+	Fixture f;
+	f.login();
+
+	// 1. 验证默认新手村配置
+	auto sp0 = f.world.hometownSpawn(0);
+	CHECK(sp0.floor == 1000);
+	CHECK(sp0.x == 98);
+	CHECK(sp0.y == 93);
+
+	// 2. 自定义配置玛丽娜斯 (Hometown 0) 到可通行的 (7, 12, 12)
+	f.world.setHometownSpawn(0, 7, 12, 12);
+	f.world.setSessionHometown(f.id, 0);
+	CHECK(f.world.sessionHometown(f.id) == 0);
+
+	SA::Transport::CreateCharacterRequest req0{};
+	(void)req0.name.assign("玛丽娜斯新手");
+	req0.image = f.saved.player.image;
+	req0.vital = 8;
+	req0.str = 8;
+	req0.tough = 2;
+	req0.dex = 2;
+	req0.earth = 10;
+	f.feed(req0, 50);
+
+	REQUIRE(f.storage.requests.back().operation == Op::kCreate);
+	const auto rec0 = f.storage.requests.back().character.player;
+	CHECK(rec0.floor == 7);
+	CHECK(rec0.x == 12);
+	CHECK(rec0.y == 12);
+	f.storage.finish(Code::ACCOUNT_UNAVAILABLE);
+	f.world.tick();
+	f.transport.clearSent(f.id);
+
+	// 3. 未设置新手村 (或设置 -1 / 越界 99)，平滑兜底为 character_defaults 初始坐标
+	f.world.setSessionHometown(f.id, -1);
+	CHECK(f.world.sessionHometown(f.id) == -1);
+
+	SA::Transport::CreateCharacterRequest req_def{};
+	(void)req_def.name.assign("默认村新手");
+	req_def.image = f.saved.player.image;
+	req_def.vital = 8;
+	req_def.str = 8;
+	req_def.tough = 2;
+	req_def.dex = 2;
+	req_def.wind = 10;
+	f.feed(req_def, 51);
+
+	REQUIRE(f.storage.requests.back().operation == Op::kCreate);
+	const auto rec_def = f.storage.requests.back().character.player;
+	CHECK(rec_def.floor == f.saved.player.floor);
+	CHECK(rec_def.x == f.saved.player.x);
+	CHECK(rec_def.y == f.saved.player.y);
+}
+
+TEST_CASE("选角流程: 在线中收到选角/建角请求被冲突阻断 (ACCOUNT_CONFLICT)")
+{
+	Fixture f;
+	f.select(); // 进入大世界，当前角色在线且 conn.char_id != 0
+
+	const auto req_count_before = f.storage.requests.size();
+
+	// 1. 业务接口防御: 已在世界中(conn.char_id != 0)，直接调用 onSelectCharacter 被 ACCOUNT_CONFLICT 拦截
+	SA::Transport::SelectCharacterRequest sel{};
+	sel.char_id = 999;
+	f.world.onSelectCharacter(f.id, sel, 60);
+
+	// 未向 storage 提交新请求
+	CHECK(f.storage.requests.size() == req_count_before);
+
+	// 2. 业务接口防御: 已在世界中(conn.char_id != 0)，直接调用 onCreateCharacter 被 ACCOUNT_CONFLICT 拦截
+	SA::Transport::CreateCharacterRequest create{};
+	(void)create.name.assign("在线偷建");
+	create.image = f.saved.player.image;
+	create.vital = 8;
+	create.str = 8;
+	create.tough = 2;
+	create.dex = 2;
+	create.earth = 10;
+	f.world.onCreateCharacter(f.id, create, 61);
+
+	// 未向 storage 提交新请求
+	CHECK(f.storage.requests.size() == req_count_before);
+
+	// 3. 协议信令防护: 若在线状态经由网关字节流强送选角请求，状态机会直接判定协议越权并安全断开连接
+	f.feed(sel, 62);
+	CHECK(f.transport.closed(f.id));
+}
+
+TEST_CASE("选角流程: 多楼层大世界跨图角色恢复登入")
+{
+	Fixture f;
+
+	// 为世界注册 Floor 1000 地图 (160x160)
+	f.world.loadFloorMap(1000, SA::World::makeFixtureMap(160, 160));
+	REQUIRE(f.world.findFloorMap(1000) != nullptr);
+
+	f.login();
+
+	// 角色此前存档在 Floor 1000 的 (25, 25)
+	SA::Domain::CharacterRecord fl1000_char = f.saved;
+	fl1000_char.char_id = 888;
+	fl1000_char.player.floor = 1000;
+	fl1000_char.player.x = 25;
+	fl1000_char.player.y = 25;
+	(void)fl1000_char.player.name.assign("跨图旅行者");
+
+	SA::Transport::SelectCharacterRequest sel{};
+	sel.char_id = 888;
+	f.feed(sel, 70);
+
+	f.storage.finish(Code::ACCOUNT_OK, fl1000_char);
+	f.world.tick();
+
+	// 成功载入，不再被 default floor 误杀
+	CHECK(f.world.playerCount() == 1);
+	auto ppos = f.world.playerPos(f.id);
+	CHECK(ppos.valid);
+	CHECK(ppos.floor == 1000);
+	CHECK(ppos.x == 25);
+	CHECK(ppos.y == 25);
 }

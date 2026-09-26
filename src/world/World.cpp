@@ -2502,6 +2502,13 @@ struct World::Impl : GoldAuditSink
 	SA::SessionStorage::Service *storage = nullptr;
 	std::string content_version;
 	SA::Domain::CharacterRecord character_defaults{};
+	std::array<HometownSpawn, 4> hometown_spawns = {{
+	    {1000, 98, 93}, // 0: 玛丽娜斯村 (Marina)
+	    {2000, 85, 80}, // 1: 萨姆吉尔村 (Shamgir)
+	    {3000, 85, 75}, // 2: 加加村 (Jaja)
+	    {4000, 60, 60}, // 3: 卡鲁它那村 (Karutana)
+	}};
+	std::unordered_map<SA::Net::SessionId, int> session_hometowns;
 	SA::Domain::CharacterRecord snapshot(SA::Net::SessionId id) const;
 	bool install(SA::Net::SessionId id, const SA::Domain::CharacterRecord &record);
 
@@ -5674,6 +5681,7 @@ void World::removeSession(SA::Net::ConnectionId id)
 	closeStall(id);
 	dismountPet(id);
 	_impl->player_ride_permits.erase(id);
+	_impl->session_hometowns.erase(id);
 	for (auto &kv : _impl->market_listings)
 	{
 		if (kv.second.seller_session == id)
@@ -9599,8 +9607,13 @@ SA::Domain::CharacterRecord World::Impl::snapshot(SA::Net::SessionId id) const
 
 bool World::Impl::install(SA::Net::SessionId id, const SA::Domain::CharacterRecord &record)
 {
-	if (!SA::SessionStorage::validRecord(record) || record.player.floor != character_defaults.player.floor ||
-	    !mapWalkable(map, map_attr, record.player.x, record.player.y) || player_of_session.find(id).valid())
+	const bool on_default_floor = (record.player.floor == character_defaults.player.floor);
+	auto *fl = getFloor(record.player.floor);
+	const auto &target_map = (on_default_floor || !fl) ? map : fl->map;
+	const bool floor_valid = on_default_floor || (fl != nullptr);
+
+	if (!SA::SessionStorage::validRecord(record) || !floor_valid ||
+	    !mapWalkable(target_map, map_attr, record.player.x, record.player.y) || player_of_session.find(id).valid())
 		return false;
 	const auto handle = players.allocate();
 	auto *player = players.resolve(handle);
@@ -9648,7 +9661,7 @@ bool World::Impl::install(SA::Net::SessionId id, const SA::Domain::CharacterReco
 	conn.char_id = record.char_id;
 	conn.revision = record.revision;
 	conn.session->markOnline();
-	auto *fl = getFloor(player->floor);
+	fl = getFloor(player->floor);
 	const auto &cur_map = fl ? fl->map : map;
 	auto &cur_olink = fl ? fl->olink : olink;
 	if (cur_map.inBounds(player->x, player->y))
@@ -9705,9 +9718,19 @@ void World::onCreateCharacter(SA::Net::SessionId id, const SA::Transport::Create
 {
 	auto &s = *_impl;
 	auto &conn = s.conns.at(id);
+
+	if (conn.char_id != 0 || s.player_of_session.find(id).valid())
+	{
+		SA::Transport::CharacterResult result{};
+		result.code = SA::Transport::AccountCode::ACCOUNT_CONFLICT;
+		(void)SA::Net::encodeFramed(corr, result, conn.outbound);
+		return;
+	}
+
 	const std::int64_t points = static_cast<std::int64_t>(req.vital) + req.str + req.tough + req.dex;
 	const std::int64_t elements = static_cast<std::int64_t>(req.earth) + req.water + req.fire + req.wind;
-	bool valid = !req.name.empty() && req.name.size() <= 31 && req.image == s.character_defaults.player.image &&
+	const bool valid_image = (req.image == s.character_defaults.player.image) || isValidPlayerImage(req.image);
+	bool valid = !req.name.empty() && req.name.size() <= 31 && valid_image &&
 	             SA::Data::Json::validUtf8(std::string_view(req.name.data, req.name.size()));
 	for (std::size_t i = 0; i < req.name.size(); ++i)
 		if (static_cast<unsigned char>(req.name.data[i]) < 0x20 || req.name.data[i] == 0x7f)
@@ -9718,7 +9741,8 @@ void World::onCreateCharacter(SA::Net::SessionId id, const SA::Transport::Create
 	for (auto element : {req.earth, req.water, req.fire, req.wind})
 		if (element < 0 || element > 10)
 			valid = false;
-	valid = valid && points == 20 && elements == 10 && !(req.earth && req.fire) && !(req.water && req.wind);
+	const int elem_cnt = (req.earth > 0) + (req.water > 0) + (req.fire > 0) + (req.wind > 0);
+	valid = valid && points == 20 && elements == 10 && !(req.earth && req.fire) && !(req.water && req.wind) && elem_cnt <= 2;
 	SA::SessionStorage::Request request{};
 	request.operation = SA::SessionStorage::Operation::kCreate;
 	request.session = id;
@@ -9728,6 +9752,8 @@ void World::onCreateCharacter(SA::Net::SessionId id, const SA::Transport::Create
 	player.name = req.name;
 	if (valid)
 	{
+		player.image = req.image;
+		player.face_image = computeFaceImage(req.image);
 		player.vital = req.vital * 100;
 		player.str = req.str * 100;
 		player.tough = req.tough * 100;
@@ -9736,7 +9762,26 @@ void World::onCreateCharacter(SA::Net::SessionId id, const SA::Transport::Create
 		player.water = req.water * 10;
 		player.fire = req.fire * 10;
 		player.wind = req.wind * 10;
-		player.hp = SA::Rules::deriveBaseStats(player.vital, player.str, player.tough, player.dex).max_hp;
+		const auto base_stats = SA::Rules::deriveBaseStats(player.vital, player.str, player.tough, player.dex);
+		player.hp = base_stats.max_hp;
+		player.mp = player.max_mp = 100;
+
+		const auto it_ht = s.session_hometowns.find(id);
+		if (it_ht != s.session_hometowns.end() && it_ht->second >= 0 &&
+		    it_ht->second < static_cast<int>(s.hometown_spawns.size()))
+		{
+			const auto &sp = s.hometown_spawns[static_cast<std::size_t>(it_ht->second)];
+			const bool is_def = (sp.floor == s.character_defaults.player.floor);
+			auto *fl = s.getFloor(sp.floor);
+			const auto &target_map = (is_def || !fl) ? s.map : fl->map;
+			if ((is_def || fl != nullptr) && mapWalkable(target_map, s.map_attr, sp.x, sp.y))
+			{
+				player.floor = sp.floor;
+				player.x = sp.x;
+				player.y = sp.y;
+			}
+		}
+
 		for (auto &pet : request.character.pets)
 			pet.value.owner_char_name = player.name;
 	}
@@ -9755,6 +9800,15 @@ void World::onSelectCharacter(SA::Net::SessionId id, const SA::Transport::Select
 {
 	auto &s = *_impl;
 	auto &conn = s.conns.at(id);
+
+	if (conn.char_id != 0 || s.player_of_session.find(id).valid())
+	{
+		SA::Transport::CharacterResult result{};
+		result.code = SA::Transport::AccountCode::ACCOUNT_CONFLICT;
+		(void)SA::Net::encodeFramed(corr, result, conn.outbound);
+		return;
+	}
+
 	SA::SessionStorage::Request request{};
 	request.operation = SA::SessionStorage::Operation::kSelect;
 	request.session = id;
@@ -12159,6 +12213,63 @@ std::vector<std::string> World::playerRidePermits(SA::Net::SessionId session) co
 		res.assign(it->second.begin(), it->second.end());
 	}
 	return res;
+}
+
+bool World::isValidPlayerImage(std::int32_t image) noexcept
+{
+	if (image >= 100000 && image <= 100235)
+	{
+		const std::int32_t offset = image - 100000;
+		return (offset % 5 == 0);
+	}
+	return false;
+}
+
+std::int32_t World::computeFaceImage(std::int32_t image) noexcept
+{
+	if (image >= 100000 && image <= 100235 && ((image - 100000) % 5 == 0))
+	{
+		const std::int32_t k = (image - 100000) / 5;
+		const std::int32_t archetype = k / 4; // 0..11
+		const std::int32_t color = k % 4;     // 0..3
+		return 30000 + archetype * 100 + color * 25;
+	}
+	return 30000;
+}
+
+void World::setHometownSpawn(int hometown, std::int32_t floor, std::int32_t x, std::int32_t y)
+{
+	if (hometown >= 0 && hometown < static_cast<int>(_impl->hometown_spawns.size()))
+	{
+		_impl->hometown_spawns[static_cast<std::size_t>(hometown)] = {floor, x, y};
+	}
+}
+
+World::HometownSpawn World::hometownSpawn(int hometown) const noexcept
+{
+	if (hometown >= 0 && hometown < static_cast<int>(_impl->hometown_spawns.size()))
+	{
+		return _impl->hometown_spawns[static_cast<std::size_t>(hometown)];
+	}
+	return {0, 0, 0};
+}
+
+void World::setSessionHometown(SA::Net::SessionId session, int hometown)
+{
+	if (hometown >= 0 && hometown < static_cast<int>(_impl->hometown_spawns.size()))
+	{
+		_impl->session_hometowns[session] = hometown;
+	}
+	else
+	{
+		_impl->session_hometowns.erase(session);
+	}
+}
+
+int World::sessionHometown(SA::Net::SessionId session) const noexcept
+{
+	const auto it = _impl->session_hometowns.find(session);
+	return (it != _impl->session_hometowns.end()) ? it->second : -1;
 }
 
 } // namespace SA::World

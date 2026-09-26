@@ -1702,6 +1702,22 @@ class World final : public SA::Net::TransportEvents,
 	bool hasRidePermit(SA::Net::SessionId session, const std::string &permit_name) const;
 	std::vector<std::string> playerRidePermits(SA::Net::SessionId session) const;
 
+	// ── 选角流程与新手村出生地 (Character Selection & Hometown) ─────────────
+	struct HometownSpawn
+	{
+		std::int32_t floor = 0;
+		std::int32_t x = 0;
+		std::int32_t y = 0;
+	};
+
+	static bool isValidPlayerImage(std::int32_t image) noexcept;
+	static std::int32_t computeFaceImage(std::int32_t image) noexcept;
+
+	void setHometownSpawn(int hometown, std::int32_t floor, std::int32_t x, std::int32_t y);
+	HometownSpawn hometownSpawn(int hometown) const noexcept;
+	void setSessionHometown(SA::Net::SessionId session, int hometown);
+	int sessionHometown(SA::Net::SessionId session) const noexcept;
+
 	// 某会话背后 Player 的位置(批次 W.1)。valid == false ⇒ 该会话无 L2 实体。
 	//   ★ 移动用例的观察面:走一步坐标变化 / 撞墙不变 / 转身只改 dir。
 	struct PlayerPos
