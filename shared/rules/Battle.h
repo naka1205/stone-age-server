@@ -32,6 +32,8 @@
 #include "rules/Config.h"
 #include "rules/RandomSource.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 
 namespace SA::Rules
@@ -542,6 +544,93 @@ KnockbackKind rollKnockback(std::int32_t damage,
                             std::int32_t accumulator,
                             bool immune_knockback,
                             std::int32_t *out_accumulator) noexcept;
+
+// ── 批次 A-ε: 攻击魔法与杂项 ──────────────────────────────────
+//
+// 火杀物理伤害纯函数 (原版 battle_event.c:3046 BATTLE_Attack_FIREKILL)
+// 攻方攻击力取基础力量的 80% (WORKFIXSTR * 0.8)
+std::int32_t computeFireKillPhysicalDamage(const BattleField &field,
+                                           const Combatant &attacker,
+                                           const Combatant &defender,
+                                           const RulesConfig &config,
+                                           Random &rng) noexcept;
+
+// 火魔法伤害纯函数 (原版 battle_magic.c:5183 BATTLE_MultiAttMagic_Fire)
+std::int32_t computeFireMagicDamage(int att_magic_lv,
+                                    int def_magic_resist,
+                                    int power,
+                                    const Combatant &attacker,
+                                    const Combatant &defender,
+                                    const BattleField &field,
+                                    Random &rng) noexcept;
+
+// 拐骗判定纯函数 (原版 battle_event.c:5677 BATTLE_Abduct)
+// 守方为 BOSS 时几率恒为 0; 否则 per = max(50, (def_lv - att_lv) * 0.6 + 30)
+bool rollAbduct(int attacker_level,
+                int defender_level,
+                bool is_boss,
+                Random &rng) noexcept;
+
+// 偷窃金币判定纯函数 (原版 battle_event.c:5800 BATTLE_StealMoney)
+std::int32_t rollStealMoney(bool defender_is_player,
+                            int defender_level,
+                            bool same_side,
+                            std::int32_t master_gold,
+                            std::int32_t max_gold,
+                            std::int32_t defender_gold,
+                            Random &rng) noexcept;
+
+// 合击伤害累加纯函数 (原版 battle_event.c:5336 BATTLE_Combo)
+std::int32_t computeComboDamage(const BattleField &field,
+                                const int *attacker_slots,
+                                std::size_t attacker_count,
+                                const Combatant &defender,
+                                const RulesConfig &config,
+                                Random &rng) noexcept;
+
+// 分摊攻击 / 恩惠削减结算 (原版 battle_event.c:10015 BATTLE_DivideAttack)
+struct DivideAttackTargetResult
+{
+	int slot = -1;
+	std::int32_t hp_loss = 0;
+	std::int32_t mp_loss = 0;
+	std::int32_t ride_pet_hp_loss = 0;
+};
+int applyDivideAttack(BattleField &field,
+                      int target_side,
+                      DivideAttackTargetResult *out_results = nullptr) noexcept;
+
+// 敌人求援判定纯函数 (原版 battle_event.c:6504 BATTLE_E_ENEMYHELP)
+struct EnemyHelpResult
+{
+	bool success = false;
+	int spawn_slot = -1;
+	int spawn_level = 0;
+};
+EnemyHelpResult rollEnemyHelp(const BattleField &field,
+                              int caller_slot,
+                              int caller_level,
+                              bool is_pvp,
+                              Random &rng) noexcept;
+
+// 宠物忠诚度与行动模式判定 (原版 battle.c:8369 BATTLE_PetLoyalCheck)
+enum class PetAiMode : std::uint8_t
+{
+	kNormal = 0,       // 正常服从指令
+	kTargetRandom = 1, // 随机攻击目标
+	kRandomAct = 2,    // 随机行动
+	kOwnerAttack = 3,  // 攻击主人
+	kEnemyAttack = 4,  // 攻击敌方
+	kEscape = 5,       // 忠诚过低逃跑 (LostEscape)
+};
+PetAiMode checkPetLoyalty(int ai, Random &rng) noexcept;
+
+// 复活结算纯函数 (原版 battle_magic.c:1597 BATTLE_MultiRessurect)
+std::int32_t applyRessurect(Combatant &target,
+                            int power,
+                            int per,
+                            bool is_pvp,
+                            Random &rng) noexcept;
 
 } // namespace SA::Rules
 

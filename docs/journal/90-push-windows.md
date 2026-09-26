@@ -807,3 +807,32 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
   - `tests/RulesBattleTest.cpp`: 增补 A-δ 用例，覆盖率 164 用例 / 3226 断言。
 - **守卫闭环**:
   - 服务端打附注 tag `shared-v0.40.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.40.0`，消除 D2 漂移告警，保持双端 CI 100% 绿灯。
+
+---
+
+### 9.0.87b ★ 推送窗口执行记录 —— `shared-v0.41.0`(2026-09-26)
+
+> **本窗口前推范围**: 战斗子批 A-ε 攻击魔法与杂项（§9.0.87），涉及 `shared/rules/Battle.{h,cpp}`, `tests/RulesBattleTest.cpp`。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `shared-v0.41.0`(**附注** tag，subject「release: shared-v0.41.0 (batch A-epsilon attack magic & battle misc)」) |
+| client master | pin v0.40.0 → **v0.41.0**(`cmake/SaShared.cmake`) |
+| client 本机 ci_verify | **8 项全过**(清洁构建 · 锁定 ref 与源码一致 · shared/ 与锁定 ref 一致无漂移 · 7 条全部注册 · ctest 7/7) |
+| server 本机 ci_verify | **6 项全过**(22 条全部注册 · ctest 22/22 · 断言防线反向验证通过) |
+| 两端用例集一致性 | D2「一份规则两端编译」本批闭环 |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/rules/Battle.h` / `Battle.cpp`:
+    - 声明并实现 `computeFireKillPhysicalDamage`、`computeFireMagicDamage`；
+    - 声明并实现 `rollAbduct`、`rollStealMoney`；
+    - 声明并实现 `computeComboDamage`、`applyDivideAttack`；
+    - 声明并实现 `rollEnemyHelp`、`checkPetLoyalty`、`applyRessurect`。
+  - `tests/RulesBattleTest.cpp`: 增补 A-ε 纯函数与 GBreak 对齐用例，覆盖率由 164 用例 / 3,226 断言扩充至 **170 用例 / 3,275 断言**。
+- **守卫闭环**:
+  - 服务端打附注 tag `shared-v0.41.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.41.0`，消除 D2 漂移告警，保持双端 CI 100% 绿灯。
+

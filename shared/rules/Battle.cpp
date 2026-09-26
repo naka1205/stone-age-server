@@ -2748,4 +2748,269 @@ bool resolveTurn(const BattleField &field, const TurnCommands &commands,
 	return resolveOrdered(field, commands, config, rng, out, order, count, nullptr);
 }
 
+// ── 批次 A-ε: 攻击魔法与杂项 ──────────────────────────────────
+
+std::int32_t computeFireKillPhysicalDamage(const BattleField &field,
+                                           const Combatant &attacker,
+                                           const Combatant &defender,
+                                           const RulesConfig &config,
+                                           Random &rng) noexcept
+{
+	Combatant temp_attacker = attacker;
+	temp_attacker.attack = static_cast<std::int32_t>(static_cast<float>(temp_attacker.str) * 0.8f);
+	if (temp_attacker.attack <= 0)
+		temp_attacker.attack = 1;
+	return computeDamage(field, temp_attacker, defender, config, rng);
+}
+
+std::int32_t computeFireMagicDamage(int att_magic_lv,
+                                    int def_magic_resist,
+                                    int power,
+                                    const Combatant &attacker,
+                                    const Combatant &defender,
+                                    const BattleField &field,
+                                    Random &rng) noexcept
+{
+	float k_magic = static_cast<float>(att_magic_lv) * 1.4f - static_cast<float>(def_magic_resist);
+	if (k_magic < 0.0f)
+		k_magic = 0.0f;
+	float m_magic = static_cast<float>(att_magic_lv);
+	if (m_magic < 1.0f)
+		m_magic = 1.0f;
+	float a_magic = (k_magic * k_magic) / (m_magic * m_magic);
+	a_magic += static_cast<float>(rng.rand(0, 19)) / 100.0f;
+	constexpr int kMagicLv = 4;
+	const int a_power = static_cast<int>(
+	    static_cast<float>(power) * (1.0f + static_cast<float>(kMagicLv) / 10.0f) * a_magic);
+	if (a_power <= 0)
+		return 0;
+	const std::int32_t damage = applyElementMatrix(field, attacker, defender, a_power);
+	return damage > 0 ? damage : 1;
+}
+
+bool rollAbduct(int attacker_level,
+                int defender_level,
+                bool is_boss,
+                Random &rng) noexcept
+{
+	if (is_boss)
+		return false;
+	int per = static_cast<int>(static_cast<float>(defender_level - attacker_level) * 0.6f + 30.0f);
+	if (per < 50)
+		per = 50;
+	return rng.rand(1, 100) < per;
+}
+
+std::int32_t rollStealMoney(bool defender_is_player,
+                            int defender_level,
+                            bool same_side,
+                            std::int32_t master_gold,
+                            std::int32_t max_gold,
+                            std::int32_t defender_gold,
+                            Random &rng) noexcept
+{
+	if (same_side || master_gold >= max_gold)
+		return 0;
+	int per = 0;
+	if (defender_is_player)
+		per = (((50 + defender_level) / 4) + 10) >> 1;
+	else
+		per = 5;
+	if (rng.rand(1, 100) >= per)
+		return 0;
+	std::int32_t stolen = 0;
+	if (defender_is_player)
+	{
+		const double ratio = static_cast<double>(rng.rand(1, 15)) * 0.01;
+		stolen = static_cast<std::int32_t>(static_cast<double>(defender_gold) * ratio);
+	}
+	else
+	{
+		stolen = rng.rand(10, 100);
+	}
+	if (master_gold + stolen >= max_gold)
+		stolen = max_gold - master_gold;
+	return stolen > 0 ? stolen : 0;
+}
+
+std::int32_t computeComboDamage(const BattleField &field,
+                                const int *attacker_slots,
+                                std::size_t attacker_count,
+                                const Combatant &defender,
+                                const RulesConfig &config,
+                                Random &rng) noexcept
+{
+	std::int32_t all_damage = 0;
+	for (std::size_t i = 0; i < attacker_count; ++i)
+	{
+		const int slot = attacker_slots[i];
+		if (slot < 0 || slot >= kSlotCount)
+			continue;
+		const auto &attacker = field.at(slot);
+		if (!attacker.occupied || attacker.dead || attacker.hp <= 0)
+			continue;
+		std::int32_t dmg = computeDamage(field, attacker, defender, config, rng);
+		if (dmg <= 0)
+			dmg = 1;
+		all_damage += dmg;
+	}
+	return all_damage;
+}
+
+int applyDivideAttack(BattleField &field,
+                      int target_side,
+                      DivideAttackTargetResult *out_results) noexcept
+{
+	int count = 0;
+	const int start_slot = (target_side == 0) ? 0 : kSideOffset;
+	const int end_slot = start_slot + kSideOffset;
+	for (int i = start_slot; i < end_slot; ++i)
+	{
+		Combatant &c = field.at(i);
+		if (!c.occupied || c.dead || c.hp <= 0)
+			continue;
+
+		DivideAttackTargetResult res{};
+		res.slot = i;
+		if (c.kind == CombatantKind::kPlayer)
+		{
+			res.mp_loss = c.mp >> 1;
+			c.mp -= res.mp_loss;
+		}
+		if (!c.has_ride || c.ride_hp <= 0)
+		{
+			res.hp_loss = c.hp / 5;
+			if (res.hp_loss <= 0)
+				res.hp_loss = 1;
+			c.hp -= res.hp_loss;
+			if (c.hp <= 0)
+			{
+				c.hp = 0;
+				c.dead = true;
+			}
+		}
+		else
+		{
+			res.hp_loss = c.hp / 10;
+			if (res.hp_loss <= 0)
+				res.hp_loss = 1;
+			c.hp -= res.hp_loss;
+			if (c.hp <= 0)
+			{
+				c.hp = 0;
+				c.dead = true;
+			}
+
+			res.ride_pet_hp_loss = c.ride_hp / 10;
+			if (res.ride_pet_hp_loss <= 0)
+				res.ride_pet_hp_loss = 1;
+			c.ride_hp -= res.ride_pet_hp_loss;
+			if (c.ride_hp <= 0)
+			{
+				c.ride_hp = 0;
+				c.has_ride = false;
+			}
+		}
+		if (out_results != nullptr)
+		{
+			out_results[count] = res;
+		}
+		++count;
+	}
+	return count;
+}
+
+EnemyHelpResult rollEnemyHelp(const BattleField &field,
+                              int caller_slot,
+                              int caller_level,
+                              bool is_pvp,
+                              Random &rng) noexcept
+{
+	EnemyHelpResult res{};
+	if (is_pvp || caller_level <= 0 || caller_slot < 0 || caller_slot >= kSlotCount)
+		return res;
+	const Combatant &caller = field.at(caller_slot);
+	if (!caller.occupied || caller.dead || caller.hp <= 0)
+		return res;
+	for (int k = kSideOffset; k < kSlotCount; ++k)
+	{
+		if (!field.at(k).occupied)
+		{
+			res.spawn_slot = k;
+			break;
+		}
+	}
+	if (res.spawn_slot == -1)
+		return res;
+	int min_lv = static_cast<int>(static_cast<float>(caller_level) * 0.8f);
+	int max_lv = static_cast<int>(static_cast<float>(caller_level) * 1.2f);
+	if (min_lv < 1)
+		min_lv = 1;
+	if (max_lv < min_lv)
+		max_lv = min_lv;
+	res.spawn_level = rng.rand(min_lv, max_lv);
+	res.success = true;
+	return res;
+}
+
+PetAiMode checkPetLoyalty(int ai, Random &rng) noexcept
+{
+	if (ai >= 80)
+		return PetAiMode::kNormal;
+	const int roll_val = rng.rand(1, 100);
+	if (ai >= 70)
+		return roll_val < 10 ? PetAiMode::kTargetRandom : PetAiMode::kNormal;
+	if (ai >= 60)
+		return roll_val < 20 ? PetAiMode::kTargetRandom : PetAiMode::kNormal;
+	if (ai >= 50)
+		return roll_val < 35 ? PetAiMode::kTargetRandom : PetAiMode::kNormal;
+	if (ai >= 40)
+		return roll_val < 50 ? PetAiMode::kTargetRandom : PetAiMode::kNormal;
+	if (ai >= 30)
+		return roll_val < 70 ? PetAiMode::kRandomAct : PetAiMode::kNormal;
+	if (ai >= 20)
+		return roll_val < 70 ? PetAiMode::kRandomAct : PetAiMode::kNormal;
+	if (ai >= 10)
+		return roll_val < 80 ? PetAiMode::kOwnerAttack : PetAiMode::kEnemyAttack;
+	return roll_val < 60 ? PetAiMode::kOwnerAttack : PetAiMode::kEscape;
+}
+
+std::int32_t applyRessurect(Combatant &target,
+                            int power,
+                            int per,
+                            bool is_pvp,
+                            Random &rng) noexcept
+{
+	if (is_pvp && target.kind == CombatantKind::kPlayer)
+		return 0;
+	if (!target.occupied || (!target.dead && target.hp > 0))
+		return 0;
+	std::int32_t up_point = 0;
+	if (power <= 0)
+	{
+		up_point = target.max_hp;
+	}
+	else if (per != 0)
+	{
+		up_point = (power * target.max_hp) / 100;
+	}
+	else
+	{
+		int min_val = static_cast<int>(static_cast<float>(power) * 0.9f);
+		int max_val = static_cast<int>(static_cast<float>(power) * 1.1f);
+		if (min_val < 1)
+			min_val = 1;
+		if (max_val < min_val)
+			max_val = min_val;
+		up_point = rng.rand(min_val, max_val);
+	}
+	if (up_point > target.max_hp)
+		up_point = target.max_hp;
+	if (up_point < 1)
+		up_point = 1;
+	target.dead = false;
+	target.hp = up_point;
+	return up_point;
+}
+
 } // namespace SA::Rules

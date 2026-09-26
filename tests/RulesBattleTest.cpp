@@ -5579,3 +5579,258 @@ TEST_CASE("A-δ指令集成:属性反转与地球一周遁地不可被选")
 		CHECK_FALSE(targetCheck(f, nullptr, 0));
 	}
 }
+
+TEST_CASE("A-ε纯函数:火杀与火魔法伤害")
+{
+	BattleField f{};
+	f.at(0).occupied = true;
+	f.at(0).str = 100;
+	f.at(0).attack = 100;
+	f.at(0).elements[2] = 100; // 火100
+
+	f.at(10).occupied = true;
+	f.at(10).hp = 500;
+	f.at(10).max_hp = 500;
+	f.at(10).defense = 50;
+	f.at(10).elements[3] = 100; // 风100
+
+	RulesConfig config{};
+	ScriptedRandom rng1({0});
+	ScriptedRandom rng2({0});
+
+	// 火杀物理攻击以 str * 0.8 = 80 攻击力结算
+	Combatant baseline_att = f.at(0);
+	baseline_att.attack = 80;
+	const auto expected_phys = computeDamage(f, baseline_att, f.at(10), config, rng1);
+	const auto firekill_phys = computeFireKillPhysicalDamage(f, f.at(0), f.at(10), config, rng2);
+	CHECK(firekill_phys == expected_phys);
+
+	// 火魔法伤害
+	ScriptedRandom rng3({0}); // Amagic offset = 0
+	const auto magic_dmg = computeFireMagicDamage(50, 20, 200, f.at(0), f.at(10), f, rng3);
+	CHECK(magic_dmg > 0);
+}
+
+TEST_CASE("A-ε纯函数:拐骗与偷窃金币")
+{
+	SUBCASE("拐骗 rollAbduct: BOSS 免疫与概率下限 50%")
+	{
+		ScriptedRandom rng({1}); // roll 1
+		CHECK_FALSE(rollAbduct(100, 10, /*is_boss=*/true, rng));
+
+		// 等级相同时 per = 30 抬下限为 50%
+		ScriptedRandom rng_low({49, 50});
+		CHECK(rollAbduct(50, 50, /*is_boss=*/false, rng_low));
+		CHECK_FALSE(rollAbduct(50, 50, /*is_boss=*/false, rng_low));
+
+		// 守方高于攻方: (80 - 20) * 0.6 + 30 = 66%
+		ScriptedRandom rng_hi({65, 66});
+		CHECK(rollAbduct(20, 80, /*is_boss=*/false, rng_hi));
+		CHECK_FALSE(rollAbduct(20, 80, /*is_boss=*/false, rng_hi));
+	}
+
+	SUBCASE("偷窃金币 rollStealMoney: 同侧/满金币否决与偷得金额计算")
+	{
+		ScriptedRandom rng({1, 5}); // roll 1 成功, roll 5% 金额
+		CHECK(rollStealMoney(true, 50, /*same_side=*/true, 0, 10000, 1000, rng) == 0);
+		CHECK(rollStealMoney(true, 50, /*same_side=*/false, 10000, 10000, 1000, rng) == 0);
+
+		// 玩家守方成功偷窃
+		ScriptedRandom rng_p({1, 10}); // per成功, 10%
+		const auto stolen_p = rollStealMoney(true, 70, false, 0, 10000, 1000, rng_p);
+		CHECK(stolen_p == 100);
+
+		// 敌人守方成功偷窃
+		ScriptedRandom rng_e({1, 50}); // per成功, 50
+		const auto stolen_e = rollStealMoney(false, 70, false, 0, 10000, 0, rng_e);
+		CHECK(stolen_e == 50);
+	}
+}
+
+TEST_CASE("A-ε纯函数:合击累加与恩惠分摊削减")
+{
+	SUBCASE("合击 computeComboDamage 累加各参战者打击伤害")
+	{
+		BattleField f{};
+		f.at(0).occupied = true;
+		f.at(0).hp = 500;
+		f.at(0).attack = 100;
+		f.at(1).occupied = true;
+		f.at(1).hp = 500;
+		f.at(1).attack = 120;
+		f.at(2).occupied = true;
+		f.at(2).dead = true; // 阵亡者跳过
+
+		f.at(10).occupied = true;
+		f.at(10).hp = 1000;
+		f.at(10).defense = 50;
+
+		RulesConfig config{};
+		ScriptedRandom rng1({0});
+		ScriptedRandom rng2({0});
+		const auto dmg0 = computeDamage(f, f.at(0), f.at(10), config, rng1);
+		const auto dmg1 = computeDamage(f, f.at(1), f.at(10), config, rng1);
+
+		const int attackers[] = {0, 1, 2};
+		const auto combo_dmg = computeComboDamage(f, attackers, 3, f.at(10), config, rng2);
+		CHECK(combo_dmg == dmg0 + dmg1);
+	}
+
+	SUBCASE("分摊攻击 applyDivideAttack: MP 减半与无骑宠 20% / 骑宠各 10% HP 扣减")
+	{
+		BattleField f{};
+		// 槽 0: 无骑宠玩家
+		f.at(0).occupied = true;
+		f.at(0).kind = CombatantKind::kPlayer;
+		f.at(0).hp = 500;
+		f.at(0).mp = 100;
+
+		// 槽 1: 骑乘玩家
+		f.at(1).occupied = true;
+		f.at(1).kind = CombatantKind::kPlayer;
+		f.at(1).hp = 500;
+		f.at(1).mp = 100;
+		f.at(1).has_ride = true;
+		f.at(1).ride_hp = 300;
+
+		DivideAttackTargetResult results[kSideOffset]{};
+		const int count = applyDivideAttack(f, 0, results);
+		CHECK(count == 2);
+
+		// 槽 0: mp 100 -> 50 (loss 50), hp 500 -> 400 (loss 100 = 20%)
+		CHECK(f.at(0).mp == 50);
+		CHECK(f.at(0).hp == 400);
+		CHECK(results[0].mp_loss == 50);
+		CHECK(results[0].hp_loss == 100);
+
+		// 槽 1: mp 100 -> 50, hp 500 -> 450 (loss 50 = 10%), ride_hp 300 -> 270 (loss 30 = 10%)
+		CHECK(f.at(1).mp == 50);
+		CHECK(f.at(1).hp == 450);
+		CHECK(f.at(1).ride_hp == 270);
+		CHECK(results[1].hp_loss == 50);
+		CHECK(results[1].ride_pet_hp_loss == 30);
+	}
+}
+
+TEST_CASE("A-ε纯函数:敌人求援与宠物忠诚度判定")
+{
+	SUBCASE("敌人求援 rollEnemyHelp: PvP 否决、搜寻空槽与等级浮动")
+	{
+		BattleField f{};
+		f.at(10).occupied = true;
+		f.at(10).kind = CombatantKind::kEnemy;
+		f.at(10).hp = 200;
+
+		ScriptedRandom rng({45}); // lv 45
+		CHECK_FALSE(rollEnemyHelp(f, 10, 50, /*is_pvp=*/true, rng).success);
+
+		const auto res = rollEnemyHelp(f, 10, 50, /*is_pvp=*/false, rng);
+		CHECK(res.success);
+		CHECK(res.spawn_slot == 11);
+		CHECK(res.spawn_level == 45);
+
+		// 填满所有敌方槽位后求援失败
+		for (int k = 10; k < 20; ++k)
+			f.at(k).occupied = true;
+		CHECK_FALSE(rollEnemyHelp(f, 10, 50, /*is_pvp=*/false, rng).success);
+	}
+
+	SUBCASE("宠物忠诚度 checkPetLoyalty 阶梯状态机判定")
+	{
+		ScriptedRandom rng_dummy({0});
+		CHECK(checkPetLoyalty(100, rng_dummy) == PetAiMode::kNormal);
+		CHECK(checkPetLoyalty(80, rng_dummy) == PetAiMode::kNormal);
+
+		ScriptedRandom rng_75({5, 15});
+		CHECK(checkPetLoyalty(75, rng_75) == PetAiMode::kTargetRandom);
+		CHECK(checkPetLoyalty(75, rng_75) == PetAiMode::kNormal);
+
+		ScriptedRandom rng_35({50, 75});
+		CHECK(checkPetLoyalty(35, rng_35) == PetAiMode::kRandomAct);
+		CHECK(checkPetLoyalty(35, rng_35) == PetAiMode::kNormal);
+
+		ScriptedRandom rng_15({50, 85});
+		CHECK(checkPetLoyalty(15, rng_15) == PetAiMode::kOwnerAttack);
+		CHECK(checkPetLoyalty(15, rng_15) == PetAiMode::kEnemyAttack);
+
+		ScriptedRandom rng_5({50, 75});
+		CHECK(checkPetLoyalty(5, rng_5) == PetAiMode::kOwnerAttack);
+		CHECK(checkPetLoyalty(5, rng_5) == PetAiMode::kEscape);
+	}
+}
+
+TEST_CASE("A-ε纯函数:群体复活结算")
+{
+	Combatant target{};
+	target.occupied = true;
+	target.kind = CombatantKind::kPlayer;
+	target.max_hp = 500;
+	target.hp = 0;
+	target.dead = true;
+
+	ScriptedRandom rng({200});
+
+	// PvP 玩家不可被复活
+	CHECK(applyRessurect(target, 100, 0, /*is_pvp=*/true, rng) == 0);
+	CHECK(target.dead);
+
+	// power <= 0 满血复活
+	const auto full_heal = applyRessurect(target, 0, 0, /*is_pvp=*/false, rng);
+	CHECK(full_heal == 500);
+	CHECK_FALSE(target.dead);
+	CHECK(target.hp == 500);
+
+	// 存活状态不可再次复活
+	CHECK(applyRessurect(target, 100, 0, /*is_pvp=*/false, rng) == 0);
+
+	// 百分比复活: 50%
+	target.dead = true;
+	target.hp = 0;
+	const auto per_heal = applyRessurect(target, 50, 1, /*is_pvp=*/false, rng);
+	CHECK(per_heal == 250);
+	CHECK(target.hp == 250);
+}
+
+TEST_CASE("A-ε宿主核对:GBreak与GBreak2对齐断言")
+{
+	// 核对 B1 消费端断言:
+	// GBreak (guard_break_mode=1): 专打防御; 守方防御生效, 守方未防御则 MISS
+	// GBreak2 (guard_break_mode=2): 守方防御 *1.3, 守方未防御 *0.7, 永不 MISS
+	Duel d1 = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	d1.field.at(0).mods.pet_skill_direct = true;
+	d1.field.at(0).mods.pet_skill_guard_break = 1;
+	d1.field.at(10).mods.always_dodge = false;
+
+	// 守方不防御 => GBreak 造成 0 伤害 (MISS)
+	SA::Domain::BattleEvents ev1{};
+	ScriptedRandom rng1({999999999});
+	REQUIRE(resolveTurn(d1.field, d1.cmds, RulesConfig{}, rng1, ev1));
+	bool found_miss = false;
+	for (const auto &e : ev1.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE && e.body.damage.target == 10u)
+		{
+			if (e.body.damage.hp_delta == 0)
+				found_miss = true;
+		}
+	}
+	CHECK(found_miss);
+
+	// GBreak2: 不防御也必命中 (0.7x)
+	Duel d2 = makeB1Duel(1000, 10, /*pet_skill=*/true);
+	d2.field.at(0).mods.pet_skill_direct = true;
+	d2.field.at(0).mods.pet_skill_guard_break = 2;
+	SA::Domain::BattleEvents ev2{};
+	ScriptedRandom rng2({999999999});
+	REQUIRE(resolveTurn(d2.field, d2.cmds, RulesConfig{}, rng2, ev2));
+	bool found_gbreak2_dmg = false;
+	for (const auto &e : ev2.events)
+	{
+		if (e.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE && e.body.damage.target == 10u)
+		{
+			if (e.body.damage.hp_delta < 0)
+				found_gbreak2_dmg = true;
+		}
+	}
+	CHECK(found_gbreak2_dmg);
+}

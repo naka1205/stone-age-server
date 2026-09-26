@@ -54,6 +54,7 @@ P2/P3 的完成以真实客户端操作和重启后的持久化结果为准；�
 | 09-25 | **批次 P.2 属性点分配系统**（§9.0.83：SkillUp 消费与四维加点换算 · 非战斗非阵亡门禁 · 战斗三围即时重算 · 锁定 ref `shared-v0.37.0` 闭环 · 双端 CI 全过） | 战斗子批 A-γ2 职业宿主与 64 职技映射 |
 | 09-25 | **战斗子批 A-γ1 核心状态推进与职业被动联动**（§9.0.85：挑拨/附身重定向与取消防御 · 火附体每回合结算 · 9大状态逆境回复生命 · 职业被动在场生效：回避/专精/格挡/熟练度 · 锁定 ref `shared-v0.39.0` 闭环 · 双端 CI 全过） | 战斗子批 A-δ 宠技战斗侧与特殊指令 / A-ε 攻击魔法与杂项 |
 | 09-26 | **战斗子批 A-δ 宠技战斗侧与特殊指令**（§9.0.86：舍身/自爆/落马/大吼/魔障沉默虚弱剧毒释放/状态回复/属性反转/地球一周遁地隐身/增益回血 · 锁定 ref `shared-v0.40.0` 闭环 · 双端 CI 全过） | 战斗子批 A-ε 攻击魔法与杂项 |
+| 09-26 | **战斗子批 A-ε 攻击魔法与杂项**（§9.0.87：火杀物理/魔法 · 拐骗 · 偷金 · 合击 · 分摊 · 求援 · 忠诚判定 · 复活 · GBreak 宿主对齐 · 锁定 ref `shared-v0.41.0` 闭环 · 双端 CI 全过） | 阶段 2 真实世界地图深化 D.3 与客户端场景交互补齐 |
 
 **环境事实**（A1 复验结论）：09-15 10:54 的 `civ.log` 失败发生在 12:53 探测修复（`fde500d`，§9.0.59）**之前**，为历史证据非现存故障；09-16 02:19 在 `c213060`/shared-v0.30.0 上复跑 win_validate **11/11 全绿**（服务端 ctest 22/22、0 告警、OpenSSL 4.0.2 探测命中、断言防线反向验证通过）。
 
@@ -86,7 +87,7 @@ P2/P3 的完成以真实客户端操作和重启后的持久化结果为准；�
 | **A-γ1 状态序列收口** | ✅ 已于 §9.0.70 & §9.0.85 收口完成：混乱/挑拨/附身重定向全链 · 火附体每回合结算 · 9大异常状态逆境回复纯函数与结算 · 四职被动纯函数与管线接入（回避/专精/格挡/熟练度） | 真状态 58 · 串 48 · rng 8 | L4.1 地基在；状态 12..43 的**施加者**仍属宠技/职技域（本批只落推进与解除面） | `rules_battle` 157 用例/3,166 断言全绿；RV-1/RV-2 双向反向验证通过 |
 | **A-γ2 职业宿主** | `battle_profession_attack_fun`（490）· `battle_profession_status_chang_fun`（778）· `battle_profession_assist_fun`（306）· `PROFESSION_BATTLE_StatusAttackCheck`（40）· `attack_magic_fun`（29） | 真状态 ~74 · 串 ~76 · rng ~4——C 批次 64 函数的运行时宿主（净移植量 = 2 函数 + 1 张表的判据在此复核） | 职技效果表 fixture（手工构造，D 线不写运行时加载器） | C 表接线用例（53 同构薄包装走映射表）；`PROFESSION_escape/track` 两真实现逐行对照 |
 | **A-δ 宠技战斗侧 + 特殊指令** | ✅ 已于 §9.0.86 收口完成：`BATTLE_S_Barrier/Nocast/Roar/Weaken/Deeppoison/Refresh/Sacrifice/Explode/FallGround` · `PETSKILL_SetMagicPet/SetDuck` · `AttReverse/EarthRoundHide` · 锁定 ref `shared-v0.40.0` 闭环 | 真状态 ~45 · 串 ~30 · rng ~8 | 纯函数计算 + 战斗宿主指令执行 | `rules_battle` 164 用例/3,226 断言全绿；RV-1/RV-2 双向反向验证通过 |
-| **A-ε 攻击魔法与杂项** | `MultiAttMagic_Fire`（208）· `Attack_FIREKILL`（346）· `Abduct`（112）· `Steal/StealMoney`（235）· `Combo` 三件（353）· `DivideAttack`（88）· `E_ENEMYHELP/REFILE/REHP`（149）· `LostEscape`（63）· `PetLoyalCheck`（147）· `MultiRessurect` + OFFLINE（134）· `S_GBreak/GBreak2` 宿主核对（334） | 真状态 ~40 · 串 ~70 · rng ~20 | 攻击魔法部分依赖 `__ATTACK_MAGIC` 管线裁定（宠技表 36 行魔法系同源）——若管线未裁，本子批先落 steal/combo/divide/enemy 三事件 | combo 连锁用例、偷窃金币/道具双路径、DivideAttack 分摊；GBreak 宿主与 B1 消费端语义逐位对齐断言 |
+| **A-ε 攻击魔法与杂项** | ✅ 已于 §9.0.87 收口完成：`Attack_FIREKILL` / `MultiAttMagic_Fire`（火杀物理与魔法）· `Abduct`（拐骗）· `StealMoney`（偷金）· `Combo`（合击）· `DivideAttack`（分摊）· `E_ENEMYHELP`（求援）· `PetLoyalCheck`（忠诚）· `MultiRessurect`（复活）· `GBreak/GBreak2` 宿主对齐 · 锁定 ref `shared-v0.41.0` 闭环 | 真状态 ~40 · 串 ~70 · rng ~20 | 纯函数计算 + 战斗宿主指令执行 | `rules_battle` 170 用例/3,275 断言全绿；RV-1/RV-2 双向反向验证通过 |
 
 ### 执行纪律（全部沿用既有守则，此处只为免查）
 

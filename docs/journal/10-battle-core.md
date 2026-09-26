@@ -399,10 +399,38 @@ shared-v0.8.0 + 客户端 `d2-only` 复验**,两仓 × 两远端一起推 tag(§
    - 战斗指令 `CommandKind::PROF_SKILL` 驱动直攻管线，复用标准 strike 计算（破防、闪避、暴击等），打上 `ATTACK_KIND_PROF_SKILL` 事件标记；
    - 支持混乱攻击多段打击与状态施加、双重攻击固定 2 段伤害衰减、爆击高额攻倍率结算。
 
-#### ② 验证与工程纪律
-- 服务端 22 项全量 CTest 100% 通过（`rules_progression` 增补职业属性上限与加点门禁、`rules_battle` 增补 64 技能全表及直攻结算测试、`world_map` 增补职业与遇敌率时钟集成测试）。
-- 双向反向验证：
-  - 1) 篡改 `getProfessionStatCap` 期望为 19999 -> 断言失败转红，恢复 20000 -> 回绿；
-  - 2) 篡改 64 技能表大小期望为 65 -> 断言失败转红，恢复 64 -> 回绿。
 - `ci_verify.py` 全量通过（6/6 项全绿）。
+
+---
+
+### 9.0.87 ★★ 战斗子批 A-ε —— 攻击魔法与杂项 (2026-09-26)
+
+> **本批聚焦**: 承接 9.0.86 (批次 A-δ) 宠技战斗侧与特殊指令，依据原版石器 8.0 权威源码与架构裁定，收口战斗核心指令族最后的子批 A-ε（攻击魔法与杂项）。
+> 涵盖火杀物理/魔法伤害计算（`Attack_FIREKILL` / `MultiAttMagic_Fire`）、拐骗离场判定（`Abduct`）、偷窃金币判定（`StealMoney`）、合击伤害累加（`Combo`）、分摊攻击/恩惠削减结算（`DivideAttack`）、敌人求援（`E_ENEMYHELP`）、宠物忠诚度状态机判定（`PetLoyalCheck`）、群体复活（`MultiRessurect`）以及破除防御（`GBreak/GBreak2`）宿主对齐。
+
+#### ① 核心真源与领域规则兑现
+1. **火杀物理与魔法伤害 (`shared/rules/Battle.h` / `Battle.cpp`)**:
+   - `computeFireKillPhysicalDamage`: 忠实兑现原版 `battle.c:9260` 规则，攻方物理攻击力临时修正为基础力量的 80%（`WORKATTACKPOWER = WORKFIXSTR * 0.8`），按标准伤害管线结算；
+   - `computeFireMagicDamage`: 忠实复刻原版 `battle_magic.c:5183-5370` 规则，按 `att_magic_lv * 1.4 - def_magic_resist`、Amagic 二次方比率、20% 随机扰动以及属性相克矩阵计算魔法伤害。
+2. **拐骗判定与脱离战场 (`shared/rules/Battle.h` / `Battle.cpp`)**:
+   - `rollAbduct`: 1:1 移植 `battle_event.c:5677`，守方为 BOSS 时几率恒为 0；基础几率 `per = max(50, (def_lv - att_lv) * 0.6 + 30)`，掷骰判定成功则目标离场，攻方无论成败均离场。
+3. **偷窃金币双路径 (`shared/rules/Battle.h` / `Battle.cpp`)**:
+   - `rollStealMoney`: 1:1 移植 `battle_event.c:5800`，同侧或主人金币已满时直接否决；守方为玩家时成功率 `(((50 + def_lv) / 4) + 10) >> 1`，偷取金额为守方金币的 1%~15%；守方为敌人时成功率 5%，偷取 10~100 金币。
+4. **合击伤害累加与分摊攻击 (`shared/rules/Battle.h` / `Battle.cpp`)**:
+   - `computeComboDamage`: 1:1 移植 `battle_event.c:5336`，各合击参战者无视守护接管，独立计算打击伤害并累加求和；
+   - `applyDivideAttack`: 1:1 移植 `battle_event.c:10015`，目标侧所有在场者削减：玩家 MP 减半；无骑宠扣减 20% HP，骑宠态玩家扣减 10% HP 且骑宠扣减 10% HP。零堆分配设计。
+5. **敌人求援、宠物忠诚度与群体复活 (`shared/rules/Battle.h` / `Battle.cpp`)**:
+   - `rollEnemyHelp`: 1:1 移植 `battle_event.c:6504`，非 PvP 下搜索敌方侧首个空槽，以主叫者等级的 80%~120% 随机浮动召入援军；
+   - `checkPetLoyalty`: 1:1 移植 `battle.c:8369`，兑现 80/70/60/50/40/30/20/10 各忠诚档位的随机选敌、随机行动、攻击主人、攻击敌方及忠诚过低逃跑（`LostEscape`）的阶梯状态机；
+   - `applyRessurect`: 1:1 移植 `battle_magic.c:1597`，PvP 下玩家不可复活，阵亡目标按 power/per 公式回复 HP 并恢复存活状态。
+6. **GBreak 与 GBreak2 宿主断言核对**:
+   - 严格核实 B1 消费端语义：GBreak 专打防御（对非防御或混乱防御造成 0 伤 MISS），GBreak2 永不 MISS（防守方 1.3x，非防守方 0.7x），且均绕过防御减伤计算。
+
+#### ② 验证与工程纪律
+- 服务端 `rules_battle` 用例由 164 例 / 3,226 断言扩充至 **170 例 / 3,275 断言**，全部测试 100% 绿灯。
+- 全量 CTest 22/22 项全部通过。
+- ★ **双向反向验证 (RV)**:
+  - RV-1: 篡改 `rollAbduct` 移除 `per < 50` 抬下限逻辑，拐骗用例精准红灯（49 < 30 失败）；复原回绿。
+  - RV-2: 篡改 `applyDivideAttack` MP 削减公式由 `c.mp >> 1` 改为 `c.mp / 3`，分摊攻击用例 3 处断言精准转红（67 == 50 与 33 == 50 失败）；复原回绿。
+
 
