@@ -6321,3 +6321,460 @@ TEST_CASE("家族跨图专属聊天频道 (kTalkFamily) 与上下线感知")
 	f.world.onSessionClosed(id2);
 	CHECK_FALSE(f.world.getFamilyInfo(fid1)->members[1].online);
 }
+
+// ══ 阶段 2: 玩家摆摊与拍卖市场系统 (Street Stall & Consignment Market) ═════
+
+TEST_CASE("玩家摆摊生命周期与移动/组队/交易拦截门禁")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p2->floor = 0;
+	p2->x = 21;
+	p2->y = 20;
+
+	// 给 Alice 放置道具和宠物
+	auto item = makeTestItem(1001);
+	item.name.assign("恢复药水");
+	const int item_slot = f.world.giveItemToPlayer(id1, item);
+	REQUIRE(item_slot >= 0);
+
+	auto pet = makeTestPet(50, 5);
+	pet.name.assign("小暴龙");
+	const int pet_slot = f.world.givePetToPlayer(id1, pet);
+	REQUIRE(pet_slot >= 0);
+
+	// 1. 开摊进入配置模式
+	REQUIRE(f.world.openStall(id1, "Alice的小铺"));
+	CHECK_FALSE(f.world.isPlayerVending(id1)); // 尚未正式营业
+
+	// 2. 上架道具与宠物，并设定单价
+	REQUIRE(f.world.setStallItem(id1, item_slot, 300));
+	REQUIRE(f.world.setStallPet(id1, pet_slot, 800));
+
+	// 检视配置态中的摊位信息
+	auto stall_opt = f.world.getPlayerStall(id1);
+	REQUIRE(stall_opt.has_value());
+	CHECK(stall_opt->title == "Alice的小铺");
+	CHECK(stall_opt->items.size() == 1);
+	CHECK(stall_opt->items[0].price == 300);
+	CHECK(stall_opt->items[0].item_name == "恢复药水");
+	CHECK(stall_opt->pets.size() == 1);
+	CHECK(stall_opt->pets[0].price == 800);
+	CHECK(stall_opt->pets[0].pet_name == "小暴龙");
+
+	// 3. 正式出摊营业
+	REQUIRE(f.world.startStallVending(id1));
+	CHECK(f.world.isPlayerVending(id1));
+
+	// 4. 摆摊态门禁拦截
+	// a. 摊主禁止移动: onWalk 拦截
+	SA::Domain::WalkRequest walk_req{};
+	walk_req.x = 20;
+	walk_req.y = 20;
+	walk_req.direction.assign("e");
+	f.world.onWalk(id1, walk_req);
+	f.clock.advance(300);
+	f.world.tick();
+	CHECK(p1->x == 20); // 坐标未变，移动被锁定
+	CHECK(p1->y == 20);
+
+	// b. 摊主禁止组队 (发起与接受均被拦截)
+	CHECK_FALSE(f.world.joinParty(id2, id1));
+	CHECK_FALSE(f.world.joinParty(id1, id2));
+
+	// c. 摊主禁止交易 (发起与接受均被拦截)
+	CHECK_FALSE(f.world.requestTrade(id2, id1));
+	CHECK_FALSE(f.world.requestTrade(id1, id2));
+
+	// 5. 收摊与解除门禁
+	REQUIRE(f.world.closeStall(id1));
+	CHECK_FALSE(f.world.isPlayerVending(id1));
+	CHECK_FALSE(f.world.getPlayerStall(id1).has_value());
+
+	// 收摊后交易与组队恢复
+	CHECK(f.world.joinParty(id2, id1));
+	f.world.leaveParty(id2);
+}
+
+TEST_CASE("玩家摆摊购买与出战宠重置")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+
+	p1->floor = 0;
+	p1->x = 30;
+	p1->y = 30;
+	p1->gold = 1000;
+	p2->floor = 0;
+	p2->x = 31;
+	p2->y = 30;
+	p2->gold = 2000;
+
+	auto item = makeTestItem(2001);
+	item.name.assign("精工石斧");
+	const int item_slot = f.world.giveItemToPlayer(id1, item);
+	REQUIRE(item_slot >= 0);
+
+	auto pet = makeTestPet(88, 10);
+	pet.name.assign("战斗金虎");
+	const int pet_slot = f.world.givePetToPlayer(id1, pet);
+	REQUIRE(pet_slot >= 0);
+
+	// 将该宠物设为出战宠
+	p1->default_pet = pet_slot;
+	CHECK(p1->default_pet == pet_slot);
+
+	REQUIRE(f.world.openStall(id1, "神兵珍兽阁"));
+	REQUIRE(f.world.setStallItem(id1, item_slot, 500));
+	REQUIRE(f.world.setStallPet(id1, pet_slot, 1200));
+
+	// 出战宠上架摊位时，default_pet 安全重置为 -1
+	CHECK(p1->default_pet == -1);
+
+	REQUIRE(f.world.startStallVending(id1));
+
+	// 视野内的附近摊位检视
+	auto nearby = f.world.nearbyStalls(id2, 5);
+	REQUIRE(nearby.size() == 1);
+	CHECK(nearby[0].seller_name == "Alice");
+	CHECK(nearby[0].title == "神兵珍兽阁");
+
+	// 1. Bob 购买道具
+	REQUIRE(f.world.buyFromStall(id2, id1, MarketAssetType::kItem, item_slot));
+	CHECK(p2->gold == 1500);                                             // 2000 - 500
+	CHECK(p1->gold == 1500);                                             // 1000 + 500
+	CHECK_FALSE(p1->items[static_cast<std::size_t>(item_slot)].valid()); // 卖家槽位清空
+	CHECK(f.world.playerItemSlotsUsed(id2) == 1);                        // 买家到账
+
+	// 2. Bob 购买宠物
+	REQUIRE(f.world.buyFromStall(id2, id1, MarketAssetType::kPet, pet_slot));
+	CHECK(p2->gold == 300);                                            // 1500 - 1200
+	CHECK(p1->gold == 2700);                                           // 1500 + 1200
+	CHECK_FALSE(p1->pets[static_cast<std::size_t>(pet_slot)].valid()); // 卖家宠物栏清空
+	CHECK(f.world.playerPetSlotsUsed(id2) == 1);                       // 买家到账
+
+	// 售空后摊位自动关闭
+	CHECK_FALSE(f.world.isPlayerVending(id1));
+}
+
+TEST_CASE("摆摊购买买家容量前置阻断 [RV-1] 与距离门禁")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+
+	p1->floor = 0;
+	p1->x = 10;
+	p1->y = 10;
+	p2->floor = 0;
+	p2->x = 10;
+	p2->y = 15; // 切比雪夫距离 5 > 3
+	p2->gold = 10000;
+
+	const int item_slot = f.world.giveItemToPlayer(id1, makeTestItem(3001));
+	REQUIRE(item_slot >= 0);
+	const int pet_slot = f.world.givePetToPlayer(id1, makeTestPet(10, 1));
+	REQUIRE(pet_slot >= 0);
+
+	REQUIRE(f.world.openStall(id1, "超远距离测试"));
+	REQUIRE(f.world.setStallItem(id1, item_slot, 200));
+	REQUIRE(f.world.setStallPet(id1, pet_slot, 500));
+	REQUIRE(f.world.startStallVending(id1));
+
+	// 1. 距离门禁 (> 3 格拒绝)
+	CHECK_FALSE(f.world.buyFromStall(id2, id1, MarketAssetType::kItem, item_slot));
+
+	// Bob 走到距离 <= 3 格 (10, 12: 切比雪夫距离 = 2)
+	p2->y = 12;
+
+	// 2. [RV-1] 买家背包满阻断购买道具
+	while (f.world.giveItemToPlayer(id2, makeTestItem(999)) >= 0)
+	{
+	}
+	CHECK(f.world.playerItemSlotsUsed(id2) == 45); // 满包
+	CHECK_FALSE(f.world.buyFromStall(id2, id1, MarketAssetType::kItem, item_slot));
+	CHECK(p2->gold == 10000); // 资产分文未扣
+
+	// Bob 腾出 1 格背包，成功购买
+	p2->clearItemSlot(static_cast<int>(SA::Model::kStartItemArray));
+	REQUIRE(f.world.buyFromStall(id2, id1, MarketAssetType::kItem, item_slot));
+	CHECK(p2->gold == 9800);
+
+	// 3. [RV-1] 买家宠物栏满阻断购买宠物
+	while (f.world.givePetToPlayer(id2, makeTestPet(99, 1)) >= 0)
+	{
+	}
+	CHECK(f.world.playerPetSlotsUsed(id2) == 5); // 满栏
+	CHECK_FALSE(f.world.buyFromStall(id2, id1, MarketAssetType::kPet, pet_slot));
+	CHECK(p2->gold == 9800);
+
+	// Bob 腾出 1 格宠物槽，成功购买
+	p2->clearPetSlot(0);
+	REQUIRE(f.world.buyFromStall(id2, id1, MarketAssetType::kPet, pet_slot));
+	CHECK(p2->gold == 9300);
+}
+
+TEST_CASE("拍卖市场挂牌、100石币挂牌费扣除与资产严格解耦")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	REQUIRE(f.world.setPlayerName(id, "Alice"));
+
+	const int item_slot = f.world.giveItemToPlayer(id, makeTestItem(5001));
+	REQUIRE(item_slot >= 0);
+	const int pet_slot = f.world.givePetToPlayer(id, makeTestPet(60, 1));
+	REQUIRE(pet_slot >= 0);
+	p->default_pet = pet_slot;
+
+	// 1. 余额不足挂牌费 (50 < 100) 拦截
+	p->gold = 50;
+	CHECK(f.world.listMarketItem(id, item_slot, 2000) == 0);
+	CHECK(f.world.listMarketPet(id, pet_slot, 5000) == 0);
+
+	// 2. 补足挂牌费并挂牌道具
+	p->gold = 500;
+	const auto lid_item = f.world.listMarketItem(id, item_slot, 2000);
+	REQUIRE(lid_item > 0);
+	CHECK(p->gold == 400); // 严格扣除 100 挂牌费
+	// 实体严格解耦：原背包槽位已被清除
+	CHECK_FALSE(p->items[static_cast<std::size_t>(item_slot)].valid());
+
+	auto listing_item = f.world.getMarketListing(lid_item);
+	REQUIRE(listing_item.has_value());
+	CHECK(listing_item->seller_name == "Alice");
+	CHECK(listing_item->price == 2000);
+	CHECK(listing_item->asset_type == MarketAssetType::kItem);
+	CHECK(listing_item->item_data.has_value());
+
+	// 3. 挂牌宠物
+	const auto lid_pet = f.world.listMarketPet(id, pet_slot, 5000);
+	REQUIRE(lid_pet > 0);
+	CHECK(p->gold == 300); // 严格扣除 100 挂牌费
+	// 出战宠安全重置
+	CHECK(p->default_pet == -1);
+	CHECK_FALSE(p->pets[static_cast<std::size_t>(pet_slot)].valid());
+
+	auto listing_pet = f.world.getMarketListing(lid_pet);
+	REQUIRE(listing_pet.has_value());
+	CHECK(listing_pet->asset_type == MarketAssetType::kPet);
+	CHECK(listing_pet->pet_data.has_value());
+
+	CHECK(f.world.activeMarketListingCount() == 2);
+	CHECK(f.world.playerMarketListings(id).size() == 2);
+
+	// 4. 上架上限测试 (最大 10 件)
+	p->gold = 10000;
+	for (int i = 0; i < 8; ++i)
+	{
+		const int slot = f.world.giveItemToPlayer(id, makeTestItem(6000 + i));
+		REQUIRE(slot >= 0);
+		REQUIRE(f.world.listMarketItem(id, slot, 1000) > 0);
+	}
+	CHECK(f.world.playerMarketListings(id).size() == 10);
+
+	// 第 11 件上架被阻断 (达到玩家在售上限)
+	const int extra_slot = f.world.giveItemToPlayer(id, makeTestItem(9999));
+	REQUIRE(extra_slot >= 0);
+	CHECK(f.world.listMarketItem(id, extra_slot, 1000) == 0);
+}
+
+TEST_CASE("拍卖市场模糊检索与跨玩家购买结算 (5% 成交税)")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+
+	p1->gold = 1000;
+	p2->gold = 10000;
+
+	auto ring = makeTestItem(8001);
+	ring.name.assign("火之戒指");
+	const int s1 = f.world.giveItemToPlayer(id1, ring);
+	REQUIRE(s1 >= 0);
+
+	auto sword = makeTestItem(8002);
+	sword.name.assign("风之长剑");
+	const int s2 = f.world.giveItemToPlayer(id1, sword);
+	REQUIRE(s2 >= 0);
+
+	auto pet = makeTestPet(100, 20);
+	pet.name.assign("红暴龙");
+	const int s3 = f.world.givePetToPlayer(id1, pet);
+	REQUIRE(s3 >= 0);
+
+	const auto lid1 = f.world.listMarketItem(id1, s1, 1000); // 火之戒指
+	const auto lid2 = f.world.listMarketItem(id1, s2, 2000); // 风之长剑
+	const auto lid3 = f.world.listMarketPet(id1, s3, 5000);  // 红暴龙
+	REQUIRE(lid1 > 0);
+	REQUIRE(lid2 > 0);
+	REQUIRE(lid3 > 0);
+	CHECK(p1->gold == 700); // 扣除了 300 挂牌费
+
+	// 1. 检索功能测试
+	auto search_ring = f.world.searchMarket("戒指");
+	CHECK(search_ring.size() == 1);
+	CHECK(search_ring[0].listing_id == lid1);
+
+	auto search_pets = f.world.searchMarket("", MarketAssetType::kPet);
+	CHECK(search_pets.size() == 1);
+	CHECK(search_pets[0].listing_id == lid3);
+
+	// 2. 自买自卖拦截
+	CHECK_FALSE(f.world.buyMarketListing(id1, lid1));
+
+	// 3. Bob 购买火之戒指 (标价 1000, 5% 税 = 50, 净收益 950)
+	REQUIRE(f.world.buyMarketListing(id2, lid1));
+	CHECK(p2->gold == 9000);                      // 10000 - 1000
+	CHECK(p1->gold == 1650);                      // 700 + 950
+	CHECK(f.world.playerItemSlotsUsed(id2) == 1); // 道具已入 Bob 背包
+
+	auto sold_listing = f.world.getMarketListing(lid1);
+	REQUIRE(sold_listing.has_value());
+	CHECK(sold_listing->sold);
+	CHECK(f.world.activeMarketListingCount() == 2);
+}
+
+TEST_CASE("拍卖市场离线卖家与随身溢出转存系统邮件保全 [RV-2]")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+
+	p1->gold = 500;
+	p2->gold = 50000;
+
+	// === 场景 A: 卖家离线，收益转存系统邮件 [RV-2] ===
+	const int s1 = f.world.giveItemToPlayer(id1, makeTestItem(9001));
+	REQUIRE(s1 >= 0);
+	const auto lid_offline = f.world.listMarketItem(id1, s1, 2000);
+	REQUIRE(lid_offline > 0);
+
+	// Alice 下线
+	f.world.onSessionClosed(id1);
+
+	// Bob 购买 Alice 的离线挂牌 (2000 石币, 5% 税 = 100, 净收益 1900)
+	REQUIRE(f.world.buyMarketListing(id2, lid_offline));
+
+	// Alice 重新上线，检查邮箱
+	const auto id1_new = spawnHandshaked(f);
+	REQUIRE(f.world.setPlayerName(id1_new, "Alice"));
+	auto *p1_new = f.world.playerForTest(id1_new);
+	REQUIRE(p1_new != nullptr);
+	p1_new->gold = 100;
+
+	auto mails = f.world.playerMails(id1_new);
+	REQUIRE(mails.size() == 1);
+	CHECK(mails[0].sender_name == "拍卖市场");
+	CHECK(mails[0].attached_gold == 1900);
+
+	// 提取邮件收益
+	REQUIRE(f.world.takeMailAttachment(id1_new, mails[0].mail_id));
+	CHECK(p1_new->gold == 2000); // 100 + 1900
+
+	// === 场景 B: 卖家在线但随身石币达到上限溢出，溢出部分转存系统邮件 [RV-2] ===
+	p1_new->gold = SA::World::maxHaveGold(0) - 200; // 随身仅剩 200 容量达到 1,000,000
+	const int s2 = f.world.giveItemToPlayer(id1_new, makeTestItem(9002));
+	REQUIRE(s2 >= 0);
+	const auto lid_overflow = f.world.listMarketItem(id1_new, s2, 1000);
+	REQUIRE(lid_overflow > 0);
+
+	// 挂牌后 p1_new 扣除了 100 挂牌费，当前余额 = max - 300
+	// Bob 购买该物品: 标价 1000, 税后 950
+	// 卖家可容纳 300 石币入账达到 1,000,000，剩余 650 发生溢出 (kClamped)
+	REQUIRE(f.world.buyMarketListing(id2, lid_overflow));
+	CHECK(p1_new->gold == SA::World::maxHaveGold(0)); // 达到满额
+
+	// 检查系统邮件：溢出的 650 石币已转存为系统补偿邮件
+	auto overflow_mails = f.world.playerMails(id1_new);
+	REQUIRE(overflow_mails.size() >= 2);
+	const auto &last_mail = overflow_mails.back();
+	CHECK(last_mail.sender_name == "拍卖市场");
+	CHECK(last_mail.title == "拍卖收入超额补发");
+	CHECK(last_mail.attached_gold == 650);
+}
+
+TEST_CASE("拍卖市场商品撤回下架与退还 (满包退回系统邮件)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	REQUIRE(f.world.setPlayerName(id, "Alice"));
+	p->gold = 2000;
+
+	// 1. 正常下架撤回
+	const int s1 = f.world.giveItemToPlayer(id, makeTestItem(1111));
+	REQUIRE(s1 >= 0);
+	const auto lid1 = f.world.listMarketItem(id, s1, 3000);
+	REQUIRE(lid1 > 0);
+	CHECK(f.world.playerItemSlotsUsed(id) == 0);
+
+	REQUIRE(f.world.cancelMarketListing(id, lid1));
+	CHECK(f.world.playerItemSlotsUsed(id) == 1); // 道具安全退回背包
+	CHECK(f.world.getMarketListing(lid1)->cancelled);
+
+	// 2. 背包已满时下架，资产安全退回系统邮件附件
+	const int s2 = f.world.giveItemToPlayer(id, makeTestItem(2222));
+	REQUIRE(s2 >= 0);
+	const auto lid2 = f.world.listMarketItem(id, s2, 5000);
+	REQUIRE(lid2 > 0);
+
+	// 将 Alice 背包填满 (45 格道具)
+	while (f.world.giveItemToPlayer(id, makeTestItem(999)) >= 0)
+	{
+	}
+	CHECK(f.world.playerItemSlotsUsed(id) == 45);
+
+	// 执行下架：由于背包已满，自动转存系统邮件
+	REQUIRE(f.world.cancelMarketListing(id, lid2));
+
+	auto mails = f.world.playerMails(id);
+	REQUIRE(mails.size() == 1);
+	CHECK(mails[0].sender_name == "拍卖市场");
+	CHECK(mails[0].title == "寄售物品下架返还");
+	REQUIRE(mails[0].attached_item.has_value());
+	CHECK(mails[0].attached_item->item_id == 2222);
+
+	// 腾出背包空间后即可提取
+	p->clearItemSlot(static_cast<int>(SA::Model::kStartItemArray));
+	REQUIRE(f.world.takeMailAttachment(id, mails[0].mail_id));
+	CHECK(f.world.playerItemSlotsUsed(id) == 45);
+}

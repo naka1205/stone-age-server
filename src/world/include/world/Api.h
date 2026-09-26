@@ -1115,6 +1115,65 @@ struct FamilyInfo
 	std::vector<FamilyMember> applicants{}; // 申请入族名单
 };
 
+// ══ 摆摊系统 (阶段 2: 玩家地摊系统, 对齐官方 STREET_VENDOR) ════════════════
+inline constexpr std::size_t kMaxStallItemSlots = 10;
+inline constexpr std::size_t kMaxStallPetSlots = 3;
+
+// ══ 寄售与拍卖市场系统 (阶段 2: 市场/拍卖行系统) ════════════════════════════
+enum class MarketAssetType : std::uint8_t
+{
+	kItem = 0,
+	kPet = 1,
+};
+
+struct StallItemEntry
+{
+	int item_slot = -1;      // 卖家背包中的槽位 (kStartItemArray..kMaxItemHave - 1)
+	std::uint32_t price = 0; // 标价石币
+	std::string item_name{};
+};
+
+struct StallPetEntry
+{
+	int pet_slot = -1;       // 卖家随身宠物栏中的槽位 (0..4)
+	std::uint32_t price = 0; // 标价石币
+	std::string pet_name{};
+	std::int32_t pet_level = 1;
+};
+
+struct StallInfo
+{
+	SA::Net::SessionId seller = 0;
+	std::string seller_name{};
+	std::string title{};
+	std::int32_t floor = 0;
+	std::int32_t x = 0;
+	std::int32_t y = 0;
+	std::vector<StallItemEntry> items{};
+	std::vector<StallPetEntry> pets{};
+	bool open = false; // 是否正式营业中
+};
+
+struct MarketListing
+{
+	std::uint64_t listing_id = 0;
+	SA::Net::SessionId seller_session = 0;
+	std::string seller_name{};
+	MarketAssetType asset_type = MarketAssetType::kItem;
+	std::optional<SA::Model::Item> item_data{};
+	std::optional<SA::Model::Pet> pet_data{};
+	std::string asset_name{};
+	std::int32_t asset_level = 1;
+	std::uint32_t price = 0;
+	std::int64_t list_timestamp_ms = 0;
+	bool sold = false;
+	bool cancelled = false;
+};
+
+inline constexpr std::uint32_t kMarketListingFee = 100;        // 上架挂牌费 100 石币
+inline constexpr std::uint32_t kMarketTaxRatePercent = 5;      // 成交税率 5%
+inline constexpr std::size_t kMaxMarketListingsPerPlayer = 10; // 每玩家同时在售上限
+
 struct ChatMessage
 {
 	ChatChannel channel{ChatChannel::kTalkNormal};
@@ -1593,6 +1652,31 @@ class World final : public SA::Net::TransportEvents,
 	FamilyRole playerFamilyRole(SA::Net::SessionId session) const;
 	std::size_t familyCount() const;
 
+	// ── 玩家摆摊系统 (Street Stall System) ────────────────────────────────
+	bool openStall(SA::Net::SessionId seller, const std::string &title);
+	bool setStallItem(SA::Net::SessionId seller, int item_slot, std::uint32_t price);
+	bool setStallPet(SA::Net::SessionId seller, int pet_slot, std::uint32_t price);
+	bool removeStallItem(SA::Net::SessionId seller, int item_slot);
+	bool removeStallPet(SA::Net::SessionId seller, int pet_slot);
+	bool startStallVending(SA::Net::SessionId seller);
+	bool closeStall(SA::Net::SessionId seller);
+	bool isPlayerVending(SA::Net::SessionId seller) const;
+	std::optional<StallInfo> getPlayerStall(SA::Net::SessionId seller) const;
+	std::vector<StallInfo> nearbyStalls(SA::Net::SessionId viewer, int max_distance = 9) const;
+	bool buyFromStall(SA::Net::SessionId buyer, SA::Net::SessionId seller,
+	                  MarketAssetType asset_type, int slot);
+
+	// ── 寄售与拍卖市场系统 (Consignment & Auction Market System) ─────────
+	std::uint64_t listMarketItem(SA::Net::SessionId seller, int item_slot, std::uint32_t price);
+	std::uint64_t listMarketPet(SA::Net::SessionId seller, int pet_slot, std::uint32_t price);
+	bool cancelMarketListing(SA::Net::SessionId seller, std::uint64_t listing_id);
+	bool buyMarketListing(SA::Net::SessionId buyer, std::uint64_t listing_id);
+	std::optional<MarketListing> getMarketListing(std::uint64_t listing_id) const;
+	std::vector<MarketListing> searchMarket(const std::string &keyword = "",
+	                                        std::optional<MarketAssetType> type_filter = std::nullopt) const;
+	std::vector<MarketListing> playerMarketListings(SA::Net::SessionId seller) const;
+	std::size_t activeMarketListingCount() const;
+
 	// 某会话背后 Player 的位置(批次 W.1)。valid == false ⇒ 该会话无 L2 实体。
 	//   ★ 移动用例的观察面:走一步坐标变化 / 撞墙不变 / 转身只改 dir。
 	struct PlayerPos
@@ -1980,6 +2064,14 @@ enum class GoldReason : std::uint8_t
 	kFamilyDeposit,
 	// 提取家族金库给予石币 (源, 阶段 2 家族系统)
 	kFamilyWithdraw,
+	// 市场挂牌上架费 (汇, 阶段 2 市场系统)
+	kMarketListFee,
+	// 市场/摆摊购买支出石币 (汇, 阶段 2 市场系统)
+	kMarketBuy,
+	// 市场/摆摊出售获得收益 (源, 阶段 2 市场系统)
+	kMarketSellEarn,
+	// 市场交易手续费/税费 (汇, 阶段 2 市场系统)
+	kMarketTaxFee,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -2108,6 +2200,14 @@ inline const char *goldReasonName(GoldReason r) noexcept
 		return "family_deposit";
 	case GoldReason::kFamilyWithdraw:
 		return "family_withdraw";
+	case GoldReason::kMarketListFee:
+		return "market_list_fee";
+	case GoldReason::kMarketBuy:
+		return "market_buy";
+	case GoldReason::kMarketSellEarn:
+		return "market_sell_earn";
+	case GoldReason::kMarketTaxFee:
+		return "market_tax_fee";
 	}
 	return "unknown";
 }
