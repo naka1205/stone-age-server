@@ -2900,6 +2900,15 @@ struct World::Impl : GoldAuditSink
 	};
 	std::unordered_map<SA::Net::SessionId, PlayerExtraStats> player_extra_stats{};
 
+	// 称号系统数据 (批次 §9.0.98)
+	struct PlayerTitleData
+	{
+		std::vector<int> owned_titles{};
+		int active_title_id = 0;
+	};
+	std::unordered_map<int, TitleDefinition> registered_titles{};
+	std::unordered_map<SA::Net::SessionId, PlayerTitleData> player_titles{};
+
 	const SA::Model::Pet *getRidingPet(SA::Net::SessionId sid) const
 	{
 		const auto rit = player_rides.find(sid);
@@ -6866,6 +6875,14 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 				{
 					// 宠物转生师 NPC 交互 (批次 §9.0.96)
 					std::string msg = npc.message.empty() ? "我是宠物转生师。只有达到 100 级以上的忠诚宠物才能进行转生仪式。" : npc.message;
+					s.sendExChangeWindow(id, npc.id, msg,
+					                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+					ok = true;
+				}
+				else if (npc.type == NpcType::kFameShop)
+				{
+					// 声望商城 / 荣誉兑换使者 NPC 交互 (批次 §9.0.98)
+					std::string msg = npc.message.empty() ? "欢迎来到荣誉殿堂！可以使用声望兑换珍稀称号与宝物。" : npc.message;
 					s.sendExChangeWindow(id, npc.id, msg,
 					                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
 					ok = true;
@@ -12999,6 +13016,247 @@ bool World::setPlayerFame(SA::Net::SessionId session, int fame)
 {
 	_impl->player_extra_stats[session].fame = fame;
 	return true;
+}
+
+bool World::registerTitle(const TitleDefinition &title)
+{
+	if (title.title_id <= 0 || title.name.empty())
+		return false;
+	_impl->registered_titles[title.title_id] = title;
+	return true;
+}
+
+std::optional<TitleDefinition> World::findTitle(int title_id) const
+{
+	const auto it = _impl->registered_titles.find(title_id);
+	if (it == _impl->registered_titles.end())
+		return std::nullopt;
+	return it->second;
+}
+
+bool World::grantTitle(SA::Net::SessionId session, int title_id)
+{
+	SA::Model::Player *p = _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return false;
+	if (_impl->registered_titles.find(title_id) == _impl->registered_titles.end())
+		return false;
+
+	auto &data = _impl->player_titles[session];
+	for (int tid : data.owned_titles)
+	{
+		if (tid == title_id)
+			return true;
+	}
+	if (data.owned_titles.size() >= 30)
+		return false;
+	data.owned_titles.push_back(title_id);
+	return true;
+}
+
+bool World::revokeTitle(SA::Net::SessionId session, int title_id)
+{
+	auto it = _impl->player_titles.find(session);
+	if (it == _impl->player_titles.end())
+		return false;
+	auto &vec = it->second.owned_titles;
+	const auto pos = std::find(vec.begin(), vec.end(), title_id);
+	if (pos == vec.end())
+		return false;
+	vec.erase(pos);
+	if (it->second.active_title_id == title_id)
+		it->second.active_title_id = 0;
+	return true;
+}
+
+bool World::hasTitle(SA::Net::SessionId session, int title_id) const
+{
+	const auto it = _impl->player_titles.find(session);
+	if (it == _impl->player_titles.end())
+		return false;
+	for (int tid : it->second.owned_titles)
+	{
+		if (tid == title_id)
+			return true;
+	}
+	return false;
+}
+
+std::vector<int> World::playerOwnedTitles(SA::Net::SessionId session) const
+{
+	const auto it = _impl->player_titles.find(session);
+	if (it == _impl->player_titles.end())
+		return {};
+	return it->second.owned_titles;
+}
+
+bool World::equipTitle(SA::Net::SessionId session, int title_id)
+{
+	SA::Model::Player *p = _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return false;
+	const auto tit = _impl->registered_titles.find(title_id);
+	if (tit == _impl->registered_titles.end())
+		return false;
+	if (!hasTitle(session, title_id))
+		return false;
+	if (playerFame(session) < tit->second.req_fame)
+		return false;
+
+	_impl->player_titles[session].active_title_id = title_id;
+	return true;
+}
+
+bool World::unequipTitle(SA::Net::SessionId session)
+{
+	auto it = _impl->player_titles.find(session);
+	if (it == _impl->player_titles.end())
+		return false;
+	it->second.active_title_id = 0;
+	return true;
+}
+
+int World::playerActiveTitle(SA::Net::SessionId session) const
+{
+	const auto it = _impl->player_titles.find(session);
+	if (it == _impl->player_titles.end())
+		return 0;
+	return it->second.active_title_id;
+}
+
+std::string World::playerActiveTitleName(SA::Net::SessionId session) const
+{
+	const int tid = playerActiveTitle(session);
+	if (tid <= 0)
+		return "";
+	const auto it = _impl->registered_titles.find(tid);
+	if (it == _impl->registered_titles.end())
+		return "";
+	return it->second.name;
+}
+
+TitleStatsBonus World::playerTitleBonus(SA::Net::SessionId session) const
+{
+	const int tid = playerActiveTitle(session);
+	if (tid <= 0)
+		return {};
+	const auto it = _impl->registered_titles.find(tid);
+	if (it == _impl->registered_titles.end())
+		return {};
+	return it->second.bonus;
+}
+
+World::FameShopResultCode World::buyFromFameShop(SA::Net::SessionId session, std::uint64_t npc_id, int entry_id)
+{
+	Impl &s = *_impl;
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (p == nullptr)
+		return FameShopResultCode::kSessionInvalid;
+
+	const NpcEntity *npc = findNpc(npc_id);
+	if (npc == nullptr || npc->type != NpcType::kFameShop)
+		return FameShopResultCode::kShopNpcNotFound;
+
+	// 距离检查: 同地图且曼哈顿距离 <= 3
+	if (p->floor != npc->floor || std::abs(p->x - npc->x) > 3 || std::abs(p->y - npc->y) > 3)
+		return FameShopResultCode::kDistanceTooFar;
+
+	const FameShopItem *chosen = nullptr;
+	for (const auto &item : npc->fame_shop_items)
+	{
+		if (item.entry_id == entry_id)
+		{
+			chosen = &item;
+			break;
+		}
+	}
+	if (chosen == nullptr)
+		return FameShopResultCode::kEntryNotFound;
+
+	// 1. 声望充足性检查
+	const int cur_fame = playerFame(session);
+	if (cur_fame < chosen->fame_cost)
+	{
+		std::string msg = npc->fame_less_msg.empty() ? "声望不足，无法兑换！" : npc->fame_less_msg;
+		s.sendExChangeWindow(session, npc->id, msg,
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return FameShopResultCode::kInsufficientFame;
+	}
+
+	// 2. 类型专属门禁检查
+	if (chosen->type == FameShopItemType::kTitle)
+	{
+		if (hasTitle(session, chosen->target_id))
+		{
+			s.sendExChangeWindow(session, npc->id, "你已经拥有该荣誉称号！",
+			                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+			return FameShopResultCode::kAlreadyHaveTitle;
+		}
+		if (playerOwnedTitles(session).size() >= 30)
+		{
+			s.sendExChangeWindow(session, npc->id, "称号栏已满！",
+			                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+			return FameShopResultCode::kTitleSlotsFull;
+		}
+	}
+	else if (chosen->type == FameShopItemType::kItem)
+	{
+		if (s.countFreeItemSlots(*p) < 1)
+		{
+			std::string msg = npc->item_full_msg.empty() ? "你的背包空间不足！" : npc->item_full_msg;
+			s.sendExChangeWindow(session, npc->id, msg,
+			                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+			return FameShopResultCode::kInventoryFull;
+		}
+	}
+	else if (chosen->type == FameShopItemType::kPet)
+	{
+		if (s.countFreePetSlots(*p) < 1)
+		{
+			std::string msg = npc->pet_full_msg.empty() ? "你的宠物栏已满！" : npc->pet_full_msg;
+			s.sendExChangeWindow(session, npc->id, msg,
+			                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+			return FameShopResultCode::kPetSlotsFull;
+		}
+	}
+
+	// 3. 原子执行与扣费
+	setPlayerFame(session, cur_fame - chosen->fame_cost);
+
+	if (chosen->type == FameShopItemType::kTitle)
+	{
+		grantTitle(session, chosen->target_id);
+	}
+	else if (chosen->type == FameShopItemType::kItem)
+	{
+		SA::Model::Item item{};
+		item.uid = ++s.next_window_id;
+		item.item_id = chosen->target_id;
+		item.current_pile = chosen->count > 0 ? chosen->count : 1;
+		item.use_pile_nums = 1;
+		item.name.assign(chosen->name.c_str());
+		(void)giveItemToPlayer(session, item);
+	}
+	else if (chosen->type == FameShopItemType::kPet)
+	{
+		SA::Model::Pet pet{};
+		pet.pet_id = chosen->target_id;
+		pet.name.assign(chosen->name.c_str());
+		pet.level = chosen->count > 0 ? chosen->count : 1;
+		const auto base_stats = SA::Rules::deriveBaseStats(20, 20, 20, 20);
+		pet.vital = 20;
+		pet.str = 20;
+		pet.tough = 20;
+		pet.dex = 20;
+		pet.hp = base_stats.max_hp;
+		pet.mp = 50;
+		pet.max_mp = 50;
+		(void)givePetToPlayer(session, pet);
+	}
+
+	s.sendExChangeWindow(session, npc->id, "荣誉兑换成功！",
+	                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+	return FameShopResultCode::kSuccess;
 }
 
 } // namespace SA::World

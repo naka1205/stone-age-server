@@ -8095,3 +8095,301 @@ TEST_CASE("§9.0.97: [RV-2] 动作原子执行与资产事务一致性反向变�
 	REQUIRE(new_pet != nullptr);
 	CHECK(new_pet->pet_id == 2002);
 }
+
+// ══ 阶段 2: 称号系统与声望商城体系 (批次 §9.0.98, Title & Fame Shop) ══════════
+
+TEST_CASE("§9.0.98: 称号系统基础管理 (注册/授予/去重/容量限制/移除/查询)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	// 1. 注册称号元数据
+	TitleDefinition t1{};
+	t1.title_id = 101;
+	t1.name = "萨伊那斯勇者";
+	t1.description = "新手村的骄傲";
+	t1.req_fame = 50;
+	t1.bonus = {.bonus_hp = 50, .bonus_attack = 5, .bonus_defense = 5, .bonus_dex = 2};
+	CHECK(f.world.registerTitle(t1));
+
+	TitleDefinition t2{};
+	t2.title_id = 102;
+	t2.name = "漆黑征服者";
+	t2.description = "登顶漆黑之洞窟的勇士";
+	t2.req_fame = 200;
+	t2.bonus = {.bonus_hp = 200, .bonus_attack = 20, .bonus_defense = 15, .bonus_dex = 10};
+	CHECK(f.world.registerTitle(t2));
+
+	auto opt1 = f.world.findTitle(101);
+	REQUIRE(opt1.has_value());
+	CHECK(opt1->name == "萨伊那斯勇者");
+	CHECK(opt1->bonus.bonus_attack == 5);
+
+	// 2. 授予玩家称号与幂等去重
+	CHECK(f.world.grantTitle(id, 101));
+	CHECK(f.world.hasTitle(id, 101));
+	CHECK_FALSE(f.world.hasTitle(id, 102));
+
+	// 重复授予返回 true (幂等) 且数量不重复增加
+	CHECK(f.world.grantTitle(id, 101));
+	auto titles = f.world.playerOwnedTitles(id);
+	CHECK(titles.size() == 1);
+
+	// 授予未注册称号失败
+	CHECK_FALSE(f.world.grantTitle(id, 999));
+
+	// 3. 移除称号
+	CHECK(f.world.revokeTitle(id, 101));
+	CHECK_FALSE(f.world.hasTitle(id, 101));
+	CHECK(f.world.playerOwnedTitles(id).empty());
+
+	// 4. 容量限制 (30 个称号上限，对齐官方 indexOfHaveTitle[30])
+	for (int i = 1; i <= 30; ++i)
+	{
+		TitleDefinition t{};
+		t.title_id = 1000 + i;
+		t.name = "荣誉勋位" + std::to_string(i);
+		CHECK(f.world.registerTitle(t));
+		CHECK(f.world.grantTitle(id, 1000 + i));
+	}
+	CHECK(f.world.playerOwnedTitles(id).size() == 30);
+
+	// 第 31 个称号授予被阻断
+	TitleDefinition t_overflow{};
+	t_overflow.title_id = 2000;
+	t_overflow.name = "溢出称号";
+	CHECK(f.world.registerTitle(t_overflow));
+	CHECK_FALSE(f.world.grantTitle(id, 2000));
+}
+
+TEST_CASE("§9.0.98: 称号佩戴、卸下与属性加成 (声望门槛门禁/属性联动/卸除自动收口)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	TitleDefinition t{};
+	t.title_id = 101;
+	t.name = "萨伊那斯勇者";
+	t.req_fame = 100;
+	t.bonus = {.bonus_hp = 100, .bonus_attack = 10, .bonus_defense = 8, .bonus_dex = 5};
+	REQUIRE(f.world.registerTitle(t));
+	REQUIRE(f.world.grantTitle(id, 101));
+
+	// 1. 声望未达标门禁拦截: 当前声望 50 < req_fame 100 ⇒ 拒绝佩戴
+	f.world.setPlayerFame(id, 50);
+	CHECK_FALSE(f.world.equipTitle(id, 101));
+	CHECK(f.world.playerActiveTitle(id) == 0);
+	CHECK(f.world.playerActiveTitleName(id).empty());
+
+	// 2. 声望达标后佩戴成功，属性加成生效
+	f.world.setPlayerFame(id, 100);
+	CHECK(f.world.equipTitle(id, 101));
+	CHECK(f.world.playerActiveTitle(id) == 101);
+	CHECK(f.world.playerActiveTitleName(id) == "萨伊那斯勇者");
+
+	const auto bonus = f.world.playerTitleBonus(id);
+	CHECK(bonus.bonus_hp == 100);
+	CHECK(bonus.bonus_attack == 10);
+	CHECK(bonus.bonus_defense == 8);
+	CHECK(bonus.bonus_dex == 5);
+
+	// 3. 卸下称号恢复无加成状态
+	CHECK(f.world.unequipTitle(id));
+	CHECK(f.world.playerActiveTitle(id) == 0);
+	CHECK(f.world.playerActiveTitleName(id).empty());
+	CHECK(f.world.playerTitleBonus(id).bonus_attack == 0);
+
+	// 4. 再次佩戴后若称号被 revoke，自动卸下
+	CHECK(f.world.equipTitle(id, 101));
+	CHECK(f.world.playerActiveTitle(id) == 101);
+	CHECK(f.world.revokeTitle(id, 101));
+	CHECK(f.world.playerActiveTitle(id) == 0);
+}
+
+TEST_CASE("§9.0.98: 声望商城 (Fame Shop) 兑换称号、道具与宠物全流程闭环")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	TitleDefinition t{};
+	t.title_id = 201;
+	t.name = "尼斯大陆尊皇";
+	t.req_fame = 500;
+	t.bonus = {.bonus_hp = 300, .bonus_attack = 30, .bonus_defense = 20, .bonus_dex = 15};
+	REQUIRE(f.world.registerTitle(t));
+
+	// 配置声望商城 NPC (33, 32)
+	NpcEntity shop_npc{};
+	shop_npc.id = 9001;
+	shop_npc.floor = 0;
+	shop_npc.x = 33;
+	shop_npc.y = 32;
+	shop_npc.type = NpcType::kFameShop;
+	shop_npc.message = "欢迎来到荣誉殿堂！可以使用声望兑换珍稀称号与宝物。";
+
+	FameShopItem item_title{1, FameShopItemType::kTitle, 201, 1, 100, "尼斯大陆尊皇称号", "尊皇专属荣誉"};
+	FameShopItem item_item{2, FameShopItemType::kItem, 1001, 2, 50, "极品光之手环", "闪烁光芒的防具"};
+	FameShopItem item_pet{3, FameShopItemType::kPet, 2001, 5, 80, "雷龙多萨尔邦斯", "古代雷龙伙伴"};
+	shop_npc.fame_shop_items = {item_title, item_item, item_pet};
+
+	f.world.loadNpcEntities({shop_npc});
+
+	// 1. 面对对话交互，弹窗欢迎语
+	SA::Domain::EventRequest ev{};
+	ev.dir = 2;
+	ev.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev.seqno = 1201;
+	f.world.onEvent(id, ev);
+	f.world.tick();
+
+	CHECK(f.world.playerHasActiveWindow(id));
+	CHECK(f.world.playerLastWindowText(id) == "欢迎来到荣誉殿堂！可以使用声望兑换珍稀称号与宝物。");
+
+	// 关闭提示窗口
+	SA::Domain::WindowReply ack{};
+	ack.window_id = f.world.playerActiveWindowId(id);
+	ack.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+	f.world.onWindowReply(id, ack);
+	CHECK_FALSE(f.world.playerHasActiveWindow(id));
+
+	// 2. 给予玩家 500 点声望，购买称号 (消耗 100)
+	f.world.setPlayerFame(id, 500);
+	auto res1 = f.world.buyFromFameShop(id, 9001, 1);
+	CHECK(res1 == World::FameShopResultCode::kSuccess);
+	CHECK(f.world.playerFame(id) == 400); // 500 - 100
+	CHECK(f.world.hasTitle(id, 201));
+
+	// 3. 购买道具 1001 (消耗 50)
+	auto res2 = f.world.buyFromFameShop(id, 9001, 2);
+	CHECK(res2 == World::FameShopResultCode::kSuccess);
+	CHECK(f.world.playerFame(id) == 350); // 400 - 50
+	CHECK(f.world.playerItemSlotsUsed(id) == 1);
+
+	// 4. 购买宠物 2001 (消耗 80)
+	auto res3 = f.world.buyFromFameShop(id, 9001, 3);
+	CHECK(res3 == World::FameShopResultCode::kSuccess);
+	CHECK(f.world.playerFame(id) == 270); // 350 - 80
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+	const auto *pet = f.world.playerPetAt(id, 0);
+	REQUIRE(pet != nullptr);
+	CHECK(pet->pet_id == 2001);
+	CHECK(pet->level == 5);
+}
+
+TEST_CASE("§9.0.98: [RV-1] 称号佩戴门限与防重购/超限防御拦截与反向变异验证")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+
+	TitleDefinition t{};
+	t.title_id = 301;
+	t.name = "圣灵守护者";
+	t.req_fame = 300;
+	REQUIRE(f.world.registerTitle(t));
+
+	NpcEntity shop_npc{};
+	shop_npc.id = 9002;
+	shop_npc.floor = 0;
+	shop_npc.x = 33;
+	shop_npc.y = 32;
+	shop_npc.type = NpcType::kFameShop;
+	FameShopItem item_title{1, FameShopItemType::kTitle, 301, 1, 100, "圣灵守护者称号", "荣誉守护"};
+	shop_npc.fame_shop_items = {item_title};
+	f.world.loadNpcEntities({shop_npc});
+
+	f.world.setPlayerFame(id, 100);
+
+	// 1. 未拥有佩戴拦截:
+	CHECK_FALSE(f.world.equipTitle(id, 301));
+	CHECK(f.world.playerActiveTitle(id) == 0);
+
+	// 2. 购买获得该称号
+	CHECK(f.world.buyFromFameShop(id, 9002, 1) == World::FameShopResultCode::kSuccess);
+	CHECK(f.world.hasTitle(id, 301));
+	CHECK(f.world.playerFame(id) == 0); // 100 - 100
+
+	// 3. 重复购买防御拦截: 已有称号禁止再次兑换
+	f.world.setPlayerFame(id, 500);
+	auto dup_res = f.world.buyFromFameShop(id, 9002, 1);
+	CHECK(dup_res == World::FameShopResultCode::kAlreadyHaveTitle);
+	CHECK(f.world.playerFame(id) == 500); // 声望 0 扣除
+
+	// 4. 声望门槛拦截: 玩家当前声望 250 < req_fame 300 ⇒ 拒绝佩戴
+	f.world.setPlayerFame(id, 250);
+	CHECK_FALSE(f.world.equipTitle(id, 301));
+	CHECK(f.world.playerActiveTitle(id) == 0);
+
+	// 达标 300 允许佩戴
+	f.world.setPlayerFame(id, 300);
+	CHECK(f.world.equipTitle(id, 301));
+	CHECK(f.world.playerActiveTitle(id) == 301);
+}
+
+TEST_CASE("§9.0.98: [RV-2] 声望商城兑换原子事务一致性反向变异验证")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	NpcEntity shop_npc{};
+	shop_npc.id = 9003;
+	shop_npc.floor = 0;
+	shop_npc.x = 33;
+	shop_npc.y = 32;
+	shop_npc.type = NpcType::kFameShop;
+	FameShopItem item_food{1, FameShopItemType::kItem, 1002, 1, 100, "神仙仙草", "恢复全状态"};
+	FameShopItem item_beast{2, FameShopItemType::kPet, 2002, 1, 150, "机暴帖拉所伊朵", "机械暴龙"};
+	shop_npc.fame_shop_items = {item_food, item_beast};
+	f.world.loadNpcEntities({shop_npc});
+
+	// 场景 A: 声望不足拦截
+	f.world.setPlayerFame(id, 50); // 需求 100
+	auto res_fame = f.world.buyFromFameShop(id, 9003, 1);
+	CHECK(res_fame == World::FameShopResultCode::kInsufficientFame);
+	CHECK(f.world.playerFame(id) == 50);         // 声望未扣
+	CHECK(f.world.playerItemSlotsUsed(id) == 0); // 道具未发放
+
+	// 场景 B: 背包满拦截 (45/45)
+	f.world.setPlayerFame(id, 500);
+	for (int i = 0; i < 45; ++i)
+	{
+		REQUIRE(f.world.giveItemToPlayer(id, makeTestItem(999)) >= 0);
+	}
+	CHECK(f.world.playerItemSlotsUsed(id) == 45);
+
+	auto res_bag = f.world.buyFromFameShop(id, 9003, 1);
+	CHECK(res_bag == World::FameShopResultCode::kInventoryFull);
+	CHECK(f.world.playerFame(id) == 500); // 严格零损耗，500声望分文未扣
+	CHECK(f.world.playerItemSlotsUsed(id) == 45);
+
+	// 场景 C: 宠物栏满拦截 (5/5)
+	for (int i = 0; i < 5; ++i)
+	{
+		REQUIRE(f.world.givePetToPlayer(id, makeTestPet(3000 + i)) >= 0);
+	}
+	CHECK(f.world.playerPetSlotsUsed(id) == 5);
+
+	auto res_pet = f.world.buyFromFameShop(id, 9003, 2);
+	CHECK(res_pet == World::FameShopResultCode::kPetSlotsFull);
+	CHECK(f.world.playerFame(id) == 500); // 严格零损耗，500声望分文未扣
+	CHECK(f.world.playerPetSlotsUsed(id) == 5);
+
+	// 场景 D: 释放空间后兑换成功，声望与资产精确同步
+	p->items[SA::Model::kStartItemArray] = {};
+	p->pets[0] = {};
+	CHECK(f.world.playerItemSlotsUsed(id) == 44);
+	CHECK(f.world.playerPetSlotsUsed(id) == 4);
+
+	auto ok_item = f.world.buyFromFameShop(id, 9003, 1);
+	CHECK(ok_item == World::FameShopResultCode::kSuccess);
+	CHECK(f.world.playerFame(id) == 400); // 500 - 100
+	CHECK(f.world.playerItemSlotsUsed(id) == 45);
+
+	auto ok_pet = f.world.buyFromFameShop(id, 9003, 2);
+	CHECK(ok_pet == World::FameShopResultCode::kSuccess);
+	CHECK(f.world.playerFame(id) == 250); // 400 - 150
+	CHECK(f.world.playerPetSlotsUsed(id) == 5);
+}

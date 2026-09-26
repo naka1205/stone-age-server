@@ -1177,4 +1177,45 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - 篡改 `checkExChangePreconditions` 绕过道具持有充足性检查 ⇒ 用例 5 中石币扣减一致性断言（500 != 1000）立即精准报红失败；恢复后回绿。
 - **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 8 项 CTest 全量通过（锁定 `shared-v0.42.0` 零漂移），双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
 
+### 9.0.98 Title & Fame Shop (阶段 2 称号系统与声望商城体系)
 
+> **对应架构设计**: 原版 `title.c` (`TITLE_TitleCheck`, `TITLE_TitleCheck_Npc`, `indexOfHaveTitle[30]`)，`npc_fameshop.c` (`FAMESHOP_WindowOpen`, `FAMESHOP_WindowReply`)，`10-world-map.md` 阶段 2 扩展  
+> **核心交付**: 称号元数据注册（`TitleDefinition` 包含 ID、名称、说明、所需声望 `req_fame` 与四维加成 `TitleStatsBonus`）、称号授予（`grantTitle`）、称号移除（`revokeTitle`）、拥有检查（`hasTitle`）、称号佩戴（`equipTitle`）与卸下（`unequipTitle`）、称号容量上限（30 个，对齐原版 `indexOfHaveTitle[30]`）、声望商城体系（`NpcType::kFameShop`，在售条目 `FameShopItem` 包含称号 `kTitle`、道具 `kItem`、宠物 `kPet`，交互弹窗 `WindowOpen` 与购买响应 `buyFromFameShop`）、[RV-1] 称号佩戴门限与防重购/超限防御拦截、[RV-2] 声望商城兑换原子事务一致性（声望不足/背包满/宠物栏满严格 0 消耗拦截）。
+
+#### 1. 核心设计与落地产出
+
+1. **称号元数据与四维加成 (`TitleDefinition` & `TitleStatsBonus`)**:
+   - `TitleStatsBonus`: 支持生命加成（`bonus_hp`）、攻击加成（`bonus_attack`）、防御加成（`bonus_defense`）、敏捷加成（`bonus_dex`）；
+   - `TitleDefinition`: 包含 `title_id`、`name`、`desc`、所需声望门槛（`req_fame`）以及四维属性加成 `bonus`；
+   - 注册机制：`World::registerTitle` 校验 `title_id > 0` 且不为空名，成功后收录于全局称号注册表 `registered_titles`。
+2. **称号授予、移除、佩戴与容量治理**:
+   - **容量与去重**: 严格对齐原版 30 称号位上限（`owned_titles.size() >= 30` 阻断），`grantTitle` 具备天然幂等保护（已有则直接返回 `true`，防止重复占用名额）；
+   - **佩戴门槛与活跃称号**: `equipTitle` 实施双重前置校验（1. 必须属于已拥有称号列表；2. 玩家当前声望必须 $\ge req\_fame$ 称号门槛，防刷降声望佩戴高阶荣誉），佩戴后激活 `active_title_id`；
+   - **卸下与吊销收口**: `unequipTitle` 将 `active_title_id` 重置为 0；`revokeTitle` 在移除拥有权时，若该称号正处于佩戴态，自动触发下马/卸下逻辑收口为 0，防止残留幽灵属性加成。
+3. **声望商城体系 (Fame Shop System)**:
+   - **NPC 类型扩充**: 扩展 `NpcType::kFameShop = 11`，大世界面对交互（`onEvent`）触发 `kFameShop` 专属欢迎与商品引导弹窗；
+   - **在售条目模型 (`FameShopItem`)**: 支持三种条目类型 `FameShopItemType::kTitle`（荣誉称号）、`kItem`（珍稀道具）、`kPet`（强力战宠），配置兑换所需声望消耗 `fame_cost` 与目标 ID 及数量/初始等级；
+   - **兑换执行 (`buyFromFameShop`)**:
+     - 距离与地图校验：必须处于同张地图且曼哈顿距离 $\le 3$；
+     - 声望充足性前置校验：玩家声望未达到标价严格拦截并弹窗 `fame_less_msg`；
+     - 称号专属门禁：已拥有该称号（`kAlreadyHaveTitle`）或 30 称号位已满（`kTitleSlotsFull`）严格阻断；
+     - 背包与宠物空间预检：道具类型检查背包空槽（`kInventoryFull`），宠物类型检查宠物空槽（`kPetSlotsFull`）；
+     - 扣费与发放原子闭环：前置校验全过之后原子扣减声望（调用 `setPlayerFame`，绝对不触碰 `p.gold`，零非法金币写），并原子发放称号/道具/宠物。
+4. **防御机制与反向变异验证**:
+   - **[RV-1] 称号佩戴门限与防重购/超限防御拦截**: 验证玩家声望低于门限时拒绝佩戴；验证声望商城中已拥有称号防重复购买；验证称号槽满 30 个拒绝购买；
+   - **[RV-2] 声望商城兑换原子事务一致性**: 验证在声望不足、背包满（45/45）、宠物栏满（5/5）等异常工况下，声望严格 0 扣减，背包与宠物栏严格无副作用变动；在空间释放后兑换成功且声望扣减精确对账。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 130 组增至 **135 组**（+5 组称号全生命周期管理、佩戴/卸下/吊销收口、声望商城多资产兑换及 RV-1/RV-2 变异用例），断言数从 3807 条增至 **4013 条**（+206 条断言，100% 成功）。
+- **实测用例矩阵**:
+  1. `§9.0.98: 称号元数据注册、玩家称号授予、容量上限与拥有判定`
+  2. `§9.0.98: 称号佩戴、卸下、声望门槛校验、属性加成与吊销收口`
+  3. `§9.0.98: 声望商城 (Fame Shop) 兑换称号、道具与宠物全流程闭环`
+  4. `§9.0.98: [RV-1] 称号佩戴门限与防重购/超限防御拦截与反向变异验证`
+  5. `§9.0.98: [RV-2] 声望商城兑换原子事务一致性反向变异验证`
+- **反向验证 (RV-1)**:
+  - 篡改 `equipTitle` 注释掉声望门限校验 `if (playerFame(session) < tit->second.req_fame) return false;` ⇒ 用例 4 中未达声望门槛佩戴断言（`CHECK_FALSE` 与 `CHECK(playerActiveTitle == 0)`）立即精确报红失败；恢复后回绿。
+- **反向验证 (RV-2)**:
+  - 篡改 `buyFromFameShop` 注释掉背包空间空槽检查 `if (s.countFreeItemSlots(*p) < 1) ...` ⇒ 用例 5 中背包满时断言立即捕获非预期返回（`0 != 7`）与声望被错误扣减（`400 != 500`）；恢复后回绿。
+- **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 8 项 CTest 全量通过（锁定 `shared-v0.42.0` 零漂移），双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。

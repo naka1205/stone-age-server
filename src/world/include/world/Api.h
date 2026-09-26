@@ -740,6 +740,46 @@ enum class NpcType : std::uint8_t
 	kOther = 8,
 	kPetFusionMan = 9,
 	kPetTransMan = 10,
+	kFameShop = 11,
+};
+
+// 称号属性加成 (批次 §9.0.98)
+struct TitleStatsBonus
+{
+	std::int32_t bonus_hp = 0;
+	std::int32_t bonus_attack = 0;
+	std::int32_t bonus_defense = 0;
+	std::int32_t bonus_dex = 0;
+};
+
+// 称号定义 (批次 §9.0.98)
+struct TitleDefinition
+{
+	std::int32_t title_id = 0;
+	std::string name{};
+	std::string description{};
+	std::int32_t req_fame = 0;
+	TitleStatsBonus bonus{};
+};
+
+// 声望商城商品类型 (批次 §9.0.98)
+enum class FameShopItemType : std::uint8_t
+{
+	kTitle = 0,
+	kItem = 1,
+	kPet = 2,
+};
+
+// 声望商城商品条目 (批次 §9.0.98)
+struct FameShopItem
+{
+	std::int32_t entry_id = 0;
+	FameShopItemType type = FameShopItemType::kTitle;
+	std::int32_t target_id = 0; // title_id / item_id / pet_id
+	std::int32_t count = 1;     // 道具数量 或 宠物初始等级
+	std::int32_t fame_cost = 0; // 消耗声望
+	std::string name{};         // 条目显示名
+	std::string description{};  // 条目描述
 };
 
 // 商店商品条目 (批次 W.12)
@@ -843,6 +883,10 @@ struct NpcEntity
 	std::string sign_title{};                         // 告示牌标题 (默认 "＜　看板　＞")
 	std::vector<WarpDestination> warp_destinations{}; // 传送员目的地列表
 	std::string warp_msg{};                           // 传送提示对白
+
+	// ── 阶段 2: 声望商城 (批次 §9.0.98, Fame Shop) ──
+	std::vector<FameShopItem> fame_shop_items{};
+	std::string fame_less_msg{};
 };
 
 // 世界态敌人的位置快照(批次 W.2 / W.3 的观察面)。
@@ -1621,6 +1665,39 @@ class World final : public SA::Net::TransportEvents,
 	bool setPlayerTransmigration(SA::Net::SessionId session, int trans);
 	int playerFame(SA::Net::SessionId session) const;
 	bool setPlayerFame(SA::Net::SessionId session, int fame);
+
+	// ── 称号系统与声望商城 (批次 §9.0.98) ──────────────────────────────────
+	// 称号注册与查询
+	bool registerTitle(const TitleDefinition &title);
+	std::optional<TitleDefinition> findTitle(int title_id) const;
+
+	// 玩家称号管理
+	bool grantTitle(SA::Net::SessionId session, int title_id);
+	bool revokeTitle(SA::Net::SessionId session, int title_id);
+	bool hasTitle(SA::Net::SessionId session, int title_id) const;
+	std::vector<int> playerOwnedTitles(SA::Net::SessionId session) const;
+	bool equipTitle(SA::Net::SessionId session, int title_id);
+	bool unequipTitle(SA::Net::SessionId session);
+	int playerActiveTitle(SA::Net::SessionId session) const;
+	std::string playerActiveTitleName(SA::Net::SessionId session) const;
+	TitleStatsBonus playerTitleBonus(SA::Net::SessionId session) const;
+
+	// 声望商城购买
+	enum class FameShopResultCode
+	{
+		kSuccess = 0,
+		kSessionInvalid = 1,
+		kShopNpcNotFound = 2,
+		kDistanceTooFar = 3,
+		kEntryNotFound = 4,
+		kInsufficientFame = 5,
+		kAlreadyHaveTitle = 6,
+		kInventoryFull = 7,
+		kPetSlotsFull = 8,
+		kTitleSlotsFull = 9,
+	};
+	FameShopResultCode buyFromFameShop(SA::Net::SessionId session, std::uint64_t npc_id, int entry_id);
+
 	int playerEncounterRateFix(SA::Net::SessionId session) const;
 	bool castHunterEncounterSkill(SA::Net::SessionId session, bool is_track, int skill_level,
 	                              int rate = 10, std::int64_t duration_ms = 180000);
