@@ -987,6 +987,58 @@ struct TradeStatus
 	std::uint32_t partner_gold = 0;
 };
 
+// ══ 名片夹与好友系统 (阶段 2: 社交系统, 对齐官方 addressbook.c ADDRESSBOOK_entry) ══
+struct AddressBookEntry
+{
+	bool use = false;
+	SA::Net::SessionId session = 0; // 若在线，当前关联会话 ID
+	std::string charname{};
+	std::int32_t level = 1;
+	std::int32_t duelpoint = 0;
+	std::int32_t graphicsno = 0;
+	std::int32_t transmigration = 0;
+	bool online = false;
+	bool blocked = false; // 黑名单/屏蔽标志
+};
+inline constexpr std::size_t kMaxAddressBook = 80;
+
+// ══ 邮件与离线信件系统 (阶段 2: 邮件系统, 对齐官方 petmail.c / mail.c) ══
+struct MailEntry
+{
+	std::uint64_t mail_id = 0;
+	std::string sender_name{};
+	std::string receiver_name{};
+	std::string title{};
+	std::string message{};
+	std::int64_t sent_time_ms = 0;
+	bool is_read = false;
+	bool has_attachment = false;
+	std::optional<SA::Model::Item> attached_item{};
+	std::optional<SA::Model::Pet> attached_pet{};
+	std::uint32_t attached_gold = 0;
+};
+inline constexpr std::size_t kMaxMailBoxSize = 20;
+
+// ══ 聊天频道与分级广播 (阶段 2: 聊天系统, 对齐官方 char_talk.c / lssproto_TK_recv) ══
+enum class ChatChannel : std::uint8_t
+{
+	kTalkNormal = 0, // 普通说话 (切比雪夫距离 <= 9 或同地图九宫格内可见玩家)
+	kTalkParty = 1,  // 队伍频道 (仅全队成员接收, 跨图/全地图可达)
+	kTalkShout = 2,  // 世界/大喊广播 (全地图或全服在线玩家)
+	kTalkTell = 3,   // 私聊/密聊 (指定玩家名称, 需目标在线且未拉黑)
+};
+
+struct ChatMessage
+{
+	ChatChannel channel{ChatChannel::kTalkNormal};
+	SA::Net::SessionId sender{0};
+	std::string sender_name{};
+	std::string target_name{};
+	std::string text{};
+	std::uint32_t color{0};
+	std::int64_t timestamp_ms{0};
+};
+
 class World final : public SA::Net::TransportEvents,
 
                     public SA::Net::SessionHost
@@ -1397,6 +1449,36 @@ class World final : public SA::Net::TransportEvents,
 	std::optional<TradeStatus> playerTradeStatus(SA::Net::SessionId session) const;
 	std::size_t activeTradeCount() const noexcept;
 
+	// ── 角色名称设置与查询 ─────────────────────────────────────────────────
+	std::string playerName(SA::Net::SessionId session) const;
+	bool setPlayerName(SA::Net::SessionId session, const std::string &name);
+
+	// ── 名片夹与好友系统 (AddressBook System) ──────────────────────────────
+	bool requestAddressCard(SA::Net::SessionId requester, SA::Net::SessionId target);
+	bool acceptAddressCard(SA::Net::SessionId acceptor, SA::Net::SessionId requester);
+	bool removeAddressCard(SA::Net::SessionId session, std::size_t index);
+	bool setAddressCardBlock(SA::Net::SessionId session, std::size_t index, bool blocked);
+	std::vector<AddressBookEntry> playerAddressBook(SA::Net::SessionId session) const;
+	std::size_t playerAddressBookCount(SA::Net::SessionId session) const;
+	bool isAddressCardBlocked(SA::Net::SessionId session, const std::string &charname) const;
+
+	// ── 邮件与离线信件系统 (Mail System) ──────────────────────────────────
+	bool sendMail(SA::Net::SessionId sender, const std::string &receiver_name,
+	              const std::string &title, const std::string &message,
+	              int item_slot = -1, int pet_slot = -1, std::uint32_t gold = 0);
+	std::vector<MailEntry> playerMails(SA::Net::SessionId session) const;
+	std::size_t playerMailCount(SA::Net::SessionId session) const;
+	bool readMail(SA::Net::SessionId session, std::uint64_t mail_id);
+	bool takeMailAttachment(SA::Net::SessionId session, std::uint64_t mail_id);
+	bool deleteMail(SA::Net::SessionId session, std::uint64_t mail_id);
+
+	// ── 聊天频道与分级广播 (Chat & Channel System) ────────────────────────
+	bool sendChat(SA::Net::SessionId sender, ChatChannel channel,
+	              const std::string &text, const std::string &target_name = "",
+	              std::uint32_t color = 0);
+	std::vector<ChatMessage> pollChatMessages(SA::Net::SessionId session);
+	std::size_t pendingChatMessageCount(SA::Net::SessionId session) const;
+
 	// 某会话背后 Player 的位置(批次 W.1)。valid == false ⇒ 该会话无 L2 实体。
 	//   ★ 移动用例的观察面:走一步坐标变化 / 撞墙不变 / 转身只改 dir。
 	struct PlayerPos
@@ -1774,6 +1856,10 @@ enum class GoldReason : std::uint8_t
 	kTradeGive,
 	// 交易获得石币 (源, 阶段 2 交易系统)
 	kTradeReceive,
+	// 邮件寄送附加石币 (汇, 阶段 2 邮件系统)
+	kMailSend,
+	// 邮件提取附加石币 (源, 阶段 2 邮件系统)
+	kMailReceive,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -1892,6 +1978,10 @@ inline const char *goldReasonName(GoldReason r) noexcept
 		return "trade_give";
 	case GoldReason::kTradeReceive:
 		return "trade_receive";
+	case GoldReason::kMailSend:
+		return "mail_send";
+	case GoldReason::kMailReceive:
+		return "mail_receive";
 	}
 	return "unknown";
 }

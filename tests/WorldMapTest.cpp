@@ -5485,3 +5485,438 @@ TEST_CASE("交易原子互换: 道具、宠物、石币无损原子置换与默�
 	}
 	CHECK(id2_has_item1001);
 }
+
+// ══ 批次 W.21: 核心社交与通信系统 (名片好友 AddressBook · 邮件信箱 Mail · 聊天广播 Chat) ══
+
+TEST_CASE("名片交换发起与门禁: 距离过远/阵亡/跨图/名片夹满拦截 [RV-1]")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p1->hp = 100;
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 21;
+	p2->hp = 100;
+
+	// 1. 不能与自己交换名片
+	CHECK_FALSE(f.world.requestAddressCard(id1, id1));
+
+	// 2. 超距离拦截 (> 2 格)
+	p2->x = 25;
+	CHECK_FALSE(f.world.requestAddressCard(id1, id2));
+	p2->x = 20;
+
+	// 3. 跨地图拦截
+	p2->floor = 1;
+	CHECK_FALSE(f.world.requestAddressCard(id1, id2));
+	p2->floor = 0;
+
+	// 4. 阵亡拦截
+	p1->hp = 0;
+	CHECK_FALSE(f.world.requestAddressCard(id1, id2));
+	p1->hp = 100;
+
+	p2->hp = 0;
+	CHECK_FALSE(f.world.requestAddressCard(id1, id2));
+	p2->hp = 100;
+
+	// 5. 名片夹满员拦截 [RV-1]
+	// 往 id1 的名片夹填满 80 张名片
+	for (std::size_t i = 0; i < kMaxAddressBook; ++i)
+	{
+		const auto dummy_sid = spawnHandshaked(f);
+		auto *dp = f.world.playerForTest(dummy_sid);
+		REQUIRE(dp != nullptr);
+		dp->floor = 0;
+		dp->x = 20;
+		dp->y = 20;
+		dp->hp = 100;
+		dp->name.assign(("Dummy_" + std::to_string(i)).c_str());
+		REQUIRE(f.world.requestAddressCard(id1, dummy_sid));
+		REQUIRE(f.world.acceptAddressCard(dummy_sid, id1));
+	}
+	CHECK(f.world.playerAddressBookCount(id1) == kMaxAddressBook);
+
+	// 名片夹已满 (80 张)，再次申请名片交换必须被拦截 [RV-1]
+	CHECK_FALSE(f.world.requestAddressCard(id1, id2));
+	CHECK_FALSE(f.world.requestAddressCard(id2, id1));
+}
+
+TEST_CASE("名片原子交换与信息同步: 双方互存名片(等级/头像/名字)与重复交换阻断")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	const auto id3 = spawnHandshaked(f);
+
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p1->level = 15;
+	p1->image = 10001;
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 21;
+	p2->level = 20;
+	p2->image = 10002;
+
+	// 1. 发起名片交换请求
+	REQUIRE(f.world.requestAddressCard(id1, id2));
+
+	// 第三方无法横插接受
+	CHECK_FALSE(f.world.acceptAddressCard(id3, id1));
+
+	// 2. 接受名片交换
+	REQUIRE(f.world.acceptAddressCard(id2, id1));
+
+	// 3. 双方互存信息断言
+	CHECK(f.world.playerAddressBookCount(id1) == 1);
+	CHECK(f.world.playerAddressBookCount(id2) == 1);
+
+	const auto cards1 = f.world.playerAddressBook(id1);
+	REQUIRE(cards1.size() == 1);
+	CHECK(cards1[0].charname == "Bob");
+	CHECK(cards1[0].level == 20);
+	CHECK(cards1[0].graphicsno == 10002);
+	CHECK(cards1[0].online);
+	CHECK(cards1[0].session == id2);
+	CHECK_FALSE(cards1[0].blocked);
+
+	const auto cards2 = f.world.playerAddressBook(id2);
+	REQUIRE(cards2.size() == 1);
+	CHECK(cards2[0].charname == "Alice");
+	CHECK(cards2[0].level == 15);
+	CHECK(cards2[0].graphicsno == 10001);
+	CHECK(cards2[0].online);
+	CHECK(cards2[0].session == id1);
+	CHECK_FALSE(cards2[0].blocked);
+
+	// 4. 重复交换阻断: 双方名片夹中已有对方，不得再次申请
+	CHECK_FALSE(f.world.requestAddressCard(id1, id2));
+	CHECK_FALSE(f.world.requestAddressCard(id2, id1));
+}
+
+TEST_CASE("名片好友生命周期: 好友上下线状态感知同步、名片删除与黑名单屏蔽")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 21;
+
+	REQUIRE(f.world.requestAddressCard(id1, id2));
+	REQUIRE(f.world.acceptAddressCard(id2, id1));
+
+	// 1. 离线感知: Bob 断开连接
+	f.world.onSessionClosed(id2);
+
+	auto cards1 = f.world.playerAddressBook(id1);
+	REQUIRE(cards1.size() == 1);
+	CHECK(cards1[0].charname == "Bob");
+	CHECK_FALSE(cards1[0].online); // 状态自动变更为离线
+	CHECK(cards1[0].session == 0);
+
+	// 2. 黑名单设置与查询
+	CHECK_FALSE(f.world.isAddressCardBlocked(id1, "Bob"));
+	REQUIRE(f.world.setAddressCardBlock(id1, 0, true));
+	CHECK(f.world.isAddressCardBlocked(id1, "Bob"));
+
+	REQUIRE(f.world.setAddressCardBlock(id1, 0, false));
+	CHECK_FALSE(f.world.isAddressCardBlocked(id1, "Bob"));
+
+	// 3. 名片删除
+	CHECK_FALSE(f.world.removeAddressCard(id1, 99)); // 越界索引
+	REQUIRE(f.world.removeAddressCard(id1, 0));
+	CHECK(f.world.playerAddressBookCount(id1) == 0);
+}
+
+TEST_CASE("邮件寄送与离线信箱: 文本信件寄送、离线收信与邮箱容量满拦截 [RV-2]")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+
+	// 1. 寄信输入格式合法性校验
+	CHECK_FALSE(f.world.sendMail(id1, "Bob", "", "Message"));                   // 空标题
+	CHECK_FALSE(f.world.sendMail(id1, "Bob", std::string(70, 'A'), "Message")); // 标题超长
+	CHECK_FALSE(f.world.sendMail(id1, "", "Title", "Message"));                 // 空收件人
+
+	// 2. 正常给离线玩家寄送纯文本信件
+	REQUIRE(f.world.sendMail(id1, "Bob", "你好Bob", "欢迎来到石器时代！"));
+
+	// 3. 收件人 Bob 登录上线
+	const auto id2 = spawnHandshaked(f);
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+
+	CHECK(f.world.playerMailCount(id2) == 1);
+	auto mails = f.world.playerMails(id2);
+	REQUIRE(mails.size() == 1);
+	CHECK(mails[0].sender_name == "Alice");
+	CHECK(mails[0].receiver_name == "Bob");
+	CHECK(mails[0].title == "你好Bob");
+	CHECK(mails[0].message == "欢迎来到石器时代！");
+	CHECK_FALSE(mails[0].is_read);
+	CHECK_FALSE(mails[0].has_attachment);
+
+	// 4. 查阅信件
+	const auto mid = mails[0].mail_id;
+	REQUIRE(f.world.readMail(id2, mid));
+	CHECK(f.world.playerMails(id2)[0].is_read);
+
+	// 5. 邮箱容量满员门禁 [RV-2]
+	// 往 Bob 的信箱继续寄送 19 封信 (使其达到 20 封上限)
+	for (std::size_t i = 1; i < kMaxMailBoxSize; ++i)
+	{
+		REQUIRE(f.world.sendMail(id1, "Bob", "信件_" + std::to_string(i), "测试内容"));
+	}
+	CHECK(f.world.playerMailCount(id2) == kMaxMailBoxSize);
+
+	// 第 21 封邮件尝试寄送，必须被容量门禁阻断 [RV-2]
+	CHECK_FALSE(f.world.sendMail(id1, "Bob", "溢出信件", "拒绝接收"));
+
+	// 6. 删除邮件
+	REQUIRE(f.world.deleteMail(id2, mid));
+	CHECK(f.world.playerMailCount(id2) == kMaxMailBoxSize - 1);
+}
+
+TEST_CASE("邮件附件流转: 道具/宠物/石币安全寄送与扣除(出战宠重置与GoldLedger审计)")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+
+	auto *p1 = f.world.playerForTest(id1);
+	REQUIRE(p1 != nullptr);
+	p1->gold = 1000;
+
+	const int item_slot = f.world.giveItemToPlayer(id1, makeTestItem(9001));
+	REQUIRE(item_slot >= 0);
+	const int pet_slot = f.world.givePetToPlayer(id1, makeTestPet(88, 5));
+	REQUIRE(pet_slot >= 0);
+	p1->default_pet = pet_slot; // 设为出战宠
+
+	// 寄送携带道具、宠物与石币的完整礼包邮件
+	REQUIRE(f.world.sendMail(id1, "Bob", "礼物赠送", "请查收礼品", item_slot, pet_slot, 400));
+
+	// 1. 发送方资产扣除与状态清理校验
+	CHECK(p1->gold == 600);                                 // 1000 - 400
+	CHECK(f.world.playerItemAt(id1, item_slot) == nullptr); // 道具槽已清空
+	CHECK(f.world.playerPetAt(id1, pet_slot) == nullptr);   // 宠物槽已清空
+	CHECK(p1->default_pet == -1);                           // 默认出战宠被安全重置
+
+	// 2. 接收方信件附件校验
+	REQUIRE(f.world.playerMailCount(id2) == 1);
+	const auto mail = f.world.playerMails(id2)[0];
+	CHECK(mail.has_attachment);
+	CHECK(mail.attached_gold == 400);
+	REQUIRE(mail.attached_item.has_value());
+	CHECK(mail.attached_item->item_id == 9001);
+	REQUIRE(mail.attached_pet.has_value());
+	CHECK(mail.attached_pet->pet_id == 88);
+
+	// 3. 防意外损毁: 未领取附件时禁止删除邮件
+	CHECK_FALSE(f.world.deleteMail(id2, mail.mail_id));
+}
+
+TEST_CASE("邮件附件领取门禁: 背包满/宠物栏满/石币超限前置阻断与原子收取")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	p1->gold = 2000;
+	p2->gold = 100;
+
+	const int item_slot = f.world.giveItemToPlayer(id1, makeTestItem(777));
+	REQUIRE(item_slot >= 0);
+	const int pet_slot = f.world.givePetToPlayer(id1, makeTestPet(99, 1));
+	REQUIRE(pet_slot >= 0);
+
+	REQUIRE(f.world.sendMail(id1, "Bob", "大礼包", "包含三类资产", item_slot, pet_slot, 500));
+	REQUIRE(f.world.playerMailCount(id2) == 1);
+	const auto mid = f.world.playerMails(id2)[0].mail_id;
+
+	// === 场景 A: 背包满拦截 ===
+	while (f.world.giveItemToPlayer(id2, makeTestItem(999)) >= 0)
+	{
+	}
+	CHECK(f.world.playerItemSlotsUsed(id2) == static_cast<int>(SA::Model::kMaxItemHave - SA::Model::kStartItemArray));
+	CHECK_FALSE(f.world.takeMailAttachment(id2, mid)); // 背包满阻断
+	// 清空 1 格背包
+	p2->clearItemSlot(static_cast<int>(SA::Model::kStartItemArray));
+
+	// === 场景 B: 宠物栏满拦截 ===
+	while (f.world.givePetToPlayer(id2, makeTestPet(500)) >= 0)
+	{
+	}
+	CHECK(f.world.playerPetSlotsUsed(id2) == 5);
+	CHECK_FALSE(f.world.takeMailAttachment(id2, mid)); // 宠物栏满阻断
+	// 清空 1 个宠物槽
+	p2->clearPetSlot(0);
+
+	// === 场景 C: 石币溢出拦截 ===
+	p2->gold = maxHaveGold(0);
+	CHECK_FALSE(f.world.takeMailAttachment(id2, mid)); // 石币溢出阻断
+	p2->gold = 100;
+
+	// === 场景 D: 前置校验全通，原子提取附件 ===
+	REQUIRE(f.world.takeMailAttachment(id2, mid));
+
+	// 资产成功入账
+	CHECK(p2->gold == 600); // 100 + 500
+	bool found_it777 = false;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		const auto *it = f.world.playerItemAt(id2, static_cast<int>(i));
+		if (it != nullptr && it->item_id == 777)
+			found_it777 = true;
+	}
+	CHECK(found_it777);
+
+	bool found_pet99 = false;
+	for (int i = 0; i < 5; ++i)
+	{
+		const auto *pt = f.world.playerPetAt(id2, i);
+		if (pt != nullptr && pt->pet_id == 99)
+			found_pet99 = true;
+	}
+	CHECK(found_pet99);
+
+	// 附件提取完毕，信件附件状态解除，允许安全删除
+	CHECK_FALSE(f.world.playerMails(id2)[0].has_attachment);
+	REQUIRE(f.world.deleteMail(id2, mid));
+	CHECK(f.world.playerMailCount(id2) == 0);
+}
+
+TEST_CASE("分级聊天频道广播: 视野说话(<=9格)、组队频道跨图同步、世界广播与黑名单私聊拦截")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f); // Alice (20, 20, floor 0)
+	const auto id2 = spawnHandshaked(f); // Bob (25, 20, floor 0) 距离 5 <= 9
+	const auto id3 = spawnHandshaked(f); // Charlie (50, 50, floor 0) 距离 30 > 9
+
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+	REQUIRE(f.world.setPlayerName(id3, "Charlie"));
+
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	auto *p3 = f.world.playerForTest(id3);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(p3 != nullptr);
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p2->floor = 0;
+	p2->x = 25;
+	p2->y = 20;
+	p3->floor = 0;
+	p3->x = 50;
+	p3->y = 50;
+
+	// 1. 普通说话频道 (kTalkNormal, 视野 <= 9 格)
+	REQUIRE(f.world.sendChat(id1, ChatChannel::kTalkNormal, "附近的朋友你们好！"));
+	// Alice 收到 (自身)
+	CHECK(f.world.pendingChatMessageCount(id1) == 1);
+	// Bob 在 5 格内，收到
+	CHECK(f.world.pendingChatMessageCount(id2) == 1);
+	// Charlie 在 30 格外，未收到
+	CHECK(f.world.pendingChatMessageCount(id3) == 0);
+
+	auto b_chats = f.world.pollChatMessages(id2);
+	REQUIRE(b_chats.size() == 1);
+	CHECK(b_chats[0].sender_name == "Alice");
+	CHECK(b_chats[0].text == "附近的朋友你们好！");
+	CHECK(b_chats[0].channel == ChatChannel::kTalkNormal);
+	CHECK(f.world.pendingChatMessageCount(id2) == 0); // 轮询后清空
+	(void)f.world.pollChatMessages(id1);
+
+	// 2. 队伍频道 (kTalkParty)
+	// 未组队前发送失败
+	CHECK_FALSE(f.world.sendChat(id1, ChatChannel::kTalkParty, "队伍集合！"));
+
+	// Charlie 靠近 Alice 组队，随后移至远方 (验证队伍频道跨越视野距离广播)
+	p3->x = 21;
+	p3->y = 20;
+	REQUIRE(f.world.joinParty(id3, id1));
+	p3->x = 50;
+	p3->y = 50;
+
+	REQUIRE(f.world.sendChat(id1, ChatChannel::kTalkParty, "队伍集合！"));
+	// Alice 与 Charlie 均收到
+	CHECK(f.world.pendingChatMessageCount(id1) == 1);
+	CHECK(f.world.pendingChatMessageCount(id3) == 1);
+	// 未在队内的 Bob 未收到
+	CHECK(f.world.pendingChatMessageCount(id2) == 0);
+
+	(void)f.world.pollChatMessages(id1);
+	(void)f.world.pollChatMessages(id3);
+
+	// 3. 世界广播频道 (kTalkShout)
+	REQUIRE(f.world.sendChat(id2, ChatChannel::kTalkShout, "全服大喊：高价收石龟！"));
+	CHECK(f.world.pendingChatMessageCount(id1) == 1);
+	CHECK(f.world.pendingChatMessageCount(id2) == 1);
+	CHECK(f.world.pendingChatMessageCount(id3) == 1);
+
+	(void)f.world.pollChatMessages(id1);
+	(void)f.world.pollChatMessages(id2);
+	(void)f.world.pollChatMessages(id3);
+
+	// 4. 私聊/密聊频道 (kTalkTell)
+	// 目标离线拦截
+	CHECK_FALSE(f.world.sendChat(id1, ChatChannel::kTalkTell, "在吗？", "UnknownUser"));
+	// 正常密聊 Bob
+	REQUIRE(f.world.sendChat(id1, ChatChannel::kTalkTell, "在吗？私聊你点事", "Bob"));
+	CHECK(f.world.pendingChatMessageCount(id1) == 1);
+	CHECK(f.world.pendingChatMessageCount(id2) == 1);
+	CHECK(f.world.pendingChatMessageCount(id3) == 0);
+
+	(void)f.world.pollChatMessages(id1);
+	(void)f.world.pollChatMessages(id2);
+
+	// 5. 黑名单拦截私聊
+	// Bob 与 Alice 交换名片并将 Alice 拉入黑名单
+	p2->x = 21; // 走到 Alice 身边
+	REQUIRE(f.world.requestAddressCard(id2, id1));
+	REQUIRE(f.world.acceptAddressCard(id1, id2));
+	REQUIRE(f.world.setAddressCardBlock(id2, 0, true)); // Bob 把 Alice 设为 blocked
+
+	// Alice 再次私聊 Bob，必须被黑名单拦截阻断
+	CHECK_FALSE(f.world.sendChat(id1, ChatChannel::kTalkTell, "能收到吗？", "Bob"));
+	CHECK(f.world.pendingChatMessageCount(id2) == 0); // Bob 未收到任何消息
+}
