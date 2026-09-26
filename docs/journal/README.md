@@ -21,10 +21,10 @@
 | [`15-status.md`](15-status.md) | L4.1 状态异常系统 · A-γ1 混乱重定向与核心状态推进/职业被动联动 | 3 |
 | [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
 | [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
-| [`18-petskill.md`](18-petskill.md) | 宠技三连发:B1 直攻系 · B2 宠技槽 + CHARGE · B3 状态系 + 铁壁 | 3 |
-| [`90-push-windows.md`](90-push-windows.md) | 二十二次 `shared-v0.x.0` 推送窗口的闭合核实 | 22 |
+| [`18-petskill.md`](18-petskill.md) | 宠技三连发:B1 直攻系 · B2 宠技槽 + CHARGE · B3 状态系 + 铁壁 · A-δ 特殊宠技 | 4 |
+| [`90-push-windows.md`](90-push-windows.md) | 二十三次 `shared-v0.x.0` 推送窗口的闭合核实 | 23 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **95** |
+| **合计** | | **97** |
 
 ## 全量映射表(按编号)
 
