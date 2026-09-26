@@ -969,6 +969,55 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **反向验证 (RV-2)**: 篡改溢出石币邮件补投逻辑（禁用溢出邮件投递）⇒ RV-2 邮件到账断言立即变红失败（`REQUIRE(1 >= 2)`）；恢复后回绿。
 - **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 7 项 CTest 全量通过，双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
 
+---
+
+### 9.0.94 阶段 2: 骑乘系统: 资质门限与濒死拦截 · 复合外观切换与下马还原 · 出战宠互斥 · 战斗生命分摊与战后血量回写 · 资产流转脱钩与庄园特权联动 (Ride System) (2026-09-26)
+
+2026-09-26 交付。依据石器时代官方 GMSV 核心源码（`char/char.c:3990-4075`、`char/char_base.c:50`、`include/char_base.h:1567 tagRidePetTable`、`char/family.c:2440`、`npc_riderman.c`、`battle.c:5492`），在服务端核心大世界循环与战斗系统之间落地实现**骑乘系统 (Ride System)**。
+
+#### 1. 源码事实与裁定
+
+1. **骑乘资质与庄园特权门限 (`canPlayerRide`, `grantRidePermit`, `hasRidePermit`, `revokeRidePermit`)**:
+   - **普通资质**: 玩家持有通用骑乘学习证（`hasRidePermit(session, "骑乘学习证")` / `"骑乘许可"`）或特约骑宠证（匹配宠物名称或特定品系）；
+   - **庄园特权**: 四大庄园占领家族成员享有对应特约骑宠骑乘特权，无需学习证即可骑乘：
+     - 萨姆吉尔庄园 (`FamilyManor::kSamo`): 暴龙系（暴龙、巴朵兰恩、左迪洛斯、奥卡洛斯、帖拉所伊朵、红暴、机暴等）；
+     - 玛丽娜斯庄园 (`FamilyManor::kMarina`): 虎系（虎、佩露夏、贝鲁卡、格鲁西斯、贝鲁伊卡等）；
+     - 加加庄园 (`FamilyManor::kJaja`): 飞龙 / 加美系（飞龙、加美、朵拉比斯、飞飞、布伊、加宝格、扑扑等）；
+     - 卡鲁它那庄园 (`FamilyManor::kKarutana`): 雷龙系（雷龙、布拉奇多斯、布鲁顿、斯天多斯、邦恩多斯等）；
+   - **[RV-1] 濒死门禁**: 骑宠生命值 `hp <= 0` 时，严格阻断上马，无论是否持有许可证或庄园特权均不可骑乘。
+
+2. **骑乘生命周期与状态管理 (`mountPet`, `dismountPet`, `isPlayerRiding`, `playerRidePetSlot`, `getPlayerRideInfo`)**:
+   - **外观切换与精准还原**: 上马记录玩家原外观 `original_image`，依据源码公式 `100700 + ((player_image >= 100000 ? player_image - 100000 : player_image) % 500) + (pet_image % 100)` 计算复合骑乘外观 `ride_image` 并切换角色图号；下马时精准还原 `original_image`；
+   - **出战宠互斥防护**: 上马的宠物若是当前出战宠（`default_pet == pet_slot`），自动重置 `default_pet = -1`，杜绝既作为座骑又作为独立战斗单位出战的逻辑冲突；
+   - **战斗与营业态保护**: 战斗中或摆摊营业中禁止手动上马。
+
+3. **大世界资产流转安全脱钩**:
+   - 寄售上架（`listMarketPet`）、摆摊上架（`setStallPet`）、交易放置（`offerTradePet`）、邮件寄送（`sendMail`）、宠物商店出售（`sellPetToShop`）等资产转移操作触发时，若目标宠物为当前骑乘宠，自动触发下马（`dismountPet`）并恢复人物初始外观；
+   - 玩家下线或连接关闭（`removeSession` / `onSessionClosed`）时，自动安全解骑并清理会话临时资质状态。
+
+4. **战斗生命分摊、战后血量回写与酒醉欠债清偿 [RV-2]**:
+   - **进战投影**: `makePlayerCombatant` 接收骑宠实体，填充 `c.has_ride = true` 与骑宠四维/三围/血量（`ride_hp`, `ride_max_hp`, `ride_attack`, `ride_defense`, `ride_vital`, `ride_str`, `ride_tough`, `ride_dex`）；
+   - **战斗实例绑定**: `BattleInstance` 扩充 `ride_pet_of_slot` 稳定句柄数组，在 `joinBattle` 时精准绑定主人骑宠；
+   - **生命分摊与落马**: 战斗中受到攻击时经 `splitRideDamage` 自动分摊伤害；受重击落马（`rollFallGround`）或骑宠死亡时，`c.has_ride` 变为 false；
+   - **[RV-2] 战后血量同步**: 战后 `syncPetState` 遍历 `ride_pet_of_slot`，将战斗剩余血量 `ride_hp` 严格同步回玩家真实 `Pet` 实体；若战后 `pet->hp <= 0` 或已落马，战斗结束时自动在世界态下马恢复人身外观；
+   - **酒醉欠债清偿**: 修复 `World.cpp:1858-1869` 历史欠债，对齐原版 `battle.c:5492`，骑乘状态解除酒醉时敏捷恢复由 `c.quick *= 2` 调整为 `c.quick += c.ride_dex`。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 110 增至 **117**（+7 组骑乘系统全流程实测用例），断言数从 3350 增至 **3512**（+162 断言）。
+- **实测用例矩阵**:
+  1. `骑乘资质门限与 [RV-1] 濒死拦截`；
+  2. `骑乘复合外观切换与下马精准还原`；
+  3. `出战宠与骑宠互斥防护`；
+  4. `大世界资产流转安全脱钩 (寄售/摆摊/交易/邮件/离线)`；
+  5. `战斗人宠生命分摊与 [RV-2] 战后血量回写`；
+  6. `战中骑宠濒死战后自动下马恢复人身外观`；
+  7. `庄园骑宠特权与庄园易主联动`。
+- **反向验证 (RV-1)**: 篡改濒死门禁（禁用 `pet->hp <= 0` 拦截）⇒ 用例 1 中 5 处断言全部变红失败；恢复后回绿。
+- **反向验证 (RV-2)**: 篡改战后状态回写（绕过 `syncPetState` 中 `ride_pet->hp` 写回）⇒ 用例 5 与用例 6 断言立即变红失败（`CHECK(500 < 500)` 与 `CHECK(1 == 0)`）；恢复后回绿。
+- **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 8 项 CTest 全量通过（锁定 `shared-v0.42.0` 零漂移），双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
+
+
 
 
 

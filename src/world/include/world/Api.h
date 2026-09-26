@@ -1185,6 +1185,19 @@ struct ChatMessage
 	std::int64_t timestamp_ms{0};
 };
 
+// ══ 骑乘系统 (Ride System, 阶段 2) ════════════════════════════════════════
+// 对齐官方石器时代源码 char/char.c:3990-4075, char/char_base.c:50, include/char_base.h:1567 tagRidePetTable
+struct RideInfo
+{
+	int pet_slot = -1;               // 骑乘宠在随身宠栏的槽位 (0..4)
+	std::int32_t original_image = 0; // 上马前的原外观图号
+	std::int32_t ride_image = 0;     // 骑乘后的复合外观图号
+	std::string pet_name{};          // 骑乘宠名称
+	std::int32_t pet_level = 1;      // 骑乘宠等级
+	std::int32_t pet_hp = 0;         // 骑乘宠当前生命值
+	std::int32_t pet_max_hp = 0;     // 骑乘宠生命上限
+};
+
 class World final : public SA::Net::TransportEvents,
 
                     public SA::Net::SessionHost
@@ -1676,6 +1689,18 @@ class World final : public SA::Net::TransportEvents,
 	                                        std::optional<MarketAssetType> type_filter = std::nullopt) const;
 	std::vector<MarketListing> playerMarketListings(SA::Net::SessionId seller) const;
 	std::size_t activeMarketListingCount() const;
+
+	// ── 骑乘系统 (Ride System) ──────────────────────────────────────────
+	bool mountPet(SA::Net::SessionId session, int pet_slot);
+	bool dismountPet(SA::Net::SessionId session);
+	bool isPlayerRiding(SA::Net::SessionId session) const;
+	int playerRidePetSlot(SA::Net::SessionId session) const;
+	std::optional<RideInfo> getPlayerRideInfo(SA::Net::SessionId session) const;
+	bool canPlayerRide(SA::Net::SessionId session, int pet_slot) const;
+	bool grantRidePermit(SA::Net::SessionId session, const std::string &permit_name);
+	bool revokeRidePermit(SA::Net::SessionId session, const std::string &permit_name);
+	bool hasRidePermit(SA::Net::SessionId session, const std::string &permit_name) const;
+	std::vector<std::string> playerRidePermits(SA::Net::SessionId session) const;
 
 	// 某会话背后 Player 的位置(批次 W.1)。valid == false ⇒ 该会话无 L2 实体。
 	//   ★ 移动用例的观察面:走一步坐标变化 / 撞墙不变 / 转身只改 dir。

@@ -15,6 +15,7 @@
 #include <array>
 #include <map>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -198,6 +199,7 @@ struct BattleInstance
 	//    以及 demo 里手填的那只 foe(见 `makeDemoField`)都没有。
 	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> enemy_of_slot{};
 	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> pet_of_slot{};
+	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> ride_pet_of_slot{};
 	// 集气态(批次 B2b,见上方 ChargeState)。★ 按**下标句柄**活:单位死亡 / 离场后
 	//   槽位守卫(`occupied && !dead`)让残余状态不再触发;新指令到达即清
 	//   (onBattleCommand,对应原版「蓄力中宠物菜单关闭」—— 新指令不可能,
@@ -828,11 +830,17 @@ int giveItemIntoPlayer(SA::Model::Player &owner, const SA::Model::Item &item, It
 void syncPetState(BattleInstance &b, PetPool &pets)
 {
 	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+	{
 		if (auto *pet = pets.resolve(b.pet_of_slot[static_cast<std::size_t>(slot)]))
 		{
 			pet->hp = std::max(0, b.field.at(slot).hp);
 			pet->mp = std::max(0, b.field.at(slot).mp);
 		}
+		if (auto *ride_pet = pets.resolve(b.ride_pet_of_slot[static_cast<std::size_t>(slot)]))
+		{
+			ride_pet->hp = std::max(0, b.field.at(slot).ride_hp);
+		}
+	}
 }
 
 // 对账(A-α 批):= 原版 `BATTLE_GetExpGold`(SSRC80 `battle.c:3308`)的
@@ -1853,19 +1861,18 @@ void applyEvents(SA::Domain::BattleEvents &events,
 			//      (`BATTLE_TurnParam`,未移植)⇒ 现在它会**多留一会儿**,记明在案。
 			if (c.status == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_DRUNK))
 			{
-				// ⚠️★★ **只实现无骑宠那一支,有骑宠那一支有据地不做**:
-				//    原版有骑宠时是 `quick += 骑宠的 quick`(`battle.c:5492`),而
-				//    ① `Combatant` 没有 `ride_quick` 字段(骑宠只投了 attack/defense/hp);
-				//    ② 更要紧的是 **`has_ride` 在世界侧从未被写入过**(全仓实测:只有
-				//       用例在设)⇒ 骑乘系统整个未移植 ⇒ 那一支**运行时不可达**。
-				//    ⇒ 现在写它就是在猜一个没有输入能验证的实现(纪律 ⓪)。
-				// ⚠️★ **但它是一颗会静默引爆的雷**:骑乘系统接上之后 `has_ride` 变真,
-				//    这里会**照旧走 ×2** 而不报任何错 ⇒ 敏捷幅度悄悄错掉。
-				//    ⇒ 已在 `01` §13 欠债登记,并由 `Status.h` 的 `drunk_quick_restore`
-				//      注释指回本处(同 A.4 打飞下游「写下就是定时炸弹」的处置取向)。
 				if (ctx.battle != nullptr)
 					ctx.battle->quick_to_restore[sc.target] = c.quick;
-				c.quick *= 2;
+				if (c.has_ride)
+				{
+					// 原版有骑宠时是 quick += 骑宠的 quick (battle.c:5492)
+					// Combatant::ride_dex 存放了骑宠敏捷属性
+					c.quick += c.ride_dex;
+				}
+				else
+				{
+					c.quick *= 2;
+				}
 			}
 
 			c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_NONE);
@@ -2290,7 +2297,8 @@ int clampEnemyAction(std::uint32_t enemy_action)
 // ★ 占位量级照 `makeDemoField` 的 me(力量为主):让占位玩家能打动遇敌链产出的真实弱怪,
 //   使「打赢拿经验」闭环有意义 —— 与欠债 25「真实模板 18 级弱 demo 约 16 倍」同一量级考量。
 SA::Rules::Combatant makePlayerCombatant(const SA::Model::Player *player = nullptr,
-                                         const SA::Rules::EquipModifiers &equip = {})
+                                         const SA::Rules::EquipModifiers &equip = {},
+                                         const SA::Model::Pet *ride_pet = nullptr)
 {
 	SA::Rules::Combatant c{};
 	c.occupied = true;
@@ -2319,32 +2327,49 @@ SA::Rules::Combatant makePlayerCombatant(const SA::Model::Player *player = nullp
 		c.elements[1] = player->water;
 		c.elements[2] = player->fire;
 		c.elements[3] = player->wind;
-		return c;
 	}
-	c.level = player ? player->level : 20;
-	c.mp = player && player->mp > 0 ? player->mp : 100;
-	c.max_mp = player && player->max_mp > 0 ? player->max_mp : 100;
-	c.luck = player ? player->luck : 10;
-	c.charm = player ? player->charm : 0;
-	const SA::Rules::DerivedStats st =
-	    SA::Rules::deriveEquippedStats(8000, 30000, 4000, 20000, equip);
-	c.vital = 8000;
-	c.str = 30000;
-	c.tough = 4000;
-	c.dex = 20000;
-	c.attack = st.attack;
-	c.defense = st.defense;
-	c.quick = st.quick;
-	c.fix_dex = st.quick;
-	c.max_hp = st.max_hp;
-	c.hp = player && player->hp > 0 ? std::min(player->hp, st.max_hp) : st.max_hp;
-	if (player)
+	else
 	{
-		c.elements[0] = player->earth;
-		c.elements[1] = player->water;
-		c.elements[2] = player->fire;
-		c.elements[3] = player->wind;
+		c.level = player ? player->level : 20;
+		c.mp = player && player->mp > 0 ? player->mp : 100;
+		c.max_mp = player && player->max_mp > 0 ? player->max_mp : 100;
+		c.luck = player ? player->luck : 10;
+		c.charm = player ? player->charm : 0;
+		const SA::Rules::DerivedStats st =
+		    SA::Rules::deriveEquippedStats(8000, 30000, 4000, 20000, equip);
+		c.vital = 8000;
+		c.str = 30000;
+		c.tough = 4000;
+		c.dex = 20000;
+		c.attack = st.attack;
+		c.defense = st.defense;
+		c.quick = st.quick;
+		c.fix_dex = st.quick;
+		c.max_hp = st.max_hp;
+		c.hp = player && player->hp > 0 ? std::min(player->hp, st.max_hp) : st.max_hp;
+		if (player)
+		{
+			c.elements[0] = player->earth;
+			c.elements[1] = player->water;
+			c.elements[2] = player->fire;
+			c.elements[3] = player->wind;
+		}
 	}
+
+	if (ride_pet && ride_pet->hp > 0)
+	{
+		c.has_ride = true;
+		const auto rstats = SA::Rules::deriveBaseStats(ride_pet->vital, ride_pet->str, ride_pet->tough, ride_pet->dex);
+		c.ride_max_hp = rstats.max_hp;
+		c.ride_hp = std::min(ride_pet->hp, rstats.max_hp);
+		c.ride_attack = rstats.attack;
+		c.ride_defense = rstats.defense;
+		c.ride_vital = ride_pet->vital;
+		c.ride_str = ride_pet->str;
+		c.ride_tough = ride_pet->tough;
+		c.ride_dex = ride_pet->dex;
+	}
+
 	return c;
 }
 
@@ -2839,6 +2864,29 @@ struct World::Impl : GoldAuditSink
 	// ── 经济体系: 寄售与拍卖市场 (阶段 2: 市场/拍卖行系统) ───────────────────
 	std::unordered_map<std::uint64_t, MarketListing> market_listings{};
 	std::uint64_t next_market_listing_id = 1;
+
+	// ── 骑乘体系 (阶段 2: 对齐 char.c:3990-4075 / tagRidePetTable) ─────────
+	struct PlayerRideState
+	{
+		int pet_slot = -1;
+		std::int32_t original_image = 0;
+	};
+	std::unordered_map<SA::Net::SessionId, PlayerRideState> player_rides{};
+	std::unordered_map<SA::Net::SessionId, std::set<std::string>> player_ride_permits{};
+
+	const SA::Model::Pet *getRidingPet(SA::Net::SessionId sid) const
+	{
+		const auto rit = player_rides.find(sid);
+		if (rit == player_rides.end())
+			return nullptr;
+		const auto *player = players.resolve(player_of_session.find(sid));
+		if (player == nullptr)
+			return nullptr;
+		const int rslot = rit->second.pet_slot;
+		if (rslot < 0 || static_cast<std::size_t>(rslot) >= SA::Model::kMaxPetHave)
+			return nullptr;
+		return pets.resolve(player->pets[static_cast<std::size_t>(rslot)]);
+	}
 
 	// 系统邮件直投辅助函数 (用于拍卖结算、离线返还、溢出石币补偿投递)
 	bool deliverSystemMail(const std::string &receiver_name,
@@ -4178,6 +4226,10 @@ void World::tick()
 						const auto slot = b.slot_of.at(sid);
 						deliverPlayerProfit(b, slot, s.players, s.items, &s.pets);
 						b.field.at(slot).occupied = false;
+						if (!b.field.at(slot).has_ride || b.field.at(slot).ride_hp <= 0)
+						{
+							dismountPet(sid);
+						}
 						if (slot % SA::Rules::kSideOffset < SA::Rules::kBattlePlayerMax)
 						{
 							exitPetFromField(b.field, slot);
@@ -4527,6 +4579,18 @@ void World::tick()
 			             {{"battle_id", id},
 			              {"turns", static_cast<std::uint64_t>(
 			                            it->second.stats.turns_resolved)}});
+			for (const auto sid : b.members)
+			{
+				const auto slot_it = b.slot_of.find(sid);
+				if (slot_it != b.slot_of.end())
+				{
+					const int slot = static_cast<int>(slot_it->second);
+					if (!b.field.at(slot).has_ride || b.field.at(slot).ride_hp <= 0)
+					{
+						dismountPet(sid);
+					}
+				}
+			}
 			const auto members = b.members;
 			s.retireBattle(id);
 			if (s.storage)
@@ -4933,6 +4997,15 @@ bool World::joinBattle(BattleId battle, SA::Net::SessionId session,
 				    p->pets[static_cast<std::size_t>(p->default_pet)];
 	}
 
+	if (s.getRidingPet(session) != nullptr)
+	{
+		const auto rit = s.player_rides.find(session);
+		if (SA::Model::Player *p = s.players.resolve(b.player_of_slot[slot]))
+		{
+			b.ride_pet_of_slot[slot] = p->pets[static_cast<std::size_t>(rit->second.pet_slot)];
+		}
+	}
+
 	cit->second.session->markOnline();
 
 	// ★★ 入场即下发**自己是谁**与**现在是第几回合**,否则客户端无从组指令:
@@ -5316,7 +5389,8 @@ bool World::triggerEncounter(SA::Net::SessionId session, std::int32_t area_row)
 	{
 		const auto mid = battle_party_members[idx];
 		field.at(static_cast<int>(idx)) = makePlayerCombatant(s.players.resolve(s.player_of_session.find(mid)),
-		                                                      playerEquipModifiers(mid));
+		                                                      playerEquipModifiers(mid),
+		                                                      s.getRidingPet(mid));
 	}
 
 	const BattleId battle = startBattle(field);
@@ -5408,7 +5482,8 @@ bool World::triggerNpcEnemyBattle(SA::Net::SessionId session, std::size_t world_
 	{
 		const auto mid = battle_party_members[idx];
 		field.at(static_cast<int>(idx)) = makePlayerCombatant(s.players.resolve(s.player_of_session.find(mid)),
-		                                                      playerEquipModifiers(mid));
+		                                                      playerEquipModifiers(mid),
+		                                                      s.getRidingPet(mid));
 	}
 
 	const BattleId battle = startBattle(field);
@@ -5597,6 +5672,8 @@ void World::removeSession(SA::Net::ConnectionId id)
 	cancelTrade(id);
 	leaveParty(id);
 	closeStall(id);
+	dismountPet(id);
+	_impl->player_ride_permits.erase(id);
 	for (auto &kv : _impl->market_listings)
 	{
 		if (kv.second.seller_session == id)
@@ -7012,6 +7089,10 @@ bool World::sellPetToShop(SA::Net::SessionId id, std::uint64_t npc_id, int pet_s
 	}
 
 	// 执行出售原子操作: 扣除并释放宠物 + 增加石币 (走 GoldLedger, 源 kPetShopSell)
+	if (playerRidePetSlot(id) == pet_slot)
+	{
+		dismountPet(id);
+	}
 	p->clearPetSlot(pet_slot);
 	s.pets.release(h);
 
@@ -7232,6 +7313,8 @@ void World::onSessionClosed(SA::Net::SessionId id)
 	cancelTrade(id);
 	leaveParty(id);
 	closeStall(id);
+	dismountPet(id);
+	_impl->player_ride_permits.erase(id);
 	for (auto &kv : _impl->market_listings)
 	{
 		if (kv.second.seller_session == id)
@@ -7491,14 +7574,16 @@ bool World::requestDuel(SA::Net::SessionId requester, SA::Net::SessionId target)
 		const auto sid = party0[i];
 		field.at(static_cast<int>(i)) = makePlayerCombatant(
 		    s.players.resolve(s.player_of_session.find(sid)),
-		    playerEquipModifiers(sid));
+		    playerEquipModifiers(sid),
+		    s.getRidingPet(sid));
 	}
 	for (std::size_t i = 0; i < party1.size() && i < SA::Rules::kBattlePlayerMax; ++i)
 	{
 		const auto sid = party1[i];
 		field.at(static_cast<int>(SA::Rules::kSideOffset + i)) = makePlayerCombatant(
 		    s.players.resolve(s.player_of_session.find(sid)),
-		    playerEquipModifiers(sid));
+		    playerEquipModifiers(sid),
+		    s.getRidingPet(sid));
 	}
 
 	const BattleId battle = startBattle(field);
@@ -7740,6 +7825,11 @@ bool World::offerTradePet(SA::Net::SessionId session, int pet_slot)
 	auto &pets = is_a ? ts.a_pets : ts.b_pets;
 	if (std::find(pets.begin(), pets.end(), pet_slot) != pets.end())
 		return false;
+
+	if (playerRidePetSlot(session) == pet_slot)
+	{
+		dismountPet(session);
+	}
 
 	pets.push_back(pet_slot);
 	ts.a_confirmed = false;
@@ -10217,6 +10307,10 @@ bool World::sendMail(SA::Net::SessionId sender, const std::string &receiver_name
 	}
 	if (pet_slot >= 0)
 	{
+		if (playerRidePetSlot(sender) == pet_slot)
+		{
+			dismountPet(sender);
+		}
 		if (p->default_pet == pet_slot)
 			p->default_pet = -1;
 		(void)s.pets.release(p->pets[static_cast<std::size_t>(pet_slot)]);
@@ -11142,6 +11236,11 @@ bool World::setStallPet(SA::Net::SessionId seller, int pet_slot, std::uint32_t p
 	if (pet_obj == nullptr)
 		return false;
 
+	if (playerRidePetSlot(seller) == pet_slot)
+	{
+		dismountPet(seller);
+	}
+
 	if (p->default_pet == pet_slot)
 	{
 		p->default_pet = -1;
@@ -11542,6 +11641,11 @@ std::uint64_t World::listMarketPet(SA::Net::SessionId seller, int pet_slot, std:
 	if (p->gold < static_cast<std::int32_t>(kMarketListingFee))
 		return 0;
 
+	if (playerRidePetSlot(seller) == pet_slot)
+	{
+		dismountPet(seller);
+	}
+
 	if (p->default_pet == pet_slot)
 	{
 		p->default_pet = -1;
@@ -11787,6 +11891,274 @@ std::size_t World::activeMarketListingCount() const
 			++count;
 	}
 	return count;
+}
+
+// ══ 骑乘系统 (Ride System, 阶段 2) ════════════════════════════════════════
+// 对齐官方石器时代源码 char/char.c:3990-4075, char/char_base.c:50, include/char_base.h:1567 tagRidePetTable
+
+namespace
+{
+inline std::int32_t computeRideImage(std::int32_t player_image, std::int32_t pet_image) noexcept
+{
+	const std::int32_t p_base = player_image >= 100000 ? (player_image - 100000) : player_image;
+	const std::int32_t p_rem = p_base >= 0 ? (p_base % 500) : 0;
+	const std::int32_t pet_rem = pet_image >= 0 ? (pet_image % 100) : 0;
+	return 100700 + p_rem + pet_rem;
+}
+
+inline bool matchesManorPet(FamilyManor manor, const std::string &pet_name) noexcept
+{
+	if (pet_name.empty())
+		return false;
+
+	switch (manor)
+	{
+	case FamilyManor::kSamo:
+		// 萨姆吉尔庄园: 暴龙系
+		return pet_name.find("暴龙") != std::string::npos ||
+		       pet_name.find("巴朵兰恩") != std::string::npos ||
+		       pet_name.find("左迪洛斯") != std::string::npos ||
+		       pet_name.find("奥卡洛斯") != std::string::npos ||
+		       pet_name.find("帖拉所伊朵") != std::string::npos ||
+		       pet_name.find("红暴") != std::string::npos ||
+		       pet_name.find("机暴") != std::string::npos ||
+		       pet_name.find("绿暴") != std::string::npos ||
+		       pet_name.find("蓝暴") != std::string::npos ||
+		       pet_name.find("暴") != std::string::npos;
+	case FamilyManor::kMarina:
+		// 玛丽娜斯庄园: 虎系
+		return pet_name.find("虎") != std::string::npos ||
+		       pet_name.find("佩露夏") != std::string::npos ||
+		       pet_name.find("贝鲁卡") != std::string::npos ||
+		       pet_name.find("格鲁西斯") != std::string::npos ||
+		       pet_name.find("贝鲁伊卡") != std::string::npos;
+	case FamilyManor::kJaja:
+		// 加加庄园: 飞龙 / 加美系
+		return pet_name.find("飞龙") != std::string::npos ||
+		       pet_name.find("加美") != std::string::npos ||
+		       pet_name.find("朵拉比斯") != std::string::npos ||
+		       pet_name.find("飞飞") != std::string::npos ||
+		       pet_name.find("布伊") != std::string::npos ||
+		       pet_name.find("加宝格") != std::string::npos ||
+		       pet_name.find("扑扑") != std::string::npos;
+	case FamilyManor::kKarutana:
+		// 卡鲁它那庄园: 雷龙系
+		return pet_name.find("雷龙") != std::string::npos ||
+		       pet_name.find("布拉奇多斯") != std::string::npos ||
+		       pet_name.find("布鲁顿") != std::string::npos ||
+		       pet_name.find("斯天多斯") != std::string::npos ||
+		       pet_name.find("邦恩多斯") != std::string::npos;
+	case FamilyManor::kNone:
+		return false;
+	}
+	return false;
+}
+} // namespace
+
+bool World::canPlayerRide(SA::Net::SessionId session, int pet_slot) const
+{
+	const auto pit = _impl->player_of_session.find(session);
+	if (!pit.valid())
+		return false;
+	const auto *p = _impl->players.resolve(pit);
+	if (p == nullptr)
+		return false;
+	if (pet_slot < 0 || static_cast<std::size_t>(pet_slot) >= SA::Model::kMaxPetHave)
+		return false;
+	const auto ph = p->pets[static_cast<std::size_t>(pet_slot)];
+	if (!ph.valid())
+		return false;
+	const auto *pet = _impl->pets.resolve(ph);
+	if (pet == nullptr)
+		return false;
+
+	// [RV-1] 濒死门禁: 骑宠生命值 hp <= 0 严格阻断上马
+	if (pet->hp <= 0)
+		return false;
+
+	// 1. 资质检查: 通用骑乘学习证或特约骑宠证
+	const auto permit_it = _impl->player_ride_permits.find(session);
+	if (permit_it != _impl->player_ride_permits.end())
+	{
+		const auto &permits = permit_it->second;
+		if (permits.find("骑乘学习证") != permits.end() ||
+		    permits.find("骑乘许可") != permits.end())
+		{
+			return true;
+		}
+		const std::string pet_name = pet->name.c_str();
+		for (const auto &permit : permits)
+		{
+			if (permit == pet_name ||
+			    (!pet_name.empty() && permit.find(pet_name) != std::string::npos) ||
+			    (!permit.empty() && pet_name.find(permit) != std::string::npos))
+			{
+				return true;
+			}
+		}
+	}
+
+	// 2. 庄园特权检查: 占领庄园的家族成员享有对应骑宠特权
+	const std::uint32_t fam_id = playerFamilyId(session);
+	if (fam_id != 0)
+	{
+		const FamilyManor manor = familyManor(fam_id);
+		if (manor != FamilyManor::kNone)
+		{
+			const std::string pname = pet->name.c_str();
+			if (matchesManorPet(manor, pname))
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+bool World::mountPet(SA::Net::SessionId session, int pet_slot)
+{
+	Impl &s = *_impl;
+	if (s.inBattle(session))
+		return false;
+	if (isPlayerVending(session))
+		return false;
+
+	if (!canPlayerRide(session, pet_slot))
+		return false;
+
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (p == nullptr)
+		return false;
+
+	const auto ph = p->pets[static_cast<std::size_t>(pet_slot)];
+	const auto *pet = s.pets.resolve(ph);
+	if (pet == nullptr)
+		return false;
+
+	// 若已处于骑乘状态，先执行下马还原
+	if (isPlayerRiding(session))
+	{
+		dismountPet(session);
+	}
+
+	// 出战宠互斥防护: 上马的宠物若是当前出战宠，自动重置 default_pet = -1
+	if (p->default_pet == pet_slot)
+	{
+		p->default_pet = -1;
+	}
+
+	const std::int32_t orig_img = p->image;
+	const std::int32_t ride_img = computeRideImage(orig_img, pet->base_image);
+	p->image = ride_img;
+
+	s.player_rides[session] = {pet_slot, orig_img};
+	return true;
+}
+
+bool World::dismountPet(SA::Net::SessionId session)
+{
+	Impl &s = *_impl;
+	auto it = s.player_rides.find(session);
+	if (it == s.player_rides.end())
+		return false;
+
+	if (SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session)))
+	{
+		p->image = it->second.original_image;
+	}
+	s.player_rides.erase(it);
+	return true;
+}
+
+bool World::isPlayerRiding(SA::Net::SessionId session) const
+{
+	return _impl->player_rides.find(session) != _impl->player_rides.end();
+}
+
+int World::playerRidePetSlot(SA::Net::SessionId session) const
+{
+	const auto it = _impl->player_rides.find(session);
+	if (it == _impl->player_rides.end())
+		return -1;
+	return it->second.pet_slot;
+}
+
+std::optional<RideInfo> World::getPlayerRideInfo(SA::Net::SessionId session) const
+{
+	const auto it = _impl->player_rides.find(session);
+	if (it == _impl->player_rides.end())
+		return std::nullopt;
+
+	const SA::Model::Player *p = _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return std::nullopt;
+
+	const int slot = it->second.pet_slot;
+	if (slot < 0 || static_cast<std::size_t>(slot) >= SA::Model::kMaxPetHave)
+		return std::nullopt;
+
+	const auto *pet = _impl->pets.resolve(p->pets[static_cast<std::size_t>(slot)]);
+	if (pet == nullptr)
+		return std::nullopt;
+
+	RideInfo info{};
+	info.pet_slot = slot;
+	info.original_image = it->second.original_image;
+	info.ride_image = p->image;
+	info.pet_name = pet->name.c_str();
+	info.pet_level = pet->level;
+	info.pet_hp = pet->hp;
+	info.pet_max_hp = SA::Rules::deriveBaseStats(pet->vital, pet->str, pet->tough, pet->dex).max_hp;
+	return info;
+}
+
+bool World::grantRidePermit(SA::Net::SessionId session, const std::string &permit_name)
+{
+	if (permit_name.empty())
+		return false;
+	auto &permits = _impl->player_ride_permits[session];
+	const auto res = permits.insert(permit_name);
+	return res.second;
+}
+
+bool World::revokeRidePermit(SA::Net::SessionId session, const std::string &permit_name)
+{
+	auto it = _impl->player_ride_permits.find(session);
+	if (it == _impl->player_ride_permits.end())
+		return false;
+	const auto count = it->second.erase(permit_name);
+	if (count == 0)
+		return false;
+
+	if (isPlayerRiding(session))
+	{
+		const int rslot = playerRidePetSlot(session);
+		if (!canPlayerRide(session, rslot))
+		{
+			dismountPet(session);
+		}
+	}
+	return true;
+}
+
+bool World::hasRidePermit(SA::Net::SessionId session, const std::string &permit_name) const
+{
+	const auto it = _impl->player_ride_permits.find(session);
+	if (it == _impl->player_ride_permits.end())
+		return false;
+	return it->second.find(permit_name) != it->second.end();
+}
+
+std::vector<std::string> World::playerRidePermits(SA::Net::SessionId session) const
+{
+	std::vector<std::string> res;
+	const auto it = _impl->player_ride_permits.find(session);
+	if (it != _impl->player_ride_permits.end())
+	{
+		res.assign(it->second.begin(), it->second.end());
+	}
+	return res;
 }
 
 } // namespace SA::World

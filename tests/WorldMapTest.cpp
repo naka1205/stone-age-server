@@ -6778,3 +6778,426 @@ TEST_CASE("拍卖市场商品撤回下架与退还 (满包退回系统邮件)")
 	REQUIRE(f.world.takeMailAttachment(id, mails[0].mail_id));
 	CHECK(f.world.playerItemSlotsUsed(id) == 45);
 }
+
+// ══ 阶段 2 骑乘系统 (Ride System) 单元测试 ═════════════════════════════════
+
+TEST_CASE("骑乘资质门限与 [RV-1] 濒死拦截")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	REQUIRE(f.world.setPlayerName(id, "Alice"));
+
+	// 赋予一只 10 级测试宠物 (初始 hp = 20)
+	const int pet_slot = f.world.givePetToPlayer(id, makeTestPet(100, 10));
+	REQUIRE(pet_slot >= 0);
+
+	// 1. 无任何骑乘资质时，阻断骑乘
+	CHECK_FALSE(f.world.hasRidePermit(id, "骑乘学习证"));
+	CHECK_FALSE(f.world.canPlayerRide(id, pet_slot));
+	CHECK_FALSE(f.world.mountPet(id, pet_slot));
+	CHECK_FALSE(f.world.isPlayerRiding(id));
+
+	// 2. 授予通用骑乘学习证
+	REQUIRE(f.world.grantRidePermit(id, "骑乘学习证"));
+	CHECK(f.world.hasRidePermit(id, "骑乘学习证"));
+	CHECK(f.world.canPlayerRide(id, pet_slot));
+
+	// 3. [RV-1] 濒死门禁: 骑宠生命值 hp <= 0 时严格阻断上马
+	auto dead_pet = makeTestPet(101, 10);
+	dead_pet.hp = 0;
+	const int slot_dead = f.world.givePetToPlayer(id, dead_pet);
+	REQUIRE(slot_dead >= 0);
+	CHECK_FALSE(f.world.canPlayerRide(id, slot_dead));
+	CHECK_FALSE(f.world.mountPet(id, slot_dead));
+	CHECK_FALSE(f.world.isPlayerRiding(id));
+
+	auto dying_pet = makeTestPet(102, 10);
+	dying_pet.hp = -10;
+	const int slot_dying = f.world.givePetToPlayer(id, dying_pet);
+	REQUIRE(slot_dying >= 0);
+	CHECK_FALSE(f.world.canPlayerRide(id, slot_dying));
+	CHECK_FALSE(f.world.mountPet(id, slot_dying));
+
+	// 4. 存活宠物 (hp = 20 > 0) 正常上马
+	CHECK(f.world.canPlayerRide(id, pet_slot));
+	REQUIRE(f.world.mountPet(id, pet_slot));
+	CHECK(f.world.isPlayerRiding(id));
+	CHECK(f.world.playerRidePetSlot(id) == pet_slot);
+}
+
+TEST_CASE("骑乘复合外观切换与下马精准还原")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	REQUIRE(f.world.setPlayerName(id, "Alice"));
+	p->image = 100000;
+
+	auto pet_data = makeTestPet(105, 5);
+	pet_data.base_image = 100105;
+	pet_data.name.assign("黄金雷龙");
+	const int pet_slot = f.world.givePetToPlayer(id, pet_data);
+	REQUIRE(pet_slot >= 0);
+
+	REQUIRE(f.world.grantRidePermit(id, "骑乘学习证"));
+	REQUIRE(f.world.mountPet(id, pet_slot));
+
+	// 1. 骑乘状态与复合外观校验 (100700 + 0 + 5 = 100705)
+	CHECK(f.world.isPlayerRiding(id));
+	CHECK(f.world.playerRidePetSlot(id) == pet_slot);
+	CHECK(p->image == 100705);
+
+	const auto info = f.world.getPlayerRideInfo(id);
+	REQUIRE(info.has_value());
+	CHECK(info->pet_slot == pet_slot);
+	CHECK(info->original_image == 100000);
+	CHECK(info->ride_image == 100705);
+	CHECK(info->pet_name == "黄金雷龙");
+	CHECK(info->pet_level == 5);
+	CHECK(info->pet_hp == 20);
+
+	// 2. 下马精准还原人物原始外观
+	REQUIRE(f.world.dismountPet(id));
+	CHECK_FALSE(f.world.isPlayerRiding(id));
+	CHECK(f.world.playerRidePetSlot(id) == -1);
+	CHECK(p->image == 100000);
+	CHECK_FALSE(f.world.getPlayerRideInfo(id).has_value());
+}
+
+TEST_CASE("出战宠与骑宠互斥防护")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+
+	const int s0 = f.world.givePetToPlayer(id, makeTestPet(101, 10));
+	const int s1 = f.world.givePetToPlayer(id, makeTestPet(102, 10));
+	REQUIRE(s0 == 0);
+	REQUIRE(s1 == 1);
+
+	// 设 slot 0 为出战宠
+	p->default_pet = 0;
+	CHECK(p->default_pet == 0);
+
+	REQUIRE(f.world.grantRidePermit(id, "骑乘学习证"));
+
+	// 骑上出战宠 slot 0，出战宠自动重置为 -1
+	REQUIRE(f.world.mountPet(id, 0));
+	CHECK(f.world.isPlayerRiding(id));
+	CHECK(p->default_pet == -1);
+
+	// 换骑 slot 1，原骑宠安全解脱，slot 1 成为新骑宠
+	REQUIRE(f.world.mountPet(id, 1));
+	CHECK(f.world.playerRidePetSlot(id) == 1);
+	CHECK(p->default_pet == -1);
+
+	REQUIRE(f.world.dismountPet(id));
+	CHECK_FALSE(f.world.isPlayerRiding(id));
+	CHECK(f.world.playerPetSlotsUsed(id) == 2);
+}
+
+TEST_CASE("大世界资产流转安全脱钩 (寄售/摆摊/交易/邮件/离线)")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	auto *p1 = f.world.playerForTest(id1);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+	p1->gold = 2000;
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p2 != nullptr);
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 21;
+	p2->gold = 2000;
+
+	REQUIRE(f.world.grantRidePermit(id1, "骑乘学习证"));
+
+	// === 场景 A: 寄售目标骑宠自动下马 ===
+	const int s0 = f.world.givePetToPlayer(id1, makeTestPet(201, 10));
+	REQUIRE(s0 == 0);
+	REQUIRE(f.world.mountPet(id1, s0));
+	CHECK(f.world.isPlayerRiding(id1));
+
+	const auto lid = f.world.listMarketPet(id1, s0, 500);
+	REQUIRE(lid > 0);
+	CHECK_FALSE(f.world.isPlayerRiding(id1)); // 寄售自动脱钩下马
+
+	// === 场景 B: 摆摊目标骑宠自动下马 ===
+	const int s1 = f.world.givePetToPlayer(id1, makeTestPet(202, 10));
+	REQUIRE(s1 == 0);
+	REQUIRE(f.world.mountPet(id1, s1));
+	CHECK(f.world.isPlayerRiding(id1));
+
+	REQUIRE(f.world.openStall(id1, "Alice小摊"));
+	REQUIRE(f.world.setStallPet(id1, s1, 300));
+	CHECK_FALSE(f.world.isPlayerRiding(id1)); // 摆摊目标宠自动下马
+	REQUIRE(f.world.closeStall(id1));
+
+	// === 场景 C: 交易放置目标骑宠自动下马 ===
+	REQUIRE(f.world.mountPet(id1, s1));
+	CHECK(f.world.isPlayerRiding(id1));
+
+	REQUIRE(f.world.requestTrade(id1, id2));
+	REQUIRE(f.world.acceptTrade(id2, id1));
+	REQUIRE(f.world.offerTradePet(id1, s1));
+	CHECK_FALSE(f.world.isPlayerRiding(id1)); // 放入交易表自动下马
+	REQUIRE(f.world.cancelTrade(id1));
+
+	// === 场景 D: 邮件邮寄目标骑宠自动下马 ===
+	REQUIRE(f.world.mountPet(id1, s1));
+	CHECK(f.world.isPlayerRiding(id1));
+
+	REQUIRE(f.world.sendMail(id1, "Bob", "送宠", "收下吧", -1, s1, 0));
+	CHECK_FALSE(f.world.isPlayerRiding(id1)); // 邮寄自动下马
+
+	// === 场景 E: 会话关闭离线自动安全解骑 ===
+	const int s2 = f.world.givePetToPlayer(id1, makeTestPet(203, 10));
+	REQUIRE(s2 == 0);
+	REQUIRE(f.world.mountPet(id1, s2));
+	CHECK(f.world.isPlayerRiding(id1));
+
+	f.world.onSessionClosed(id1);
+	CHECK_FALSE(f.world.isPlayerRiding(id1)); // 离线解骑
+}
+
+TEST_CASE("战斗人宠生命分摊与 [RV-2] 战后血量回写")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f); // Alice (防守方)
+	const auto id2 = spawnHandshaked(f); // Bob (攻击方)
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(f.world.setPlayerName(id1, "Alice"));
+	REQUIRE(f.world.setPlayerName(id2, "Bob"));
+
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p1->hp = 2000;
+	p1->vital = 20000;
+	p1->str = 5000;
+	p1->tough = 500;
+	p1->dex = 190; // 略慢于 Bob
+
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 21;
+	p2->hp = 1; // 1 点血，受到反击即战败结束战斗
+	p2->vital = 10;
+	p2->str = 5000; // 造成分摊伤害
+	p2->tough = 10;
+	p2->dex = 200; // 略快于 Alice 先手攻击
+
+	// 给 Alice 一只满血 500 HP 骑宠
+	auto pet_data = makeTestPet(301, 10);
+	pet_data.vital = 20000;
+	pet_data.str = 4000;
+	pet_data.tough = 4000;
+	pet_data.dex = 4000;
+	pet_data.hp = 500;
+	const int slot = f.world.givePetToPlayer(id1, pet_data);
+	REQUIRE(slot == 0);
+
+	REQUIRE(f.world.grantRidePermit(id1, "骑乘学习证"));
+	REQUIRE(f.world.mountPet(id1, slot));
+	CHECK(f.world.isPlayerRiding(id1));
+
+	// Bob 发起决斗 (Bob 是 Side 0 slot 0, Alice 是 Side 1 slot 10)
+	REQUIRE(f.world.requestDuel(id2, id1));
+	REQUIRE(f.world.battleCount() == 1);
+	const BattleId battle = 1;
+
+	// 验证开战进场快照中骑宠投影完整
+	const auto *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->at(10).has_ride);
+	CHECK(fld->at(10).ride_hp == 500);
+
+	// 回合循环: Bob 先手攻击 Alice (slot 10)，伤害经 splitRideDamage 在 Alice 与骑宠间分摊
+	// 随后 Alice 反击攻击 Bob (slot 0)，Bob 战败，战斗结束
+	for (int turn = 0; turn < 5; ++turn)
+	{
+		const auto *cur_fld = f.world.battleField(battle);
+		if (cur_fld == nullptr)
+			break;
+		const auto *st = f.world.stats(battle);
+		if (st != nullptr && st->finished)
+			break;
+
+		SA::Domain::BattleCommand cmd_bob{};
+		cmd_bob.battle_id = battle;
+		cmd_bob.turn = cur_fld->turn;
+		cmd_bob.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd_bob.command.attack.target = 10;
+		f.world.onBattleCommand(id2, cmd_bob);
+
+		SA::Domain::BattleCommand cmd_alice{};
+		cmd_alice.battle_id = battle;
+		cmd_alice.turn = cur_fld->turn;
+		cmd_alice.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd_alice.command.attack.target = 0;
+		f.world.onBattleCommand(id1, cmd_alice);
+
+		f.clock.advance(1000);
+		f.world.tick();
+	}
+
+	// 战斗结束，回到大世界态
+	CHECK(f.world.battleCount() == 0);
+
+	// [RV-2] 战后状态同步校验: 骑宠血量严格回写回 Alice 真实宠物实体
+	auto *real_pet = f.world.playerPetAt(id1, 0);
+	REQUIRE(real_pet != nullptr);
+	CHECK(real_pet->hp < 500);          // 确已受到分摊伤害
+	CHECK(real_pet->hp > 0);            // 依然存活
+	CHECK(f.world.isPlayerRiding(id1)); // 保持骑乘
+}
+
+TEST_CASE("战中骑宠濒死战后自动下马恢复人身外观")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f); // Alice (防守方)
+	const auto id2 = spawnHandshaked(f); // Bob (超高攻击方)
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	p1->image = 100000;
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p1->hp = 500;
+	p1->vital = 20000;
+	p1->str = 500;
+	p1->tough = 500;
+	p1->dex = 100;
+
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 21;
+	p2->hp = 1;
+	p2->vital = 100;
+	p2->str = 50000; // 超强攻击力
+	p2->tough = 100;
+	p2->dex = 1000;
+
+	// Alice 骑乘一只仅剩 1 点生命值的宠物
+	auto pet_data = makeTestPet(302, 1);
+	pet_data.vital = 1000;
+	pet_data.str = 1000;
+	pet_data.tough = 1000;
+	pet_data.dex = 100;
+	pet_data.hp = 1;
+	const int slot = f.world.givePetToPlayer(id1, pet_data);
+	REQUIRE(slot == 0);
+
+	REQUIRE(f.world.grantRidePermit(id1, "骑乘学习证"));
+	REQUIRE(f.world.mountPet(id1, slot));
+	CHECK(f.world.isPlayerRiding(id1));
+	CHECK(p1->image != 100000); // 骑乘外观
+
+	// 发起决斗
+	REQUIRE(f.world.requestDuel(id2, id1));
+	const BattleId battle = 1;
+	const auto *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+
+	SA::Domain::BattleCommand cmd_bob{};
+	cmd_bob.battle_id = battle;
+	cmd_bob.turn = fld->turn;
+	cmd_bob.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+	cmd_bob.command.attack.target = 10;
+	f.world.onBattleCommand(id2, cmd_bob);
+
+	SA::Domain::BattleCommand cmd_alice{};
+	cmd_alice.battle_id = battle;
+	cmd_alice.turn = fld->turn;
+	cmd_alice.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+	cmd_alice.command.attack.target = 0;
+	f.world.onBattleCommand(id1, cmd_alice);
+
+	f.clock.advance(1000);
+	f.world.tick();
+
+	// 战斗结束
+	CHECK(f.world.battleCount() == 0);
+
+	// 战后校验: 骑宠血量归零，在世界态自动触发 dismountPet，人物形象精确还原
+	auto *real_pet = f.world.playerPetAt(id1, 0);
+	REQUIRE(real_pet != nullptr);
+	CHECK(real_pet->hp == 0);
+	CHECK_FALSE(f.world.isPlayerRiding(id1));
+	CHECK(p1->image == 100000); // 还原为人身初始外观
+}
+
+TEST_CASE("庄园骑宠特权与庄园易主联动")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	p1->gold = 50000;
+	p2->gold = 50000;
+	p1->level = 30;
+	p2->level = 30;
+
+	// Alice 创建家族 1
+	const auto fam1 = f.world.createFamily(id1, "萨姆吉尔勇士", "守护村庄");
+	REQUIRE(fam1 > 0);
+
+	// 给 Alice 一只暴龙系宠物
+	auto pet = makeTestPet(401, 10);
+	pet.name.assign("萨姆吉尔暴龙");
+	const int slot = f.world.givePetToPlayer(id1, pet);
+	REQUIRE(slot >= 0);
+
+	// 1. 无骑宠证且家族无庄园时，无法骑乘
+	CHECK_FALSE(f.world.hasRidePermit(id1, "骑乘学习证"));
+	CHECK_FALSE(f.world.canPlayerRide(id1, slot));
+	CHECK_FALSE(f.world.mountPet(id1, slot));
+
+	// 2. 家族 1 占领萨姆吉尔庄园 (暴龙系特权)
+	REQUIRE(f.world.occupyManor(fam1, FamilyManor::kSamo));
+	CHECK(f.world.familyManor(fam1) == FamilyManor::kSamo);
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kSamo) == fam1);
+
+	// 享有庄园特权，无需学习证即可骑乘
+	CHECK(f.world.canPlayerRide(id1, slot));
+	REQUIRE(f.world.mountPet(id1, slot));
+	CHECK(f.world.isPlayerRiding(id1));
+
+	// 3. 家族 2 夺得萨姆吉尔庄园 (庄园易主)
+	const auto fam2 = f.world.createFamily(id2, "玛丽娜斯海盗", "争夺庄园");
+	REQUIRE(fam2 > 0);
+	REQUIRE(f.world.occupyManor(fam2, FamilyManor::kSamo));
+	CHECK(f.world.familyManor(fam1) == FamilyManor::kNone);
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kSamo) == fam2);
+
+	// Alice 下马后，因家族失去庄园特权且无学习证，无法再次骑乘
+	REQUIRE(f.world.dismountPet(id1));
+	CHECK_FALSE(f.world.canPlayerRide(id1, slot));
+	CHECK_FALSE(f.world.mountPet(id1, slot));
+
+	// 4. 授予特约骑宠证 ("萨姆吉尔暴龙")
+	REQUIRE(f.world.grantRidePermit(id1, "萨姆吉尔暴龙"));
+	CHECK(f.world.hasRidePermit(id1, "萨姆吉尔暴龙"));
+	CHECK(f.world.canPlayerRide(id1, slot));
+	REQUIRE(f.world.mountPet(id1, slot));
+	CHECK(f.world.isPlayerRiding(id1));
+}
