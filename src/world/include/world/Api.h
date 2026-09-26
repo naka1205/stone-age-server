@@ -962,6 +962,31 @@ enum class PartyMode : std::uint8_t
 
 inline constexpr std::size_t kPartyMaxMembers = 5;
 
+// ── 玩家间安全交易状态与镜像 (阶段 2: 交易系统, 依据原版 char/trade.c) ──
+enum class TradeState : std::uint8_t
+{
+	kNone = 0,
+	kTrading = 1,
+	kLocked = 2,
+	kConfirmed = 3,
+};
+
+struct TradeStatus
+{
+	TradeState state = TradeState::kNone;
+	SA::Net::SessionId partner = 0;
+	bool self_locked = false;
+	bool partner_locked = false;
+	bool self_confirmed = false;
+	bool partner_confirmed = false;
+	std::vector<int> self_item_slots{};
+	std::vector<int> partner_item_slots{};
+	std::vector<int> self_pet_slots{};
+	std::vector<int> partner_pet_slots{};
+	std::uint32_t self_gold = 0;
+	std::uint32_t partner_gold = 0;
+};
+
 class World final : public SA::Net::TransportEvents,
 
                     public SA::Net::SessionHost
@@ -1337,6 +1362,41 @@ class World final : public SA::Net::TransportEvents,
 	std::vector<SA::Net::SessionId> playerPartyMembers(SA::Net::SessionId session) const;
 	std::size_t partyCount() const noexcept;
 
+	// ══ 决斗切磋系统 (Duel / PVP System) ═════════════════════════════════════
+	// 规则对齐官方 GMSV battle.c:3008 (BATTLE_CreateVsPlayer):
+	// 1. 发起者与目标必须在线且存活 (hp > 0)，且在同一地图层同一九宫格视野内 (切比雪夫距离 <= 2)；
+	// 2. 发起者不能与自己决斗；
+	// 3. 任何一方当前在战斗中均拒绝；
+	// 4. 同一队伍队员之间绝对禁止决斗 (BATTLE_ERR_SAMEPARTY)；
+	// 5. 若玩家处于队伍中，全队队员 (slots 0..4 / 10..14) 与默认战斗宠物 (slots 5..9 / 15..19)
+	//    均被拉入对应阵营；
+	// 6. 战斗标记为 is_pvp = true，不产生野外怪物经验与掉落通胀；
+	// 7. 战斗结束时，战败方 HP 钳位保底保留 1 点，双方安全返回大世界，队伍关系保持不变。
+	bool requestDuel(SA::Net::SessionId requester, SA::Net::SessionId target);
+	bool isDuelBattle(BattleId battle) const noexcept;
+
+	// ══ 玩家间安全交易系统 (Trade System) ═════════════════════════════════════
+	// 状态机与原子事务对齐官方 GMSV char/trade.c:
+	// 状态跃迁: kNone -> kRequesting -> kTrading -> kLocked -> kConfirmed -> 原子互换 -> kNone
+	bool requestTrade(SA::Net::SessionId requester, SA::Net::SessionId target);
+	bool acceptTrade(SA::Net::SessionId target, SA::Net::SessionId requester);
+	bool cancelTrade(SA::Net::SessionId session);
+
+	bool offerTradeItem(SA::Net::SessionId session, int inventory_slot);
+	bool removeTradeItem(SA::Net::SessionId session, int inventory_slot);
+	bool offerTradePet(SA::Net::SessionId session, int pet_slot);
+	bool removeTradePet(SA::Net::SessionId session, int pet_slot);
+	bool offerTradeGold(SA::Net::SessionId session, std::uint32_t gold);
+
+	bool lockTrade(SA::Net::SessionId session);
+	bool unlockTrade(SA::Net::SessionId session);
+	bool confirmTrade(SA::Net::SessionId session);
+
+	TradeState playerTradeState(SA::Net::SessionId session) const noexcept;
+	SA::Net::SessionId playerTradePartner(SA::Net::SessionId session) const noexcept;
+	std::optional<TradeStatus> playerTradeStatus(SA::Net::SessionId session) const;
+	std::size_t activeTradeCount() const noexcept;
+
 	// 某会话背后 Player 的位置(批次 W.1)。valid == false ⇒ 该会话无 L2 实体。
 	//   ★ 移动用例的观察面:走一步坐标变化 / 撞墙不变 / 转身只改 dir。
 	struct PlayerPos
@@ -1710,6 +1770,10 @@ enum class GoldReason : std::uint8_t
 	kPetSkillFee,
 	// 传送员 NPC 传送路费扣除 (汇, 批次 W.14)
 	kWarpFee,
+	// 交易交付石币 (汇, 阶段 2 交易系统)
+	kTradeGive,
+	// 交易获得石币 (源, 阶段 2 交易系统)
+	kTradeReceive,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -1824,6 +1888,10 @@ inline const char *goldReasonName(GoldReason r) noexcept
 		return "pet_skill_fee";
 	case GoldReason::kWarpFee:
 		return "warp_fee";
+	case GoldReason::kTradeGive:
+		return "trade_give";
+	case GoldReason::kTradeReceive:
+		return "trade_receive";
 	}
 	return "unknown";
 }

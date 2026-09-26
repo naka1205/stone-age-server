@@ -4890,3 +4890,598 @@ TEST_CASE("组队战斗闭环: 队长遇敌全队切入、宠物站位(5..9)、�
 	CHECK(f.world.playerPartyMode(id2) == PartyMode::kMember);
 	CHECK(f.world.partyCount() == 1);
 }
+
+// ══ 批次 W.20: 决斗切磋系统 (Duel / PVP System) 与 安全交易系统 (Trade System) ══
+
+TEST_CASE("PVP 决斗发起门禁: 距离过远/阵亡/跨图/同队互打拦截 [RV-1]")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p1->hp = 100;
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 21;
+	p2->hp = 100;
+
+	// 1. 不能与自己决斗
+	CHECK_FALSE(f.world.requestDuel(id1, id1));
+
+	// 2. 距离过远拦截 (> 2 格)
+	p2->x = 25;
+	CHECK_FALSE(f.world.requestDuel(id1, id2));
+	p2->x = 20;
+
+	// 3. 跨地图拦截
+	p2->floor = 1;
+	CHECK_FALSE(f.world.requestDuel(id1, id2));
+	p2->floor = 0;
+
+	// 4. 阵亡拦截 (hp <= 0)
+	p1->hp = 0;
+	CHECK_FALSE(f.world.requestDuel(id1, id2));
+	p1->hp = 100;
+
+	p2->hp = 0;
+	CHECK_FALSE(f.world.requestDuel(id1, id2));
+	p2->hp = 100;
+
+	// 5. 同队互打拦截 [RV-1]
+	REQUIRE(f.world.joinParty(id2, id1));
+	CHECK(f.world.playerPartyMode(id1) == PartyMode::kLeader);
+	CHECK(f.world.playerPartyMode(id2) == PartyMode::kMember);
+	// 队友之间发起决斗必须被阻断
+	CHECK_FALSE(f.world.requestDuel(id1, id2));
+	CHECK_FALSE(f.world.requestDuel(id2, id1));
+
+	// 离队后合法发起决斗
+	REQUIRE(f.world.leaveParty(id2));
+	REQUIRE(f.world.requestDuel(id1, id2));
+
+	CHECK(f.world.battleCount() == 1);
+	const BattleId battle = 1;
+	CHECK(f.world.isDuelBattle(battle));
+
+	// 战斗中不可重复发起
+	CHECK_FALSE(f.world.requestDuel(id1, id2));
+}
+
+TEST_CASE("PVP 组队决斗切入: 双方队长发起拉取全队队员(0..4 vs 10..14)与出战宠物(5..9 vs 15..19)")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f); // 队伍 A 队长
+	const auto id2 = spawnHandshaked(f); // 队伍 A 队员 1
+	const auto id3 = spawnHandshaked(f); // 队伍 A 队员 2
+	const auto id4 = spawnHandshaked(f); // 队伍 B 队长
+	const auto id5 = spawnHandshaked(f); // 队伍 B 队员 1
+
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	auto *p3 = f.world.playerForTest(id3);
+	auto *p4 = f.world.playerForTest(id4);
+	auto *p5 = f.world.playerForTest(id5);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(p3 != nullptr);
+	REQUIRE(p4 != nullptr);
+	REQUIRE(p5 != nullptr);
+
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p1->hp = 100;
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 20;
+	p2->hp = 100;
+	p3->floor = 0;
+	p3->x = 20;
+	p3->y = 20;
+	p3->hp = 100;
+	p4->floor = 0;
+	p4->x = 21;
+	p4->y = 20;
+	p4->hp = 100;
+	p5->floor = 0;
+	p5->x = 21;
+	p5->y = 20;
+	p5->hp = 100;
+
+	// 为部分玩家配置出战宠物
+	const int s1 = f.world.givePetToPlayer(id1, makeTestPet(101, 10));
+	REQUIRE(s1 >= 0);
+	p1->default_pet = s1;
+
+	const int s2 = f.world.givePetToPlayer(id2, makeTestPet(102, 10));
+	REQUIRE(s2 >= 0);
+	p2->default_pet = s2;
+
+	const int s4 = f.world.givePetToPlayer(id4, makeTestPet(104, 10));
+	REQUIRE(s4 >= 0);
+	p4->default_pet = s4;
+
+	// 组队: 队 A (id1, id2, id3), 队 B (id4, id5)
+	REQUIRE(f.world.joinParty(id2, id1));
+	REQUIRE(f.world.joinParty(id3, id1));
+	REQUIRE(f.world.joinParty(id5, id4));
+
+	// 门禁: 队员不能发起决斗，也不能向对方队员发起
+	CHECK_FALSE(f.world.requestDuel(id2, id4));
+	CHECK_FALSE(f.world.requestDuel(id1, id5));
+
+	// 队长 vs 队长发起决斗
+	REQUIRE(f.world.requestDuel(id1, id4));
+
+	REQUIRE(f.world.battleCount() == 1);
+	const BattleId battle = 1;
+	CHECK(f.world.isDuelBattle(battle));
+
+	const auto *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+
+	// 检查双方站位:
+	// Side 0 (队 A):
+	// slot 0: id1, slot 1: id2, slot 2: id3, slot 3/4 空
+	CHECK(fld->at(0).occupied);
+	CHECK(fld->at(1).occupied);
+	CHECK(fld->at(2).occupied);
+	CHECK_FALSE(fld->at(3).occupied);
+	CHECK_FALSE(fld->at(4).occupied);
+	// 宠物站位: slot 5 (id1宠), slot 6 (id2宠), slot 7 空 (id3未配宠)
+	CHECK(fld->at(5).occupied);
+	CHECK(fld->at(6).occupied);
+	CHECK_FALSE(fld->at(7).occupied);
+
+	// Side 1 (队 B):
+	// slot 10: id4, slot 11: id5, slot 12/13/14 空
+	CHECK(fld->at(10).occupied);
+	CHECK(fld->at(11).occupied);
+	CHECK_FALSE(fld->at(12).occupied);
+	CHECK_FALSE(fld->at(13).occupied);
+	CHECK_FALSE(fld->at(14).occupied);
+	// 宠物站位: slot 15 (id4宠), slot 16 空 (id5未配宠)
+	CHECK(fld->at(15).occupied);
+	CHECK_FALSE(fld->at(16).occupied);
+}
+
+TEST_CASE("PVP 决斗战斗闭环: 双方玩家指令协同、战败方 HP 钳位为 1 且队伍关系完整返回大世界")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f); // 队 A 队长
+	const auto id2 = spawnHandshaked(f); // 队 A 队员
+	const auto id3 = spawnHandshaked(f); // 敌方单人
+
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	auto *p3 = f.world.playerForTest(id3);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(p3 != nullptr);
+
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p1->hp = 100;
+	p1->str = 300;
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 20;
+	p2->hp = 100;
+	p2->str = 300;
+	p3->floor = 0;
+	p3->x = 20;
+	p3->y = 21;
+	p3->hp = 10;
+	p3->str = 1;
+
+	REQUIRE(f.world.joinParty(id2, id1));
+
+	const int exp1_before = f.world.playerExp(id1);
+	const int exp3_before = f.world.playerExp(id3);
+	const int gold1_before = f.world.playerGold(id1);
+	const int gold3_before = f.world.playerGold(id3);
+
+	REQUIRE(f.world.requestDuel(id1, id3));
+	REQUIRE(f.world.battleCount() == 1);
+	const BattleId battle = 1;
+
+	// 双方协同出招推进回合，直至战斗结束 (id3 被打败)
+	for (int turn = 0; turn < 10; ++turn)
+	{
+		const auto *cur_fld = f.world.battleField(battle);
+		if (cur_fld == nullptr)
+			break;
+		const auto *st = f.world.stats(battle);
+		if (st != nullptr && st->finished)
+			break;
+
+		// 队 A 成员攻击对方 slot 10 (id3)
+		SA::Domain::BattleCommand cmd1{};
+		cmd1.battle_id = battle;
+		cmd1.turn = cur_fld->turn;
+		cmd1.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd1.command.attack.target = 10;
+		f.world.onBattleCommand(id1, cmd1);
+
+		SA::Domain::BattleCommand cmd2{};
+		cmd2.battle_id = battle;
+		cmd2.turn = cur_fld->turn;
+		cmd2.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd2.command.attack.target = 10;
+		f.world.onBattleCommand(id2, cmd2);
+
+		// id3 攻击对方 slot 0 (id1)
+		SA::Domain::BattleCommand cmd3{};
+		cmd3.battle_id = battle;
+		cmd3.turn = cur_fld->turn;
+		cmd3.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd3.command.attack.target = 0;
+		f.world.onBattleCommand(id3, cmd3);
+
+		f.clock.advance(1000);
+		f.world.tick();
+	}
+
+	REQUIRE(f.world.stats(battle) != nullptr);
+	CHECK(f.world.stats(battle)->finished);
+
+	// PVP 结算断言:
+	// 1. 无野怪经验产出，无石币通胀产出
+	CHECK(f.world.playerExp(id1) == exp1_before);
+	CHECK(f.world.playerExp(id3) == exp3_before);
+	CHECK(f.world.playerGold(id1) == gold1_before);
+	CHECK(f.world.playerGold(id3) == gold3_before);
+
+	// 2. 战败方 HP 钳位保护为 >= 1 (免于死亡惩罚与回城)
+	CHECK(f.world.playerHp(id3) >= 1);
+
+	// 3. 双方脱离战斗状态，队伍关系完整保留
+	CHECK(f.world.battleCount() == 0);
+	CHECK(f.world.playerPartyMode(id1) == PartyMode::kLeader);
+	CHECK(f.world.playerPartyMode(id2) == PartyMode::kMember);
+	CHECK(f.world.partyCount() == 1);
+}
+
+TEST_CASE("交易生命周期: 发起、距离过远拦截、接受、取消与断线回滚")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+	const auto id3 = spawnHandshaked(f);
+
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	auto *p3 = f.world.playerForTest(id3);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	REQUIRE(p3 != nullptr);
+
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 21; // 距离 1
+	p3->floor = 0;
+	p3->x = 30;
+	p3->y = 30; // 距离 > 2
+
+	// 1. 门禁检查: 自己与自己、超距离
+	CHECK_FALSE(f.world.requestTrade(id1, id1));
+	CHECK_FALSE(f.world.requestTrade(id1, id3));
+
+	// 2. 发起与接受
+	REQUIRE(f.world.requestTrade(id1, id2));
+	CHECK(f.world.playerTradeState(id1) == TradeState::kNone); // 尚在邀请中
+	REQUIRE(f.world.acceptTrade(id2, id1));
+
+	// 会话已建立
+	CHECK(f.world.activeTradeCount() == 1);
+	CHECK(f.world.playerTradeState(id1) == TradeState::kTrading);
+	CHECK(f.world.playerTradeState(id2) == TradeState::kTrading);
+	CHECK(f.world.playerTradePartner(id1) == id2);
+	CHECK(f.world.playerTradePartner(id2) == id1);
+
+	// 交易中无法接受或发起第三方交易
+	CHECK_FALSE(f.world.requestTrade(id3, id1));
+	CHECK_FALSE(f.world.requestTrade(id2, id3));
+
+	// 3. 主动取消
+	REQUIRE(f.world.cancelTrade(id1));
+	CHECK(f.world.activeTradeCount() == 0);
+	CHECK(f.world.playerTradeState(id1) == TradeState::kNone);
+	CHECK(f.world.playerTradeState(id2) == TradeState::kNone);
+
+	// 4. 断线清理
+	REQUIRE(f.world.requestTrade(id1, id2));
+	REQUIRE(f.world.acceptTrade(id2, id1));
+	CHECK(f.world.activeTradeCount() == 1);
+
+	f.world.onSessionClosed(id2);
+	CHECK(f.world.activeTradeCount() == 0);
+	CHECK(f.world.playerTradeState(id1) == TradeState::kNone);
+}
+
+TEST_CASE("交易抵押物操作: 道具、宠物、石币抵押与锁定/解锁状态机")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+
+	auto *p1 = f.world.playerForTest(id1);
+	REQUIRE(p1 != nullptr);
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p1->gold = 500;
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p2 != nullptr);
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 20;
+
+	const int item_slot = f.world.giveItemToPlayer(id1, makeTestItem(888));
+	REQUIRE(item_slot >= 0);
+	const int pet_slot = f.world.givePetToPlayer(id1, makeTestPet(50));
+	REQUIRE(pet_slot >= 0);
+
+	REQUIRE(f.world.requestTrade(id1, id2));
+	REQUIRE(f.world.acceptTrade(id2, id1));
+
+	// 1. 道具抵押
+	CHECK_FALSE(f.world.offerTradeItem(id1, 999)); // 越界槽
+	REQUIRE(f.world.offerTradeItem(id1, item_slot));
+	CHECK_FALSE(f.world.offerTradeItem(id1, item_slot)); // 重复抵押拦截
+
+	// 2. 宠物抵押
+	CHECK_FALSE(f.world.offerTradePet(id1, 99)); // 越界槽
+	REQUIRE(f.world.offerTradePet(id1, pet_slot));
+	CHECK_FALSE(f.world.offerTradePet(id1, pet_slot)); // 重复抵押拦截
+
+	// 3. 石币抵押
+	CHECK_FALSE(f.world.offerTradeGold(id1, 600)); // 超过持有量 (500)
+	REQUIRE(f.world.offerTradeGold(id1, 300));
+
+	auto st1 = f.world.playerTradeStatus(id1);
+	REQUIRE(st1.has_value());
+	CHECK(st1->self_item_slots.size() == 1);
+	CHECK(st1->self_pet_slots.size() == 1);
+	CHECK(st1->self_gold == 300);
+
+	auto st2 = f.world.playerTradeStatus(id2);
+	REQUIRE(st2.has_value());
+	CHECK(st2->partner_item_slots.size() == 1);
+	CHECK(st2->partner_pet_slots.size() == 1);
+	CHECK(st2->partner_gold == 300);
+
+	// 撤回抵押物
+	REQUIRE(f.world.removeTradeItem(id1, item_slot));
+	CHECK(f.world.playerTradeStatus(id1)->self_item_slots.empty());
+	REQUIRE(f.world.offerTradeItem(id1, item_slot)); // 重新抵押
+
+	// 4. 锁定与解锁状态机
+	REQUIRE(f.world.lockTrade(id1));
+	CHECK(f.world.playerTradeStatus(id1)->self_locked);
+	CHECK(f.world.playerTradeStatus(id2)->partner_locked);
+	// 锁定后不可再更改抵押物
+	CHECK_FALSE(f.world.offerTradeGold(id1, 100));
+
+	// 对方也锁定 ⇒ 状态推进至 kLocked
+	REQUIRE(f.world.lockTrade(id2));
+	CHECK(f.world.playerTradeState(id1) == TradeState::kLocked);
+	CHECK(f.world.playerTradeState(id2) == TradeState::kLocked);
+
+	// 任一方解锁 ⇒ 回退至 kTrading，且双方锁定状态清空
+	REQUIRE(f.world.unlockTrade(id1));
+	CHECK(f.world.playerTradeState(id1) == TradeState::kTrading);
+	CHECK_FALSE(f.world.playerTradeStatus(id1)->self_locked);
+	CHECK_FALSE(f.world.playerTradeStatus(id2)->self_locked);
+}
+
+TEST_CASE("交易容量防刷门禁 [RV-2]: 接收方背包满/宠物栏满/石币溢出阻断")
+{
+	MoveFixture f;
+
+	// === 场景 A: 接收方背包满拦截 ===
+	{
+		const auto id1 = spawnHandshaked(f);
+		const auto id2 = spawnHandshaked(f);
+		auto *p1 = f.world.playerForTest(id1);
+		auto *p2 = f.world.playerForTest(id2);
+		REQUIRE(p1 != nullptr);
+		REQUIRE(p2 != nullptr);
+		p1->floor = 0;
+		p1->x = 20;
+		p1->y = 20;
+		p2->floor = 0;
+		p2->x = 20;
+		p2->y = 20;
+
+		const int item1 = f.world.giveItemToPlayer(id1, makeTestItem(701));
+		REQUIRE(item1 >= 0);
+
+		// 把 id2 背包填满 (45 个道具)
+		while (f.world.giveItemToPlayer(id2, makeTestItem(999)) >= 0)
+		{
+		}
+		CHECK(f.world.playerItemSlotsUsed(id2) == static_cast<int>(SA::Model::kMaxItemHave - SA::Model::kStartItemArray));
+
+		REQUIRE(f.world.requestTrade(id1, id2));
+		REQUIRE(f.world.acceptTrade(id2, id1));
+
+		REQUIRE(f.world.offerTradeItem(id1, item1));
+		REQUIRE(f.world.lockTrade(id1));
+		REQUIRE(f.world.lockTrade(id2));
+
+		// id1 确认正常记录，id2 确认时触发容量预检 [RV-2]，阻断交易
+		REQUIRE(f.world.confirmTrade(id1));
+		CHECK_FALSE(f.world.confirmTrade(id2));
+		// 交易未被执行，状态保留
+		CHECK(f.world.activeTradeCount() == 1);
+
+		f.world.cancelTrade(id1);
+	}
+
+	// === 场景 B: 接收方宠物栏满拦截 ===
+	{
+		const auto id3 = spawnHandshaked(f);
+		const auto id4 = spawnHandshaked(f);
+		auto *p3 = f.world.playerForTest(id3);
+		auto *p4 = f.world.playerForTest(id4);
+		REQUIRE(p3 != nullptr);
+		REQUIRE(p4 != nullptr);
+		p3->floor = 0;
+		p3->x = 20;
+		p3->y = 20;
+		p4->floor = 0;
+		p4->x = 20;
+		p4->y = 20;
+
+		const int pet1 = f.world.givePetToPlayer(id3, makeTestPet(501));
+		REQUIRE(pet1 >= 0);
+
+		// 把 id4 宠物栏填满 (5 只宠物)
+		while (f.world.givePetToPlayer(id4, makeTestPet(600)) >= 0)
+		{
+		}
+		CHECK(f.world.playerPetSlotsUsed(id4) == 5);
+
+		REQUIRE(f.world.requestTrade(id3, id4));
+		REQUIRE(f.world.acceptTrade(id4, id3));
+
+		REQUIRE(f.world.offerTradePet(id3, pet1));
+		REQUIRE(f.world.lockTrade(id3));
+		REQUIRE(f.world.lockTrade(id4));
+
+		REQUIRE(f.world.confirmTrade(id3));
+		CHECK_FALSE(f.world.confirmTrade(id4)); // 宠物栏不足阻断
+		CHECK(f.world.activeTradeCount() == 1);
+
+		f.world.cancelTrade(id3);
+	}
+
+	// === 场景 C: 石币上限溢出拦截 ===
+	{
+		const auto id5 = spawnHandshaked(f);
+		const auto id6 = spawnHandshaked(f);
+		auto *p5 = f.world.playerForTest(id5);
+		auto *p6 = f.world.playerForTest(id6);
+		REQUIRE(p5 != nullptr);
+		REQUIRE(p6 != nullptr);
+		p5->floor = 0;
+		p5->x = 20;
+		p5->y = 20;
+		p6->floor = 0;
+		p6->x = 20;
+		p6->y = 20;
+
+		p5->gold = 1000;
+		p6->gold = maxHaveGold(0); // 达到随身石币上限 (1,000,000)
+
+		REQUIRE(f.world.requestTrade(id5, id6));
+		REQUIRE(f.world.acceptTrade(id6, id5));
+
+		REQUIRE(f.world.offerTradeGold(id5, 500));
+		REQUIRE(f.world.lockTrade(id5));
+		REQUIRE(f.world.lockTrade(id6));
+
+		REQUIRE(f.world.confirmTrade(id5));
+		CHECK_FALSE(f.world.confirmTrade(id6)); // 石币超限阻断
+		CHECK(f.world.activeTradeCount() == 1);
+
+		f.world.cancelTrade(id5);
+	}
+}
+
+TEST_CASE("交易原子互换: 道具、宠物、石币无损原子置换与默认出战宠安全重置")
+{
+	MoveFixture f;
+	const auto id1 = spawnHandshaked(f);
+	const auto id2 = spawnHandshaked(f);
+
+	auto *p1 = f.world.playerForTest(id1);
+	auto *p2 = f.world.playerForTest(id2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	p1->floor = 0;
+	p1->x = 20;
+	p1->y = 20;
+	p1->gold = 1000;
+	p2->floor = 0;
+	p2->x = 20;
+	p2->y = 20;
+	p2->gold = 500;
+
+	const int item1 = f.world.giveItemToPlayer(id1, makeTestItem(1001));
+	const int item2 = f.world.giveItemToPlayer(id2, makeTestItem(2002));
+	REQUIRE(item1 >= 0);
+	REQUIRE(item2 >= 0);
+
+	const int pet1 = f.world.givePetToPlayer(id1, makeTestPet(50, 10));
+	REQUIRE(pet1 >= 0);
+	p1->default_pet = pet1; // 设为出战宠
+
+	REQUIRE(f.world.requestTrade(id1, id2));
+	REQUIRE(f.world.acceptTrade(id2, id1));
+
+	REQUIRE(f.world.offerTradeItem(id1, item1));
+	REQUIRE(f.world.offerTradePet(id1, pet1));
+	REQUIRE(f.world.offerTradeGold(id1, 300));
+
+	REQUIRE(f.world.offerTradeItem(id2, item2));
+	REQUIRE(f.world.offerTradeGold(id2, 100));
+
+	REQUIRE(f.world.lockTrade(id1));
+	REQUIRE(f.world.lockTrade(id2));
+
+	REQUIRE(f.world.confirmTrade(id1));
+	REQUIRE(f.world.confirmTrade(id2));
+
+	// 交易成功，会话闭环结束
+	CHECK(f.world.activeTradeCount() == 0);
+	CHECK(f.world.playerTradeState(id1) == TradeState::kNone);
+	CHECK(f.world.playerTradeState(id2) == TradeState::kNone);
+
+	// 1. 石币原子置换检查: id1 = 1000 - 300 + 100 = 800; id2 = 500 - 100 + 300 = 700
+	CHECK(p1->gold == 800);
+	CHECK(p2->gold == 700);
+
+	// 2. 宠物原子置换与 default_pet 安全重置检查
+	CHECK(p1->default_pet == -1); // 交易出去的宠物是出战宠，重置为 -1
+	CHECK(f.world.playerPetAt(id1, pet1) == nullptr);
+	bool id2_has_pet50 = false;
+	for (int i = 0; i < 5; ++i)
+	{
+		const auto *pt = f.world.playerPetAt(id2, i);
+		if (pt != nullptr && pt->pet_id == 50)
+			id2_has_pet50 = true;
+	}
+	CHECK(id2_has_pet50);
+
+	// 3. 道具原子置换检查
+	bool id1_has_item2002 = false;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		const auto *it = f.world.playerItemAt(id1, static_cast<int>(i));
+		if (it != nullptr && it->item_id == 2002)
+			id1_has_item2002 = true;
+	}
+	CHECK(id1_has_item2002);
+
+	bool id2_has_item1001 = false;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		const auto *it = f.world.playerItemAt(id2, static_cast<int>(i));
+		if (it != nullptr && it->item_id == 1001)
+			id2_has_item1001 = true;
+	}
+	CHECK(id2_has_item1001);
+}
