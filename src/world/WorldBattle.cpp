@@ -2566,6 +2566,16 @@ void World::onBattleCommand(SA::Net::SessionId id,
 		return;
 	BattleInstance &b = bit->second;
 
+	// 观战者不占用战斗槽位，其 ESCAPE 命令为即时离场，不依赖当前回合号对齐
+	if (std::find(b.spectators.begin(), b.spectators.end(), id) != b.spectators.end())
+	{
+		if (cmd.command_kind == SA::Domain::BattleCommand::CommandKind::ESCAPE)
+		{
+			(void)leaveSpectate(id);
+		}
+		return;
+	}
+
 	// ⚠️ 指令必须指向**当前**回合。02 §1.3 的取向:不靠"下一个到达的包就是回复",
 	//    这里同理 —— 迟到的上一回合指令若被采纳,会在新回合里执行一个过期的决定。
 	if (cmd.turn != b.field.turn)
@@ -2573,16 +2583,7 @@ void World::onBattleCommand(SA::Net::SessionId id,
 
 	const auto sit = b.slot_of.find(id);
 	if (sit == b.slot_of.end())
-	{
-		if (std::find(b.spectators.begin(), b.spectators.end(), id) != b.spectators.end())
-		{
-			if (cmd.command_kind == SA::Domain::BattleCommand::CommandKind::ESCAPE)
-			{
-				(void)leaveSpectate(id);
-			}
-		}
 		return;
-	}
 	const std::uint8_t slot = sit->second;
 	if (slot >= SA::Rules::kSlotCount || b.stats.finished || !b.field.at(slot).occupied || b.field.at(slot).dead)
 		return;

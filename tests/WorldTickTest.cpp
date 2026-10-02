@@ -5907,3 +5907,43 @@ TEST_CASE("Battle spectating: spectator lifecycle on battle resolution")
 	CHECK(f.world.isSpectating(id_b) == false);
 	CHECK(f.world.inBattle(id_b) == false);
 }
+
+TEST_CASE("Battle spectating: onEvent ENTITY_PLAYER triggers spectatePlayer and clean leave")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id_a = f.transport.connect();
+	const SA::Net::ConnectionId id_b = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id_a, hs.data(), hs.size());
+	f.transport.deliver(id_b, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 2);
+
+	// A 位于 (10, 10), B 位于正东 (11, 10)
+	f.world.warpPlayerForTest(id_a, 100, 10, 10);
+	f.world.warpPlayerForTest(id_b, 100, 11, 10);
+
+	const BattleId battle = f.world.startBattle(makeField());
+	REQUIRE(f.world.joinBattle(battle, id_b, 0));
+
+	// A 朝向东 (dir=2, 面前格为 11, 10) 发送 ENTITY_PLAYER 事件
+	SA::Domain::EventRequest req{};
+	req.x = 11;
+	req.y = 10;
+	req.dir = 2;
+	req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER);
+	req.seqno = 77;
+	f.world.onEvent(id_a, req);
+
+	CHECK(f.world.isSpectating(id_a) == true);
+	CHECK(f.world.spectatorCount(battle) == 1);
+
+	// 观战者主动撤离：发送 ESCAPE 指令
+	SA::Domain::BattleCommand esc_cmd{};
+	esc_cmd.battle_id = battle;
+	esc_cmd.turn = 1;
+	esc_cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ESCAPE;
+	f.world.onBattleCommand(id_a, esc_cmd);
+	CHECK(f.world.isSpectating(id_a) == false);
+	CHECK(f.world.spectatorCount(battle) == 0);
+}

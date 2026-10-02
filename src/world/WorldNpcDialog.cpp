@@ -804,6 +804,46 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 		}
 	}
 	else if (req.event_type ==
+	         static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER))
+	{
+		const auto it = s.conns.find(id);
+		SA::Model::Player *p = s.players.resolve(s.player_of_session.find(id));
+		if (it != s.conns.end() && p != nullptr && req.dir < 8)
+		{
+			auto *fl = s.getFloor(p->floor);
+			const auto &cur_olink = fl ? fl->olink : s.olink;
+			const auto &m = fl ? fl->map : s.map;
+
+			auto try_spectate_cell = [&](std::int32_t cx, std::int32_t cy) -> bool
+			{
+				if (cx < 0 || cx >= m.width || cy < 0 || cy >= m.height)
+					return false;
+				const std::size_t idx = static_cast<std::size_t>(cy) * static_cast<std::size_t>(m.width) + static_cast<std::size_t>(cx);
+				if (idx >= cur_olink.size())
+					return false;
+				for (auto target_sid : cur_olink[idx])
+				{
+					if (target_sid != id && s.inBattle(target_sid))
+					{
+						if (spectatePlayer(id, target_sid))
+							return true;
+					}
+				}
+				return false;
+			};
+
+			// 优先面前一格 (原版 EV 对面观战契约，05 §6.3)
+			const std::int32_t fx = p->x + kDirDelta[req.dir].dx;
+			const std::int32_t fy = p->y + kDirDelta[req.dir].dy;
+			ok = try_spectate_cell(fx, fy);
+			// 若面前格未命中，且请求坐标在合法切比雪夫交互半径内 (<= 2)，尝试目标格
+			if (!ok && std::max(std::abs(p->x - req.x), std::abs(p->y - req.y)) <= 2)
+			{
+				ok = try_spectate_cell(req.x, req.y);
+			}
+		}
+	}
+	else if (req.event_type ==
 	         static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC))
 	{
 		const auto it = s.conns.find(id);

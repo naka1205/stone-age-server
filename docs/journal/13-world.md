@@ -1573,9 +1573,11 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
      - 观战者发送 `ESCAPE` 指令或主动调用 `leaveSpectate` 时，下发 `BattleLeave` 退出并恢复自由大世界状态；
      - `detachBattles` 离线保护移除观战者，杜绝悬挂连接。
 
-3. **玩家同屏交互观战 (`World::spectatePlayer`)**:
-   - 依据《05 战斗系统架构规范》§6.3：取面前或近身目标，检查目标玩家是否正处于战斗；
+3. **玩家同屏交互观战 (`World::spectatePlayer` / `World::onEvent`)**:
+   - 依据《05 战斗系统架构规范》§6.3：取面前一格（或 $\le 2$ 格请求格），检查目标玩家是否正处于战斗；
+   - 接入大世界事件交互流 (`World::onEvent` 处理 `ENTITY_PLAYER`)，客户端可直接通过 `EventRequest` 面向/点击目标玩家触发观战；
    - 校验同层地图门禁与距离门禁（切比雪夫距离 $\le 5$ 格）；
+   - 观战者支持随时发送 `ESCAPE` 指令即时撤出观战，脱离回合对齐等待，并干净清理；
    - 成功即无缝转入 `spectateBattle`。
 
 #### 2. 接口扩展与架构合规
@@ -1597,5 +1599,6 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **新增单元测试 (`tests/WorldTickTest.cpp`)**:
   - `Battle spectating: spectateBattle, leaveSpectate, and spectator limits`: 验证观战加入、重复拦截、主动离场与状态复位；
   - `Battle spectating: spectatePlayer distance and floor gating`: 验证近距离观战成功、跨层拦截与超距拦截；
-  - `Battle spectating: spectator lifecycle on battle resolution`: 验证战斗决胜后观战者自动结算与清空。
+  - `Battle spectating: spectator lifecycle on battle resolution`: 验证战斗决胜后观战者自动结算与清空；
+  - `Battle spectating: onEvent ENTITY_PLAYER triggers spectatePlayer and clean leave`: 验证大世界协议级 `EventRequest(ENTITY_PLAYER)` 触发面向观战及随时 `ESCAPE` 指令安全脱离。
 - **全量 CTest 22/22 100% 绿灯**。
