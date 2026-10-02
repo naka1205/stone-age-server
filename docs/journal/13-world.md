@@ -1645,3 +1645,29 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - `Battle rescue: gate validations and onEvent event_type=3`: 验证跨距离拦截、大世界 `EventRequest(event_type=3)` 协议级面向救援。
 - **全量 CTest 22/22 100% 绿灯**。
 
+---
+
+### 9.0.109 阶段 3.1 —— 大世界全量资产批处理管线与地图/NPC/传送门编目落地 (Batch Content Pipeline & World Catalogs)
+
+- **日期**: 2026-10-03
+- **分支**: `master`
+- **目标**: 依据实施计划 Phase 3.1 核心资产批处理要求，构建全自动化无头大世界资产解析器与编目体系，打通原版 1,235 张 LS2MAP 地图、9,011 处传送门及 3,450 个具名功能 NPC 实体。
+
+#### 1. 核心架构与功能落地
+
+1. **全量资产批处理工具链 (`tools/import_all_world_content.py`)**:
+   - **地图解析引擎**: 遍历 `csa8.0/gmsv/data/map`，逐文件校验 `LS2MAP` 二进制头部、解算宽高尺寸、UTF-8 字符集安全转译地图名称，全量编目 1,185 张有效地图（覆盖四大主村、各大洞窟、外岛与深渊地下城）；
+   - **双轨传送网络整合**: 读取 `mapwarp.txt` 静态传送配置（4,742 条），并穿透解析 `npcgen_warp` 动态传送门 NPC（4,269 条），去重归并生成包含 9,011 条路由的统一传送字典 `warps_catalog.json`；
+   - **NPC 实体与模板关联画像**: 解析 7,719 个 `.create` 实例块与 178 个 `.template` 模板块，提取出生坐标（`borncenter`/`borncorner`）、朝向、图形编号与外部 `file:*.arg` 脚本，精准分类映射到服务端核心领域类型（ExChangeMan 861 个、Enemy 533 个、TownPeople 531 个、Shop 360 个、WarpMan 334 个、SignBoard 290 个、Healer 47 个），生成 `npcs_catalog.json`。
+
+2. **编目产物持久化与回归测试 (`tools/test_content_catalog.py`)**:
+   - 输出结构化数据至 `content/catalog/` (`maps_catalog.json`, `warps_catalog.json`, `npcs_catalog.json`, `summary.json`)；
+   - 新增专用自动化测试套件 `test_content_catalog.py`，断言地图数量 > 1000、传送点 > 5000、NPC > 3000 及分类完备性。
+
+#### 2. 验证与门禁
+
+- **全量回归与门禁**:
+  - `python3 tools/test_content_catalog.py` 4 项测试通过；
+  - 全量 CTest 22/22 保持 100% 绿灯；
+  - 架构守卫工具 `check_module_boundaries.py`, `check_gold_writes.py`, `check_shared_purity.py`, `check_docs_index.py`, `check_dr_table.py` 全数绿灯。
+
