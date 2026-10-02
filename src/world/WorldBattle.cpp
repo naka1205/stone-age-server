@@ -2013,6 +2013,13 @@ void World::advanceBattles()
 				    !conn->second.session->push(b.events, conn->second.outbound))
 					conn->second.session->close();
 			}
+			for (auto sid : b.spectators)
+			{
+				auto conn = s.conns.find(sid);
+				if (conn != s.conns.end() && conn->second.session != nullptr &&
+				    !conn->second.session->push(b.events, conn->second.outbound))
+					conn->second.session->close();
+			}
 			b.events.events.clear();
 		};
 		std::uint32_t turn_events = 0;
@@ -2114,6 +2121,9 @@ void World::advanceBattles()
 			for (auto sid : b.members)
 				if (auto conn = s.conns.find(sid); conn != s.conns.end() && conn->second.session)
 					conn->second.session->close();
+			for (auto sid : b.spectators)
+				if (auto conn = s.conns.find(sid); conn != s.conns.end() && conn->second.session)
+					conn->second.session->close();
 			b.stats.finished = true;
 			finished.push_back(b.id);
 			continue;
@@ -2176,6 +2186,20 @@ void World::advanceBattles()
 				info.slot = b.slot_of.at(sid);
 				info.mp = b.field.at(static_cast<int>(info.slot)).mp;
 				info.cannot_act = SA::Rules::checkCanAct(b.field.at(static_cast<int>(info.slot)));
+				(void)it->second.session->push(info, it->second.outbound);
+				(void)it->second.session->push(begin, it->second.outbound);
+			}
+			for (const SA::Net::SessionId sid : b.spectators)
+			{
+				const auto it = s.conns.find(sid);
+				if (it == s.conns.end() || it->second.session == nullptr)
+					continue;
+				SA::Domain::BattleSelfInfo info{};
+				info.battle_id = b.id;
+				info.slot = SA::Rules::kSlotCount;
+				info.mp = 0;
+				info.menu_flags = 0;
+				info.cannot_act = SA::Domain::CannotActReason::CANNOT_ACT_NONE;
 				(void)it->second.session->push(info, it->second.outbound);
 				(void)it->second.session->push(begin, it->second.outbound);
 			}
@@ -2312,6 +2336,17 @@ void World::advanceBattles()
 					continue;
 				(void)c.session->push(result, c.outbound);
 			}
+			for (const SA::Net::SessionId sid : b.spectators)
+			{
+				const auto cit = s.conns.find(sid);
+				if (cit == s.conns.end())
+					continue;
+				Impl::Conn &c = cit->second;
+				if (c.session == nullptr)
+					continue;
+				(void)c.session->push(result, c.outbound);
+			}
+			b.spectators.clear();
 		}
 
 		// ★★ **战斗结束 ⇒ 该场剩下的敌人 L2 实体全部回池(批次 M.4b)**。
@@ -2512,6 +2547,7 @@ void World::detachBattles(SA::Net::SessionId id)
 				}
 			}
 		battle.members.erase(std::remove(battle.members.begin(), battle.members.end(), id), battle.members.end());
+		battle.spectators.erase(std::remove(battle.spectators.begin(), battle.spectators.end(), id), battle.spectators.end());
 		if (member && battle.members.empty())
 			abandoned.push_back(battle.id);
 		else if (member)
@@ -2537,7 +2573,16 @@ void World::onBattleCommand(SA::Net::SessionId id,
 
 	const auto sit = b.slot_of.find(id);
 	if (sit == b.slot_of.end())
+	{
+		if (std::find(b.spectators.begin(), b.spectators.end(), id) != b.spectators.end())
+		{
+			if (cmd.command_kind == SA::Domain::BattleCommand::CommandKind::ESCAPE)
+			{
+				(void)leaveSpectate(id);
+			}
+		}
 		return;
+	}
 	const std::uint8_t slot = sit->second;
 	if (slot >= SA::Rules::kSlotCount || b.stats.finished || !b.field.at(slot).occupied || b.field.at(slot).dead)
 		return;
@@ -2711,6 +2756,140 @@ const SA::Rules::BattleField *World::battleField(BattleId id) const
 		return &it->second.field;
 	const auto done = _impl->finished_battles.find(id);
 	return done == _impl->finished_battles.end() ? nullptr : &done->second.field;
+}
+
+bool World::spectateBattle(BattleId battle, SA::Net::SessionId session)
+{
+	Impl &s = *_impl;
+	if (s.inBattle(session))
+		return false;
+	const auto bit = s.battles.find(battle);
+	if (bit == s.battles.end())
+		return false;
+
+	BattleInstance &b = bit->second;
+	if (b.stats.finished)
+		return false;
+
+	const auto cit = s.conns.find(session);
+	if (cit == s.conns.end() || cit->second.session == nullptr)
+		return false;
+
+	if (cit->second.session->state() == SA::Net::SessionState::kAnonymous ||
+	    cit->second.session->closed())
+	{
+		return false;
+	}
+
+	if (std::find(b.members.begin(), b.members.end(), session) != b.members.end() ||
+	    std::find(b.spectators.begin(), b.spectators.end(), session) != b.spectators.end())
+	{
+		return false;
+	}
+
+	// 观战席位限制 (最多 20 人)
+	if (b.spectators.size() >= 20)
+		return false;
+
+	b.spectators.push_back(session);
+	cit->second.walk_seq.clear();
+
+	// 下发观战者身份 (slot 20 为观战槽位, 行动限制为 CANNOT_ACT_WAIT)
+	SA::Domain::BattleSelfInfo self{};
+	self.battle_id = b.id;
+	self.slot = SA::Rules::kSlotCount;
+	self.mp = 0;
+	self.menu_flags = 0;
+	self.cannot_act = SA::Domain::CannotActReason::CANNOT_ACT_NONE;
+	(void)cit->second.session->push(self, cit->second.outbound);
+
+	s.pushBattleSnapshot(b);
+
+	SA::Domain::BattleTurnBegin begin{};
+	begin.battle_id = b.id;
+	begin.turn = b.field.turn;
+	begin.ready_mask = readyMask(b);
+	(void)cit->second.session->push(begin, cit->second.outbound);
+
+	s.logger.log(SA::Platform::LogLevel::kInfo,
+	             SA::Platform::LogEvent::kBattleJoined,
+	             {{"battle_id", b.id},
+	              {"session_id", static_cast<std::uint64_t>(session)},
+	              {"slot", static_cast<std::uint64_t>(SA::Rules::kSlotCount)}});
+
+	return true;
+}
+
+bool World::leaveSpectate(SA::Net::SessionId session)
+{
+	Impl &s = *_impl;
+	for (auto &entry : s.battles)
+	{
+		auto &b = entry.second;
+		auto it = std::find(b.spectators.begin(), b.spectators.end(), session);
+		if (it != b.spectators.end())
+		{
+			b.spectators.erase(it);
+			SA::Domain::BattleLeave leave{};
+			leave.battle_id = b.id;
+			leave.reason = 0;
+			if (auto cit = s.conns.find(session); cit != s.conns.end() && cit->second.session)
+				(void)cit->second.session->push(leave, cit->second.outbound);
+			return true;
+		}
+	}
+	return false;
+}
+
+bool World::spectatePlayer(SA::Net::SessionId spectator, SA::Net::SessionId target_player)
+{
+	Impl &s = *_impl;
+	if (spectator == target_player)
+		return false;
+	if (s.inBattle(spectator))
+		return false;
+
+	BattleId target_battle = 0;
+	for (const auto &entry : s.battles)
+	{
+		const auto &b = entry.second;
+		if (!b.stats.finished && b.slot_of.find(target_player) != b.slot_of.end())
+		{
+			target_battle = b.id;
+			break;
+		}
+	}
+	if (target_battle == 0)
+		return false;
+
+	const auto *sp_player = s.players.resolve(s.player_of_session.find(spectator));
+	const auto *tg_player = s.players.resolve(s.player_of_session.find(target_player));
+	if (sp_player == nullptr || tg_player == nullptr)
+		return false;
+	if (sp_player->floor != tg_player->floor)
+		return false;
+	if (std::abs(sp_player->x - tg_player->x) > 5 || std::abs(sp_player->y - tg_player->y) > 5)
+		return false;
+
+	return spectateBattle(target_battle, spectator);
+}
+
+bool World::inBattle(SA::Net::SessionId session) const noexcept
+{
+	return _impl->inBattle(session);
+}
+
+bool World::isSpectating(SA::Net::SessionId session) const noexcept
+{
+	return _impl->isSpectating(session);
+}
+
+std::size_t World::spectatorCount(BattleId battle) const noexcept
+{
+	const auto it = _impl->battles.find(battle);
+	if (it == _impl->battles.end())
+		return 0;
+	return it->second.spectators.size();
 }
 
 } // namespace SA::World

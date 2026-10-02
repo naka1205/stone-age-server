@@ -165,6 +165,7 @@ struct BattleInstance
 	SA::Platform::Millis next_turn_at_ms = 0;
 	BattleStats stats{};
 	std::vector<SA::Net::SessionId> members{};
+	std::vector<SA::Net::SessionId> spectators{};
 	std::map<SA::Net::SessionId, std::uint8_t> slot_of{};
 
 	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> player_of_slot{};
@@ -450,6 +451,18 @@ struct World::Impl : GoldAuditSink
 	static constexpr std::size_t kFinishedBattleLimit = 128;
 	std::map<BattleId, FinishedBattle> finished_battles;
 
+	bool isSpectating(SA::Net::SessionId sid) const
+	{
+		for (const auto &entry : battles)
+		{
+			const auto &battle = entry.second;
+			if (!battle.stats.finished &&
+			    std::find(battle.spectators.begin(), battle.spectators.end(), sid) != battle.spectators.end())
+				return true;
+		}
+		return false;
+	}
+
 	bool inBattle(SA::Net::SessionId sid) const
 	{
 		for (const auto &entry : battles)
@@ -458,6 +471,9 @@ struct World::Impl : GoldAuditSink
 			const auto slot = battle.slot_of.find(sid);
 			if (!battle.stats.finished && slot != battle.slot_of.end() &&
 			    battle.field.at(slot->second).occupied)
+				return true;
+			if (!battle.stats.finished &&
+			    std::find(battle.spectators.begin(), battle.spectators.end(), sid) != battle.spectators.end())
 				return true;
 		}
 		return false;
@@ -500,6 +516,10 @@ struct World::Impl : GoldAuditSink
 			}
 		}
 		for (auto sid : battle.members)
+			if (auto conn = conns.find(sid); conn != conns.end() && conn->second.session != nullptr)
+				if (!conn->second.session->push(snapshot, conn->second.outbound))
+					conn->second.session->close();
+		for (auto sid : battle.spectators)
 			if (auto conn = conns.find(sid); conn != conns.end() && conn->second.session != nullptr)
 				if (!conn->second.session->push(snapshot, conn->second.outbound))
 					conn->second.session->close();

@@ -1545,8 +1545,57 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - 石币安全守卫 `tools/check_gold_writes.py` 100% 通过；
   - 源码格式守卫 `tools/check_format.py` 全绿。
 
+### 9.0.107 服务端战斗观战系统落地与广播链路全覆盖 (阶段 2.10)
 
+- **日期**: 2026-10-03
+- **分支**: `master`
+- **目标**: 依据《05 战斗系统架构规范》§6.3 救援与观战规范，实现服务端战斗观战（Spectating）核心系统，建立观战者入场/离场、同屏搜索、多播流同步及生命周期管理。
 
+#### 1. 核心架构与功能落地
 
+1. **观战席位与状态抽象 (`BattleInstance` / `WorldImpl.h`)**:
+   - 在 `BattleInstance` 引入 `std::vector<SA::Net::SessionId> spectators`，独立于参战者 `members`；
+   - 观战者状态接入 `WorldImpl::isSpectating` 与 `WorldImpl::inBattle`，保证观战期间行为隔离（防瞬移、禁大世界移动、禁重复触发战斗与交易）；
+   - 观战槽位分配标准化为 `SA::Rules::kSlotCount` (槽位 20)，客户端通过 `BattleSelfInfo (slot=20, mp=0, cannot_act=CANNOT_ACT_NONE)` 明确自身为观战身份。
 
+2. **全周期多播事件流覆盖 (`WorldBattle.cpp`)**:
+   - **观战加入与快照注入**:
+     - `World::spectateBattle(battle, session)`：严格门禁（自身在线未参战、目标战斗有效未结束、单场观战人数上限 20）；
+     - 入场即刻下发三件套：`BattleSelfInfo(slot 20)` + `BattleSnapshot` + `BattleTurnBegin`，确保客户端视角与当前战局瞬时对齐；
+   - **回合事件流广播 (`flush`)**:
+     - `advanceBattles` 的逐行动 `flush()` 闭包将 `BattleEvents` 统一多播至 `members` 与 `spectators`；
+   - **战场动态快照广播 (`pushBattleSnapshot`)**:
+     - 捕获、离场、换宠等引起的战场阵容变更快照一并推送给全部观战者；
+   - **下回合就绪通知 (`BattleTurnBegin`)**:
+     - 每回合推进时向全部观战者发送更新的 `BattleTurnBegin`；
+   - **战斗结算与退出 (`BattleResult` / `BattleLeave`)**:
+     - 战斗决胜或中止时向观战者下发 `BattleResult`（无经验与掉落结算），并自动清除观战状态；
+     - 观战者发送 `ESCAPE` 指令或主动调用 `leaveSpectate` 时，下发 `BattleLeave` 退出并恢复自由大世界状态；
+     - `detachBattles` 离线保护移除观战者，杜绝悬挂连接。
 
+3. **玩家同屏交互观战 (`World::spectatePlayer`)**:
+   - 依据《05 战斗系统架构规范》§6.3：取面前或近身目标，检查目标玩家是否正处于战斗；
+   - 校验同层地图门禁与距离门禁（切比雪夫距离 $\le 5$ 格）；
+   - 成功即无缝转入 `spectateBattle`。
+
+#### 2. 接口扩展与架构合规
+
+- `src/world/include/world/Api.h`:
+  - `spectateBattle(BattleId, SessionId)`
+  - `leaveSpectate(SessionId)`
+  - `spectatePlayer(SessionId spectator, SessionId target_player)`
+  - `inBattle(SessionId)`
+  - `isSpectating(SessionId)`
+  - `spectatorCount(BattleId)`
+- 架构守卫验证：
+  - `include/world/Api.h` 仍为 `world` 模块唯一公开头文件（`check_module_boundaries.py` 100% 保持）；
+  - 无任何 `GoldLedger` 绕行（`check_gold_writes.py` 100% 保持）；
+  - 全工程 `-Werror` 零告警。
+
+#### 3. 验证与门禁
+
+- **新增单元测试 (`tests/WorldTickTest.cpp`)**:
+  - `Battle spectating: spectateBattle, leaveSpectate, and spectator limits`: 验证观战加入、重复拦截、主动离场与状态复位；
+  - `Battle spectating: spectatePlayer distance and floor gating`: 验证近距离观战成功、跨层拦截与超距拦截；
+  - `Battle spectating: spectator lifecycle on battle resolution`: 验证战斗决胜后观战者自动结算与清空。
+- **全量 CTest 22/22 100% 绿灯**。

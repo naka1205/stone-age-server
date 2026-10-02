@@ -5799,3 +5799,111 @@ TEST_CASE("A-β d2★:表外宠技 id 不建立守护链接(表外 ⇒ 整次跳
 	// 空表 ⇒ findPetSkillEffect 返回 nullptr ⇒ 不建链。
 	CHECK(fld->at(0).guardian == -1);
 }
+
+TEST_CASE("Battle spectating: spectateBattle, leaveSpectate, and spectator limits")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id_a = f.transport.connect();
+	const SA::Net::ConnectionId id_b = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id_a, hs.data(), hs.size());
+	f.transport.deliver(id_b, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 2);
+
+	const BattleId battle = f.world.startBattle(makeField());
+	REQUIRE(battle != 0);
+	REQUIRE(f.world.joinBattle(battle, id_a, 0));
+
+	CHECK(f.world.inBattle(id_a) == true);
+	CHECK(f.world.inBattle(id_b) == false);
+	CHECK(f.world.isSpectating(id_b) == false);
+	CHECK(f.world.spectatorCount(battle) == 0);
+
+	// 观战加入
+	REQUIRE(f.world.spectateBattle(battle, id_b) == true);
+	CHECK(f.world.isSpectating(id_b) == true);
+	CHECK(f.world.inBattle(id_b) == true);
+	CHECK(f.world.spectatorCount(battle) == 1);
+
+	// 不能重复观战
+	CHECK(f.world.spectateBattle(battle, id_b) == false);
+
+	// 退出观战
+	CHECK(f.world.leaveSpectate(id_b) == true);
+	CHECK(f.world.isSpectating(id_b) == false);
+	CHECK(f.world.inBattle(id_b) == false);
+	CHECK(f.world.spectatorCount(battle) == 0);
+
+	// 未在观战时退出返回 false
+	CHECK(f.world.leaveSpectate(id_b) == false);
+}
+
+TEST_CASE("Battle spectating: spectatePlayer distance and floor gating")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id_a = f.transport.connect();
+	const SA::Net::ConnectionId id_b = f.transport.connect();
+	const SA::Net::ConnectionId id_c = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id_a, hs.data(), hs.size());
+	f.transport.deliver(id_b, hs.data(), hs.size());
+	f.transport.deliver(id_c, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 3);
+
+	// 摆放位置: A 与 B 相距 2 格 (同层), C 相距 15 格 (同层)
+	f.world.warpPlayerForTest(id_a, 100, 10, 10);
+	f.world.warpPlayerForTest(id_b, 100, 12, 11);
+	f.world.warpPlayerForTest(id_c, 100, 25, 25);
+
+	const BattleId battle = f.world.startBattle(makeField());
+	REQUIRE(f.world.joinBattle(battle, id_a, 0));
+
+	// 目标未开战时观战返回 false
+	CHECK(f.world.spectatePlayer(id_a, id_b) == false);
+
+	// 距离过远 (C 离 A 15 格) 无法观战
+	CHECK(f.world.spectatePlayer(id_c, id_a) == false);
+
+	// 近距离同层 (B 离 A 2 格) 观战成功
+	CHECK(f.world.spectatePlayer(id_b, id_a) == true);
+	CHECK(f.world.isSpectating(id_b) == true);
+	CHECK(f.world.spectatorCount(battle) == 1);
+}
+
+TEST_CASE("Battle spectating: spectator lifecycle on battle resolution")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id_a = f.transport.connect();
+	const SA::Net::ConnectionId id_b = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id_a, hs.data(), hs.size());
+	f.transport.deliver(id_b, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 2);
+
+	const BattleId battle = f.world.startBattle(makeField());
+	REQUIRE(f.world.joinBattle(battle, id_a, 0));
+	REQUIRE(f.world.spectateBattle(battle, id_b));
+
+	// 第一回合指令：玩家攻击敌人
+	{
+		SA::Domain::BattleCommand cmd{};
+		cmd.battle_id = battle;
+		cmd.turn = f.world.battleField(battle)->turn;
+		cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmd.command.attack.target = SA::Rules::kSideOffset;
+		f.world.onBattleCommand(id_a, cmd);
+	}
+	f.clock.advance(2000);
+	f.world.tick();
+
+	// 敌人仅 40HP，己方攻击力 300，首回合击毙，战斗结束
+	REQUIRE(f.world.stats(battle) != nullptr);
+	CHECK(f.world.stats(battle)->finished == true);
+	CHECK(f.world.inBattle(id_a) == false);
+	// 观战者状态应当随之自动清空复位
+	CHECK(f.world.isSpectating(id_b) == false);
+	CHECK(f.world.inBattle(id_b) == false);
+}

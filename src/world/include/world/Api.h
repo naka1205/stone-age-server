@@ -1530,6 +1530,27 @@ class World final : public SA::Net::TransportEvents,
 	bool joinBattle(BattleId battle, SA::Net::SessionId session,
 	                std::uint8_t slot);
 
+	// 将一条会话作为观战者加入正在进行的战斗 (slot 20 为观战槽位)。
+	// 门禁: 自身必须已登录且不在战斗/观战中；目标战斗必须存在且未结束。
+	bool spectateBattle(BattleId battle, SA::Net::SessionId session);
+
+	// 退出观战:
+	// 若该会话正在观战某场战斗，将其从观战列表移除并下发 BattleLeave。
+	bool leaveSpectate(SA::Net::SessionId session);
+
+	// 观战指定玩家:
+	// 寻找 target_player 正在参与的战斗，在同层同屏距离内接入观战。
+	bool spectatePlayer(SA::Net::SessionId spectator, SA::Net::SessionId target_player);
+
+	// 查询某会话是否处于战斗中 (参战中或观战中)
+	bool inBattle(SA::Net::SessionId session) const noexcept;
+
+	// 查询某会话是否正在观战某场战斗
+	bool isSpectating(SA::Net::SessionId session) const noexcept;
+
+	// 查询某场战斗当前的观战者人数
+	std::size_t spectatorCount(BattleId battle) const noexcept;
+
 	// 据模板生成一只敌人,建 L2 实体并投影进某场战斗的某个槽(批次 M.4b)。
 	//
 	// ★★ **这是 `rollSpawnStats` 的第一个真实调用方** —— 欠债 25 立案的原话是
