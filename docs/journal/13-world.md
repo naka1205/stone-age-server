@@ -1404,26 +1404,27 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
      - 集中承载 `kMaxPlayers`、`kMaxPets`、`PlayerPool`、`WorldWriteContext`、`ChargeState`、`MagicStatusState`、`BattleInstance` 等实体池与战场状态结构；
      - 内联实现 `makeBattleSnapshot`、`syncPetState`、`makePlayerCombatant`、`retireBattle`、`pushBattleSnapshot` 以及 `sendTo<M>` 下发模板；
      - 定义完备的 `struct World::Impl : GoldAuditSink`，作为所有世界领域编译单元共享的内部实现基石。
-   - **7 大领域独立编译单元**:
+   - **8 大领域独立编译单元**:
      1. `WorldPartyTrade.cpp`: 组队邀请与踢出、决斗发起与切磋判定、双向确认安全交易全状态机；
      2. `WorldSocial.cpp`: 好友名片索取与屏蔽、邮件寄送/查阅/附件提取与删除、世界/公屏/队伍/私聊分级频道；
      3. `WorldFamily.cpp`: 家族创建/解散/成员管理、金库充提、四大庄园占领与庄园对决争夺战；
      4. `WorldEconomy.cpp`: 原地摆摊/标价/上下架/购买、寄售拍卖市场挂牌/下架/选购与搜索；
      5. `WorldRide.cpp`: 宠物骑乘上下马、庄园骑乘考试考核、骑宠契合度相性计算；
      6. `WorldPetFeatures.cpp`: 宠物忠诚度、料理喂食、技能遗忘、顺服度判定、宠物融合与转生流程；
-     7. `WorldLifestyle.cpp`: 外观与头像计算、新手村出生点、称号系统、声望商城、料理烹饪与合成精炼。
+     7. `WorldLifestyle.cpp`: 外观与头像计算、新手村出生点、称号系统、声望商城、料理烹饪与合成精炼；
+     8. `WorldEncounter.cpp`: 大世界暗雷/明雷遇敌链、编组筛选与抽签、敌人四维与经验生成、入场投影与大世界明雷开战。
    - **构建与边界合规**:
-     - `src/world/CMakeLists.txt` 完整纳入 7 个新编译单元，严格维持 `-ffp-contract=off`；
-     - `World.cpp` 由原先臃肿的 14,265 行大幅缩减至 8,784 行（削减 5,481 行业务逻辑代码），职责纯化为世界主循环 tick、地图与地板管理、战斗生命周期推进及角色进出场生命周期调度。
+     - `src/world/CMakeLists.txt` 完整纳入 8 个新编译单元，严格维持 `-ffp-contract=off`；
+     - `World.cpp` 由原先臃肿的 14,265 行大幅缩减至 **7,703 行**（累计削减 6,562 行业务逻辑代码，降幅达 46%），职责纯化为世界主循环 tick、地图与地板管理、战斗生命周期推进及角色进出场生命周期调度。
 
 #### 2. 验证与指标
 
 - **双端 CTest 100% 绿灯**:
   - 服务端 22 项 CTest 全量通过（`world_persistence` 16/16 用例、`world_map` 155/155 用例、`rules_battle` 170/170 用例全绿）；
-  - 客户端 7 项 CTest 全量通过；
+  - 客户端 7 项 CTest 全量通过（启用 GameStudio 引擎宿主时 8/8 全绿，含 `boot` 场景启动测试）；
 - **CI 门禁与守卫验证通过**:
   - `tools/ci_verify.py` 全部 6 项门禁通过（编码检查、WERROR 构建、CTest 22/22、断言反向探针验证通过）；
-  - `tools/check_module_boundaries.py` 严格校验 4 模块 29 源文件依赖纯净无泄漏；
+  - `tools/check_module_boundaries.py` 严格校验 4 模块 30 源文件依赖纯净无泄漏；
   - `tools/check_gold_writes.py` 守卫确认所有石币改动全部由 `GoldLedger` 统一审计；
   - `tools/check_shared_purity.py` 确认 28 个 shared 头文件纯度无污染。
 
