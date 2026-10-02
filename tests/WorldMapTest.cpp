@@ -9185,3 +9185,243 @@ TEST_CASE("§9.0.101: [RV-2] 宠物喂食资产原子消耗与宠物状态同步
 	CHECK(f.world.petLoyalty(live_pet->uid) == 55);
 	CHECK(f.world.playerItemAt(id, s_food) == nullptr); // 食物被原子扣除
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  阶段 2: 庄园家族战体系与骑乘战备全景测试 (批次 §9.0.102 / §9.0.103)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("§9.0.102: 庄园挑战发起、无主进驻与战备排期全流程")
+{
+	MoveFixture f;
+	const auto leader1 = spawnHandshaked(f);
+	const auto leader2 = spawnHandshaked(f);
+
+	auto *p1 = f.world.playerForTest(leader1);
+	auto *p2 = f.world.playerForTest(leader2);
+	REQUIRE(p1 != nullptr);
+	REQUIRE(p2 != nullptr);
+	p1->level = 50;
+	p2->level = 50;
+	p1->gold = 500000;
+	p2->gold = 500000;
+
+	// 创建家族 1 与 家族 2
+	REQUIRE(f.world.createFamily(leader1, "龙之誓约", "守卫萨姆吉尔"));
+	REQUIRE(f.world.createFamily(leader2, "雷霆狂怒", "进军四大庄园"));
+	const auto fid1 = f.world.playerFamilyId(leader1);
+	const auto fid2 = f.world.playerFamilyId(leader2);
+	REQUIRE(fid1 > 0);
+	REQUIRE(fid2 > 0);
+
+	// 1. 无主庄园直接进驻占领
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kSamo) == 0);
+	auto res_no_def = f.world.challengeManor(leader1, FamilyManor::kSamo, 100000);
+	CHECK(res_no_def == ManorChallengeResult::kNoDefender);
+	CHECK(f.world.familyManor(fid1) == FamilyManor::kSamo);
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kSamo) == fid1);
+	CHECK(f.world.playerGold(leader1) == 490000); // 建族扣 10,000，无守方占领无需扣除挑战押金
+
+	// 2. 守方自己尝试挑战自己庄园 -> 拦截
+	CHECK(f.world.challengeManor(leader1, FamilyManor::kSamo, 100000) == ManorChallengeResult::kAlreadyOwnManor);
+
+	// 3. 押金不足 100,000 石币门槛 -> 拦截
+	CHECK(f.world.challengeManor(leader2, FamilyManor::kSamo, 99999) == ManorChallengeResult::kDepositInsufficient);
+
+	// 4. 正常发起庄园挑战
+	const auto g2_before = f.world.playerGold(leader2);
+	auto res_ok = f.world.challengeManor(leader2, FamilyManor::kSamo, 150000);
+	CHECK(res_ok == ManorChallengeResult::kSuccess);
+	CHECK(f.world.playerGold(leader2) == g2_before - 150000); // 原子扣除押金
+
+	// 校验战备状态快照
+	auto war_info = f.world.getManorWarInfo(FamilyManor::kSamo);
+	CHECK(war_info.state == ManorWarState::kScheduled);
+	CHECK(war_info.defender_family_id == fid1);
+	CHECK(war_info.challenger_family_id == fid2);
+	CHECK(war_info.challenge_deposit == 150000);
+	CHECK(war_info.defender_score == 0);
+	CHECK(war_info.challenger_score == 0);
+
+	// 5. 处于排期状态时，第三方重复约战拦截
+	const auto leader3 = spawnHandshaked(f);
+	auto *p3 = f.world.playerForTest(leader3);
+	REQUIRE(p3 != nullptr);
+	p3->level = 50;
+	p3->gold = 500000;
+	REQUIRE(f.world.createFamily(leader3, "幻影旅团", "中立势力"));
+	CHECK(f.world.challengeManor(leader3, FamilyManor::kSamo, 200000) == ManorChallengeResult::kManorNotIdle);
+}
+
+TEST_CASE("§9.0.102: 庄园战开战状态机推进与决斗比分累加闭环")
+{
+	MoveFixture f;
+	const auto leader1 = spawnHandshaked(f);
+	const auto leader2 = spawnHandshaked(f);
+	f.world.playerForTest(leader1)->level = 50;
+	f.world.playerForTest(leader2)->level = 50;
+	f.world.playerForTest(leader1)->gold = 200000;
+	f.world.playerForTest(leader2)->gold = 200000;
+
+	REQUIRE(f.world.createFamily(leader1, "玛丽娜斯水族", "渔村守备"));
+	REQUIRE(f.world.createFamily(leader2, "加加飞行团", "羽龙征服"));
+	const auto fid1 = f.world.playerFamilyId(leader1);
+	const auto fid2 = f.world.playerFamilyId(leader2);
+
+	// 占领并约战
+	REQUIRE(f.world.occupyManor(fid1, FamilyManor::kMarina));
+	REQUIRE(f.world.challengeManor(leader2, FamilyManor::kMarina, 100000) == ManorChallengeResult::kSuccess);
+
+	// 未开战前无法记录决斗比分
+	CHECK_FALSE(f.world.recordManorDuelScore(FamilyManor::kMarina, fid1, 1));
+
+	// 推进开战
+	REQUIRE(f.world.startManorWar(FamilyManor::kMarina));
+	auto info = f.world.getManorWarInfo(FamilyManor::kMarina);
+	CHECK(info.state == ManorWarState::kInWar);
+	CHECK(info.war_end_time_ms > 0);
+
+	// 记录战绩比分
+	REQUIRE(f.world.recordManorDuelScore(FamilyManor::kMarina, fid1, 3));
+	REQUIRE(f.world.recordManorDuelScore(FamilyManor::kMarina, fid2, 5));
+	CHECK_FALSE(f.world.recordManorDuelScore(FamilyManor::kMarina, 99999, 1)); // 无关家族忽略
+
+	auto war_after = f.world.getManorWarInfo(FamilyManor::kMarina);
+	CHECK(war_after.defender_score == 3);
+	CHECK(war_after.challenger_score == 5);
+}
+
+TEST_CASE("§9.0.102: 庄园战胜负结算与攻守庄园所有权与奖金原子交割闭环")
+{
+	MoveFixture f;
+	const auto leader1 = spawnHandshaked(f);
+	const auto leader2 = spawnHandshaked(f);
+	f.world.playerForTest(leader1)->level = 50;
+	f.world.playerForTest(leader2)->level = 50;
+	f.world.playerForTest(leader1)->gold = 200000;
+	f.world.playerForTest(leader2)->gold = 200000;
+
+	REQUIRE(f.world.createFamily(leader1, "守方家族", "坚守阵地"));
+	REQUIRE(f.world.createFamily(leader2, "攻方家族", "奋勇向前"));
+	const auto fid1 = f.world.playerFamilyId(leader1);
+	const auto fid2 = f.world.playerFamilyId(leader2);
+
+	// 场景 A: 挑战方攻方胜出 (庄园易主，奖金退回/全额发放挑战家族金库)
+	REQUIRE(f.world.occupyManor(fid1, FamilyManor::kJaja));
+	REQUIRE(f.world.challengeManor(leader2, FamilyManor::kJaja, 120000) == ManorChallengeResult::kSuccess);
+	REQUIRE(f.world.startManorWar(FamilyManor::kJaja));
+
+	const auto fam2_gold_before = f.world.getFamilyInfo(fid2)->family_gold;
+	const auto fam2_fame_before = f.world.getFamilyInfo(fid2)->family_fame;
+	REQUIRE(f.world.concludeManorWar(FamilyManor::kJaja, fid2));
+
+	// 庄园成功易主至挑战方
+	CHECK(f.world.familyManor(fid1) == FamilyManor::kNone);
+	CHECK(f.world.familyManor(fid2) == FamilyManor::kJaja);
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kJaja) == fid2);
+
+	// 挑战方金库收到 120,000 战利金，声望提升
+	CHECK(f.world.getFamilyInfo(fid2)->family_gold == fam2_gold_before + 120000);
+	CHECK(f.world.getFamilyInfo(fid2)->family_fame == fam2_fame_before + 500);
+
+	// 状态转入保护期
+	auto war_concluded = f.world.getManorWarInfo(FamilyManor::kJaja);
+	CHECK(war_concluded.state == ManorWarState::kCooldown);
+	CHECK(war_concluded.challenger_family_id == 0);
+
+	// 场景 B: 守方卫冕成功 (庄园所有权保持，挑战押金原子没收并注资守方金库)
+	const auto leader3 = spawnHandshaked(f);
+	f.world.playerForTest(leader3)->level = 50;
+	f.world.playerForTest(leader3)->gold = 300000;
+	REQUIRE(f.world.createFamily(leader3, "挑战方三号", "尝试攻打雷龙庄园"));
+	const auto fid3 = f.world.playerFamilyId(leader3);
+	(void)fid3;
+
+	REQUIRE(f.world.occupyManor(fid1, FamilyManor::kKarutana));
+	REQUIRE(f.world.challengeManor(leader3, FamilyManor::kKarutana, 150000) == ManorChallengeResult::kSuccess);
+	REQUIRE(f.world.startManorWar(FamilyManor::kKarutana));
+
+	const auto fam1_gold_before = f.world.getFamilyInfo(fid1)->family_gold;
+	const auto fam1_fame_before = f.world.getFamilyInfo(fid1)->family_fame;
+	REQUIRE(f.world.concludeManorWar(FamilyManor::kKarutana, fid1));
+
+	// 守方保有庄园
+	CHECK(f.world.familyManor(fid1) == FamilyManor::kKarutana);
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kKarutana) == fid1);
+
+	// 守方金库获得 150,000 没收押金注资
+	CHECK(f.world.getFamilyInfo(fid1)->family_gold == fam1_gold_before + 150000);
+	CHECK(f.world.getFamilyInfo(fid1)->family_fame == fam1_fame_before + 200);
+}
+
+TEST_CASE("§9.0.102: [RV-1] 庄园挑战发起族长门禁与已有庄园互斥拦截反向变异验证")
+{
+	MoveFixture f;
+	const auto leader = spawnHandshaked(f);
+	const auto member = spawnHandshaked(f);
+	auto *p_l = f.world.playerForTest(leader);
+	auto *p_m = f.world.playerForTest(member);
+	REQUIRE(p_l != nullptr);
+	REQUIRE(p_m != nullptr);
+	p_l->level = 50;
+	p_m->level = 50;
+	p_l->gold = 200000;
+	p_m->gold = 200000;
+
+	REQUIRE(f.world.createFamily(leader, "自由之翼", "进军全图"));
+	const auto fid = f.world.playerFamilyId(leader);
+	REQUIRE(f.world.applyJoinFamily(member, fid));
+	REQUIRE(f.world.acceptFamilyMember(leader, fid, p_m->name.c_str(), true));
+	CHECK(f.world.playerFamilyRole(member) == FamilyRole::kMember);
+
+	// 占领萨姆吉尔庄园作为已有守方
+	REQUIRE(f.world.occupyManor(fid, FamilyManor::kSamo));
+
+	// 1. [RV-1 反向变异实证]: 普通成员尝试发起挑战 -> 严格被 kNotLeader 拦截
+	CHECK(f.world.challengeManor(member, FamilyManor::kMarina, 100000) == ManorChallengeResult::kNotLeader);
+
+	// 2. [RV-1 反向变异实证]: 自身已有庄园时，族长尝试跨庄园挑战 -> 严格被 kAlreadyOwnManor 拦截
+	CHECK(f.world.challengeManor(leader, FamilyManor::kMarina, 100000) == ManorChallengeResult::kAlreadyOwnManor);
+
+	// 3. 玩家濒死拦截
+	p_l->hp = 0;
+	CHECK(f.world.challengeManor(leader, FamilyManor::kMarina, 100000) == ManorChallengeResult::kPlayerDead);
+	p_l->hp = 100;
+}
+
+TEST_CASE("§9.0.102: [RV-2] 庄园战押金原子扣除与结算交割一致性反向变异验证")
+{
+	MoveFixture f;
+	const auto leader1 = spawnHandshaked(f);
+	const auto leader2 = spawnHandshaked(f);
+	auto *p1 = f.world.playerForTest(leader1);
+	auto *p2 = f.world.playerForTest(leader2);
+	p1->level = 50;
+	p2->level = 50;
+	p1->gold = 500000;
+	p2->gold = 50000; // 仅 5 万石币，不足以支付 10 万押金
+
+	REQUIRE(f.world.createFamily(leader1, "庄园霸主", "雄踞一方"));
+	REQUIRE(f.world.createFamily(leader2, "平民军团", "挑战权威"));
+	const auto fid1 = f.world.playerFamilyId(leader1);
+	REQUIRE(f.world.occupyManor(fid1, FamilyManor::kSamo));
+
+	// 1. [RV-2 资金不足严格防御]: 随身石币不足 10 万 -> 严格返回 kGoldInsufficient，且零扣除零改动
+	const auto g2_init = f.world.playerGold(leader2);
+	auto res_poor = f.world.challengeManor(leader2, FamilyManor::kSamo, 100000);
+	CHECK(res_poor == ManorChallengeResult::kGoldInsufficient);
+	CHECK(f.world.playerGold(leader2) == g2_init); // 50,000 一分未少
+
+	auto war_info = f.world.getManorWarInfo(FamilyManor::kSamo);
+	CHECK(war_info.state == ManorWarState::kIdle); // 庄园依然处于和平空闲态
+
+	// 2. 补足资金后发起挑战并卫冕结算，验证金库 100% 精确注资
+	p2->gold = 200000;
+	REQUIRE(f.world.challengeManor(leader2, FamilyManor::kSamo, 100000) == ManorChallengeResult::kSuccess);
+	CHECK(f.world.playerGold(leader2) == 100000);
+
+	REQUIRE(f.world.startManorWar(FamilyManor::kSamo));
+	const auto fid1_gold_prev = f.world.getFamilyInfo(fid1)->family_gold;
+	REQUIRE(f.world.concludeManorWar(FamilyManor::kSamo, fid1)); // 守方获胜
+
+	CHECK(f.world.getFamilyInfo(fid1)->family_gold == fid1_gold_prev + 100000); // 精确入账
+}

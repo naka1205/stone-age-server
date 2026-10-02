@@ -2863,6 +2863,7 @@ struct World::Impl : GoldAuditSink
 	std::unordered_map<SA::Net::SessionId, std::uint32_t> session_to_family{};
 	std::unordered_map<std::string, std::uint32_t> player_to_family_name{};
 	std::map<FamilyManor, std::uint32_t> manor_owners{};
+	std::map<FamilyManor, ManorWarInfo> manor_wars{};
 	std::uint32_t next_family_id = 1;
 
 	// ── 经济体系: 玩家摆摊 (阶段 2: 对齐 char.c:9057 CHAR_sendStreetVendor) ──
@@ -11508,6 +11509,17 @@ bool World::occupyManor(std::uint32_t family_id, FamilyManor manor)
 
 	s.manor_owners[manor] = family_id;
 	fit->second.manor = manor;
+
+	// 同步庄园战防守方状态
+	auto &war = s.manor_wars[manor];
+	war.manor = manor;
+	war.defender_family_id = family_id;
+	war.challenger_family_id = 0;
+	war.state = ManorWarState::kIdle;
+	war.challenge_deposit = 0;
+	war.defender_score = 0;
+	war.challenger_score = 0;
+
 	return true;
 }
 
@@ -11524,6 +11536,178 @@ std::uint32_t World::manorOwnerFamily(FamilyManor manor) const
 	const auto it = _impl->manor_owners.find(manor);
 	if (it == _impl->manor_owners.end())
 		return 0;
+	return it->second;
+}
+
+ManorChallengeResult World::challengeManor(SA::Net::SessionId session, FamilyManor manor, std::uint32_t deposit)
+{
+	Impl &s = *_impl;
+	if (manor == FamilyManor::kNone)
+		return ManorChallengeResult::kInvalidManor;
+
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (p == nullptr || p->hp <= 0)
+		return ManorChallengeResult::kPlayerDead;
+
+	if (s.inBattle(session))
+		return ManorChallengeResult::kInBattle;
+
+	if (isPlayerVending(session))
+		return ManorChallengeResult::kVending;
+
+	const auto fid = playerFamilyId(session);
+	if (fid == 0)
+		return ManorChallengeResult::kNotLeader;
+
+	const auto role = playerFamilyRole(session);
+	if (role != FamilyRole::kLeader)
+		return ManorChallengeResult::kNotLeader;
+
+	// 挑战方家族自身不能已占领庄园
+	if (familyManor(fid) != FamilyManor::kNone)
+		return ManorChallengeResult::kAlreadyOwnManor;
+
+	if (deposit < kManorChallengeMinDeposit)
+		return ManorChallengeResult::kDepositInsufficient;
+
+	auto &war = s.manor_wars[manor];
+	war.manor = manor;
+	if (war.state != ManorWarState::kIdle)
+		return ManorChallengeResult::kManorNotIdle;
+
+	const auto current_owner = manorOwnerFamily(manor);
+	if (current_owner == 0)
+	{
+		// 无守方庄园，直接占领
+		occupyManor(fid, manor);
+		return ManorChallengeResult::kNoDefender;
+	}
+
+	// 守方不能是自己
+	if (current_owner == fid)
+		return ManorChallengeResult::kAlreadyOwnManor;
+
+	// [RV-2] 原子扣除挑战押金
+	const GoldTx tx = delGold(*p, GoldReason::kManorChallengeFee, static_cast<std::int32_t>(deposit), 0, fid, s);
+	if (tx.disposition == GoldDisposition::kRejected)
+		return ManorChallengeResult::kGoldInsufficient;
+
+	war.state = ManorWarState::kScheduled;
+	war.defender_family_id = current_owner;
+	war.challenger_family_id = fid;
+	war.challenge_deposit = deposit;
+	war.defender_score = 0;
+	war.challenger_score = 0;
+	war.scheduled_time_ms = s.clock.nowMs();
+	war.war_end_time_ms = 0;
+
+	return ManorChallengeResult::kSuccess;
+}
+
+bool World::startManorWar(FamilyManor manor)
+{
+	Impl &s = *_impl;
+	auto it = s.manor_wars.find(manor);
+	if (it == s.manor_wars.end())
+		return false;
+
+	if (it->second.state != ManorWarState::kScheduled)
+		return false;
+
+	it->second.state = ManorWarState::kInWar;
+	it->second.war_end_time_ms = s.clock.nowMs() + kManorWarDurationMs;
+	return true;
+}
+
+bool World::recordManorDuelScore(FamilyManor manor, std::uint32_t winning_family_id, std::uint32_t score_points)
+{
+	Impl &s = *_impl;
+	auto it = s.manor_wars.find(manor);
+	if (it == s.manor_wars.end())
+		return false;
+
+	if (it->second.state != ManorWarState::kInWar)
+		return false;
+
+	if (winning_family_id == it->second.defender_family_id)
+	{
+		it->second.defender_score += score_points;
+		return true;
+	}
+	else if (winning_family_id == it->second.challenger_family_id)
+	{
+		it->second.challenger_score += score_points;
+		return true;
+	}
+	return false;
+}
+
+bool World::concludeManorWar(FamilyManor manor, std::uint32_t victorious_family_id)
+{
+	Impl &s = *_impl;
+	auto it = s.manor_wars.find(manor);
+	if (it == s.manor_wars.end())
+		return false;
+
+	if (it->second.state != ManorWarState::kInWar)
+		return false;
+
+	auto &war = it->second;
+	if (victorious_family_id == war.challenger_family_id)
+	{
+		// 挑战方胜出：庄园易主！
+		const auto challenger_id = war.challenger_family_id;
+		const auto deposit = war.challenge_deposit;
+		occupyManor(challenger_id, manor);
+
+		// 挑战金退回并全额奖励挑战家族金库
+		auto c_fit = s.families.find(challenger_id);
+		if (c_fit != s.families.end())
+		{
+			c_fit->second.family_gold = static_cast<std::int32_t>(
+			    std::min<std::int64_t>(kMaxFamilyGold, static_cast<std::int64_t>(c_fit->second.family_gold) + deposit));
+			c_fit->second.family_fame += 500; // 攻下庄园增加 500 家族声望
+		}
+	}
+	else if (victorious_family_id == war.defender_family_id)
+	{
+		// 守方卫冕成功：庄园归属保持
+		const auto defender_id = war.defender_family_id;
+		const auto deposit = war.challenge_deposit;
+
+		// [RV-2] 挑战方没收之押金 100% 注资守方家族金库
+		auto d_fit = s.families.find(defender_id);
+		if (d_fit != s.families.end())
+		{
+			d_fit->second.family_gold = static_cast<std::int32_t>(
+			    std::min<std::int64_t>(kMaxFamilyGold, static_cast<std::int64_t>(d_fit->second.family_gold) + deposit));
+			d_fit->second.family_fame += 200; // 卫冕成功增加 200 家族声望
+		}
+	}
+	else
+	{
+		return false;
+	}
+
+	// 战后休战保护期
+	war.state = ManorWarState::kCooldown;
+	war.challenger_family_id = 0;
+	war.challenge_deposit = 0;
+	war.war_end_time_ms = s.clock.nowMs() + kManorWarCooldownMs;
+	return true;
+}
+
+ManorWarInfo World::getManorWarInfo(FamilyManor manor) const
+{
+	const auto it = _impl->manor_wars.find(manor);
+	if (it == _impl->manor_wars.end())
+	{
+		ManorWarInfo info{};
+		info.manor = manor;
+		info.defender_family_id = manorOwnerFamily(manor);
+		info.state = ManorWarState::kIdle;
+		return info;
+	}
 	return it->second;
 }
 

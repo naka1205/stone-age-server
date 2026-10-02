@@ -1235,6 +1235,47 @@ struct FamilyInfo
 	std::vector<FamilyMember> applicants{}; // 申请入族名单
 };
 
+// ══ 庄园家族战体系 (阶段 2: 四大庄园据点争夺与决斗调度, 对齐官方 MANOR_PK) ═════
+enum class ManorWarState : std::uint8_t
+{
+	kIdle = 0,      // 和平期，接受预约挑战
+	kScheduled = 1, // 战备期，已预约约战
+	kInWar = 2,     // 交战期，进行庄园决斗
+	kCooldown = 3,  // 战后休战保护期
+};
+
+enum class ManorChallengeResult : std::uint8_t
+{
+	kSuccess = 0,
+	kPlayerDead = 1,
+	kInBattle = 2,
+	kVending = 3,
+	kNotLeader = 4,           // 仅族长可发起庄园挑战
+	kInvalidManor = 5,        // 无效庄园目标
+	kAlreadyOwnManor = 6,     // 自身家族已占领庄园，互斥拦截
+	kDepositInsufficient = 7, // 挑战押金不足 100,000 石币门槛
+	kGoldInsufficient = 8,    // 随身石币不足以支付押金
+	kManorNotIdle = 9,        // 庄园非空闲状态（已排期/交战中/冷却中）
+	kNoDefender = 10,         // 无守方庄园（直接进驻占领）
+};
+
+inline constexpr std::uint32_t kManorChallengeMinDeposit = 100000; // 最低挑战押金 10 万石币
+inline constexpr std::int64_t kManorWarDurationMs = 3600000;       // 庄园战交战时长 1 小时
+inline constexpr std::int64_t kManorWarCooldownMs = 86400000;      // 战后休战保护期 24 小时
+
+struct ManorWarInfo
+{
+	FamilyManor manor = FamilyManor::kNone;
+	ManorWarState state = ManorWarState::kIdle;
+	std::uint32_t defender_family_id = 0;
+	std::uint32_t challenger_family_id = 0;
+	std::int64_t scheduled_time_ms = 0;
+	std::int64_t war_end_time_ms = 0;
+	std::uint32_t challenge_deposit = 0;
+	std::uint32_t defender_score = 0;
+	std::uint32_t challenger_score = 0;
+};
+
 // ══ 摆摊系统 (阶段 2: 玩家地摊系统, 对齐官方 STREET_VENDOR) ════════════════
 inline constexpr std::size_t kMaxStallItemSlots = 10;
 inline constexpr std::size_t kMaxStallPetSlots = 3;
@@ -1984,6 +2025,13 @@ class World final : public SA::Net::TransportEvents,
 	FamilyRole playerFamilyRole(SA::Net::SessionId session) const;
 	std::size_t familyCount() const;
 
+	// ── 庄园家族战接口 (Manor War System) ──────────────────────────────────
+	ManorChallengeResult challengeManor(SA::Net::SessionId session, FamilyManor manor, std::uint32_t deposit);
+	bool startManorWar(FamilyManor manor);
+	bool recordManorDuelScore(FamilyManor manor, std::uint32_t winning_family_id, std::uint32_t score_points = 1);
+	bool concludeManorWar(FamilyManor manor, std::uint32_t victorious_family_id);
+	ManorWarInfo getManorWarInfo(FamilyManor manor) const;
+
 	// ── 玩家摆摊系统 (Street Stall System) ────────────────────────────────
 	bool openStall(SA::Net::SessionId seller, const std::string &title);
 	bool setStallItem(SA::Net::SessionId seller, int item_slot, std::uint32_t price);
@@ -2452,6 +2500,10 @@ enum class GoldReason : std::uint8_t
 	kCraftingFee,
 	// 骑乘考核与认证学费 (汇, 阶段 2 骑乘认证系统)
 	kRideExamFee,
+	// 庄园挑战申请押金 (汇, 阶段 2 庄园家族战体系)
+	kManorChallengeFee,
+	// 庄园战胜出奖金/押金返还 (源, 阶段 2 庄园家族战体系)
+	kManorWarReward,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -2592,6 +2644,10 @@ inline const char *goldReasonName(GoldReason r) noexcept
 		return "crafting_fee";
 	case GoldReason::kRideExamFee:
 		return "ride_exam_fee";
+	case GoldReason::kManorChallengeFee:
+		return "manor_challenge_fee";
+	case GoldReason::kManorWarReward:
+		return "manor_war_reward";
 	}
 	return "unknown";
 }

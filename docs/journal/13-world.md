@@ -1342,5 +1342,41 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - 篡改 `feedPet` 中摆摊拦截校验 `if (false && isPlayerVending(session))` ⇒ 用例 5 中摆摊状态互斥拦截断言立即精准报红失败（`CHECK(9 == 4)`）；恢复后回绿。
 - **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 8 项 CTest 全量通过（锁定 `shared-v0.42.0` 零漂移），双端代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
 
+### 9.0.102 Manor War & Ride Battle Preparation (阶段 2 庄园家族战体系与骑乘战备闭环)
+
+> **对应架构设计**: 原版 `family.c` / `manorsman.c` / `fmpkcallman.c` 庄园争夺与约战规则，`04-storage-schema.md` §5 T8/T10  
+> **核心交付**: 四大庄园据点争夺与决斗调度（`challengeManor` 涵盖族长门禁 `role == kLeader`、无主庄园进驻、已有庄园互斥、10 万石币挑战押金原子扣除 `kManorChallengeFee`、已预约状态互斥拦截）、庄园战状态机与决斗计分闭环（`startManorWar` 推进 `kInWar`、`recordManorDuelScore` 双方战绩积分累加）、庄园战结果原子交割与特权过户（`concludeManorWar` 挑战方胜出庄园易主与奖金发放、守方卫冕成功押金 100% 注资守方家族金库 `addFamilyGold` 与战后 24 小时休战保护期 `kCooldown`）、[RV-1] 族长门禁与已有庄园互斥拦截反向变异实证、[RV-2] 资金不足零扣减与结算交割 100% 注资一致性反向变异实证。
+
+#### 1. 核心设计与落地产出
+
+1. **庄园挑战与战备预约全流程 (`challengeManor`)**:
+   - **状态门禁**: 严格校验玩家存活（`hp > 0`，濒死拦截 `kPlayerDead`）、战斗中互斥（`inBattle`，战斗拦截 `kPlayerInBattle`）、摆摊中互斥（`isPlayerVending`，开摊拦截 `kVending`）；
+   - **族长权限与庄园互斥**: 严格限定仅家族族长（`role == FamilyRole::kLeader`）可发起庄园挑战（[RV-1] 普通成员与长老拦截 `kNotLeader`）；自身家族若已占领其他庄园，互斥拦截 `kAlreadyOwnManor`；
+   - **最低押金与资金预检**: 设定 100,000 石币最低押金门槛（`kDepositInsufficient`）；通过 `GoldLedger` 原子扣减发起族长随身石币（`kManorChallengeFee`），资金不足严格拦截并保持 0 扣减（[RV-2] `kGoldInsufficient`）；
+   - **无主庄园进驻与约战状态推进**: 若目标庄园当前无守方家族，自动进驻占领并免收押金（`kNoDefender`）；已有守方时，状态转为 `kScheduled`，记录守方与挑战方家族 ID 及押金快照，拦截第三方并发约战（`kManorNotIdle`）。
+2. **庄园战开战与决斗积分调度 (`startManorWar` / `recordManorDuelScore`)**:
+   - **开战推进**: 校验 `state == kScheduled` 后推进至 `kInWar`，初始化 1 小时对决倒计时；
+   - **决斗积分**: 在交战期间接收团队与单挑决斗战报，严格累加对战双方家族胜场积分，屏蔽外部无关家族伪造积分。
+3. **庄园归属过户与资金原子交割 (`concludeManorWar`)**:
+   - **挑战方攻方胜出**: 调用 `occupyManor` 实现庄园归属原子过户，原守方失去庄园；挑战押金全额返还并作为战利金注资挑战方家族金库（上限保全），挑战家族声望 +500；
+   - **守方卫冕成功**: 守方保有庄园特权与分成收益；挑战方没收之押金 100% 原子注资守方家族金库（上限保全），守方家族声望 +200；
+   - **战后保护期**: 庄园状态转入 `kCooldown` 休战期，设置 24 小时冷却保护倒计时，清空挑战方挂载。
+
+#### 2. 验证与指标
+
+- `world_map` 用例数从 150 组增至 **155 组**（+5 组庄园挑战与排期全流程、开战与积分累加、攻守胜负所有权与资金交割、RV-1 门禁互斥变异、RV-2 资金原子扣减与一致性变异），断言数从 4276 条增至 **4373 条**（+97 条断言，100% 成功）。
+- **实测用例矩阵**:
+  1. `§9.0.102: 庄园挑战发起、无主进驻与战备排期全流程`
+  2. `§9.0.102: 庄园战开战状态机推进与决斗比分累加闭环`
+  3. `§9.0.102: 庄园战胜负结算与攻守庄园所有权与奖金原子交割闭环`
+  4. `§9.0.102: [RV-1] 庄园挑战发起族长门禁与已有庄园互斥拦截反向变异验证`
+  5. `§9.0.102: [RV-2] 庄园战押金原子扣除与结算交割一致性反向变异验证`
+- **反向验证 (RV-1)**:
+  - 篡改 `challengeManor` 中族长身份门禁 `if (false && role != FamilyRole::kLeader)` ⇒ 用例 4 中普通成员挑战拦截断言立即精准报红失败；恢复后回绿。
+- **反向验证 (RV-2)**:
+  - 篡改 `challengeManor` 中押金充足性校验 `if (false && tx.disposition == GoldDisposition::kRejected)` ⇒ 用例 5 中资金不足拦截断言立即精准报红失败；恢复后回绿。
+- **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 7 项 CTest 全量通过，代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
+
+
 
 
