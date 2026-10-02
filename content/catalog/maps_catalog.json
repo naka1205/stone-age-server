@@ -1,0 +1,8297 @@
+{
+  "1": {
+    "id": 1,
+    "name": "猜谜三兄弟的家２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz01a"
+  },
+  "3": {
+    "id": 3,
+    "name": "猜谜三兄弟的家４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz03b"
+  },
+  "2": {
+    "id": 2,
+    "name": "猜谜三兄弟的家３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz02a"
+  },
+  "8215": {
+    "id": 8215,
+    "name": "秘密花园",
+    "width": 40,
+    "height": 40,
+    "rel_path": "sevice/8215"
+  },
+  "400": {
+    "id": 400,
+    "name": "沙姆岛",
+    "width": 150,
+    "height": 149,
+    "rel_path": "seimu/400"
+  },
+  "6012": {
+    "id": 6012,
+    "name": "奇努伊的民家",
+    "width": 30,
+    "height": 30,
+    "rel_path": "seimu/kinui/6012"
+  },
+  "6000": {
+    "id": 6000,
+    "name": "奇努伊村",
+    "width": 92,
+    "height": 117,
+    "rel_path": "seimu/kinui/6000"
+  },
+  "6009": {
+    "id": 6009,
+    "name": "奇努伊的便利商店",
+    "width": 40,
+    "height": 60,
+    "rel_path": "seimu/kinui/6009"
+  },
+  "6006": {
+    "id": 6006,
+    "name": "奇努伊的村长家",
+    "width": 30,
+    "height": 40,
+    "rel_path": "seimu/kinui/6006"
+  },
+  "6004": {
+    "id": 6004,
+    "name": "奇努伊的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "seimu/kinui/6004"
+  },
+  "6005": {
+    "id": 6005,
+    "name": "奇努伊的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "seimu/kinui/6005"
+  },
+  "40101": {
+    "id": 40101,
+    "name": "梦幻的洞窟",
+    "width": 70,
+    "height": 70,
+    "rel_path": "seimu/dungeon/dun_4_01_01"
+  },
+  "40102": {
+    "id": 40102,
+    "name": "梦幻的洞窟",
+    "width": 70,
+    "height": 70,
+    "rel_path": "seimu/dungeon/dun_4_01_02"
+  },
+  "40001": {
+    "id": 40001,
+    "name": "奇努伊关卡",
+    "width": 20,
+    "height": 20,
+    "rel_path": "seimu/dungeon/dun_4-00-01"
+  },
+  "water": {
+    "id": null,
+    "name": "龙蜥洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "spirit/water"
+  },
+  "160": {
+    "id": 160,
+    "name": "龙蜥洞窟",
+    "width": 20,
+    "height": 20,
+    "rel_path": "spirit/water160"
+  },
+  "161": {
+    "id": 161,
+    "name": "龙蜥洞窟",
+    "width": 20,
+    "height": 20,
+    "rel_path": "spirit/water161"
+  },
+  "wind": {
+    "id": null,
+    "name": "龙蜥洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "spirit/wind"
+  },
+  "165": {
+    "id": 165,
+    "name": "龙蜥洞窟",
+    "width": 20,
+    "height": 20,
+    "rel_path": "spirit/wind165"
+  },
+  "fire": {
+    "id": null,
+    "name": "龙蜥洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "spirit/fire"
+  },
+  "164": {
+    "id": 164,
+    "name": "龙蜥洞窟",
+    "width": 20,
+    "height": 20,
+    "rel_path": "spirit/wind164"
+  },
+  "159": {
+    "id": 159,
+    "name": "龙蜥洞窟",
+    "width": 20,
+    "height": 20,
+    "rel_path": "spirit/earth159"
+  },
+  "earth": {
+    "id": null,
+    "name": "龙蜥洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "spirit/earth"
+  },
+  "163": {
+    "id": 163,
+    "name": "龙蜥洞窟",
+    "width": 20,
+    "height": 20,
+    "rel_path": "spirit/fire163"
+  },
+  "158": {
+    "id": 158,
+    "name": "龙蜥洞窟",
+    "width": 20,
+    "height": 20,
+    "rel_path": "spirit/earth158"
+  },
+  "162": {
+    "id": 162,
+    "name": "龙蜥洞窟",
+    "width": 20,
+    "height": 20,
+    "rel_path": "spirit/fire162"
+  },
+  "60009": {
+    "id": 60009,
+    "name": "水龙洞窟",
+    "width": 60,
+    "height": 128,
+    "rel_path": "EDEN/eden/dungeon/60009"
+  },
+  "60036": {
+    "id": 60036,
+    "name": "水龙洞窟之二",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/eden/dungeon/60036"
+  },
+  "60053": {
+    "id": 60053,
+    "name": "帕拉火洞窟",
+    "width": 80,
+    "height": 80,
+    "rel_path": "EDEN/eden/dungeon/60053"
+  },
+  "60054": {
+    "id": 60054,
+    "name": "帕拉火之眼",
+    "width": 90,
+    "height": 90,
+    "rel_path": "EDEN/eden/dungeon/60054"
+  },
+  "60055": {
+    "id": 60055,
+    "name": "帕拉火之星洞窟",
+    "width": 60,
+    "height": 100,
+    "rel_path": "EDEN/eden/dungeon/60055"
+  },
+  "60052": {
+    "id": 60052,
+    "name": "库塔伊洞窟地下四楼",
+    "width": 60,
+    "height": 70,
+    "rel_path": "EDEN/eden/dungeon/60052"
+  },
+  "60048": {
+    "id": 60048,
+    "name": "碧霄洞窟第四层",
+    "width": 80,
+    "height": 40,
+    "rel_path": "EDEN/eden/dungeon/60048"
+  },
+  "60049": {
+    "id": 60049,
+    "name": "库塔伊洞窟地下一楼",
+    "width": 70,
+    "height": 70,
+    "rel_path": "EDEN/eden/dungeon/60049"
+  },
+  "102": {
+    "id": 102,
+    "name": "建构中的地下宫殿",
+    "width": 25,
+    "height": 40,
+    "rel_path": "EDEN/senwu_102"
+  },
+  "1090": {
+    "id": 1090,
+    "name": "市集",
+    "width": 80,
+    "height": 80,
+    "rel_path": "EDEN/1090"
+  },
+  "103": {
+    "id": 103,
+    "name": "建构中的地下宫殿",
+    "width": 25,
+    "height": 40,
+    "rel_path": "EDEN/senwu_103"
+  },
+  "60050": {
+    "id": 60050,
+    "name": "库塔伊洞窟地下二楼",
+    "width": 90,
+    "height": 70,
+    "rel_path": "EDEN/eden/dungeon/60050"
+  },
+  "60035": {
+    "id": 60035,
+    "name": "水龙洞窟之三",
+    "width": 50,
+    "height": 100,
+    "rel_path": "EDEN/eden/dungeon/60035"
+  },
+  "60051": {
+    "id": 60051,
+    "name": "库塔伊洞窟地下三楼",
+    "width": 120,
+    "height": 90,
+    "rel_path": "EDEN/eden/dungeon/60051"
+  },
+  "60056": {
+    "id": 60056,
+    "name": "帕拉火之流洞窟",
+    "width": 60,
+    "height": 100,
+    "rel_path": "EDEN/eden/dungeon/60056"
+  },
+  "60010": {
+    "id": 60010,
+    "name": "水龙洞窟之一",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/eden/dungeon/60010"
+  },
+  "701": {
+    "id": 701,
+    "name": "伊甸大陆西方",
+    "width": 400,
+    "height": 400,
+    "rel_path": "EDEN/eden/701"
+  },
+  "706": {
+    "id": 706,
+    "name": "弗烈顿城区",
+    "width": 400,
+    "height": 400,
+    "rel_path": "EDEN/eden/706"
+  },
+  "708": {
+    "id": 708,
+    "name": "塔耳塔城区",
+    "width": 400,
+    "height": 400,
+    "rel_path": "EDEN/eden/708"
+  },
+  "707": {
+    "id": 707,
+    "name": "伊甸大陆北方",
+    "width": 400,
+    "height": 400,
+    "rel_path": "EDEN/eden/707"
+  },
+  "700": {
+    "id": 700,
+    "name": "伊甸园区",
+    "width": 400,
+    "height": 400,
+    "rel_path": "EDEN/eden/700"
+  },
+  "705": {
+    "id": 705,
+    "name": "伊甸大陆东方",
+    "width": 400,
+    "height": 400,
+    "rel_path": "EDEN/eden/705"
+  },
+  "702": {
+    "id": 702,
+    "name": "尼克斯城区",
+    "width": 400,
+    "height": 400,
+    "rel_path": "EDEN/eden/702"
+  },
+  "703": {
+    "id": 703,
+    "name": "伊甸大陆南方",
+    "width": 400,
+    "height": 400,
+    "rel_path": "EDEN/eden/703"
+  },
+  "704": {
+    "id": 704,
+    "name": "亚伊欧城区",
+    "width": 400,
+    "height": 400,
+    "rel_path": "EDEN/eden/704"
+  },
+  "60038": {
+    "id": 60038,
+    "name": "碧霄洞窟第二层",
+    "width": 60,
+    "height": 70,
+    "rel_path": "EDEN/eden/dungeon/60038"
+  },
+  "60007": {
+    "id": 60007,
+    "name": "南方沙漠洞穴内通道",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/eden/dungeon/60007"
+  },
+  "60062": {
+    "id": 60062,
+    "name": "斯洛克洞窟第五层",
+    "width": 50,
+    "height": 40,
+    "rel_path": "EDEN/eden/dungeon/60062"
+  },
+  "60065": {
+    "id": 60065,
+    "name": "萨伊洛山洞第三层",
+    "width": 80,
+    "height": 70,
+    "rel_path": "EDEN/eden/dungeon/60065"
+  },
+  "60039": {
+    "id": 60039,
+    "name": "碧霄洞窟第三层",
+    "width": 70,
+    "height": 70,
+    "rel_path": "EDEN/eden/dungeon/60039"
+  },
+  "60006": {
+    "id": 60006,
+    "name": "东方沙漠洞穴外通道",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/eden/dungeon/60006"
+  },
+  "60001": {
+    "id": 60001,
+    "name": "北方沙漠洞穴内通道",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/eden/dungeon/60001"
+  },
+  "60008": {
+    "id": 60008,
+    "name": "南方沙漠洞穴外通道",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/eden/dungeon/60008"
+  },
+  "60037": {
+    "id": 60037,
+    "name": "碧霄洞窟第一层",
+    "width": 50,
+    "height": 60,
+    "rel_path": "EDEN/eden/dungeon/60037"
+  },
+  "60064": {
+    "id": 60064,
+    "name": "萨伊洛山洞第二层",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/eden/dungeon/60064"
+  },
+  "60063": {
+    "id": 60063,
+    "name": "萨伊洛山洞第一层",
+    "width": 90,
+    "height": 90,
+    "rel_path": "EDEN/eden/dungeon/60063"
+  },
+  "60070": {
+    "id": 60070,
+    "name": "斯洛克洞窟第五层之二",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/eden/dungeon/60070"
+  },
+  "60077": {
+    "id": 60077,
+    "name": "库沙达洞窟第四层",
+    "width": 80,
+    "height": 80,
+    "rel_path": "EDEN/eden/dungeon/60077"
+  },
+  "60079": {
+    "id": 60079,
+    "name": "水龙洞窟之三",
+    "width": 50,
+    "height": 100,
+    "rel_path": "EDEN/eden/dungeon/60079"
+  },
+  "60078": {
+    "id": 60078,
+    "name": "水龙洞窟之一",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/eden/dungeon/60078"
+  },
+  "60076": {
+    "id": 60076,
+    "name": "库沙达洞窟第五层",
+    "width": 70,
+    "height": 100,
+    "rel_path": "EDEN/eden/dungeon/60076"
+  },
+  "60071": {
+    "id": 60071,
+    "name": "斯洛克洞窟第六层",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/eden/dungeon/60071"
+  },
+  "60057": {
+    "id": 60057,
+    "name": "斯洛克洞窟第一层",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/eden/dungeon/60057"
+  },
+  "60068": {
+    "id": 60068,
+    "name": "萨伊洛山顶",
+    "width": 50,
+    "height": 70,
+    "rel_path": "EDEN/eden/dungeon/60068"
+  },
+  "60066": {
+    "id": 60066,
+    "name": "萨伊洛山洞第四层",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/eden/dungeon/60066"
+  },
+  "60059": {
+    "id": 60059,
+    "name": "斯洛克洞窟第三层",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/eden/dungeon/60059"
+  },
+  "60061": {
+    "id": 60061,
+    "name": "斯洛克洞窟第四层之一",
+    "width": 90,
+    "height": 90,
+    "rel_path": "EDEN/eden/dungeon/60061"
+  },
+  "60004": {
+    "id": 60004,
+    "name": "西方沙漠洞穴外通道",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/eden/dungeon/60004"
+  },
+  "60003": {
+    "id": 60003,
+    "name": "西方沙漠洞穴内通道",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/eden/dungeon/60003"
+  },
+  "60060": {
+    "id": 60060,
+    "name": "斯洛克洞窟第四层",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/eden/dungeon/60060"
+  },
+  "60067": {
+    "id": 60067,
+    "name": "萨伊洛山洞第五层",
+    "width": 130,
+    "height": 130,
+    "rel_path": "EDEN/eden/dungeon/60067"
+  },
+  "60058": {
+    "id": 60058,
+    "name": "斯洛克洞窟第二层",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/eden/dungeon/60058"
+  },
+  "60069": {
+    "id": 60069,
+    "name": "萨伊洛山洞第四层",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/eden/dungeon/60069"
+  },
+  "60002": {
+    "id": 60002,
+    "name": "北方沙漠洞穴外通道",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/eden/dungeon/60002"
+  },
+  "60005": {
+    "id": 60005,
+    "name": "东方沙漠洞穴内通道",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/eden/dungeon/60005"
+  },
+  "60074": {
+    "id": 60074,
+    "name": "库沙达洞窟第三层",
+    "width": 90,
+    "height": 90,
+    "rel_path": "EDEN/eden/dungeon/60074"
+  },
+  "60073": {
+    "id": 60073,
+    "name": "库沙达洞窟第二层",
+    "width": 90,
+    "height": 90,
+    "rel_path": "EDEN/eden/dungeon/60073"
+  },
+  "60072": {
+    "id": 60072,
+    "name": "库沙达洞窟第一层",
+    "width": 90,
+    "height": 90,
+    "rel_path": "EDEN/eden/dungeon/60072"
+  },
+  "60075": {
+    "id": 60075,
+    "name": "库沙达洞窟第四层",
+    "width": 80,
+    "height": 80,
+    "rel_path": "EDEN/eden/dungeon/60075"
+  },
+  "8516": {
+    "id": 8516,
+    "name": "火精灵火山洞窟",
+    "width": 45,
+    "height": 35,
+    "rel_path": "EDEN/sa75/8516"
+  },
+  "8511": {
+    "id": 8511,
+    "name": "地牢",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/sa75/8511"
+  },
+  "8518": {
+    "id": 8518,
+    "name": "伊甸乐园主人官邸",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/sa75/8518"
+  },
+  "8520": {
+    "id": 8520,
+    "name": "伊甸乐园主人官邸",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/sa75/8520"
+  },
+  "8521": {
+    "id": 8521,
+    "name": "伊甸乐园主人官邸",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/sa75/8521"
+  },
+  "8519": {
+    "id": 8519,
+    "name": "伊甸乐园主人官邸",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/sa75/8519"
+  },
+  "8510": {
+    "id": 8510,
+    "name": "地牢",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/sa75/8510"
+  },
+  "8517": {
+    "id": 8517,
+    "name": "风精灵住所",
+    "width": 100,
+    "height": 100,
+    "rel_path": "EDEN/sa75/8517"
+  },
+  "8504": {
+    "id": 8504,
+    "name": "地牢",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/sa75/8504"
+  },
+  "8505": {
+    "id": 8505,
+    "name": "地牢",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/sa75/8505"
+  },
+  "8512": {
+    "id": 8512,
+    "name": "地牢",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/sa75/8512"
+  },
+  "8515": {
+    "id": 8515,
+    "name": "水精灵洞窟",
+    "width": 35,
+    "height": 35,
+    "rel_path": "EDEN/sa75/8515"
+  },
+  "8522": {
+    "id": 8522,
+    "name": "民房",
+    "width": 18,
+    "height": 15,
+    "rel_path": "EDEN/sa75/8522"
+  },
+  "8514": {
+    "id": 8514,
+    "name": "地精灵洞窟",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/sa75/8514"
+  },
+  "8513": {
+    "id": 8513,
+    "name": "牢房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/sa75/8513"
+  },
+  "8509": {
+    "id": 8509,
+    "name": "地牢",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/sa75/8509"
+  },
+  "8507": {
+    "id": 8507,
+    "name": "地牢",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/sa75/8507"
+  },
+  "8506": {
+    "id": 8506,
+    "name": "地牢",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/sa75/8506"
+  },
+  "8508": {
+    "id": 8508,
+    "name": "地牢",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/sa75/8508"
+  },
+  "7014": {
+    "id": 7014,
+    "name": "伊甸员工宿舍",
+    "width": 20,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/7014"
+  },
+  "7013": {
+    "id": 7013,
+    "name": "伊甸员工宿舍",
+    "width": 30,
+    "height": 20,
+    "rel_path": "EDEN/edenpark/7013"
+  },
+  "7022": {
+    "id": 7022,
+    "name": "艾巴登地下宫殿",
+    "width": 25,
+    "height": 40,
+    "rel_path": "EDEN/edenpark/7022"
+  },
+  "7023": {
+    "id": 7023,
+    "name": "艾巴登地下宫殿",
+    "width": 25,
+    "height": 40,
+    "rel_path": "EDEN/edenpark/7023"
+  },
+  "7024": {
+    "id": 7024,
+    "name": "林务局",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/edenpark/7024"
+  },
+  "7012": {
+    "id": 7012,
+    "name": "旅馆",
+    "width": 30,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/7012"
+  },
+  "7015": {
+    "id": 7015,
+    "name": "林务局",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/edenpark/7015"
+  },
+  "7008": {
+    "id": 7008,
+    "name": "骰子游乐间",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/7008"
+  },
+  "7006": {
+    "id": 7006,
+    "name": "宠物竞技场",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/edenpark/7006"
+  },
+  "7001": {
+    "id": 7001,
+    "name": "动物园",
+    "width": 50,
+    "height": 60,
+    "rel_path": "EDEN/edenpark/7001"
+  },
+  "7000": {
+    "id": 7000,
+    "name": "伊甸园",
+    "width": 200,
+    "height": 200,
+    "rel_path": "EDEN/edenpark/7000"
+  },
+  "7007": {
+    "id": 7007,
+    "name": "格斗竞技场",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/edenpark/7007"
+  },
+  "7009": {
+    "id": 7009,
+    "name": "宠物店",
+    "width": 18,
+    "height": 16,
+    "rel_path": "EDEN/edenpark/7009"
+  },
+  "7010": {
+    "id": 7010,
+    "name": "医院",
+    "width": 20,
+    "height": 18,
+    "rel_path": "EDEN/edenpark/7010"
+  },
+  "7017": {
+    "id": 7017,
+    "name": "民房",
+    "width": 18,
+    "height": 15,
+    "rel_path": "EDEN/edenpark/7017"
+  },
+  "7021": {
+    "id": 7021,
+    "name": "伊甸乐园主人官邸",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/edenpark/7021"
+  },
+  "7019": {
+    "id": 7019,
+    "name": "民房",
+    "width": 18,
+    "height": 15,
+    "rel_path": "EDEN/edenpark/7019"
+  },
+  "7018": {
+    "id": 7018,
+    "name": "民房",
+    "width": 18,
+    "height": 15,
+    "rel_path": "EDEN/edenpark/7018"
+  },
+  "7020": {
+    "id": 7020,
+    "name": "王子的房间",
+    "width": 18,
+    "height": 15,
+    "rel_path": "EDEN/edenpark/7020"
+  },
+  "7016": {
+    "id": 7016,
+    "name": "伊甸训练所",
+    "width": 20,
+    "height": 18,
+    "rel_path": "EDEN/edenpark/7016"
+  },
+  "7011": {
+    "id": 7011,
+    "name": "肉店",
+    "width": 12,
+    "height": 15,
+    "rel_path": "EDEN/edenpark/7011"
+  },
+  "7002": {
+    "id": 7002,
+    "name": "伊甸游乐场",
+    "width": 60,
+    "height": 80,
+    "rel_path": "EDEN/edenpark/7002"
+  },
+  "7005": {
+    "id": 7005,
+    "name": "竞速场",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/edenpark/7005"
+  },
+  "7003": {
+    "id": 7003,
+    "name": "轮盘游乐间",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/edenpark/7003"
+  },
+  "105": {
+    "id": 105,
+    "name": "魔印之境",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/105"
+  },
+  "60031": {
+    "id": 60031,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60031"
+  },
+  "60030": {
+    "id": 60030,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60030"
+  },
+  "60083": {
+    "id": 60083,
+    "name": "监牢",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60083"
+  },
+  "60041": {
+    "id": 60041,
+    "name": "伊甸地下通道第二层",
+    "width": 50,
+    "height": 40,
+    "rel_path": "EDEN/edenpark/dungeon/60041"
+  },
+  "60046": {
+    "id": 60046,
+    "name": "伊甸地牢",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/edenpark/dungeon/60046"
+  },
+  "60012": {
+    "id": 60012,
+    "name": "幻影之界第二层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60012"
+  },
+  "60015": {
+    "id": 60015,
+    "name": "幻影之界第二层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60015"
+  },
+  "60023": {
+    "id": 60023,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60023"
+  },
+  "60024": {
+    "id": 60024,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60024"
+  },
+  "60047": {
+    "id": 60047,
+    "name": "地下秘密通道",
+    "width": 80,
+    "height": 60,
+    "rel_path": "EDEN/edenpark/dungeon/60047"
+  },
+  "60040": {
+    "id": 60040,
+    "name": "伊甸地下通道第一层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/edenpark/dungeon/60040"
+  },
+  "60082": {
+    "id": 60082,
+    "name": "监牢",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60082"
+  },
+  "60025": {
+    "id": 60025,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60025"
+  },
+  "60022": {
+    "id": 60022,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60022"
+  },
+  "60014": {
+    "id": 60014,
+    "name": "幻影之界第二层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60014"
+  },
+  "60013": {
+    "id": 60013,
+    "name": "幻影之界第二层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60013"
+  },
+  "109": {
+    "id": 109,
+    "name": "群魔之境",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/109"
+  },
+  "107": {
+    "id": 107,
+    "name": "魔印之境",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/107"
+  },
+  "106": {
+    "id": 106,
+    "name": "魔印之境",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/106"
+  },
+  "108": {
+    "id": 108,
+    "name": "群魔之境",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/108"
+  },
+  "60032": {
+    "id": 60032,
+    "name": "幻影之界第四层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60032"
+  },
+  "60033": {
+    "id": 60033,
+    "name": "幻影之界第五层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60033"
+  },
+  "60034": {
+    "id": 60034,
+    "name": "幻影之界第五层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60034"
+  },
+  "60016": {
+    "id": 60016,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60016"
+  },
+  "60029": {
+    "id": 60029,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60029"
+  },
+  "60011": {
+    "id": 60011,
+    "name": "幻影之界第一层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60011"
+  },
+  "60027": {
+    "id": 60027,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60027"
+  },
+  "60018": {
+    "id": 60018,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60018"
+  },
+  "60020": {
+    "id": 60020,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60020"
+  },
+  "60080": {
+    "id": 60080,
+    "name": "监牢通道",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60080"
+  },
+  "60045": {
+    "id": 60045,
+    "name": "伊甸地下通道第五层",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/edenpark/dungeon/60045"
+  },
+  "60042": {
+    "id": 60042,
+    "name": "伊甸地下通道第三层",
+    "width": 40,
+    "height": 50,
+    "rel_path": "EDEN/edenpark/dungeon/60042"
+  },
+  "60021": {
+    "id": 60021,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60021"
+  },
+  "60026": {
+    "id": 60026,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60026"
+  },
+  "60019": {
+    "id": 60019,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60019"
+  },
+  "60017": {
+    "id": 60017,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60017"
+  },
+  "60028": {
+    "id": 60028,
+    "name": "幻影之界第三层",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60028"
+  },
+  "60043": {
+    "id": 60043,
+    "name": "伊甸地下通道第四层",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/edenpark/dungeon/60043"
+  },
+  "60044": {
+    "id": 60044,
+    "name": "伊甸地下通道第五层",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/edenpark/dungeon/60044"
+  },
+  "60081": {
+    "id": 60081,
+    "name": "监牢通道",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/edenpark/dungeon/60081"
+  },
+  "7135": {
+    "id": 7135,
+    "name": "贫民洞窟地下通道",
+    "width": 15,
+    "height": 15,
+    "rel_path": "EDEN/earth/7135"
+  },
+  "7217": {
+    "id": 7217,
+    "name": "水灵神殿",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/water/7217"
+  },
+  "7210": {
+    "id": 7210,
+    "name": "尼克斯民房",
+    "width": 11,
+    "height": 11,
+    "rel_path": "EDEN/water/7210"
+  },
+  "7211": {
+    "id": 7211,
+    "name": "尼克斯民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/water/7211"
+  },
+  "7205": {
+    "id": 7205,
+    "name": "尼克斯宠物店",
+    "width": 15,
+    "height": 15,
+    "rel_path": "EDEN/water/7205"
+  },
+  "7202": {
+    "id": 7202,
+    "name": "尼克斯便利商店",
+    "width": 30,
+    "height": 20,
+    "rel_path": "EDEN/water/7202"
+  },
+  "7203": {
+    "id": 7203,
+    "name": "尼克斯旅馆",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/water/7203"
+  },
+  "7204": {
+    "id": 7204,
+    "name": "尼克斯医院",
+    "width": 18,
+    "height": 18,
+    "rel_path": "EDEN/water/7204"
+  },
+  "7213": {
+    "id": 7213,
+    "name": "尼克斯民房",
+    "width": 11,
+    "height": 11,
+    "rel_path": "EDEN/water/7213"
+  },
+  "7214": {
+    "id": 7214,
+    "name": "尼克斯民房",
+    "width": 11,
+    "height": 11,
+    "rel_path": "EDEN/water/7214"
+  },
+  "7215": {
+    "id": 7215,
+    "name": "尼克斯王宫",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/water/7215"
+  },
+  "7212": {
+    "id": 7212,
+    "name": "尼克斯民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/water/7212"
+  },
+  "7201": {
+    "id": 7201,
+    "name": "尼克斯肉店",
+    "width": 15,
+    "height": 15,
+    "rel_path": "EDEN/water/7201"
+  },
+  "7206": {
+    "id": 7206,
+    "name": "尼克斯特产店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/water/7206"
+  },
+  "7208": {
+    "id": 7208,
+    "name": "尼克斯民房",
+    "width": 14,
+    "height": 14,
+    "rel_path": "EDEN/water/7208"
+  },
+  "7209": {
+    "id": 7209,
+    "name": "尼克斯民房",
+    "width": 15,
+    "height": 15,
+    "rel_path": "EDEN/water/7209"
+  },
+  "7207": {
+    "id": 7207,
+    "name": "尼克斯民房",
+    "width": 11,
+    "height": 11,
+    "rel_path": "EDEN/water/7207"
+  },
+  "7200": {
+    "id": 7200,
+    "name": "尼克斯水城",
+    "width": 120,
+    "height": 120,
+    "rel_path": "EDEN/water/7200"
+  },
+  "60203": {
+    "id": 60203,
+    "name": "地下水路第3层",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/water/dungeon/60203"
+  },
+  "60204": {
+    "id": 60204,
+    "name": "地下水路第4层",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/water/dungeon/60204"
+  },
+  "60205": {
+    "id": 60205,
+    "name": "地下水路第5层",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/water/dungeon/60205"
+  },
+  "60202": {
+    "id": 60202,
+    "name": "地下水路第2层",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/water/dungeon/60202"
+  },
+  "60211": {
+    "id": 60211,
+    "name": "动物园仓库",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/water/dungeon/60211"
+  },
+  "60216": {
+    "id": 60216,
+    "name": "水精灵洞窟",
+    "width": 35,
+    "height": 35,
+    "rel_path": "EDEN/water/dungeon/60216"
+  },
+  "60210": {
+    "id": 60210,
+    "name": "动物园仓库",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/water/dungeon/60210"
+  },
+  "60207": {
+    "id": 60207,
+    "name": "地下水路第7层",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/water/dungeon/60207"
+  },
+  "60209": {
+    "id": 60209,
+    "name": "动物园仓库",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/water/dungeon/60209"
+  },
+  "60208": {
+    "id": 60208,
+    "name": "地下水路第八层",
+    "width": 35,
+    "height": 35,
+    "rel_path": "EDEN/water/dungeon/60208"
+  },
+  "60201": {
+    "id": 60201,
+    "name": "地下水路第1层",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/water/dungeon/60201"
+  },
+  "60206": {
+    "id": 60206,
+    "name": "地下水路第6层",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/water/dungeon/60206"
+  },
+  "60215": {
+    "id": 60215,
+    "name": "水精灵洞窟",
+    "width": 35,
+    "height": 35,
+    "rel_path": "EDEN/water/dungeon/60215"
+  },
+  "60212": {
+    "id": 60212,
+    "name": "动物园仓库",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/water/dungeon/60212"
+  },
+  "60213": {
+    "id": 60213,
+    "name": "地下水路第八层",
+    "width": 35,
+    "height": 35,
+    "rel_path": "EDEN/water/dungeon/60213"
+  },
+  "601": {
+    "id": 601,
+    "name": "缘分占卜师的房间",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/moon/601"
+  },
+  "600": {
+    "id": 600,
+    "name": "药师群岛",
+    "width": 200,
+    "height": 200,
+    "rel_path": "EDEN/moon/600"
+  },
+  "7412": {
+    "id": 7412,
+    "name": "亚伊欧王宫",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/wind/7412"
+  },
+  "7423": {
+    "id": 7423,
+    "name": "凯菈村的民房",
+    "width": 12,
+    "height": 12,
+    "rel_path": "EDEN/wind/7423"
+  },
+  "7424": {
+    "id": 7424,
+    "name": "凯菈村的民房",
+    "width": 12,
+    "height": 12,
+    "rel_path": "EDEN/wind/7424"
+  },
+  "7425": {
+    "id": 7425,
+    "name": "凯菈村的民房",
+    "width": 40,
+    "height": 30,
+    "rel_path": "EDEN/wind/7425"
+  },
+  "7422": {
+    "id": 7422,
+    "name": "凯菈村的民房",
+    "width": 16,
+    "height": 18,
+    "rel_path": "EDEN/wind/7422"
+  },
+  "7453": {
+    "id": 7453,
+    "name": "伐木工头的房间",
+    "width": 15,
+    "height": 15,
+    "rel_path": "EDEN/wind/7453"
+  },
+  "7454": {
+    "id": 7454,
+    "name": "伐木工头的房间",
+    "width": 15,
+    "height": 15,
+    "rel_path": "EDEN/wind/7454"
+  },
+  "7409": {
+    "id": 7409,
+    "name": "亚伊欧风城便利店",
+    "width": 40,
+    "height": 60,
+    "rel_path": "EDEN/wind/7409"
+  },
+  "7400": {
+    "id": 7400,
+    "name": "亚伊欧风城",
+    "width": 160,
+    "height": 160,
+    "rel_path": "EDEN/wind/7400"
+  },
+  "7407": {
+    "id": 7407,
+    "name": "亚伊欧风城的旅馆",
+    "width": 40,
+    "height": 30,
+    "rel_path": "EDEN/wind/7407"
+  },
+  "7455": {
+    "id": 7455,
+    "name": "十二年前凯菈村",
+    "width": 100,
+    "height": 150,
+    "rel_path": "EDEN/wind/7455"
+  },
+  "7452": {
+    "id": 7452,
+    "name": "小猪森林",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/wind/7452"
+  },
+  "7406": {
+    "id": 7406,
+    "name": "亚伊欧风城的医院",
+    "width": 40,
+    "height": 30,
+    "rel_path": "EDEN/wind/7406"
+  },
+  "7401": {
+    "id": 7401,
+    "name": "亚伊欧王宫",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/wind/7401"
+  },
+  "7408": {
+    "id": 7408,
+    "name": "亚伊欧风城的武器店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/wind/7408"
+  },
+  "7411": {
+    "id": 7411,
+    "name": "亚伊欧王宫",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/wind/7411"
+  },
+  "7420": {
+    "id": 7420,
+    "name": "凯菈村的民房",
+    "width": 15,
+    "height": 15,
+    "rel_path": "EDEN/wind/7420"
+  },
+  "7421": {
+    "id": 7421,
+    "name": "凯菈村的民房",
+    "width": 18,
+    "height": 18,
+    "rel_path": "EDEN/wind/7421"
+  },
+  "7410": {
+    "id": 7410,
+    "name": "亚伊欧风城的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/wind/7410"
+  },
+  "7404": {
+    "id": 7404,
+    "name": "亚伊欧的民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/wind/7404"
+  },
+  "7403": {
+    "id": 7403,
+    "name": "亚伊欧的民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/wind/7403"
+  },
+  "7450": {
+    "id": 7450,
+    "name": "迷雾森林",
+    "width": 100,
+    "height": 100,
+    "rel_path": "EDEN/wind/7450"
+  },
+  "7402": {
+    "id": 7402,
+    "name": "凯菈村",
+    "width": 200,
+    "height": 150,
+    "rel_path": "EDEN/wind/7402"
+  },
+  "7405": {
+    "id": 7405,
+    "name": "亚伊欧风城的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/wind/7405"
+  },
+  "7451": {
+    "id": 7451,
+    "name": "迷雾森林",
+    "width": 100,
+    "height": 100,
+    "rel_path": "EDEN/wind/7451"
+  },
+  "3015": {
+    "id": 3015,
+    "name": "水井地下通道",
+    "width": 30,
+    "height": 10,
+    "rel_path": "EDEN/fuck/3015"
+  },
+  "3016": {
+    "id": 3016,
+    "name": "水井地下洞窟",
+    "width": 35,
+    "height": 55,
+    "rel_path": "EDEN/fuck/3016"
+  },
+  "7355": {
+    "id": 7355,
+    "name": "蒙达村肉店",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/fire/7355"
+  },
+  "7352": {
+    "id": 7352,
+    "name": "蒙达山",
+    "width": 100,
+    "height": 100,
+    "rel_path": "EDEN/fire/7352"
+  },
+  "7308": {
+    "id": 7308,
+    "name": "弗烈顿火城的肉店",
+    "width": 12,
+    "height": 15,
+    "rel_path": "EDEN/fire/7308"
+  },
+  "7306": {
+    "id": 7306,
+    "name": "弗烈顿火城的宠物店",
+    "width": 18,
+    "height": 16,
+    "rel_path": "EDEN/fire/7306"
+  },
+  "7301": {
+    "id": 7301,
+    "name": "火山道场",
+    "width": 100,
+    "height": 150,
+    "rel_path": "EDEN/fire/7301"
+  },
+  "7353": {
+    "id": 7353,
+    "name": "蒙达村村长家",
+    "width": 20,
+    "height": 34,
+    "rel_path": "EDEN/fire/7353"
+  },
+  "7354": {
+    "id": 7354,
+    "name": "蒙达村的花店",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/fire/7354"
+  },
+  "7300": {
+    "id": 7300,
+    "name": "弗烈顿火城",
+    "width": 150,
+    "height": 150,
+    "rel_path": "EDEN/fire/7300"
+  },
+  "7307": {
+    "id": 7307,
+    "name": "弗烈顿火城的民房",
+    "width": 18,
+    "height": 15,
+    "rel_path": "EDEN/fire/7307"
+  },
+  "7309": {
+    "id": 7309,
+    "name": "弗烈顿火城的便利店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/fire/7309"
+  },
+  "7302": {
+    "id": 7302,
+    "name": "火山祭坛",
+    "width": 45,
+    "height": 45,
+    "rel_path": "EDEN/fire/7302"
+  },
+  "7305": {
+    "id": 7305,
+    "name": "弗烈顿火城的旅馆",
+    "width": 30,
+    "height": 25,
+    "rel_path": "EDEN/fire/7305"
+  },
+  "7351": {
+    "id": 7351,
+    "name": "12年前蒙达村",
+    "width": 110,
+    "height": 110,
+    "rel_path": "EDEN/fire/7351"
+  },
+  "7356": {
+    "id": 7356,
+    "name": "蒙达村的民房",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/fire/7356"
+  },
+  "7358": {
+    "id": 7358,
+    "name": "蒙达村的民房",
+    "width": 20,
+    "height": 25,
+    "rel_path": "EDEN/fire/7358"
+  },
+  "7304": {
+    "id": 7304,
+    "name": "弗烈顿火城的武器店",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/fire/7304"
+  },
+  "7303": {
+    "id": 7303,
+    "name": "弗烈顿火城的民房",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/fire/7303"
+  },
+  "7359": {
+    "id": 7359,
+    "name": "蒙达村的民房",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/fire/7359"
+  },
+  "7357": {
+    "id": 7357,
+    "name": "蒙达村的民房",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/fire/7357"
+  },
+  "7350": {
+    "id": 7350,
+    "name": "蒙达村",
+    "width": 110,
+    "height": 110,
+    "rel_path": "EDEN/fire/7350"
+  },
+  "7310": {
+    "id": 7310,
+    "name": "弗烈顿火城的医院",
+    "width": 20,
+    "height": 18,
+    "rel_path": "EDEN/fire/7310"
+  },
+  "60312": {
+    "id": 60312,
+    "name": "伊塔工作室",
+    "width": 30,
+    "height": 40,
+    "rel_path": "EDEN/fire/dungeon/60312"
+  },
+  "60315": {
+    "id": 60315,
+    "name": "火精灵火山洞窟",
+    "width": 45,
+    "height": 35,
+    "rel_path": "EDEN/fire/dungeon/60315"
+  },
+  "60323": {
+    "id": 60323,
+    "name": "火山道场第七层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60323"
+  },
+  "60324": {
+    "id": 60324,
+    "name": "火山道场第八层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60324"
+  },
+  "60341": {
+    "id": 60341,
+    "name": "火山洞窟第四层",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/fire/dungeon/60341"
+  },
+  "60325": {
+    "id": 60325,
+    "name": "火山道场第九层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60325"
+  },
+  "60322": {
+    "id": 60322,
+    "name": "火山道场第六层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60322"
+  },
+  "60314": {
+    "id": 60314,
+    "name": "火山道场通道",
+    "width": 40,
+    "height": 60,
+    "rel_path": "EDEN/fire/dungeon/60314"
+  },
+  "60313": {
+    "id": 60313,
+    "name": "火精灵火山洞窟",
+    "width": 45,
+    "height": 35,
+    "rel_path": "EDEN/fire/dungeon/60313"
+  },
+  "60340": {
+    "id": 60340,
+    "name": "火山洞窟第三层",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/fire/dungeon/60340"
+  },
+  "60331": {
+    "id": 60331,
+    "name": "火山道场第十五层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60331"
+  },
+  "60336": {
+    "id": 60336,
+    "name": "火山道场第二十层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60336"
+  },
+  "60309": {
+    "id": 60309,
+    "name": "试炼洞窟第二层",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/fire/dungeon/60309"
+  },
+  "60300": {
+    "id": 60300,
+    "name": "蒙达村地下通路",
+    "width": 60,
+    "height": 40,
+    "rel_path": "EDEN/fire/dungeon/60300"
+  },
+  "60307": {
+    "id": 60307,
+    "name": "卡罗的精神结界",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/fire/dungeon/60307"
+  },
+  "60338": {
+    "id": 60338,
+    "name": "火山洞窟第一层",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/fire/dungeon/60338"
+  },
+  "60306": {
+    "id": 60306,
+    "name": "伊塔工作室",
+    "width": 30,
+    "height": 40,
+    "rel_path": "EDEN/fire/dungeon/60306"
+  },
+  "60339": {
+    "id": 60339,
+    "name": "火山洞窟第二层",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/fire/dungeon/60339"
+  },
+  "60301": {
+    "id": 60301,
+    "name": "蒙达山海底通道",
+    "width": 100,
+    "height": 40,
+    "rel_path": "EDEN/fire/dungeon/60301"
+  },
+  "60337": {
+    "id": 60337,
+    "name": "火灵道场柜台",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/fire/dungeon/60337"
+  },
+  "60308": {
+    "id": 60308,
+    "name": "试炼洞窟第一层",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/fire/dungeon/60308"
+  },
+  "60330": {
+    "id": 60330,
+    "name": "火山道场第十四层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60330"
+  },
+  "60342": {
+    "id": 60342,
+    "name": "火山道场第二十一层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60342"
+  },
+  "60329": {
+    "id": 60329,
+    "name": "火山道场第十三层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60329"
+  },
+  "60316": {
+    "id": 60316,
+    "name": "火精灵火山洞窟",
+    "width": 45,
+    "height": 35,
+    "rel_path": "EDEN/fire/dungeon/60316"
+  },
+  "60311": {
+    "id": 60311,
+    "name": "试炼洞窟第四层",
+    "width": 80,
+    "height": 60,
+    "rel_path": "EDEN/fire/dungeon/60311"
+  },
+  "60318": {
+    "id": 60318,
+    "name": "火山道场第二层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60318"
+  },
+  "60327": {
+    "id": 60327,
+    "name": "火山道场第十一层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60327"
+  },
+  "60320": {
+    "id": 60320,
+    "name": "火山道场第四层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60320"
+  },
+  "60343": {
+    "id": 60343,
+    "name": "伊塔工作室",
+    "width": 30,
+    "height": 40,
+    "rel_path": "EDEN/fire/dungeon/60343"
+  },
+  "60344": {
+    "id": 60344,
+    "name": "火山道场医务室",
+    "width": 15,
+    "height": 15,
+    "rel_path": "EDEN/fire/dungeon/60344"
+  },
+  "60321": {
+    "id": 60321,
+    "name": "火山道场第五层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60321"
+  },
+  "60319": {
+    "id": 60319,
+    "name": "火山道场第三层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60319"
+  },
+  "60326": {
+    "id": 60326,
+    "name": "火山道场第十层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60326"
+  },
+  "60310": {
+    "id": 60310,
+    "name": "试炼洞窟第三层",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/fire/dungeon/60310"
+  },
+  "60328": {
+    "id": 60328,
+    "name": "火山道场第十二层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60328"
+  },
+  "60317": {
+    "id": 60317,
+    "name": "火山道场第一层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60317"
+  },
+  "60335": {
+    "id": 60335,
+    "name": "火山道场第十九层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60335"
+  },
+  "60332": {
+    "id": 60332,
+    "name": "火山道场第十六层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60332"
+  },
+  "60304": {
+    "id": 60304,
+    "name": "蒙达山山洞通道",
+    "width": 10,
+    "height": 30,
+    "rel_path": "EDEN/fire/dungeon/60304"
+  },
+  "60303": {
+    "id": 60303,
+    "name": "蒙达山山洞通道",
+    "width": 10,
+    "height": 30,
+    "rel_path": "EDEN/fire/dungeon/60303"
+  },
+  "60302": {
+    "id": 60302,
+    "name": "蒙达山洞窟",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/fire/dungeon/60302"
+  },
+  "60305": {
+    "id": 60305,
+    "name": "蒙达山洞窟",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/fire/dungeon/60305"
+  },
+  "60333": {
+    "id": 60333,
+    "name": "火山道场第十七层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60333"
+  },
+  "60334": {
+    "id": 60334,
+    "name": "火山道场第十八层",
+    "width": 25,
+    "height": 20,
+    "rel_path": "EDEN/fire/dungeon/60334"
+  },
+  "7105": {
+    "id": 7105,
+    "name": "塔耳塔地城东南区",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/earth/7105"
+  },
+  "7102": {
+    "id": 7102,
+    "name": "道场的医务室",
+    "width": 15,
+    "height": 15,
+    "rel_path": "EDEN/earth/7102"
+  },
+  "7134": {
+    "id": 7134,
+    "name": "贫民窟",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/earth/7134"
+  },
+  "7133": {
+    "id": 7133,
+    "name": "英嘉的房间",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/earth/7133"
+  },
+  "7132": {
+    "id": 7132,
+    "name": "塔耳塔战士团餐厅",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/earth/7132"
+  },
+  "7103": {
+    "id": 7103,
+    "name": "师傅的房间",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/earth/7103"
+  },
+  "7104": {
+    "id": 7104,
+    "name": "魔法道场",
+    "width": 407,
+    "height": 144,
+    "rel_path": "EDEN/earth/7104"
+  },
+  "7119": {
+    "id": 7119,
+    "name": "塔耳塔旅馆",
+    "width": 35,
+    "height": 25,
+    "rel_path": "EDEN/earth/7119"
+  },
+  "7126": {
+    "id": 7126,
+    "name": "塔耳塔民房",
+    "width": 16,
+    "height": 10,
+    "rel_path": "EDEN/earth/7126"
+  },
+  "7121": {
+    "id": 7121,
+    "name": "塔耳塔宠物店",
+    "width": 15,
+    "height": 10,
+    "rel_path": "EDEN/earth/7121"
+  },
+  "7117": {
+    "id": 7117,
+    "name": "塔耳塔武器店",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/earth/7117"
+  },
+  "7110": {
+    "id": 7110,
+    "name": "塔耳塔地城西方通道",
+    "width": 10,
+    "height": 20,
+    "rel_path": "EDEN/earth/7110"
+  },
+  "7111": {
+    "id": 7111,
+    "name": "塔耳塔地城西南区",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/earth/7111"
+  },
+  "7129": {
+    "id": 7129,
+    "name": "塔耳塔战士团",
+    "width": 40,
+    "height": 40,
+    "rel_path": "EDEN/earth/7129"
+  },
+  "7116": {
+    "id": 7116,
+    "name": "塔耳塔肉店",
+    "width": 15,
+    "height": 15,
+    "rel_path": "EDEN/earth/7116"
+  },
+  "7120": {
+    "id": 7120,
+    "name": "塔耳塔医院",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/earth/7120"
+  },
+  "7118": {
+    "id": 7118,
+    "name": "塔耳塔便利商店",
+    "width": 30,
+    "height": 40,
+    "rel_path": "EDEN/earth/7118"
+  },
+  "7127": {
+    "id": 7127,
+    "name": "塔耳塔民房",
+    "width": 12,
+    "height": 12,
+    "rel_path": "EDEN/earth/7127"
+  },
+  "7101": {
+    "id": 7101,
+    "name": "道场柜台",
+    "width": 25,
+    "height": 25,
+    "rel_path": "EDEN/earth/7101"
+  },
+  "7106": {
+    "id": 7106,
+    "name": "塔耳塔地城东方通道",
+    "width": 10,
+    "height": 20,
+    "rel_path": "EDEN/earth/7106"
+  },
+  "7130": {
+    "id": 7130,
+    "name": "塔耳塔战士团餐厅",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/earth/7130"
+  },
+  "7108": {
+    "id": 7108,
+    "name": "塔耳塔地城北方通道",
+    "width": 25,
+    "height": 15,
+    "rel_path": "EDEN/earth/7108"
+  },
+  "7109": {
+    "id": 7109,
+    "name": "塔耳塔地城西北区",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/earth/7109"
+  },
+  "7131": {
+    "id": 7131,
+    "name": "塔耳塔战士团餐厅",
+    "width": 20,
+    "height": 20,
+    "rel_path": "EDEN/earth/7131"
+  },
+  "7107": {
+    "id": 7107,
+    "name": "塔耳塔地城东北区",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/earth/7107"
+  },
+  "7100": {
+    "id": 7100,
+    "name": "塔耳塔地城入口",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/earth/7100"
+  },
+  "7122": {
+    "id": 7122,
+    "name": "塔耳塔民房",
+    "width": 15,
+    "height": 15,
+    "rel_path": "EDEN/earth/7122"
+  },
+  "7125": {
+    "id": 7125,
+    "name": "塔耳塔民房",
+    "width": 20,
+    "height": 12,
+    "rel_path": "EDEN/earth/7125"
+  },
+  "7112": {
+    "id": 7112,
+    "name": "塔耳塔地城中央区",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/earth/7112"
+  },
+  "7124": {
+    "id": 7124,
+    "name": "塔耳塔民房",
+    "width": 15,
+    "height": 15,
+    "rel_path": "EDEN/earth/7124"
+  },
+  "7123": {
+    "id": 7123,
+    "name": "塔耳塔民房",
+    "width": 12,
+    "height": 12,
+    "rel_path": "EDEN/earth/7123"
+  },
+  "60103": {
+    "id": 60103,
+    "name": "地精灵洞窟",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/earth/dungeon/60103"
+  },
+  "60102": {
+    "id": 60102,
+    "name": "地精灵洞窟",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/earth/dungeon/60102"
+  },
+  "60100": {
+    "id": 60100,
+    "name": "塔耳塔盐矿",
+    "width": 70,
+    "height": 70,
+    "rel_path": "EDEN/earth/dungeon/60100"
+  },
+  "60101": {
+    "id": 60101,
+    "name": "地精灵洞窟",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/earth/dungeon/60101"
+  },
+  "5571": {
+    "id": 5571,
+    "name": "水坝遗迹南方洞窟地下一楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/edenporu/5571"
+  },
+  "5576": {
+    "id": 5576,
+    "name": "波拉山谷",
+    "width": 100,
+    "height": 100,
+    "rel_path": "EDEN/edenporu/5576"
+  },
+  "5582": {
+    "id": 5582,
+    "name": "波拉山谷",
+    "width": 100,
+    "height": 100,
+    "rel_path": "EDEN/edenporu/5582"
+  },
+  "5540": {
+    "id": 5540,
+    "name": "波拉岛",
+    "width": 800,
+    "height": 800,
+    "rel_path": "poru/5540"
+  },
+  "5578": {
+    "id": 5578,
+    "name": "训练师的住所",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/edenporu/5578"
+  },
+  "5579": {
+    "id": 5579,
+    "name": "伊尼机场",
+    "width": 30,
+    "height": 30,
+    "rel_path": "EDEN/edenporu/5579"
+  },
+  "5577": {
+    "id": 5577,
+    "name": "训练师的住所",
+    "width": 50,
+    "height": 50,
+    "rel_path": "EDEN/edenporu/5577"
+  },
+  "5570": {
+    "id": 5570,
+    "name": "水坝遗迹南方洞窟",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/edenporu/5570"
+  },
+  "5575": {
+    "id": 5575,
+    "name": "水坝遗迹北方洞窟地下一楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "EDEN/edenporu/5575"
+  },
+  "5581": {
+    "id": 5581,
+    "name": "天空之境",
+    "width": 150,
+    "height": 150,
+    "rel_path": "EDEN/edenporu/5581"
+  },
+  "5572": {
+    "id": 5572,
+    "name": "水坝遗迹南方洞窟地下二楼",
+    "width": 60,
+    "height": 100,
+    "rel_path": "EDEN/edenporu/5572"
+  },
+  "5573": {
+    "id": 5573,
+    "name": "水坝遗迹洞窟底层",
+    "width": 20,
+    "height": 200,
+    "rel_path": "EDEN/edenporu/5573"
+  },
+  "5580": {
+    "id": 5580,
+    "name": "波拉山谷",
+    "width": 100,
+    "height": 100,
+    "rel_path": "EDEN/edenporu/5580"
+  },
+  "5574": {
+    "id": 5574,
+    "name": "水坝遗迹北方洞窟地下二楼",
+    "width": 60,
+    "height": 100,
+    "rel_path": "EDEN/edenporu/5574"
+  },
+  "5561": {
+    "id": 5561,
+    "name": "浩瀚之洋",
+    "width": 200,
+    "height": 200,
+    "rel_path": "EDEN/edenporu/5561"
+  },
+  "20000": {
+    "id": 20000,
+    "name": "格斗竞技场",
+    "width": 50,
+    "height": 50,
+    "rel_path": "longzoro/20000"
+  },
+  "8110": {
+    "id": 8110,
+    "name": "冰颤通道",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/8110"
+  },
+  "95": {
+    "id": 95,
+    "name": "未知",
+    "width": 50,
+    "height": 50,
+    "rel_path": "longzoro/ruieryashi/95"
+  },
+  "7503": {
+    "id": 7503,
+    "name": "瑞尔亚斯的训练所",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7503"
+  },
+  "8117": {
+    "id": 8117,
+    "name": "沉睡洞窟-北",
+    "width": 100,
+    "height": 100,
+    "rel_path": "longzoro/ruieryashi/8117"
+  },
+  "7504": {
+    "id": 7504,
+    "name": "瑞尔亚斯的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7504"
+  },
+  "92": {
+    "id": 92,
+    "name": "未知",
+    "width": 50,
+    "height": 50,
+    "rel_path": "longzoro/ruieryashi/92"
+  },
+  "8121": {
+    "id": 8121,
+    "name": "黄泉之境",
+    "width": 40,
+    "height": 40,
+    "rel_path": "longzoro/ruieryashi/8121"
+  },
+  "8126": {
+    "id": 8126,
+    "name": "沉睡洞窟-中三",
+    "width": 100,
+    "height": 100,
+    "rel_path": "longzoro/ruieryashi/8126"
+  },
+  "7535": {
+    "id": 7535,
+    "name": "庄园素材贩售店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "longzoro/ruieryashi/7535"
+  },
+  "8119": {
+    "id": 8119,
+    "name": "沉睡洞窟-西",
+    "width": 100,
+    "height": 100,
+    "rel_path": "longzoro/ruieryashi/8119"
+  },
+  "8118": {
+    "id": 8118,
+    "name": "沉睡洞窟-南",
+    "width": 100,
+    "height": 100,
+    "rel_path": "longzoro/ruieryashi/8118"
+  },
+  "8120": {
+    "id": 8120,
+    "name": "沉睡洞窟-中",
+    "width": 100,
+    "height": 100,
+    "rel_path": "longzoro/ruieryashi/8120"
+  },
+  "8116": {
+    "id": 8116,
+    "name": "沉睡洞窟-东",
+    "width": 100,
+    "height": 100,
+    "rel_path": "longzoro/ruieryashi/8116"
+  },
+  "7505": {
+    "id": 7505,
+    "name": "瑞尔亚斯的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7505"
+  },
+  "93": {
+    "id": 93,
+    "name": "未知",
+    "width": 20,
+    "height": 40,
+    "rel_path": "longzoro/ruieryashi/93"
+  },
+  "8111": {
+    "id": 8111,
+    "name": "冰颤通道",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/8111"
+  },
+  "94": {
+    "id": 94,
+    "name": "未知",
+    "width": 35,
+    "height": 60,
+    "rel_path": "longzoro/ruieryashi/94"
+  },
+  "7502": {
+    "id": 7502,
+    "name": "瑞尔亚斯的道具店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7502"
+  },
+  "817": {
+    "id": 817,
+    "name": "泪之海海底",
+    "width": 400,
+    "height": 600,
+    "rel_path": "namidanoumi/817"
+  },
+  "7520": {
+    "id": 7520,
+    "name": "民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7520"
+  },
+  "89": {
+    "id": 89,
+    "name": "流冰回廊上层",
+    "width": 120,
+    "height": 120,
+    "rel_path": "longzoro/ruieryashi/89"
+  },
+  "7518": {
+    "id": 7518,
+    "name": "民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7518"
+  },
+  "7511": {
+    "id": 7511,
+    "name": "瑞尔亚斯的研究院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7511"
+  },
+  "87": {
+    "id": 87,
+    "name": "流冰回廊上层",
+    "width": 120,
+    "height": 120,
+    "rel_path": "longzoro/ruieryashi/87"
+  },
+  "8102": {
+    "id": 8102,
+    "name": "深海通道",
+    "width": 40,
+    "height": 70,
+    "rel_path": "longzoro/ruieryashi/8102"
+  },
+  "80": {
+    "id": 80,
+    "name": "流水回廊上层",
+    "width": 45,
+    "height": 45,
+    "rel_path": "longzoro/ruieryashi/80"
+  },
+  "7516": {
+    "id": 7516,
+    "name": "民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7516"
+  },
+  "8105": {
+    "id": 8105,
+    "name": "深海通道",
+    "width": 20,
+    "height": 20,
+    "rel_path": "longzoro/ruieryashi/8105"
+  },
+  "81": {
+    "id": 81,
+    "name": "流水回廊上层",
+    "width": 45,
+    "height": 45,
+    "rel_path": "longzoro/ruieryashi/81"
+  },
+  "8104": {
+    "id": 8104,
+    "name": "深海通道",
+    "width": 50,
+    "height": 50,
+    "rel_path": "longzoro/ruieryashi/8104"
+  },
+  "86": {
+    "id": 86,
+    "name": "流冰回廊上层",
+    "width": 120,
+    "height": 120,
+    "rel_path": "longzoro/ruieryashi/86"
+  },
+  "8103": {
+    "id": 8103,
+    "name": "深海通道",
+    "width": 60,
+    "height": 60,
+    "rel_path": "longzoro/ruieryashi/8103"
+  },
+  "7519": {
+    "id": 7519,
+    "name": "民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7519"
+  },
+  "7521": {
+    "id": 7521,
+    "name": "民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7521"
+  },
+  "88": {
+    "id": 88,
+    "name": "流冰回廊上层",
+    "width": 120,
+    "height": 120,
+    "rel_path": "longzoro/ruieryashi/88"
+  },
+  "7507": {
+    "id": 7507,
+    "name": "瑞尔亚斯的学习厅",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7507"
+  },
+  "91": {
+    "id": 91,
+    "name": "流冰回廊下层",
+    "width": 120,
+    "height": 120,
+    "rel_path": "longzoro/ruieryashi/91"
+  },
+  "8113": {
+    "id": 8113,
+    "name": "旋涡通道",
+    "width": 80,
+    "height": 90,
+    "rel_path": "longzoro/ruieryashi/8113"
+  },
+  "96": {
+    "id": 96,
+    "name": "流冰回廊下层",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/96"
+  },
+  "7500": {
+    "id": 7500,
+    "name": "瑞尔亚斯之都",
+    "width": 100,
+    "height": 100,
+    "rel_path": "longzoro/ruieryashi/7500"
+  },
+  "8125": {
+    "id": 8125,
+    "name": "沉睡洞窟-中二",
+    "width": 100,
+    "height": 100,
+    "rel_path": "longzoro/ruieryashi/8125"
+  },
+  "7509": {
+    "id": 7509,
+    "name": "瑞尔亚斯的便利商店",
+    "width": 40,
+    "height": 60,
+    "rel_path": "longzoro/ruieryashi/7509"
+  },
+  "7536": {
+    "id": 7536,
+    "name": "庄园专卖店一",
+    "width": 12,
+    "height": 12,
+    "rel_path": "longzoro/ruieryashi/7536"
+  },
+  "98": {
+    "id": 98,
+    "name": "流冰回廊下层",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/98"
+  },
+  "8122": {
+    "id": 8122,
+    "name": "黄泉之境",
+    "width": 100,
+    "height": 100,
+    "rel_path": "longzoro/ruieryashi/8122"
+  },
+  "99": {
+    "id": 99,
+    "name": "流冰回廊下层",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/99"
+  },
+  "8123": {
+    "id": 8123,
+    "name": "黄泉之境",
+    "width": 100,
+    "height": 100,
+    "rel_path": "longzoro/ruieryashi/8123"
+  },
+  "7530": {
+    "id": 7530,
+    "name": "瑞尔亚斯庄园",
+    "width": 100,
+    "height": 100,
+    "rel_path": "longzoro/ruieryashi/7530"
+  },
+  "8124": {
+    "id": 8124,
+    "name": "沉睡洞窟-中一",
+    "width": 100,
+    "height": 100,
+    "rel_path": "longzoro/ruieryashi/8124"
+  },
+  "7508": {
+    "id": 7508,
+    "name": "瑞尔亚斯的议会厅",
+    "width": 50,
+    "height": 50,
+    "rel_path": "longzoro/ruieryashi/7508"
+  },
+  "7537": {
+    "id": 7537,
+    "name": "庄园素通用售店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "longzoro/ruieryashi/7537"
+  },
+  "8112": {
+    "id": 8112,
+    "name": "冰封通道",
+    "width": 50,
+    "height": 60,
+    "rel_path": "longzoro/ruieryashi/8112"
+  },
+  "97": {
+    "id": 97,
+    "name": "流冰回廊下层",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/97"
+  },
+  "7501": {
+    "id": 7501,
+    "name": "瑞尔亚斯的武器店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7501"
+  },
+  "7506": {
+    "id": 7506,
+    "name": "瑞尔亚斯的首长家",
+    "width": 30,
+    "height": 40,
+    "rel_path": "longzoro/ruieryashi/7506"
+  },
+  "90": {
+    "id": 90,
+    "name": "流冰回廊上层",
+    "width": 120,
+    "height": 120,
+    "rel_path": "longzoro/ruieryashi/90"
+  },
+  "7600": {
+    "id": 7600,
+    "name": "无息之境",
+    "width": 300,
+    "height": 300,
+    "rel_path": "longzoro/ruieryashi/7600"
+  },
+  "8108": {
+    "id": 8108,
+    "name": "冰颤通道",
+    "width": 40,
+    "height": 60,
+    "rel_path": "longzoro/ruieryashi/8108"
+  },
+  "83": {
+    "id": 83,
+    "name": "流水回廊上层",
+    "width": 45,
+    "height": 45,
+    "rel_path": "longzoro/ruieryashi/83"
+  },
+  "7515": {
+    "id": 7515,
+    "name": "民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7515"
+  },
+  "8106": {
+    "id": 8106,
+    "name": "浅海通道",
+    "width": 40,
+    "height": 60,
+    "rel_path": "longzoro/ruieryashi/8106"
+  },
+  "7512": {
+    "id": 7512,
+    "name": "民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7512"
+  },
+  "84": {
+    "id": 84,
+    "name": "流水回廊上层",
+    "width": 40,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/84"
+  },
+  "7513": {
+    "id": 7513,
+    "name": "民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7513"
+  },
+  "85": {
+    "id": 85,
+    "name": "未知",
+    "width": 45,
+    "height": 45,
+    "rel_path": "longzoro/ruieryashi/85"
+  },
+  "82": {
+    "id": 82,
+    "name": "流水回廊上层",
+    "width": 45,
+    "height": 50,
+    "rel_path": "longzoro/ruieryashi/82"
+  },
+  "7514": {
+    "id": 7514,
+    "name": "民房",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/7514"
+  },
+  "8107": {
+    "id": 8107,
+    "name": "浅水通道",
+    "width": 40,
+    "height": 60,
+    "rel_path": "longzoro/ruieryashi/8107"
+  },
+  "8109": {
+    "id": 8109,
+    "name": "冰颤通道",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/ruieryashi/8109"
+  },
+  "10030": {
+    "id": 10030,
+    "name": "瑞尔亚斯－新手村",
+    "width": 80,
+    "height": 70,
+    "rel_path": "longzoro/1000/10030"
+  },
+  "10032": {
+    "id": 10032,
+    "name": "瑞尔亚斯族战场",
+    "width": 40,
+    "height": 40,
+    "rel_path": "longzoro/1000/10032"
+  },
+  "10035": {
+    "id": 10035,
+    "name": "瑞尔亚斯宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "longzoro/1000/10035"
+  },
+  "777": {
+    "id": 777,
+    "name": "测试用地图",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jssroom/777"
+  },
+  "8256": {
+    "id": 8256,
+    "name": "皓月之境",
+    "width": 100,
+    "height": 100,
+    "rel_path": "moon/8256"
+  },
+  "8260": {
+    "id": 8260,
+    "name": "封印的迷宫",
+    "width": 250,
+    "height": 180,
+    "rel_path": "moon/8260"
+  },
+  "8258": {
+    "id": 8258,
+    "name": "狼人一族的栖息地",
+    "width": 50,
+    "height": 30,
+    "rel_path": "moon/8258"
+  },
+  "8259": {
+    "id": 8259,
+    "name": "迷宫",
+    "width": 250,
+    "height": 180,
+    "rel_path": "moon/8259"
+  },
+  "8261": {
+    "id": 8261,
+    "name": "封印的迷宫",
+    "width": 250,
+    "height": 180,
+    "rel_path": "moon/8261"
+  },
+  "8257": {
+    "id": 8257,
+    "name": "皓月之境",
+    "width": 100,
+    "height": 100,
+    "rel_path": "moon/8257"
+  },
+  "8255": {
+    "id": 8255,
+    "name": "月之幻境",
+    "width": 60,
+    "height": 70,
+    "rel_path": "moon/8255"
+  },
+  "8253": {
+    "id": 8253,
+    "name": "月之幻境地下第二层",
+    "width": 60,
+    "height": 60,
+    "rel_path": "moon/8253"
+  },
+  "8254": {
+    "id": 8254,
+    "name": "月之幻境地下第一层",
+    "width": 60,
+    "height": 60,
+    "rel_path": "moon/8254"
+  },
+  "145": {
+    "id": 145,
+    "name": "水池PK竞技场",
+    "width": 30,
+    "height": 30,
+    "rel_path": "family/145"
+  },
+  "142": {
+    "id": 142,
+    "name": "草原PK竞技场",
+    "width": 30,
+    "height": 30,
+    "rel_path": "family/142"
+  },
+  "143": {
+    "id": 143,
+    "name": "丛林PK竞技场",
+    "width": 30,
+    "height": 30,
+    "rel_path": "family/143"
+  },
+  "144": {
+    "id": 144,
+    "name": "武斗场PK竞技场",
+    "width": 30,
+    "height": 30,
+    "rel_path": "family/144"
+  },
+  "130": {
+    "id": 130,
+    "name": "竞技场",
+    "width": 60,
+    "height": 60,
+    "rel_path": "extra/130"
+  },
+  "141": {
+    "id": 141,
+    "name": "PK竞技聚会场",
+    "width": 50,
+    "height": 50,
+    "rel_path": "family/141"
+  },
+  "146": {
+    "id": 146,
+    "name": "树洞PK竞技场",
+    "width": 30,
+    "height": 30,
+    "rel_path": "family/146"
+  },
+  "147": {
+    "id": 147,
+    "name": "魔王竞技场",
+    "width": 30,
+    "height": 30,
+    "rel_path": "extra/147"
+  },
+  "3038": {
+    "id": 3038,
+    "name": "庄园素材贩售店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/300/3038"
+  },
+  "3036": {
+    "id": 3036,
+    "name": "庄园专用贩售店一",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/300/3036"
+  },
+  "3031": {
+    "id": 3031,
+    "name": "加加村庄园族长家",
+    "width": 20,
+    "height": 20,
+    "rel_path": "family/300/3031"
+  },
+  "3030": {
+    "id": 3030,
+    "name": "加加村的庄园",
+    "width": 80,
+    "height": 80,
+    "rel_path": "family/300/3030"
+  },
+  "3037": {
+    "id": 3037,
+    "name": "庄园专用贩售店二",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/300/3037"
+  },
+  "3032": {
+    "id": 3032,
+    "name": "加加村庄园PK场",
+    "width": 32,
+    "height": 32,
+    "rel_path": "family/300/3032"
+  },
+  "3035": {
+    "id": 3035,
+    "name": "通用物品贩卖店店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/300/3035"
+  },
+  "3034": {
+    "id": 3034,
+    "name": "加加村庄园聊天室",
+    "width": 18,
+    "height": 18,
+    "rel_path": "family/300/3034"
+  },
+  "3033": {
+    "id": 3033,
+    "name": "加加村庄园聊天柜台",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/300/3033"
+  },
+  "9036": {
+    "id": 9036,
+    "name": "通用物品贩卖店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/900/9036"
+  },
+  "9031": {
+    "id": 9031,
+    "name": "亚伊欧庄园族长家",
+    "width": 30,
+    "height": 30,
+    "rel_path": "family/900/9031"
+  },
+  "9038": {
+    "id": 9038,
+    "name": "庄园专用贩卖店二",
+    "width": 18,
+    "height": 18,
+    "rel_path": "family/900/9038"
+  },
+  "9030": {
+    "id": 9030,
+    "name": "亚伊欧庄园",
+    "width": 120,
+    "height": 120,
+    "rel_path": "family/900/9030"
+  },
+  "9037": {
+    "id": 9037,
+    "name": "庄园素材贩卖店",
+    "width": 14,
+    "height": 14,
+    "rel_path": "family/900/9037"
+  },
+  "9032": {
+    "id": 9032,
+    "name": "亚伊欧庄园竞技场",
+    "width": 60,
+    "height": 60,
+    "rel_path": "family/900/9032"
+  },
+  "9035": {
+    "id": 9035,
+    "name": "庄园专用贩卖店一",
+    "width": 18,
+    "height": 18,
+    "rel_path": "family/900/9035"
+  },
+  "9034": {
+    "id": 9034,
+    "name": "亚伊欧庄园聊天室",
+    "width": 35,
+    "height": 35,
+    "rel_path": "family/900/9034"
+  },
+  "9033": {
+    "id": 9033,
+    "name": "亚伊欧庄园聊天室柜台",
+    "width": 13,
+    "height": 13,
+    "rel_path": "family/900/9033"
+  },
+  "7037": {
+    "id": 7037,
+    "name": "庄园专用贩卖店一",
+    "width": 15,
+    "height": 19,
+    "rel_path": "family/700/7037"
+  },
+  "7030": {
+    "id": 7030,
+    "name": "尼克斯庄园",
+    "width": 88,
+    "height": 88,
+    "rel_path": "family/700/7030"
+  },
+  "7038": {
+    "id": 7038,
+    "name": "通用物品贩卖店",
+    "width": 11,
+    "height": 11,
+    "rel_path": "family/700/7038"
+  },
+  "7031": {
+    "id": 7031,
+    "name": "尼克斯庄园族长家",
+    "width": 20,
+    "height": 20,
+    "rel_path": "family/700/7031"
+  },
+  "7036": {
+    "id": 7036,
+    "name": "庄园素材贩卖店",
+    "width": 11,
+    "height": 11,
+    "rel_path": "family/700/7036"
+  },
+  "7033": {
+    "id": 7033,
+    "name": "尼克斯庄园聊天柜台",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/700/7033"
+  },
+  "7034": {
+    "id": 7034,
+    "name": "尼克斯庄园聊天室",
+    "width": 30,
+    "height": 30,
+    "rel_path": "family/700/7034"
+  },
+  "7035": {
+    "id": 7035,
+    "name": "庄园专用贩卖店二",
+    "width": 15,
+    "height": 15,
+    "rel_path": "family/700/7035"
+  },
+  "7032": {
+    "id": 7032,
+    "name": "尼克斯庄园竞技场",
+    "width": 32,
+    "height": 32,
+    "rel_path": "family/700/7032"
+  },
+  "4033": {
+    "id": 4033,
+    "name": "卡鲁它那庄园聊天柜台",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/400/4033"
+  },
+  "4034": {
+    "id": 4034,
+    "name": "卡鲁它那庄园聊天室",
+    "width": 18,
+    "height": 18,
+    "rel_path": "family/400/4034"
+  },
+  "4035": {
+    "id": 4035,
+    "name": "庄园专用贩售店一",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/400/4035"
+  },
+  "4032": {
+    "id": 4032,
+    "name": "卡鲁它那庄园PK场",
+    "width": 32,
+    "height": 32,
+    "rel_path": "family/400/4032"
+  },
+  "4037": {
+    "id": 4037,
+    "name": "庄园专用贩售店二",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/400/4037"
+  },
+  "4030": {
+    "id": 4030,
+    "name": "卡鲁它那庄园",
+    "width": 80,
+    "height": 80,
+    "rel_path": "family/400/4030"
+  },
+  "4038": {
+    "id": 4038,
+    "name": "通用物品贩卖店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/400/4038"
+  },
+  "4031": {
+    "id": 4031,
+    "name": "卡鲁它那庄园族长家",
+    "width": 20,
+    "height": 20,
+    "rel_path": "family/400/4031"
+  },
+  "4036": {
+    "id": 4036,
+    "name": "庄园素材贩卖店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/400/4036"
+  },
+  "1044": {
+    "id": 1044,
+    "name": "萨姆吉尔庄园聊天室",
+    "width": 32,
+    "height": 32,
+    "rel_path": "family/100/1044"
+  },
+  "1043": {
+    "id": 1043,
+    "name": "萨姆吉尔庄园聊天柜台",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/100/1043"
+  },
+  "1042": {
+    "id": 1042,
+    "name": "萨姆吉尔庄园竞技场",
+    "width": 32,
+    "height": 32,
+    "rel_path": "family/100/1042"
+  },
+  "1045": {
+    "id": 1045,
+    "name": "庄园专用贩售店二",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/100/1045"
+  },
+  "1040": {
+    "id": 1040,
+    "name": "萨姆吉尔庄园",
+    "width": 80,
+    "height": 80,
+    "rel_path": "family/100/1040"
+  },
+  "1047": {
+    "id": 1047,
+    "name": "庄园专用贩售店一",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/100/1047"
+  },
+  "1046": {
+    "id": 1046,
+    "name": "通用物品贩卖店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/100/1046"
+  },
+  "1041": {
+    "id": 1041,
+    "name": "萨姆吉尔庄园族长家",
+    "width": 20,
+    "height": 20,
+    "rel_path": "family/100/1041"
+  },
+  "1048": {
+    "id": 1048,
+    "name": "庄园素材贩售店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/100/1048"
+  },
+  "5035": {
+    "id": 5035,
+    "name": "庄园专用贩售店一",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/500/5035"
+  },
+  "5032": {
+    "id": 5032,
+    "name": "伊甸庄园竞技场",
+    "width": 40,
+    "height": 40,
+    "rel_path": "family/500/5032"
+  },
+  "5033": {
+    "id": 5033,
+    "name": "伊甸庄园聊天室柜台",
+    "width": 20,
+    "height": 20,
+    "rel_path": "family/500/5033"
+  },
+  "5034": {
+    "id": 5034,
+    "name": "伊甸庄园聊天室",
+    "width": 35,
+    "height": 35,
+    "rel_path": "family/500/5034"
+  },
+  "5038": {
+    "id": 5038,
+    "name": "通用物品贩卖店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/500/5038"
+  },
+  "5031": {
+    "id": 5031,
+    "name": "伊甸庄园族长家",
+    "width": 20,
+    "height": 20,
+    "rel_path": "family/500/5031"
+  },
+  "5036": {
+    "id": 5036,
+    "name": "庄园专用贩卖店二",
+    "width": 15,
+    "height": 15,
+    "rel_path": "family/500/5036"
+  },
+  "5037": {
+    "id": 5037,
+    "name": "庄园素材贩卖店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/500/5037"
+  },
+  "5030": {
+    "id": 5030,
+    "name": "伊甸庄园",
+    "width": 80,
+    "height": 80,
+    "rel_path": "family/500/5030"
+  },
+  "8030": {
+    "id": 8030,
+    "name": "弗烈顿庄园",
+    "width": 80,
+    "height": 80,
+    "rel_path": "family/800/8030"
+  },
+  "8037": {
+    "id": 8037,
+    "name": "通用物品贩卖店",
+    "width": 20,
+    "height": 20,
+    "rel_path": "family/800/8037"
+  },
+  "8036": {
+    "id": 8036,
+    "name": "庄园专属贩卖店一",
+    "width": 20,
+    "height": 20,
+    "rel_path": "family/800/8036"
+  },
+  "8031": {
+    "id": 8031,
+    "name": "弗烈顿庄园族长家",
+    "width": 20,
+    "height": 34,
+    "rel_path": "family/800/8031"
+  },
+  "8038": {
+    "id": 8038,
+    "name": "武器贩卖店",
+    "width": 20,
+    "height": 20,
+    "rel_path": "family/800/8038"
+  },
+  "8034": {
+    "id": 8034,
+    "name": "弗烈顿庄园聊天室",
+    "width": 18,
+    "height": 18,
+    "rel_path": "family/800/8034"
+  },
+  "8033": {
+    "id": 8033,
+    "name": "弗烈顿庄园聊天室柜台",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/800/8033"
+  },
+  "8032": {
+    "id": 8032,
+    "name": "弗烈顿庄园竞技场",
+    "width": 60,
+    "height": 60,
+    "rel_path": "family/800/8032"
+  },
+  "8035": {
+    "id": 8035,
+    "name": "庄园专属贩卖店二",
+    "width": 35,
+    "height": 20,
+    "rel_path": "family/800/8035"
+  },
+  "2030": {
+    "id": 2030,
+    "name": "玛丽娜丝的庄园",
+    "width": 80,
+    "height": 80,
+    "rel_path": "family/200/2030"
+  },
+  "2037": {
+    "id": 2037,
+    "name": "通用物品贩卖店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/200/2037"
+  },
+  "2038": {
+    "id": 2038,
+    "name": "庄园专用贩售店一",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/200/2038"
+  },
+  "2036": {
+    "id": 2036,
+    "name": "庄园专用贩售店二",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/200/2036"
+  },
+  "2031": {
+    "id": 2031,
+    "name": "玛丽娜丝庄园族长家",
+    "width": 20,
+    "height": 20,
+    "rel_path": "family/200/2031"
+  },
+  "2034": {
+    "id": 2034,
+    "name": "玛丽娜丝庄园聊天室",
+    "width": 20,
+    "height": 20,
+    "rel_path": "family/200/2034"
+  },
+  "2033": {
+    "id": 2033,
+    "name": "玛丽娜丝庄园聊天柜台",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/200/2033"
+  },
+  "2032": {
+    "id": 2032,
+    "name": "玛丽娜丝庄园PK场",
+    "width": 32,
+    "height": 32,
+    "rel_path": "family/200/2032"
+  },
+  "2035": {
+    "id": 2035,
+    "name": "庄园素材贩售店",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/200/2035"
+  },
+  "6041": {
+    "id": 6041,
+    "name": "塔耳塔庄园民房",
+    "width": 15,
+    "height": 15,
+    "rel_path": "family/600/6041"
+  },
+  "6040": {
+    "id": 6040,
+    "name": "庄园素材贩卖店",
+    "width": 15,
+    "height": 15,
+    "rel_path": "family/600/6040"
+  },
+  "6031": {
+    "id": 6031,
+    "name": "塔耳塔庄园族长家",
+    "width": 20,
+    "height": 20,
+    "rel_path": "family/600/6031"
+  },
+  "6036": {
+    "id": 6036,
+    "name": "庄园专用贩卖店一",
+    "width": 20,
+    "height": 12,
+    "rel_path": "family/600/6036"
+  },
+  "6037": {
+    "id": 6037,
+    "name": "庄园专用贩卖店二",
+    "width": 15,
+    "height": 10,
+    "rel_path": "family/600/6037"
+  },
+  "6030": {
+    "id": 6030,
+    "name": "塔耳塔庄园",
+    "width": 80,
+    "height": 80,
+    "rel_path": "family/600/6030"
+  },
+  "6039": {
+    "id": 6039,
+    "name": "庄园防具贩卖店",
+    "width": 16,
+    "height": 10,
+    "rel_path": "family/600/6039"
+  },
+  "6035": {
+    "id": 6035,
+    "name": "通用物品贩卖店",
+    "width": 15,
+    "height": 10,
+    "rel_path": "family/600/6035"
+  },
+  "6032": {
+    "id": 6032,
+    "name": "塔耳塔庄园竞技场",
+    "width": 32,
+    "height": 32,
+    "rel_path": "family/600/6032"
+  },
+  "6033": {
+    "id": 6033,
+    "name": "塔耳塔庄园聊天柜台",
+    "width": 12,
+    "height": 12,
+    "rel_path": "family/600/6033"
+  },
+  "6034": {
+    "id": 6034,
+    "name": "塔耳塔庄园聊天室",
+    "width": 32,
+    "height": 32,
+    "rel_path": "family/600/6034"
+  },
+  "11": {
+    "id": 11,
+    "name": "猜谜三兄弟的家１２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz11b"
+  },
+  "0": {
+    "id": 0,
+    "name": "猜谜三兄弟的家１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz00"
+  },
+  "4": {
+    "id": 4,
+    "name": "猜谜三兄弟的家５楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz04b"
+  },
+  "5": {
+    "id": 5,
+    "name": "猜谜三兄弟的家６楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz05a"
+  },
+  "6": {
+    "id": 6,
+    "name": "猜谜三兄弟的家７楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz06"
+  },
+  "9": {
+    "id": 9,
+    "name": "猜谜三兄弟的家１０楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz09b"
+  },
+  "8": {
+    "id": 8,
+    "name": "猜谜三兄弟的家９楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz08a"
+  },
+  "7": {
+    "id": 7,
+    "name": "猜谜三兄弟的家８楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz07b"
+  },
+  "10": {
+    "id": 10,
+    "name": "猜谜三兄弟的家１１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz10a"
+  },
+  "2020": {
+    "id": 2020,
+    "name": "玛丽娜丝道场柜台",
+    "width": 25,
+    "height": 25,
+    "rel_path": "quiz/2020"
+  },
+  "12": {
+    "id": 12,
+    "name": "猜谜大师认定场",
+    "width": 50,
+    "height": 50,
+    "rel_path": "quiz/quiz12"
+  },
+  "sainasu": {
+    "id": null,
+    "name": "萨伊那斯",
+    "width": 800,
+    "height": 800,
+    "rel_path": "sainasu/sainasu"
+  },
+  "1112": {
+    "id": 1112,
+    "name": "柯奥的民家",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuo/1112"
+  },
+  "1106": {
+    "id": 1106,
+    "name": "柯奥的长老家",
+    "width": 40,
+    "height": 30,
+    "rel_path": "sainasu/kuo/1106"
+  },
+  "1101": {
+    "id": 1101,
+    "name": "柯奥的武器店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuo/1101"
+  },
+  "1108": {
+    "id": 1108,
+    "name": "柯奥的道场",
+    "width": 40,
+    "height": 40,
+    "rel_path": "sainasu/kuo/1108"
+  },
+  "kuomura": {
+    "id": null,
+    "name": "柯奥村",
+    "width": 130,
+    "height": 150,
+    "rel_path": "sainasu/kuo/kuomura"
+  },
+  "1102": {
+    "id": 1102,
+    "name": "柯奥的道具店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuo/1102"
+  },
+  "1105": {
+    "id": 1105,
+    "name": "柯奥的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuo/1105"
+  },
+  "1104": {
+    "id": 1104,
+    "name": "柯奥的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuo/1104"
+  },
+  "1103": {
+    "id": 1103,
+    "name": "柯奥的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuo/1103"
+  },
+  "1206": {
+    "id": 1206,
+    "name": "柯尔克的村长家",
+    "width": 40,
+    "height": 30,
+    "rel_path": "sainasu/kuruku/1206"
+  },
+  "1201": {
+    "id": 1201,
+    "name": "柯尔克的武器店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuruku/1201"
+  },
+  "1208": {
+    "id": 1208,
+    "name": "柯尔克的道场",
+    "width": 40,
+    "height": 40,
+    "rel_path": "sainasu/kuruku/1208"
+  },
+  "1209": {
+    "id": 1209,
+    "name": "柯尔克的便利商店",
+    "width": 40,
+    "height": 60,
+    "rel_path": "sainasu/kuruku/1209"
+  },
+  "kuruku": {
+    "id": null,
+    "name": "柯尔克村",
+    "width": 130,
+    "height": 150,
+    "rel_path": "sainasu/kuruku/kuruku"
+  },
+  "1212": {
+    "id": 1212,
+    "name": "柯尔克坑道管理事务所",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuruku/1212"
+  },
+  "1202": {
+    "id": 1202,
+    "name": "柯尔克的道具店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuruku/1202"
+  },
+  "1205": {
+    "id": 1205,
+    "name": "柯尔克的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuruku/1205"
+  },
+  "1204": {
+    "id": 1204,
+    "name": "柯尔克的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuruku/1204"
+  },
+  "1203": {
+    "id": 1203,
+    "name": "柯尔克的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuruku/1203"
+  },
+  "1210": {
+    "id": 1210,
+    "name": "柯尔克的石屋",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/kuruku/1210"
+  },
+  "10406": {
+    "id": 10406,
+    "name": "迷幻洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/10406"
+  },
+  "10408": {
+    "id": 10408,
+    "name": "迷幻洞窟最底层",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/10408"
+  },
+  "10307": {
+    "id": 10307,
+    "name": "柯奥的洞窟７楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-03-07"
+  },
+  "10407": {
+    "id": 10407,
+    "name": "迷幻洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/10407"
+  },
+  "10306": {
+    "id": 10306,
+    "name": "柯奥的洞窟６楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-03-06"
+  },
+  "10301": {
+    "id": 10301,
+    "name": "柯奥的洞窟１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-03-01"
+  },
+  "10308": {
+    "id": 10308,
+    "name": "柯奥的洞窟８楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-03-08"
+  },
+  "10912": {
+    "id": 10912,
+    "name": "柯尔克的大坑道２楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "sainasu/dungeon/dan_1-09-12"
+  },
+  "10915": {
+    "id": 10915,
+    "name": "柯尔克的大坑道５楼",
+    "width": 60,
+    "height": 40,
+    "rel_path": "sainasu/dungeon/dan_1-09-15"
+  },
+  "10201": {
+    "id": 10201,
+    "name": "海底通路地下１楼",
+    "width": 40,
+    "height": 60,
+    "rel_path": "sainasu/dungeon/dan_1-02-01"
+  },
+  "10914": {
+    "id": 10914,
+    "name": "柯尔克的大坑道４楼",
+    "width": 40,
+    "height": 60,
+    "rel_path": "sainasu/dungeon/dan_1-09-14"
+  },
+  "10913": {
+    "id": 10913,
+    "name": "柯尔克的大坑道３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-09-13"
+  },
+  "10601": {
+    "id": 10601,
+    "name": "东柯尔克的坑道１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-06-01"
+  },
+  "10102": {
+    "id": 10102,
+    "name": "往柯尔克的道路２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-01-02"
+  },
+  "10701": {
+    "id": 10701,
+    "name": "盗贼的洞窟地下１楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "sainasu/dungeon/10701"
+  },
+  "10907": {
+    "id": 10907,
+    "name": "柯尔克的大坑道地下６楼",
+    "width": 20,
+    "height": 60,
+    "rel_path": "sainasu/dungeon/dan_1-09-07"
+  },
+  "10909": {
+    "id": 10909,
+    "name": "柯尔克的大坑道地下８楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "sainasu/dungeon/dan_1-09-09"
+  },
+  "10103": {
+    "id": 10103,
+    "name": "往柯尔克的道路３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-01-03"
+  },
+  "10908": {
+    "id": 10908,
+    "name": "柯尔克的大坑道地下７楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-09-08"
+  },
+  "10906": {
+    "id": 10906,
+    "name": "柯尔克的大坑道地下５楼",
+    "width": 20,
+    "height": 60,
+    "rel_path": "sainasu/dungeon/dan_1-09-06"
+  },
+  "10901": {
+    "id": 10901,
+    "name": "柯尔克的大坑道１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-09-01"
+  },
+  "11102": {
+    "id": 11102,
+    "name": "盗贼的基地地下２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/11102"
+  },
+  "11105": {
+    "id": 11105,
+    "name": "盗贼的基地地下５楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/11105"
+  },
+  "10004": {
+    "id": 10004,
+    "name": "阿布的洞窟地下４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-00-04"
+  },
+  "11301": {
+    "id": 11301,
+    "name": "ＰＣ团本部１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/11301"
+  },
+  "10003": {
+    "id": 10003,
+    "name": "阿布的洞窟地下３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-00-03"
+  },
+  "10808": {
+    "id": 10808,
+    "name": "霍特尔的洞窟７楼",
+    "width": 40,
+    "height": 60,
+    "rel_path": "sainasu/dungeon/dan_1-08-08"
+  },
+  "11003": {
+    "id": 11003,
+    "name": "柯奥山的小洞窟３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-10-03"
+  },
+  "11004": {
+    "id": 11004,
+    "name": "柯奥山的小洞窟４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-10-04"
+  },
+  "10806": {
+    "id": 10806,
+    "name": "霍特尔的洞窟５楼",
+    "width": 60,
+    "height": 40,
+    "rel_path": "sainasu/dungeon/dan_1-08-06"
+  },
+  "10801": {
+    "id": 10801,
+    "name": "霍特尔的洞窟１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-08-01"
+  },
+  "10002": {
+    "id": 10002,
+    "name": "阿布的洞窟地下２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-00-02"
+  },
+  "10005": {
+    "id": 10005,
+    "name": "阿布的洞窟地下５楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-00-05"
+  },
+  "11300": {
+    "id": 11300,
+    "name": "ＰＣ团本部１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/11300"
+  },
+  "11104": {
+    "id": 11104,
+    "name": "盗贼的基地地下４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/11104"
+  },
+  "11103": {
+    "id": 11103,
+    "name": "盗贼的基地地下３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/11103"
+  },
+  "10807": {
+    "id": 10807,
+    "name": "霍特尔的洞窟６楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-08-07"
+  },
+  "11005": {
+    "id": 11005,
+    "name": "柯奥山的小洞窟５楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-10-05"
+  },
+  "11002": {
+    "id": 11002,
+    "name": "柯奥山的小洞窟２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-10-02"
+  },
+  "10809": {
+    "id": 10809,
+    "name": "霍特尔的洞窟８楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-08-09"
+  },
+  "10304": {
+    "id": 10304,
+    "name": "柯奥的洞窟４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-03-04"
+  },
+  "10303": {
+    "id": 10303,
+    "name": "柯奥的洞窟３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-03-03"
+  },
+  "10405": {
+    "id": 10405,
+    "name": "迷幻洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/10405"
+  },
+  "10402": {
+    "id": 10402,
+    "name": "迷幻洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/10402"
+  },
+  "10302": {
+    "id": 10302,
+    "name": "柯奥的洞窟２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-03-02"
+  },
+  "10305": {
+    "id": 10305,
+    "name": "柯奥的洞窟５楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-03-05"
+  },
+  "10403": {
+    "id": 10403,
+    "name": "迷幻洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/10403"
+  },
+  "10404": {
+    "id": 10404,
+    "name": "迷幻洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/10404"
+  },
+  "10202": {
+    "id": 10202,
+    "name": "海底通路地下２楼",
+    "width": 40,
+    "height": 60,
+    "rel_path": "sainasu/dungeon/dan_1-02-02"
+  },
+  "10603": {
+    "id": 10603,
+    "name": "东柯尔克的坑道３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-06-03"
+  },
+  "10604": {
+    "id": 10604,
+    "name": "东柯尔克的坑道４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-06-04"
+  },
+  "10918": {
+    "id": 10918,
+    "name": "柯尔克的大坑道８楼",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/dungeon/dan_1-09-18"
+  },
+  "10920": {
+    "id": 10920,
+    "name": "SBC本部",
+    "width": 100,
+    "height": 100,
+    "rel_path": "sainasu/dungeon/dan_1-09-20"
+  },
+  "10916": {
+    "id": 10916,
+    "name": "柯尔克的大坑道６楼",
+    "width": 20,
+    "height": 80,
+    "rel_path": "sainasu/dungeon/dan_1-09-16"
+  },
+  "10911": {
+    "id": 10911,
+    "name": "柯尔克的大坑道地下１０楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-09-11"
+  },
+  "10605": {
+    "id": 10605,
+    "name": "东柯尔克的坑道５楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-06-05"
+  },
+  "10602": {
+    "id": 10602,
+    "name": "东柯尔克的坑道２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-06-02"
+  },
+  "10204": {
+    "id": 10204,
+    "name": "海底通路地下２楼",
+    "width": 200,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-02-04"
+  },
+  "10203": {
+    "id": 10203,
+    "name": "海底通路地下１楼",
+    "width": 40,
+    "height": 60,
+    "rel_path": "sainasu/dungeon/dan_1-02-03"
+  },
+  "10910": {
+    "id": 10910,
+    "name": "柯尔克的大坑道地下９楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "sainasu/dungeon/dan_1-09-10"
+  },
+  "10917": {
+    "id": 10917,
+    "name": "柯尔克的大坑道７楼",
+    "width": 100,
+    "height": 30,
+    "rel_path": "sainasu/dungeon/dan_1-09-17"
+  },
+  "10919": {
+    "id": 10919,
+    "name": "审查室",
+    "width": 20,
+    "height": 20,
+    "rel_path": "sainasu/dungeon/dan_1-09-19"
+  },
+  "10904": {
+    "id": 10904,
+    "name": "柯尔克的大坑道地下３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-09-04"
+  },
+  "10705": {
+    "id": 10705,
+    "name": "盗贼的洞窟地下５楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "sainasu/dungeon/10705"
+  },
+  "10702": {
+    "id": 10702,
+    "name": "盗贼的洞窟地下２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/10702"
+  },
+  "10903": {
+    "id": 10903,
+    "name": "柯尔克的大坑道地下２楼",
+    "width": 30,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-09-03"
+  },
+  "10101": {
+    "id": 10101,
+    "name": "往柯尔克的道路１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-01-01"
+  },
+  "10703": {
+    "id": 10703,
+    "name": "盗贼的洞窟地下３楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "sainasu/dungeon/10703"
+  },
+  "10902": {
+    "id": 10902,
+    "name": "柯尔克的大坑道地下１楼",
+    "width": 50,
+    "height": 30,
+    "rel_path": "sainasu/dungeon/dan_1-09-02"
+  },
+  "10905": {
+    "id": 10905,
+    "name": "柯尔克的大坑道地下４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-09-05"
+  },
+  "10704": {
+    "id": 10704,
+    "name": "盗贼的洞窟地下４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/10704"
+  },
+  "10802": {
+    "id": 10802,
+    "name": "霍特尔的洞窟２楼",
+    "width": 20,
+    "height": 20,
+    "rel_path": "sainasu/dungeon/dan_1-08-02"
+  },
+  "10805": {
+    "id": 10805,
+    "name": "霍特尔的洞窟４楼",
+    "width": 50,
+    "height": 40,
+    "rel_path": "sainasu/dungeon/dan_1-08-05"
+  },
+  "11106": {
+    "id": 11106,
+    "name": "盗贼的基地地下６楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/11106"
+  },
+  "11101": {
+    "id": 11101,
+    "name": "盗贼的基地地下１楼",
+    "width": 70,
+    "height": 70,
+    "rel_path": "sainasu/dungeon/11101"
+  },
+  "11305": {
+    "id": 11305,
+    "name": "ＰＣ团本部地下３楼",
+    "width": 59,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/11305"
+  },
+  "10007": {
+    "id": 10007,
+    "name": "阿布的洞窟地下７楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "sainasu/dungeon/dan_1-00-07"
+  },
+  "11302": {
+    "id": 11302,
+    "name": "ＰＣ团本部地下１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/11302"
+  },
+  "10804": {
+    "id": 10804,
+    "name": "霍特尔的洞窟３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-08-04"
+  },
+  "10803": {
+    "id": 10803,
+    "name": "霍特尔的洞窟２楼",
+    "width": 40,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-08-03"
+  },
+  "11001": {
+    "id": 11001,
+    "name": "柯奥山的小洞窟１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-10-01"
+  },
+  "11006": {
+    "id": 11006,
+    "name": "博士的研究所",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-10-06"
+  },
+  "10006": {
+    "id": 10006,
+    "name": "阿布的洞窟地下６楼",
+    "width": 50,
+    "height": 100,
+    "rel_path": "sainasu/dungeon/dan_1-00-06"
+  },
+  "11303": {
+    "id": 11303,
+    "name": "ＰＣ团本部地下２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/11303"
+  },
+  "10001": {
+    "id": 10001,
+    "name": "阿布的洞窟地下１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/dan_1-00-01"
+  },
+  "11304": {
+    "id": 11304,
+    "name": "ＰＣ团本部地下３楼",
+    "width": 59,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/11304"
+  },
+  "11107": {
+    "id": 11107,
+    "name": "盗贼的基地最底层",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/11107"
+  },
+  "11202": {
+    "id": 11202,
+    "name": "玄黄的洞窟地下２楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_02"
+  },
+  "11205": {
+    "id": 11205,
+    "name": "玄黄的洞窟地下５楼",
+    "width": 70,
+    "height": 70,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_05"
+  },
+  "11204": {
+    "id": 11204,
+    "name": "玄黄的洞窟地下４楼",
+    "width": 70,
+    "height": 70,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_04"
+  },
+  "11203": {
+    "id": 11203,
+    "name": "玄黄的洞窟地下３楼",
+    "width": 70,
+    "height": 70,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_03"
+  },
+  "11210": {
+    "id": 11210,
+    "name": "玄黄的洞窟地下１０楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_10"
+  },
+  "11211": {
+    "id": 11211,
+    "name": "玄黄的洞窟地下１１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_11"
+  },
+  "11208": {
+    "id": 11208,
+    "name": "玄黄的洞窟地下８楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_08"
+  },
+  "11206": {
+    "id": 11206,
+    "name": "玄黄的洞窟地下６楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_06"
+  },
+  "11201": {
+    "id": 11201,
+    "name": "玄黄的洞窟地下１楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_01"
+  },
+  "11207": {
+    "id": 11207,
+    "name": "玄黄的洞窟地下７楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_07"
+  },
+  "11209": {
+    "id": 11209,
+    "name": "玄黄的洞窟地下９楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_09"
+  },
+  "11214": {
+    "id": 11214,
+    "name": "玄黄的洞窟地下１４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_14"
+  },
+  "11213": {
+    "id": 11213,
+    "name": "玄黄的洞窟地下１３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_13"
+  },
+  "11212": {
+    "id": 11212,
+    "name": "玄黄的洞窟地下１２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_12"
+  },
+  "11215": {
+    "id": 11215,
+    "name": "玄黄的洞窟地下１５楼",
+    "width": 20,
+    "height": 20,
+    "rel_path": "sainasu/dungeon/genou/dan_1_12_15"
+  },
+  "1005": {
+    "id": 1005,
+    "name": "萨姆吉尔的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/samugiru/1005"
+  },
+  "1002": {
+    "id": 1002,
+    "name": "萨姆吉尔的道具店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/samugiru/1002"
+  },
+  "1003": {
+    "id": 1003,
+    "name": "萨姆吉尔的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/samugiru/1003"
+  },
+  "1004": {
+    "id": 1004,
+    "name": "萨姆吉尔的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/samugiru/1004"
+  },
+  "1021": {
+    "id": 1021,
+    "name": "百人联手道场",
+    "width": 407,
+    "height": 144,
+    "rel_path": "sainasu/samugiru/1021"
+  },
+  "samugiru": {
+    "id": null,
+    "name": "萨姆吉尔村",
+    "width": 160,
+    "height": 160,
+    "rel_path": "sainasu/samugiru/samugiru"
+  },
+  "1020": {
+    "id": 1020,
+    "name": "萨姆吉尔道场柜台",
+    "width": 25,
+    "height": 25,
+    "rel_path": "sainasu/samugiru/1020"
+  },
+  "1011": {
+    "id": 1011,
+    "name": "长毛象快递",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/samugiru/1011"
+  },
+  "1008": {
+    "id": 1008,
+    "name": "师傅的房间",
+    "width": 40,
+    "height": 40,
+    "rel_path": "sainasu/samugiru/1008"
+  },
+  "1001": {
+    "id": 1001,
+    "name": "萨姆吉尔的武器店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/samugiru/1001"
+  },
+  "1006": {
+    "id": 1006,
+    "name": "萨姆吉尔的村长家",
+    "width": 30,
+    "height": 40,
+    "rel_path": "sainasu/samugiru/1006"
+  },
+  "1007": {
+    "id": 1007,
+    "name": "萨姆吉尔竞技场",
+    "width": 100,
+    "height": 100,
+    "rel_path": "sainasu/samugiru/1007"
+  },
+  "1009": {
+    "id": 1009,
+    "name": "萨姆吉尔的便利商店",
+    "width": 40,
+    "height": 60,
+    "rel_path": "sainasu/samugiru/1009"
+  },
+  "1014": {
+    "id": 1014,
+    "name": "长毛象快递",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/samugiru/1014"
+  },
+  "1022": {
+    "id": 1022,
+    "name": "萨姆吉尔道场的医务室",
+    "width": 15,
+    "height": 15,
+    "rel_path": "sainasu/samugiru/1022"
+  },
+  "1012": {
+    "id": 1012,
+    "name": "聊天室柜台",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/samugiru/1012"
+  },
+  "2014": {
+    "id": 2014,
+    "name": "长毛象快递",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/marinasu/2014"
+  },
+  "2012": {
+    "id": 2012,
+    "name": "聊天室柜台",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/marinasu/2012"
+  },
+  "2008": {
+    "id": 2008,
+    "name": "玛丽娜丝的道场",
+    "width": 40,
+    "height": 40,
+    "rel_path": "sainasu/marinasu/2008"
+  },
+  "2001": {
+    "id": 2001,
+    "name": "玛丽娜丝的武器店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/marinasu/2001"
+  },
+  "2006": {
+    "id": 2006,
+    "name": "玛丽娜丝的村长家",
+    "width": 40,
+    "height": 30,
+    "rel_path": "sainasu/marinasu/2006"
+  },
+  "2007": {
+    "id": 2007,
+    "name": "玛丽娜丝竞技场",
+    "width": 100,
+    "height": 100,
+    "rel_path": "sainasu/marinasu/2007"
+  },
+  "2009": {
+    "id": 2009,
+    "name": "玛丽娜丝的便利商店",
+    "width": 40,
+    "height": 60,
+    "rel_path": "sainasu/marinasu/2009"
+  },
+  "marinasu": {
+    "id": null,
+    "name": "玛丽娜丝渔村",
+    "width": 150,
+    "height": 150,
+    "rel_path": "sainasu/marinasu/marinasu"
+  },
+  "2011": {
+    "id": 2011,
+    "name": "长毛象快递",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/marinasu/2011"
+  },
+  "2005": {
+    "id": 2005,
+    "name": "玛丽娜丝的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/marinasu/2005"
+  },
+  "2002": {
+    "id": 2002,
+    "name": "玛丽娜丝的道具店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/marinasu/2002"
+  },
+  "2003": {
+    "id": 2003,
+    "name": "玛丽娜丝的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/marinasu/2003"
+  },
+  "2004": {
+    "id": 2004,
+    "name": "玛丽娜丝的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/marinasu/2004"
+  },
+  "101": {
+    "id": 101,
+    "name": "阿布的独栋房屋",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/sonota/101"
+  },
+  "1403": {
+    "id": 1403,
+    "name": "卡坦的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/katan/1403"
+  },
+  "1404": {
+    "id": 1404,
+    "name": "卡坦的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/katan/1404"
+  },
+  "1405": {
+    "id": 1405,
+    "name": "卡坦的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/katan/1405"
+  },
+  "1402": {
+    "id": 1402,
+    "name": "卡坦的道具店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/katan/1402"
+  },
+  "katan": {
+    "id": null,
+    "name": "卡坦村",
+    "width": 150,
+    "height": 150,
+    "rel_path": "sainasu/katan/katan"
+  },
+  "1401": {
+    "id": 1401,
+    "name": "卡坦的武器店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/katan/1401"
+  },
+  "1406": {
+    "id": 1406,
+    "name": "卡坦的村长家",
+    "width": 35,
+    "height": 35,
+    "rel_path": "sainasu/katan/1406"
+  },
+  "1408": {
+    "id": 1408,
+    "name": "卡坦的道场",
+    "width": 40,
+    "height": 40,
+    "rel_path": "sainasu/katan/1408"
+  },
+  "1310": {
+    "id": 1310,
+    "name": "营养剂名人的家",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/hotoru/1310"
+  },
+  "1305": {
+    "id": 1305,
+    "name": "霍特尔的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/hotoru/1305"
+  },
+  "1302": {
+    "id": 1302,
+    "name": "霍特尔的道具店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/hotoru/1302"
+  },
+  "1303": {
+    "id": 1303,
+    "name": "霍特尔的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/hotoru/1303"
+  },
+  "1304": {
+    "id": 1304,
+    "name": "霍特尔的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/hotoru/1304"
+  },
+  "1308": {
+    "id": 1308,
+    "name": "霍特尔的道场",
+    "width": 40,
+    "height": 40,
+    "rel_path": "sainasu/hotoru/1308"
+  },
+  "1301": {
+    "id": 1301,
+    "name": "霍特尔的武器店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "sainasu/hotoru/1301"
+  },
+  "1306": {
+    "id": 1306,
+    "name": "霍特尔的长老家",
+    "width": 40,
+    "height": 30,
+    "rel_path": "sainasu/hotoru/1306"
+  },
+  "hotoru": {
+    "id": null,
+    "name": "霍特尔村",
+    "width": 100,
+    "height": 100,
+    "rel_path": "sainasu/hotoru/hotoru"
+  },
+  "816": {
+    "id": 816,
+    "name": "新手岛",
+    "width": 180,
+    "height": 180,
+    "rel_path": "greener/816"
+  },
+  "8008": {
+    "id": 8008,
+    "name": "动物园",
+    "width": 40,
+    "height": 40,
+    "rel_path": "greener/8008"
+  },
+  "8022": {
+    "id": 8022,
+    "name": "料理训练房间",
+    "width": 30,
+    "height": 30,
+    "rel_path": "greener/8022"
+  },
+  "8024": {
+    "id": 8024,
+    "name": "组对交友训练房间",
+    "width": 30,
+    "height": 30,
+    "rel_path": "greener/8024"
+  },
+  "8023": {
+    "id": 8023,
+    "name": "合成训练房间",
+    "width": 30,
+    "height": 30,
+    "rel_path": "greener/8023"
+  },
+  "815": {
+    "id": 815,
+    "name": "新手村",
+    "width": 80,
+    "height": 70,
+    "rel_path": "greener/815"
+  },
+  "8019": {
+    "id": 8019,
+    "name": "新手村的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "greener/8019"
+  },
+  "8021": {
+    "id": 8021,
+    "name": "战斗训练场",
+    "width": 60,
+    "height": 50,
+    "rel_path": "greener/8021"
+  },
+  "8017": {
+    "id": 8017,
+    "name": "新手试练洞窟地下二楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "greener/8017"
+  },
+  "8016": {
+    "id": 8016,
+    "name": "新手试练洞窟地下一楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "greener/8016"
+  },
+  "8020": {
+    "id": 8020,
+    "name": "新手村的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "greener/8020"
+  },
+  "8018": {
+    "id": 8018,
+    "name": "新手村的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "greener/8018"
+  },
+  "jalga": {
+    "id": null,
+    "name": "加鲁卡",
+    "width": 800,
+    "height": 1200,
+    "rel_path": "jyaruga/jalga"
+  },
+  "3309": {
+    "id": 3309,
+    "name": "乌鲁力的便利商店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/ururi/3309"
+  },
+  "3308": {
+    "id": 3308,
+    "name": "乌鲁力的道场",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/ururi/3308"
+  },
+  "3306": {
+    "id": 3306,
+    "name": "乌鲁力的村长家",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/ururi/3306"
+  },
+  "ururi": {
+    "id": null,
+    "name": "乌鲁力村",
+    "width": 120,
+    "height": 120,
+    "rel_path": "jyaruga/ururi/ururi"
+  },
+  "3303": {
+    "id": 3303,
+    "name": "乌鲁力的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/ururi/3303"
+  },
+  "3304": {
+    "id": 3304,
+    "name": "乌鲁力的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/ururi/3304"
+  },
+  "3305": {
+    "id": 3305,
+    "name": "乌鲁力的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/ururi/3305"
+  },
+  "jaja": {
+    "id": null,
+    "name": "加加村",
+    "width": 150,
+    "height": 150,
+    "rel_path": "jyaruga/jaja/jaja"
+  },
+  "3012": {
+    "id": 3012,
+    "name": "聊天室柜台",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/jaja/3012"
+  },
+  "3014": {
+    "id": 3014,
+    "name": "长毛象快递",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/jaja/3014"
+  },
+  "3022": {
+    "id": 3022,
+    "name": "加加的道场医务室",
+    "width": 15,
+    "height": 15,
+    "rel_path": "jyaruga/jaja/3022"
+  },
+  "3007": {
+    "id": 3007,
+    "name": "加加的竞技场",
+    "width": 100,
+    "height": 100,
+    "rel_path": "jyaruga/jaja/3007"
+  },
+  "3009": {
+    "id": 3009,
+    "name": "加加的便利商店",
+    "width": 40,
+    "height": 60,
+    "rel_path": "jyaruga/jaja/3009"
+  },
+  "3008": {
+    "id": 3008,
+    "name": "师傅的房间",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/jaja/3008"
+  },
+  "3001": {
+    "id": 3001,
+    "name": "加加的武器店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/jaja/3001"
+  },
+  "3006": {
+    "id": 3006,
+    "name": "加加的村长家",
+    "width": 40,
+    "height": 30,
+    "rel_path": "jyaruga/jaja/3006"
+  },
+  "3020": {
+    "id": 3020,
+    "name": "加加的道场柜台",
+    "width": 25,
+    "height": 25,
+    "rel_path": "jyaruga/jaja/3020"
+  },
+  "3011": {
+    "id": 3011,
+    "name": "长毛象快递",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/jaja/3011"
+  },
+  "3021": {
+    "id": 3021,
+    "name": "百人联手道场",
+    "width": 407,
+    "height": 144,
+    "rel_path": "jyaruga/jaja/3021"
+  },
+  "3003": {
+    "id": 3003,
+    "name": "加加的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/jaja/3003"
+  },
+  "3004": {
+    "id": 3004,
+    "name": "加加的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/jaja/3004"
+  },
+  "3005": {
+    "id": 3005,
+    "name": "加加的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/jaja/3005"
+  },
+  "3002": {
+    "id": 3002,
+    "name": "加加的道具店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/jaja/3002"
+  },
+  "3204": {
+    "id": 3204,
+    "name": "多多的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/toto/3204"
+  },
+  "3203": {
+    "id": 3203,
+    "name": "多多的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/toto/3203"
+  },
+  "3205": {
+    "id": 3205,
+    "name": "多多的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/toto/3205"
+  },
+  "toto": {
+    "id": null,
+    "name": "多多村",
+    "width": 120,
+    "height": 120,
+    "rel_path": "jyaruga/toto/toto"
+  },
+  "3209": {
+    "id": 3209,
+    "name": "多多的便利商店",
+    "width": 40,
+    "height": 60,
+    "rel_path": "jyaruga/toto/3209"
+  },
+  "3206": {
+    "id": 3206,
+    "name": "多多的村长家",
+    "width": 30,
+    "height": 40,
+    "rel_path": "jyaruga/toto/3206"
+  },
+  "3208": {
+    "id": 3208,
+    "name": "多多的道场",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/toto/3208"
+  },
+  "20105": {
+    "id": 20105,
+    "name": "森林洞窟山顶",
+    "width": 50,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/dan_2-01-05"
+  },
+  "20102": {
+    "id": 20102,
+    "name": "森林洞窟２楼",
+    "width": 40,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/dan_2-01-02"
+  },
+  "20802": {
+    "id": 20802,
+    "name": "龙的巢穴２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/20802"
+  },
+  "20504": {
+    "id": 20504,
+    "name": "阿鲁姆山的洞窟地下４楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-05-04"
+  },
+  "20503": {
+    "id": 20503,
+    "name": "阿鲁姆山的洞窟地下３楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-05-03"
+  },
+  "20805": {
+    "id": 20805,
+    "name": "龙的巢穴５楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/20805"
+  },
+  "21103": {
+    "id": 21103,
+    "name": "拉多拉洞窟山顶",
+    "width": 50,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/dan_2-11-03"
+  },
+  "20901": {
+    "id": 20901,
+    "name": "卡鲁它那的洞窟１楼",
+    "width": 70,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/dan_2-09-01"
+  },
+  "20804": {
+    "id": 20804,
+    "name": "龙的巢穴４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/20804"
+  },
+  "20502": {
+    "id": 20502,
+    "name": "阿鲁姆山的洞窟地下２楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-05-02"
+  },
+  "20505": {
+    "id": 20505,
+    "name": "阿鲁姆山的洞窟地下５楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-05-05"
+  },
+  "20803": {
+    "id": 20803,
+    "name": "龙的巢穴３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/20803"
+  },
+  "20103": {
+    "id": 20103,
+    "name": "森林洞窟３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-01-03"
+  },
+  "20104": {
+    "id": 20104,
+    "name": "森林洞窟４楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/dan_2-01-04"
+  },
+  "20402": {
+    "id": 20402,
+    "name": "哥亚山洞窟２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-04-02"
+  },
+  "20405": {
+    "id": 20405,
+    "name": "哥亚山洞窟５楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-04-05"
+  },
+  "20003": {
+    "id": 20003,
+    "name": "拉多拉山岭洞窟３楼",
+    "width": 100,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-00-03"
+  },
+  "20004": {
+    "id": 20004,
+    "name": "拉多拉山岭洞窟４楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "jyaruga/dungeon/dan_2-00-04"
+  },
+  "20005": {
+    "id": 20005,
+    "name": "拉多拉山岭洞窟５楼",
+    "width": 60,
+    "height": 90,
+    "rel_path": "jyaruga/dungeon/dan_2-00-05"
+  },
+  "20712": {
+    "id": 20712,
+    "name": "JBA本部",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-07-12"
+  },
+  "20002": {
+    "id": 20002,
+    "name": "拉多拉山岭洞窟２楼",
+    "width": 50,
+    "height": 100,
+    "rel_path": "jyaruga/dungeon/dan_2-00-02"
+  },
+  "20404": {
+    "id": 20404,
+    "name": "哥亚山洞窟４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-04-04"
+  },
+  "20403": {
+    "id": 20403,
+    "name": "哥亚山洞窟３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-04-03"
+  },
+  "20706": {
+    "id": 20706,
+    "name": "拉多拉的大洞窟４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-07-06"
+  },
+  "20011": {
+    "id": 20011,
+    "name": "拉多拉山岭洞窟１０楼",
+    "width": 25,
+    "height": 25,
+    "rel_path": "jyaruga/dungeon/dan_2-00-11"
+  },
+  "20309": {
+    "id": 20309,
+    "name": "拉多拉山山顶",
+    "width": 120,
+    "height": 140,
+    "rel_path": "jyaruga/dungeon/dan_2-03-09"
+  },
+  "20701": {
+    "id": 20701,
+    "name": "拉多拉的大洞窟１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-07-01"
+  },
+  "20307": {
+    "id": 20307,
+    "name": "拉多拉洞窟３楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "jyaruga/dungeon/dan_2-03-07"
+  },
+  "20708": {
+    "id": 20708,
+    "name": "拉多拉的大洞窟６楼",
+    "width": 40,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/dan_2-07-08"
+  },
+  "20301": {
+    "id": 20301,
+    "name": "拉多拉的回廊",
+    "width": 300,
+    "height": 150,
+    "rel_path": "jyaruga/dungeon/dan_2-03-01"
+  },
+  "20306": {
+    "id": 20306,
+    "name": "拉多拉洞窟２楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "jyaruga/dungeon/dan_2-03-06"
+  },
+  "20709": {
+    "id": 20709,
+    "name": "拉多拉的大洞窟７楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-07-09"
+  },
+  "20010": {
+    "id": 20010,
+    "name": "拉多拉山岭洞窟１０楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "jyaruga/dungeon/dan_2-00-10"
+  },
+  "20707": {
+    "id": 20707,
+    "name": "拉多拉的大洞窟５楼",
+    "width": 60,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/dan_2-07-07"
+  },
+  "20308": {
+    "id": 20308,
+    "name": "拉多拉洞窟３楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "jyaruga/dungeon/dan_2-03-08"
+  },
+  "20607": {
+    "id": 20607,
+    "name": "强恩一族的洞窟７楼",
+    "width": 80,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-06-07"
+  },
+  "21110": {
+    "id": 21110,
+    "name": "碧青的洞窟地下１０楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-11-10"
+  },
+  "20606": {
+    "id": 20606,
+    "name": "强恩一族的洞窟６楼",
+    "width": 70,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-06-06"
+  },
+  "20601": {
+    "id": 20601,
+    "name": "强恩一族的洞窟１楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-06-01"
+  },
+  "20608": {
+    "id": 20608,
+    "name": "沙拉的房间",
+    "width": 15,
+    "height": 15,
+    "rel_path": "jyaruga/dungeon/dan_2-06-08"
+  },
+  "21111": {
+    "id": 21111,
+    "name": "碧青的洞窟地下１１楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-11-11"
+  },
+  "20101": {
+    "id": 20101,
+    "name": "森林洞窟１楼",
+    "width": 50,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/dan_2-01-01"
+  },
+  "20806": {
+    "id": 20806,
+    "name": "龙的巢穴６楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/20806"
+  },
+  "20801": {
+    "id": 20801,
+    "name": "龙的巢穴１楼",
+    "width": 70,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/20801"
+  },
+  "20507": {
+    "id": 20507,
+    "name": "阿鲁姆山的洞窟地下７楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-05-07"
+  },
+  "20903": {
+    "id": 20903,
+    "name": "卡鲁它那的洞窟２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-09-03"
+  },
+  "21108": {
+    "id": 21108,
+    "name": "碧青的洞窟地下８楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-11-08"
+  },
+  "21106": {
+    "id": 21106,
+    "name": "拉多拉洞窟山顶",
+    "width": 50,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/dan_2-11-06"
+  },
+  "20506": {
+    "id": 20506,
+    "name": "阿鲁姆山的洞窟地下６楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-05-06"
+  },
+  "20807": {
+    "id": 20807,
+    "name": "龙的巢穴７楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/20807"
+  },
+  "20501": {
+    "id": 20501,
+    "name": "阿鲁姆山的洞窟地下１楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-05-01"
+  },
+  "20508": {
+    "id": 20508,
+    "name": "哈恩的锻冶场",
+    "width": 25,
+    "height": 25,
+    "rel_path": "jyaruga/dungeon/dan_2-05-08"
+  },
+  "21109": {
+    "id": 21109,
+    "name": "拉多拉洞窟山顶",
+    "width": 50,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/dan_2-11-09"
+  },
+  "20902": {
+    "id": 20902,
+    "name": "卡鲁它那的洞窟２楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-09-02"
+  },
+  "20009": {
+    "id": 20009,
+    "name": "拉多拉山岭洞窟９楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "jyaruga/dungeon/dan_2-00-09"
+  },
+  "20406": {
+    "id": 20406,
+    "name": "哥亚山的洞窟山顶",
+    "width": 50,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/dan_2-04-06"
+  },
+  "20401": {
+    "id": 20401,
+    "name": "哥亚山洞窟１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-04-01"
+  },
+  "20007": {
+    "id": 20007,
+    "name": "拉多拉山岭洞窟７楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "jyaruga/dungeon/dan_2-00-07"
+  },
+  "20710": {
+    "id": 20710,
+    "name": "拉多拉的大洞窟８楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-07-10"
+  },
+  "20001": {
+    "id": 20001,
+    "name": "拉多拉山岭洞窟１楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "jyaruga/dungeon/dan_2-00-01"
+  },
+  "20711": {
+    "id": 20711,
+    "name": "审查室",
+    "width": 30,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/dan_2-07-11"
+  },
+  "20006": {
+    "id": 20006,
+    "name": "拉多拉山岭洞窟６楼",
+    "width": 80,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/dan_2-00-06"
+  },
+  "20008": {
+    "id": 20008,
+    "name": "拉多拉山岭洞窟８楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "jyaruga/dungeon/dan_2-00-08"
+  },
+  "20702": {
+    "id": 20702,
+    "name": "拉多拉的大洞窟２楼",
+    "width": 60,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/dan_2-07-02"
+  },
+  "20012": {
+    "id": 20012,
+    "name": "拉多拉山岭洞窟１０楼",
+    "width": 20,
+    "height": 20,
+    "rel_path": "jyaruga/dungeon/dan_2-00-12"
+  },
+  "20705": {
+    "id": 20705,
+    "name": "拉多拉的大洞窟３楼",
+    "width": 20,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/dan_2-07-05"
+  },
+  "20303": {
+    "id": 20303,
+    "name": "拉多拉洞窟２楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "jyaruga/dungeon/dan_2-03-03"
+  },
+  "20304": {
+    "id": 20304,
+    "name": "拉多拉洞窟３楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "jyaruga/dungeon/dan_2-03-04"
+  },
+  "20305": {
+    "id": 20305,
+    "name": "拉多拉洞窟３楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "jyaruga/dungeon/dan_2-03-05"
+  },
+  "20302": {
+    "id": 20302,
+    "name": "拉多拉洞窟１楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "jyaruga/dungeon/dan_2-03-02"
+  },
+  "20704": {
+    "id": 20704,
+    "name": "拉多拉的大洞窟３楼",
+    "width": 20,
+    "height": 20,
+    "rel_path": "jyaruga/dungeon/dan_2-07-04"
+  },
+  "20013": {
+    "id": 20013,
+    "name": "拉多拉山岭洞窟１０楼",
+    "width": 20,
+    "height": 20,
+    "rel_path": "jyaruga/dungeon/dan_2-00-13"
+  },
+  "20703": {
+    "id": 20703,
+    "name": "拉多拉的大洞窟３楼",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/dungeon/dan_2-07-03"
+  },
+  "21113": {
+    "id": 21113,
+    "name": "碧青的洞窟地下１３楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-11-13"
+  },
+  "20604": {
+    "id": 20604,
+    "name": "强恩一族的洞窟４楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/dan_2-06-04"
+  },
+  "20603": {
+    "id": 20603,
+    "name": "强恩一族的洞窟３楼",
+    "width": 50,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/dan_2-06-03"
+  },
+  "21112": {
+    "id": 21112,
+    "name": "拉多拉洞窟山顶",
+    "width": 50,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/dan_2-11-12"
+  },
+  "20602": {
+    "id": 20602,
+    "name": "强恩一族的洞窟２楼",
+    "width": 70,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/dan_2-06-02"
+  },
+  "20605": {
+    "id": 20605,
+    "name": "强恩一族的洞窟５楼",
+    "width": 60,
+    "height": 80,
+    "rel_path": "jyaruga/dungeon/dan_2-06-05"
+  },
+  "21214": {
+    "id": 21214,
+    "name": "碧青的洞窟地下１４楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-14"
+  },
+  "21213": {
+    "id": 21213,
+    "name": "碧青的洞窟地下１３楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-13"
+  },
+  "21212": {
+    "id": 21212,
+    "name": "碧青的洞窟地下１２楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-12"
+  },
+  "21215": {
+    "id": 21215,
+    "name": "碧青的洞窟地下１５楼",
+    "width": 50,
+    "height": 100,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-15"
+  },
+  "21208": {
+    "id": 21208,
+    "name": "碧青的洞窟地下８楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-08"
+  },
+  "21206": {
+    "id": 21206,
+    "name": "碧青的洞窟地下６楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-06"
+  },
+  "21201": {
+    "id": 21201,
+    "name": "碧青的洞窟地下１楼",
+    "width": 120,
+    "height": 120,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-01"
+  },
+  "21207": {
+    "id": 21207,
+    "name": "碧青的洞窟地下７楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-07"
+  },
+  "21209": {
+    "id": 21209,
+    "name": "碧青的洞窟地下９楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-09"
+  },
+  "21210": {
+    "id": 21210,
+    "name": "碧青的洞窟地下１０楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-10"
+  },
+  "21211": {
+    "id": 21211,
+    "name": "碧青的洞窟地下１１楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-11"
+  },
+  "21202": {
+    "id": 21202,
+    "name": "碧青的洞窟地下２楼",
+    "width": 120,
+    "height": 120,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-02"
+  },
+  "21205": {
+    "id": 21205,
+    "name": "碧青的洞窟地下５楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-05"
+  },
+  "21204": {
+    "id": 21204,
+    "name": "碧青的洞窟地下４楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-04"
+  },
+  "21203": {
+    "id": 21203,
+    "name": "碧青的洞窟地下３楼",
+    "width": 120,
+    "height": 120,
+    "rel_path": "jyaruga/dungeon/hekisei/dan_2-12-03"
+  },
+  "21312": {
+    "id": 21312,
+    "name": "水苍的洞窟 地下12楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-12"
+  },
+  "21315": {
+    "id": 21315,
+    "name": "水苍的洞窟 地下15楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-15"
+  },
+  "21314": {
+    "id": 21314,
+    "name": "水苍的洞窟 地下14楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-14"
+  },
+  "21313": {
+    "id": 21313,
+    "name": "水苍的洞窟 地下13楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-13"
+  },
+  "21307": {
+    "id": 21307,
+    "name": "水苍的洞窟 地下7楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-07"
+  },
+  "21309": {
+    "id": 21309,
+    "name": "水苍的洞窟 地下9楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-09"
+  },
+  "21308": {
+    "id": 21308,
+    "name": "水苍的洞窟 地下8楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-08"
+  },
+  "21306": {
+    "id": 21306,
+    "name": "水苍的洞窟 地下6楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-06"
+  },
+  "21301": {
+    "id": 21301,
+    "name": "水苍的洞窟 地下1楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-01"
+  },
+  "21311": {
+    "id": 21311,
+    "name": "水苍的洞窟 地下11楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-11"
+  },
+  "21310": {
+    "id": 21310,
+    "name": "水苍的洞窟 地下10楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-10"
+  },
+  "21304": {
+    "id": 21304,
+    "name": "水苍的洞窟 地下4楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-04"
+  },
+  "21303": {
+    "id": 21303,
+    "name": "水苍的洞窟 地下3楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-03"
+  },
+  "21302": {
+    "id": 21302,
+    "name": "水苍的洞窟 地下2楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-02"
+  },
+  "21305": {
+    "id": 21305,
+    "name": "水苍的洞窟 地下5楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/suisou/dan_2-13-05"
+  },
+  "21012": {
+    "id": 21012,
+    "name": "琉璃的洞窟１２楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_12"
+  },
+  "21007": {
+    "id": 21007,
+    "name": "琉璃的洞窟７楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_07"
+  },
+  "21009": {
+    "id": 21009,
+    "name": "琉璃的洞窟９楼",
+    "width": 55,
+    "height": 55,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_09"
+  },
+  "21008": {
+    "id": 21008,
+    "name": "琉璃的洞窟８楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_08"
+  },
+  "21001": {
+    "id": 21001,
+    "name": "琉璃的洞窟１楼",
+    "width": 85,
+    "height": 85,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_01"
+  },
+  "21006": {
+    "id": 21006,
+    "name": "琉璃的洞窟６楼",
+    "width": 65,
+    "height": 65,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_06"
+  },
+  "21015": {
+    "id": 21015,
+    "name": "琉璃的洞窟１５楼",
+    "width": 20,
+    "height": 20,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_15"
+  },
+  "21013": {
+    "id": 21013,
+    "name": "琉璃的洞窟１３楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_13"
+  },
+  "21014": {
+    "id": 21014,
+    "name": "琉璃的洞窟１４楼",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_14"
+  },
+  "21003": {
+    "id": 21003,
+    "name": "琉璃的洞窟３楼",
+    "width": 70,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_03"
+  },
+  "21004": {
+    "id": 21004,
+    "name": "琉璃的洞窟４楼",
+    "width": 70,
+    "height": 70,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_04"
+  },
+  "21005": {
+    "id": 21005,
+    "name": "琉璃的洞窟５楼",
+    "width": 65,
+    "height": 65,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_05"
+  },
+  "21002": {
+    "id": 21002,
+    "name": "琉璃的洞窟２楼",
+    "width": 75,
+    "height": 75,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_02"
+  },
+  "21011": {
+    "id": 21011,
+    "name": "琉璃的洞窟１１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_11"
+  },
+  "21010": {
+    "id": 21010,
+    "name": "琉璃的洞窟１０楼",
+    "width": 55,
+    "height": 55,
+    "rel_path": "jyaruga/dungeon/ruri/dan_2_10_10"
+  },
+  "201": {
+    "id": 201,
+    "name": "卡鲁它那牧场事务所",
+    "width": 30,
+    "height": 40,
+    "rel_path": "jyaruga/sonota/201"
+  },
+  "4002": {
+    "id": 4002,
+    "name": "卡鲁它那的道具店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/karutana/4002"
+  },
+  "4005": {
+    "id": 4005,
+    "name": "卡鲁它那的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/karutana/4005"
+  },
+  "4004": {
+    "id": 4004,
+    "name": "卡鲁它那的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/karutana/4004"
+  },
+  "4003": {
+    "id": 4003,
+    "name": "卡鲁它那的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/karutana/4003"
+  },
+  "4020": {
+    "id": 4020,
+    "name": "卡鲁他那道场柜台",
+    "width": 25,
+    "height": 25,
+    "rel_path": "jyaruga/karutana/4020"
+  },
+  "4011": {
+    "id": 4011,
+    "name": "长毛象快递",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/karutana/4011"
+  },
+  "karutana": {
+    "id": null,
+    "name": "卡鲁它那村",
+    "width": 150,
+    "height": 150,
+    "rel_path": "jyaruga/karutana/karutana"
+  },
+  "4008": {
+    "id": 4008,
+    "name": "卡鲁它那的道场",
+    "width": 40,
+    "height": 40,
+    "rel_path": "jyaruga/karutana/4008"
+  },
+  "4006": {
+    "id": 4006,
+    "name": "卡鲁它那的村长家",
+    "width": 30,
+    "height": 40,
+    "rel_path": "jyaruga/karutana/4006"
+  },
+  "4001": {
+    "id": 4001,
+    "name": "卡鲁它那的武器店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/karutana/4001"
+  },
+  "4007": {
+    "id": 4007,
+    "name": "卡鲁它那的竞技场",
+    "width": 100,
+    "height": 100,
+    "rel_path": "jyaruga/karutana/4007"
+  },
+  "4009": {
+    "id": 4009,
+    "name": "卡鲁它那的便利商店",
+    "width": 40,
+    "height": 60,
+    "rel_path": "jyaruga/karutana/4009"
+  },
+  "4014": {
+    "id": 4014,
+    "name": "长毛象快递",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/karutana/4014"
+  },
+  "4012": {
+    "id": 4012,
+    "name": "聊天室柜台",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/karutana/4012"
+  },
+  "3413": {
+    "id": 3413,
+    "name": "森林的独栋房屋",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/kikuku/3413"
+  },
+  "3412": {
+    "id": 3412,
+    "name": "奇喀喀的民家",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/kikuku/3412"
+  },
+  "3406": {
+    "id": 3406,
+    "name": "奇喀喀的村长家",
+    "width": 40,
+    "height": 30,
+    "rel_path": "jyaruga/kikuku/3406"
+  },
+  "3409": {
+    "id": 3409,
+    "name": "奇喀喀的便利商店",
+    "width": 40,
+    "height": 60,
+    "rel_path": "jyaruga/kikuku/3409"
+  },
+  "kikuku": {
+    "id": null,
+    "name": "奇喀喀村",
+    "width": 120,
+    "height": 120,
+    "rel_path": "jyaruga/kikuku/kikuku"
+  },
+  "3405": {
+    "id": 3405,
+    "name": "奇喀喀的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/kikuku/3405"
+  },
+  "3403": {
+    "id": 3403,
+    "name": "奇喀喀的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/kikuku/3403"
+  },
+  "3404": {
+    "id": 3404,
+    "name": "奇喀喀的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/kikuku/3404"
+  },
+  "3104": {
+    "id": 3104,
+    "name": "塔姆塔姆的肉店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/tamtam/3104"
+  },
+  "3103": {
+    "id": 3103,
+    "name": "塔姆塔姆的宠物店",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/tamtam/3103"
+  },
+  "3105": {
+    "id": 3105,
+    "name": "塔姆塔姆的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/tamtam/3105"
+  },
+  "3110": {
+    "id": 3110,
+    "name": "塔姆塔姆的民家",
+    "width": 30,
+    "height": 30,
+    "rel_path": "jyaruga/tamtam/3110"
+  },
+  "3109": {
+    "id": 3109,
+    "name": "塔姆塔姆的便利商店",
+    "width": 40,
+    "height": 60,
+    "rel_path": "jyaruga/tamtam/3109"
+  },
+  "3106": {
+    "id": 3106,
+    "name": "塔姆塔姆的村长家",
+    "width": 30,
+    "height": 40,
+    "rel_path": "jyaruga/tamtam/3106"
+  },
+  "tamtam": {
+    "id": null,
+    "name": "塔姆塔姆村",
+    "width": 120,
+    "height": 120,
+    "rel_path": "jyaruga/tamtam/tamtam"
+  },
+  "132": {
+    "id": 132,
+    "name": "结婚大礼堂",
+    "width": 40,
+    "height": 24,
+    "rel_path": "extra/132"
+  },
+  "104": {
+    "id": 104,
+    "name": "元神宫",
+    "width": 80,
+    "height": 80,
+    "rel_path": "extra/104"
+  },
+  "157": {
+    "id": 157,
+    "name": "魔王竞技场4F",
+    "width": 30,
+    "height": 30,
+    "rel_path": "extra/157"
+  },
+  "156": {
+    "id": 156,
+    "name": "魔王竞技场3F",
+    "width": 30,
+    "height": 30,
+    "rel_path": "extra/156"
+  },
+  "7025": {
+    "id": 7025,
+    "name": "饲养丛林",
+    "width": 150,
+    "height": 150,
+    "rel_path": "extra/7025"
+  },
+  "116": {
+    "id": 116,
+    "name": "长毛象大厅",
+    "width": 45,
+    "height": 45,
+    "rel_path": "extra/116"
+  },
+  "111": {
+    "id": 111,
+    "name": "大广场",
+    "width": 26,
+    "height": 22,
+    "rel_path": "extra/111"
+  },
+  "118": {
+    "id": 118,
+    "name": "迷宫",
+    "width": 250,
+    "height": 180,
+    "rel_path": "extra/118"
+  },
+  "120": {
+    "id": 120,
+    "name": "靠近水田的家",
+    "width": 30,
+    "height": 30,
+    "rel_path": "extra/120"
+  },
+  "kariba": {
+    "id": null,
+    "name": "狩猎场",
+    "width": 50,
+    "height": 30,
+    "rel_path": "extra/kariba"
+  },
+  "121": {
+    "id": 121,
+    "name": "岬之家",
+    "width": 30,
+    "height": 30,
+    "rel_path": "extra/121"
+  },
+  "119": {
+    "id": 119,
+    "name": "迷宫",
+    "width": 200,
+    "height": 200,
+    "rel_path": "extra/119"
+  },
+  "110": {
+    "id": 110,
+    "name": "聊天室",
+    "width": 46,
+    "height": 45,
+    "rel_path": "extra/110"
+  },
+  "117": {
+    "id": 117,
+    "name": "迷宫",
+    "width": 300,
+    "height": 200,
+    "rel_path": "extra/117"
+  },
+  "154": {
+    "id": 154,
+    "name": "魔王竞技场1F",
+    "width": 30,
+    "height": 30,
+    "rel_path": "extra/154"
+  },
+  "155": {
+    "id": 155,
+    "name": "魔王竞技场2F",
+    "width": 30,
+    "height": 30,
+    "rel_path": "extra/155"
+  },
+  "112": {
+    "id": 112,
+    "name": "结婚会场",
+    "width": 12,
+    "height": 20,
+    "rel_path": "extra/112"
+  },
+  "115": {
+    "id": 115,
+    "name": "小房间３",
+    "width": 11,
+    "height": 11,
+    "rel_path": "extra/115"
+  },
+  "148": {
+    "id": 148,
+    "name": "魔王秘境",
+    "width": 18,
+    "height": 18,
+    "rel_path": "extra/148"
+  },
+  "122": {
+    "id": 122,
+    "name": "迷宫",
+    "width": 300,
+    "height": 200,
+    "rel_path": "extra/122"
+  },
+  "114": {
+    "id": 114,
+    "name": "小房间２",
+    "width": 11,
+    "height": 11,
+    "rel_path": "extra/114"
+  },
+  "113": {
+    "id": 113,
+    "name": "小房间１",
+    "width": 11,
+    "height": 11,
+    "rel_path": "extra/113"
+  },
+  "8233": {
+    "id": 8233,
+    "name": "香普尔山山洞第三层",
+    "width": 40,
+    "height": 40,
+    "rel_path": "alcohol/8233"
+  },
+  "8232": {
+    "id": 8232,
+    "name": "香普尔山山洞第三层",
+    "width": 40,
+    "height": 40,
+    "rel_path": "alcohol/8232"
+  },
+  "8230": {
+    "id": 8230,
+    "name": "香普尔山山洞第一层",
+    "width": 70,
+    "height": 60,
+    "rel_path": "alcohol/8230"
+  },
+  "8231": {
+    "id": 8231,
+    "name": "香普尔山山洞第二层",
+    "width": 50,
+    "height": 50,
+    "rel_path": "alcohol/8231"
+  },
+  "8217": {
+    "id": 8217,
+    "name": "追猎者公会",
+    "width": 40,
+    "height": 40,
+    "rel_path": "union/8217"
+  },
+  "8221": {
+    "id": 8221,
+    "name": "暗灵法师试练洞窟",
+    "width": 160,
+    "height": 100,
+    "rel_path": "union/8221"
+  },
+  "8219": {
+    "id": 8219,
+    "name": "白狼勇士试练洞窟",
+    "width": 160,
+    "height": 100,
+    "rel_path": "union/8219"
+  },
+  "8218": {
+    "id": 8218,
+    "name": "暗灵法师公会",
+    "width": 40,
+    "height": 40,
+    "rel_path": "union/8218"
+  },
+  "8220": {
+    "id": 8220,
+    "name": "追猎者试练洞窟",
+    "width": 160,
+    "height": 100,
+    "rel_path": "union/8220"
+  },
+  "8216": {
+    "id": 8216,
+    "name": "白狼勇士公会",
+    "width": 40,
+    "height": 40,
+    "rel_path": "union/8216"
+  },
+  "boraisland": {
+    "id": null,
+    "name": "五十年前波拉岛",
+    "width": 800,
+    "height": 800,
+    "rel_path": "poru/boraisland"
+  },
+  "5541": {
+    "id": 5541,
+    "name": "泰坦洞穴",
+    "width": 50,
+    "height": 40,
+    "rel_path": "poru/5541"
+  },
+  "5530": {
+    "id": 5530,
+    "name": "海底洞窟",
+    "width": 60,
+    "height": 60,
+    "rel_path": "poru/5530"
+  },
+  "5537": {
+    "id": 5537,
+    "name": "米兰达房间",
+    "width": 12,
+    "height": 12,
+    "rel_path": "poru/5537"
+  },
+  "5508": {
+    "id": 5508,
+    "name": "波拉山顶通道",
+    "width": 60,
+    "height": 60,
+    "rel_path": "poru/5508"
+  },
+  "5501": {
+    "id": 5501,
+    "name": "水坝南方洞窟",
+    "width": 60,
+    "height": 60,
+    "rel_path": "poru/5501"
+  },
+  "5506": {
+    "id": 5506,
+    "name": "水坝北方洞窟地下一楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "poru/5506"
+  },
+  "5507": {
+    "id": 5507,
+    "name": "波拉山谷",
+    "width": 100,
+    "height": 100,
+    "rel_path": "poru/5507"
+  },
+  "5538": {
+    "id": 5538,
+    "name": "米兰达部队士兵房间",
+    "width": 20,
+    "height": 15,
+    "rel_path": "poru/5538"
+  },
+  "5500": {
+    "id": 5500,
+    "name": "避难洞窟",
+    "width": 50,
+    "height": 30,
+    "rel_path": "poru/5500"
+  },
+  "5536": {
+    "id": 5536,
+    "name": "米兰达部队驻地",
+    "width": 60,
+    "height": 60,
+    "rel_path": "poru/5536"
+  },
+  "5509": {
+    "id": 5509,
+    "name": "波拉山顶",
+    "width": 50,
+    "height": 70,
+    "rel_path": "poru/5509"
+  },
+  "517": {
+    "id": 517,
+    "name": "517",
+    "width": 60,
+    "height": 100,
+    "rel_path": "poru/517"
+  },
+  "521": {
+    "id": 521,
+    "name": "521",
+    "width": 50,
+    "height": 50,
+    "rel_path": "poru/521"
+  },
+  "519": {
+    "id": 519,
+    "name": "519",
+    "width": 50,
+    "height": 50,
+    "rel_path": "poru/519"
+  },
+  "518": {
+    "id": 518,
+    "name": "518",
+    "width": 50,
+    "height": 50,
+    "rel_path": "poru/518"
+  },
+  "520": {
+    "id": 520,
+    "name": "520",
+    "width": 50,
+    "height": 50,
+    "rel_path": "poru/520"
+  },
+  "516": {
+    "id": 516,
+    "name": "516",
+    "width": 60,
+    "height": 100,
+    "rel_path": "poru/516"
+  },
+  "501": {
+    "id": 501,
+    "name": "aabbccddee",
+    "width": 50,
+    "height": 70,
+    "rel_path": "poru/501"
+  },
+  "5543": {
+    "id": 5543,
+    "name": "米兰达机场",
+    "width": 60,
+    "height": 60,
+    "rel_path": "poru/5543"
+  },
+  "5510": {
+    "id": 5510,
+    "name": "龙穴门口",
+    "width": 60,
+    "height": 60,
+    "rel_path": "poru/5510"
+  },
+  "5542": {
+    "id": 5542,
+    "name": "爱丽考古队驻地",
+    "width": 60,
+    "height": 60,
+    "rel_path": "poru/5542"
+  },
+  "5511": {
+    "id": 5511,
+    "name": "龙穴",
+    "width": 30,
+    "height": 30,
+    "rel_path": "poru/5511"
+  },
+  "5534": {
+    "id": 5534,
+    "name": "爱丽儿部队士兵房间",
+    "width": 15,
+    "height": 20,
+    "rel_path": "poru/5534"
+  },
+  "5533": {
+    "id": 5533,
+    "name": "爱丽儿部队驻地",
+    "width": 60,
+    "height": 60,
+    "rel_path": "poru/5533"
+  },
+  "5505": {
+    "id": 5505,
+    "name": "水坝北方洞窟地下二楼",
+    "width": 60,
+    "height": 100,
+    "rel_path": "poru/5505"
+  },
+  "5502": {
+    "id": 5502,
+    "name": "水坝南方洞窟地下一楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "poru/5502"
+  },
+  "lostsea": {
+    "id": null,
+    "name": "迷失之海",
+    "width": 200,
+    "height": 200,
+    "rel_path": "poru/lostsea"
+  },
+  "5560": {
+    "id": 5560,
+    "name": "迷失之海",
+    "width": 200,
+    "height": 200,
+    "rel_path": "poru/5560"
+  },
+  "5503": {
+    "id": 5503,
+    "name": "水坝南方洞窟地下二楼",
+    "width": 60,
+    "height": 100,
+    "rel_path": "poru/5503"
+  },
+  "5504": {
+    "id": 5504,
+    "name": "水坝洞窟底层",
+    "width": 20,
+    "height": 200,
+    "rel_path": "poru/5504"
+  },
+  "5532": {
+    "id": 5532,
+    "name": "泰坦的部队驻地",
+    "width": 40,
+    "height": 40,
+    "rel_path": "poru/5532"
+  },
+  "5535": {
+    "id": 5535,
+    "name": "爱丽儿房间",
+    "width": 12,
+    "height": 12,
+    "rel_path": "poru/5535"
+  },
+  "1013": {
+    "id": 1013,
+    "name": "老爷爷的家",
+    "width": 30,
+    "height": 30,
+    "rel_path": "poru/1013"
+  },
+  "522": {
+    "id": 522,
+    "name": "abc",
+    "width": 30,
+    "height": 30,
+    "rel_path": "poru/522"
+  },
+  "8007": {
+    "id": 8007,
+    "name": "沉船",
+    "width": 60,
+    "height": 60,
+    "rel_path": "namidanoumi/8007"
+  },
+  "8015": {
+    "id": 8015,
+    "name": "海底洞窟",
+    "width": 20,
+    "height": 20,
+    "rel_path": "namidanoumi/8015"
+  },
+  "8028": {
+    "id": 8028,
+    "name": "海底洞窟",
+    "width": 20,
+    "height": 20,
+    "rel_path": "namidanoumi/8028"
+  },
+  "8029": {
+    "id": 8029,
+    "name": "海底洞窟",
+    "width": 20,
+    "height": 20,
+    "rel_path": "namidanoumi/8029"
+  },
+  "8027": {
+    "id": 8027,
+    "name": "海底洞窟",
+    "width": 20,
+    "height": 20,
+    "rel_path": "namidanoumi/8027"
+  },
+  "8101": {
+    "id": 8101,
+    "name": "沉船",
+    "width": 60,
+    "height": 60,
+    "rel_path": "namidanoumi/8101"
+  },
+  "8100": {
+    "id": 8100,
+    "name": "沉船",
+    "width": 60,
+    "height": 60,
+    "rel_path": "namidanoumi/8100"
+  },
+  "8001": {
+    "id": 8001,
+    "name": "史东尔洞窟地下一楼",
+    "width": 70,
+    "height": 80,
+    "rel_path": "namidanoumi/hole/8001"
+  },
+  "8006": {
+    "id": 8006,
+    "name": "史东尔洞窟地下六楼",
+    "width": 70,
+    "height": 80,
+    "rel_path": "namidanoumi/hole/8006"
+  },
+  "8009": {
+    "id": 8009,
+    "name": "沙己夫换气道",
+    "width": 60,
+    "height": 60,
+    "rel_path": "namidanoumi/hole/8009"
+  },
+  "8000": {
+    "id": 8000,
+    "name": "史东尔换气道",
+    "width": 60,
+    "height": 60,
+    "rel_path": "namidanoumi/hole/8000"
+  },
+  "8013": {
+    "id": 8013,
+    "name": "沙己夫洞窟地下四楼",
+    "width": 70,
+    "height": 80,
+    "rel_path": "namidanoumi/hole/8013"
+  },
+  "8014": {
+    "id": 8014,
+    "name": "沙己夫洞窟地下五楼",
+    "width": 80,
+    "height": 90,
+    "rel_path": "namidanoumi/hole/8014"
+  },
+  "8012": {
+    "id": 8012,
+    "name": "沙己夫洞窟地下三楼",
+    "width": 70,
+    "height": 50,
+    "rel_path": "namidanoumi/hole/8012"
+  },
+  "8005": {
+    "id": 8005,
+    "name": "史东尔洞窟地下五楼",
+    "width": 70,
+    "height": 60,
+    "rel_path": "namidanoumi/hole/8005"
+  },
+  "8002": {
+    "id": 8002,
+    "name": "史东尔洞窟地下二楼",
+    "width": 60,
+    "height": 50,
+    "rel_path": "namidanoumi/hole/8002"
+  },
+  "8003": {
+    "id": 8003,
+    "name": "史东尔洞窟地下三楼",
+    "width": 80,
+    "height": 60,
+    "rel_path": "namidanoumi/hole/8003"
+  },
+  "8004": {
+    "id": 8004,
+    "name": "史东尔洞窟地下四楼",
+    "width": 70,
+    "height": 80,
+    "rel_path": "namidanoumi/hole/8004"
+  },
+  "8010": {
+    "id": 8010,
+    "name": "沙己夫洞窟地下一楼",
+    "width": 80,
+    "height": 70,
+    "rel_path": "namidanoumi/hole/8010"
+  },
+  "8011": {
+    "id": 8011,
+    "name": "沙己夫洞窟地下二楼",
+    "width": 90,
+    "height": 70,
+    "rel_path": "namidanoumi/hole/8011"
+  },
+  "giiru": {
+    "id": null,
+    "name": "吉鲁岛",
+    "width": 600,
+    "height": 600,
+    "rel_path": "giiru/giiru"
+  },
+  "31001": {
+    "id": 31001,
+    "name": "加都洛的洞窟１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-10-01"
+  },
+  "5106": {
+    "id": 5106,
+    "name": "长老房间",
+    "width": 30,
+    "height": 50,
+    "rel_path": "giiru/north/hause_5106"
+  },
+  "dana": {
+    "id": null,
+    "name": "达那村",
+    "width": 90,
+    "height": 90,
+    "rel_path": "giiru/north/dana"
+  },
+  "5105": {
+    "id": 5105,
+    "name": "达那的医院",
+    "width": 30,
+    "height": 30,
+    "rel_path": "giiru/north/hospital_5105"
+  },
+  "9355": {
+    "id": 9355,
+    "name": "达那密道",
+    "width": 35,
+    "height": 15,
+    "rel_path": "giiru/north/snake_9355"
+  },
+  "5107": {
+    "id": 5107,
+    "name": "长老房间",
+    "width": 15,
+    "height": 15,
+    "rel_path": "giiru/north/hause_5107"
+  },
+  "15101": {
+    "id": 15101,
+    "name": "大厅 西",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/north/shop1_5101"
+  },
+  "5103": {
+    "id": 5103,
+    "name": "大厅 东",
+    "width": 30,
+    "height": 30,
+    "rel_path": "giiru/north/petshop_5103"
+  },
+  "9357": {
+    "id": 9357,
+    "name": "达那密道",
+    "width": 35,
+    "height": 15,
+    "rel_path": "giiru/north/snake_9357"
+  },
+  "9356": {
+    "id": 9356,
+    "name": "蛇王巢穴",
+    "width": 15,
+    "height": 25,
+    "rel_path": "giiru/north/snake_9356"
+  },
+  "30010": {
+    "id": 30010,
+    "name": "深红的洞窟地下６楼",
+    "width": 30,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-00-10"
+  },
+  "31608": {
+    "id": 31608,
+    "name": "方位的祠",
+    "width": 70,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dun_3-16-08"
+  },
+  "30017": {
+    "id": 30017,
+    "name": "火山裂缝通道",
+    "width": 49,
+    "height": 99,
+    "rel_path": "giiru/dungeon/dan_3-00-17"
+  },
+  "31601": {
+    "id": 31601,
+    "name": "方位的祠",
+    "width": 70,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dun_3-16-01"
+  },
+  "30026": {
+    "id": 30026,
+    "name": "水晶洞窟核心",
+    "width": 30,
+    "height": 30,
+    "rel_path": "giiru/dungeon/dan_3-00-26"
+  },
+  "31606": {
+    "id": 31606,
+    "name": "方位的祠",
+    "width": 100,
+    "height": 100,
+    "rel_path": "giiru/dungeon/dun_3-16-06"
+  },
+  "30510": {
+    "id": 30510,
+    "name": "巴那姆的洞窟地下３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-05-10"
+  },
+  "31607": {
+    "id": 31607,
+    "name": "方位的祠",
+    "width": 70,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dun_3-16-07"
+  },
+  "31609": {
+    "id": 31609,
+    "name": "方位的祠",
+    "width": 100,
+    "height": 100,
+    "rel_path": "giiru/dungeon/dun_3-16-09"
+  },
+  "30016": {
+    "id": 30016,
+    "name": "深红的洞窟地下９楼",
+    "width": 50,
+    "height": 100,
+    "rel_path": "giiru/dungeon/dan_3-00-16"
+  },
+  "30011": {
+    "id": 30011,
+    "name": "深红的洞窟地下５楼",
+    "width": 60,
+    "height": 40,
+    "rel_path": "giiru/dungeon/dan_3-00-11"
+  },
+  "30201": {
+    "id": 30201,
+    "name": "北吉鲁的通路地下１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-02-01"
+  },
+  "30511": {
+    "id": 30511,
+    "name": "巴那姆的洞窟地下３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-05-11"
+  },
+  "31301": {
+    "id": 31301,
+    "name": "吉鲁的海底通路",
+    "width": 40,
+    "height": 120,
+    "rel_path": "giiru/dungeon/dun_3-13-01"
+  },
+  "30301": {
+    "id": 30301,
+    "name": "地下1楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-03-01"
+  },
+  "30306": {
+    "id": 30306,
+    "name": "地下2楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-03-06"
+  },
+  "31701": {
+    "id": 31701,
+    "name": "五兄弟的山寨地下１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-17-01"
+  },
+  "31706": {
+    "id": 31706,
+    "name": "五兄弟的山寨地下６楼",
+    "width": 50,
+    "height": 80,
+    "rel_path": "giiru/dungeon/dun_3-17-06"
+  },
+  "31201": {
+    "id": 31201,
+    "name": "没落的矿坑１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-12-01"
+  },
+  "30701": {
+    "id": 30701,
+    "name": "地下１楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dun_3-07-01"
+  },
+  "30307": {
+    "id": 30307,
+    "name": "地下1楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-03-07"
+  },
+  "31103": {
+    "id": 31103,
+    "name": "族长的房间",
+    "width": 25,
+    "height": 25,
+    "rel_path": "giiru/dungeon/dan_3-11-03"
+  },
+  "30403": {
+    "id": 30403,
+    "name": "北吉鲁山岭地下１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-04-03"
+  },
+  "31908": {
+    "id": 31908,
+    "name": "吉鲁采石场７楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dan_3-19-08"
+  },
+  "31901": {
+    "id": 31901,
+    "name": "吉鲁采石场１楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "giiru/dungeon/dan_3-19-01"
+  },
+  "31906": {
+    "id": 31906,
+    "name": "吉鲁采石场５楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dan_3-19-06"
+  },
+  "31806": {
+    "id": 31806,
+    "name": "阿斯玛鲁矿山６楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-18-06"
+  },
+  "30402": {
+    "id": 30402,
+    "name": "北吉鲁山岭地下２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-04-02"
+  },
+  "31801": {
+    "id": 31801,
+    "name": "阿斯玛鲁矿山１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-18-01"
+  },
+  "31102": {
+    "id": 31102,
+    "name": "美鲁娜的洞窟２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-11-02"
+  },
+  "31907": {
+    "id": 31907,
+    "name": "吉鲁采石场６楼",
+    "width": 60,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-19-07"
+  },
+  "31909": {
+    "id": 31909,
+    "name": "吉鲁采石场８楼",
+    "width": 20,
+    "height": 30,
+    "rel_path": "giiru/dungeon/dan_3-19-09"
+  },
+  "30502": {
+    "id": 30502,
+    "name": "巴那姆的洞窟地下２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-05-02"
+  },
+  "31002": {
+    "id": 31002,
+    "name": "加特洛的洞窟２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-10-02"
+  },
+  "30505": {
+    "id": 30505,
+    "name": "巴那姆的洞窟１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-05-05"
+  },
+  "30103": {
+    "id": 30103,
+    "name": "东吉鲁山岭地下１楼",
+    "width": 70,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dun_3-01-03"
+  },
+  "30104": {
+    "id": 30104,
+    "name": "东吉鲁山岭１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-01-04"
+  },
+  "30002": {
+    "id": 30002,
+    "name": "深红的洞窟地下２楼",
+    "width": 30,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-00-02"
+  },
+  "30901": {
+    "id": 30901,
+    "name": "地下１楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dun_3-09-01"
+  },
+  "30005": {
+    "id": 30005,
+    "name": "深红的洞窟地下５楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dan_3-00-05"
+  },
+  "30105": {
+    "id": 30105,
+    "name": "东吉鲁山岭１楼",
+    "width": 30,
+    "height": 30,
+    "rel_path": "giiru/dungeon/dun_3-01-05"
+  },
+  "30102": {
+    "id": 30102,
+    "name": "东吉鲁山岭２楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "giiru/dungeon/dun_3-01-02"
+  },
+  "31003": {
+    "id": 31003,
+    "name": "族长的房间",
+    "width": 25,
+    "height": 25,
+    "rel_path": "giiru/dungeon/dan_3-10-03"
+  },
+  "30504": {
+    "id": 30504,
+    "name": "巴那姆的洞窟地下１楼",
+    "width": 30,
+    "height": 30,
+    "rel_path": "giiru/dungeon/dun_3-05-04"
+  },
+  "30503": {
+    "id": 30503,
+    "name": "巴那姆的洞窟地下２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-05-03"
+  },
+  "30004": {
+    "id": 30004,
+    "name": "深红的洞窟地下４楼",
+    "width": 60,
+    "height": 20,
+    "rel_path": "giiru/dungeon/dan_3-00-04"
+  },
+  "30003": {
+    "id": 30003,
+    "name": "深红的洞窟地下３楼",
+    "width": 30,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dan_3-00-03"
+  },
+  "31302": {
+    "id": 31302,
+    "name": "吉鲁的海底通道",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dan_3-13-02"
+  },
+  "30203": {
+    "id": 30203,
+    "name": "北吉鲁的通路地下３楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "giiru/dungeon/dun_3-02-03"
+  },
+  "30204": {
+    "id": 30204,
+    "name": "北吉鲁的通路地下２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-02-04"
+  },
+  "30014": {
+    "id": 30014,
+    "name": "深红的洞窟地下２楼",
+    "width": 70,
+    "height": 20,
+    "rel_path": "giiru/dungeon/dan_3-00-14"
+  },
+  "30013": {
+    "id": 30013,
+    "name": "深红的洞窟地下３楼",
+    "width": 20,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dan_3-00-13"
+  },
+  "30025": {
+    "id": 30025,
+    "name": "水晶洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-00-25"
+  },
+  "31605": {
+    "id": 31605,
+    "name": "方位的祠",
+    "width": 70,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dun_3-16-05"
+  },
+  "30022": {
+    "id": 30022,
+    "name": "水晶洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-00-22"
+  },
+  "31602": {
+    "id": 31602,
+    "name": "方位的祠",
+    "width": 70,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dun_3-16-02"
+  },
+  "30205": {
+    "id": 30205,
+    "name": "北吉鲁的通路地下１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-02-05"
+  },
+  "30202": {
+    "id": 30202,
+    "name": "北吉鲁的通路地下2楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-02-02"
+  },
+  "30023": {
+    "id": 30023,
+    "name": "水晶洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-00-23"
+  },
+  "31603": {
+    "id": 31603,
+    "name": "方位的祠",
+    "width": 100,
+    "height": 100,
+    "rel_path": "giiru/dungeon/dun_3-16-03"
+  },
+  "30024": {
+    "id": 30024,
+    "name": "水晶洞窟",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-00-24"
+  },
+  "31604": {
+    "id": 31604,
+    "name": "方位的祠",
+    "width": 70,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dun_3-16-04"
+  },
+  "30012": {
+    "id": 30012,
+    "name": "深红的洞窟地下４楼",
+    "width": 40,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dan_3-00-12"
+  },
+  "30015": {
+    "id": 30015,
+    "name": "深红的洞窟地下１楼",
+    "width": 80,
+    "height": 100,
+    "rel_path": "giiru/dungeon/dan_3-00-15"
+  },
+  "30305": {
+    "id": 30305,
+    "name": "地下3楼",
+    "width": 70,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dun_3-03-05"
+  },
+  "30302": {
+    "id": 30302,
+    "name": "地下2楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-03-02"
+  },
+  "31203": {
+    "id": 31203,
+    "name": "没落的矿坑３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-12-03"
+  },
+  "30703": {
+    "id": 30703,
+    "name": "地下１楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dun_3-07-03"
+  },
+  "31204": {
+    "id": 31204,
+    "name": "没落的矿坑４楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dan_3-12-04"
+  },
+  "31703": {
+    "id": 31703,
+    "name": "五兄弟的山寨地下３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-17-03"
+  },
+  "31910": {
+    "id": 31910,
+    "name": "真知之间",
+    "width": 20,
+    "height": 20,
+    "rel_path": "giiru/dungeon/dan_3-19-10"
+  },
+  "31704": {
+    "id": 31704,
+    "name": "五兄弟的山寨地下４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-17-04"
+  },
+  "30702": {
+    "id": 30702,
+    "name": "地下２楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dun_3-07-02"
+  },
+  "31205": {
+    "id": 31205,
+    "name": "没落的矿坑５楼",
+    "width": 25,
+    "height": 25,
+    "rel_path": "giiru/dungeon/dan_3-12-05"
+  },
+  "31202": {
+    "id": 31202,
+    "name": "没落的矿坑２楼",
+    "width": 40,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dan_3-12-02"
+  },
+  "30303": {
+    "id": 30303,
+    "name": "地下1楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-03-03"
+  },
+  "30304": {
+    "id": 30304,
+    "name": "地下2楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-03-04"
+  },
+  "31705": {
+    "id": 31705,
+    "name": "五兄弟的山寨地下５楼",
+    "width": 50,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dun_3-17-05"
+  },
+  "31911": {
+    "id": 31911,
+    "name": "精灵之间",
+    "width": 20,
+    "height": 20,
+    "rel_path": "giiru/dungeon/dan_3-19-11"
+  },
+  "31702": {
+    "id": 31702,
+    "name": "五兄弟的山寨地下２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-17-02"
+  },
+  "31905": {
+    "id": 31905,
+    "name": "吉鲁采石场４楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dan_3-19-05"
+  },
+  "31902": {
+    "id": 31902,
+    "name": "采石场事务所",
+    "width": 15,
+    "height": 10,
+    "rel_path": "giiru/dungeon/dan_3-19-02"
+  },
+  "31804": {
+    "id": 31804,
+    "name": "阿斯玛鲁矿山４楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-18-04"
+  },
+  "31803": {
+    "id": 31803,
+    "name": "阿斯玛鲁矿山３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-18-03"
+  },
+  "31903": {
+    "id": 31903,
+    "name": "吉鲁采石场２楼",
+    "width": 80,
+    "height": 80,
+    "rel_path": "giiru/dungeon/dan_3-19-03"
+  },
+  "31904": {
+    "id": 31904,
+    "name": "吉鲁采石场３楼",
+    "width": 60,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dan_3-19-04"
+  },
+  "31401": {
+    "id": 31401,
+    "name": "奇努伊的海底通路",
+    "width": 120,
+    "height": 40,
+    "rel_path": "giiru/dungeon/dun_3-14-01"
+  },
+  "31802": {
+    "id": 31802,
+    "name": "阿斯玛鲁矿山２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-18-02"
+  },
+  "31101": {
+    "id": 31101,
+    "name": "美鲁娜的洞窟１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-11-01"
+  },
+  "31805": {
+    "id": 31805,
+    "name": "阿斯玛鲁矿山５楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-18-05"
+  },
+  "30401": {
+    "id": 30401,
+    "name": "北吉鲁山岭地下１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-04-01"
+  },
+  "30008": {
+    "id": 30008,
+    "name": "深红的洞窟地下８楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "giiru/dungeon/dan_3-00-08"
+  },
+  "31610": {
+    "id": 31610,
+    "name": "方位的祠",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-16-10"
+  },
+  "31501": {
+    "id": 31501,
+    "name": "奇努伊的海底通路",
+    "width": 40,
+    "height": 120,
+    "rel_path": "giiru/dungeon/dun_3-15-01"
+  },
+  "30905": {
+    "id": 30905,
+    "name": "地下１楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dun_3-09-05"
+  },
+  "30006": {
+    "id": 30006,
+    "name": "深红的洞窟地下６楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "giiru/dungeon/dan_3-00-06"
+  },
+  "30001": {
+    "id": 30001,
+    "name": "深红的洞窟地下１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dan_3-00-01"
+  },
+  "30902": {
+    "id": 30902,
+    "name": "地下２楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dun_3-09-02"
+  },
+  "30506": {
+    "id": 30506,
+    "name": "巴那姆的洞窟地下１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-05-06"
+  },
+  "30501": {
+    "id": 30501,
+    "name": "巴那姆的洞窟地下１楼",
+    "width": 40,
+    "height": 40,
+    "rel_path": "giiru/dungeon/dun_3-05-01"
+  },
+  "30508": {
+    "id": 30508,
+    "name": "巴那姆的洞窟地下３楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-05-08"
+  },
+  "30107": {
+    "id": 30107,
+    "name": "东吉鲁山岭地下１楼",
+    "width": 50,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dun_3-01-07"
+  },
+  "30903": {
+    "id": 30903,
+    "name": "地下３楼",
+    "width": 70,
+    "height": 70,
+    "rel_path": "giiru/dungeon/dun_3-09-03"
+  },
+  "30007": {
+    "id": 30007,
+    "name": "深红的洞窟地下７楼",
+    "width": 20,
+    "height": 20,
+    "rel_path": "giiru/dungeon/dan_3-00-07"
+  },
+  "30904": {
+    "id": 30904,
+    "name": "地下２楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/dun_3-09-04"
+  },
+  "30009": {
+    "id": 30009,
+    "name": "深红的洞窟地下７楼",
+    "width": 50,
+    "height": 30,
+    "rel_path": "giiru/dungeon/dan_3-00-09"
+  },
+  "30101": {
+    "id": 30101,
+    "name": "东吉鲁山岭１楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "giiru/dungeon/dun_3-01-01"
+  },
+  "30509": {
+    "id": 30509,
+    "name": "巴那姆的洞窟地下２楼",
+    "width": 100,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-05-09"
+  },
+  "30106": {
+    "id": 30106,
+    "name": "东吉鲁山岭１楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-01-06"
+  },
+  "30108": {
+    "id": 30108,
+    "name": "东吉鲁山岭１楼",
+    "width": 30,
+    "height": 30,
+    "rel_path": "giiru/dungeon/dun_3-01-08"
+  },
+  "30507": {
+    "id": 30507,
+    "name": "巴那姆的洞窟地下２楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "giiru/dungeon/dun_3-05-07"
+  },
+  "32011": {
+    "id": 32011,
+    "name": "漆黑的洞窟 地下11楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-11"
+  },
+  "32016": {
+    "id": 32016,
+    "name": "漆黑的洞窟 地下16楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-16"
+  },
+  "32020": {
+    "id": 32020,
+    "name": "漆黑的洞窟 地下20楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-20"
+  },
+  "32018": {
+    "id": 32018,
+    "name": "漆黑的洞窟 地下18楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-18"
+  },
+  "32019": {
+    "id": 32019,
+    "name": "漆黑的洞窟 地下19楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-19"
+  },
+  "32021": {
+    "id": 32021,
+    "name": "漆黑的洞窟 地下20楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-21"
+  },
+  "32017": {
+    "id": 32017,
+    "name": "漆黑的洞窟 地下17楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-17"
+  },
+  "32010": {
+    "id": 32010,
+    "name": "漆黑的洞窟 地下10楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-10"
+  },
+  "32003": {
+    "id": 32003,
+    "name": "漆黑的洞窟 地下3楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-03"
+  },
+  "32004": {
+    "id": 32004,
+    "name": "漆黑的洞窟 地下4楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-04"
+  },
+  "32005": {
+    "id": 32005,
+    "name": "漆黑的洞窟 地下5楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-05"
+  },
+  "32002": {
+    "id": 32002,
+    "name": "漆黑的洞窟 地下2楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-02"
+  },
+  "32015": {
+    "id": 32015,
+    "name": "漆黑的洞窟 地下15楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-15"
+  },
+  "32012": {
+    "id": 32012,
+    "name": "漆黑的洞窟 地下12楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-12"
+  },
+  "32013": {
+    "id": 32013,
+    "name": "漆黑的洞窟 地下13楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-13"
+  },
+  "32014": {
+    "id": 32014,
+    "name": "漆黑的洞窟 地下14楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-14"
+  },
+  "32009": {
+    "id": 32009,
+    "name": "漆黑的洞窟 地下9楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-09"
+  },
+  "32007": {
+    "id": 32007,
+    "name": "漆黑的洞窟 地下7楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-07"
+  },
+  "32001": {
+    "id": 32001,
+    "name": "漆黑的洞窟 地下1楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-01"
+  },
+  "32006": {
+    "id": 32006,
+    "name": "漆黑的洞窟 地下6楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-06"
+  },
+  "32008": {
+    "id": 32008,
+    "name": "漆黑的洞窟 地下8楼",
+    "width": 60,
+    "height": 60,
+    "rel_path": "giiru/dungeon/sikkoku/dan_3-20-08"
+  },
+  "5003": {
+    "id": 5003,
+    "name": "福尔德的宠物店兼肉店",
+    "width": 40,
+    "height": 30,
+    "rel_path": "giiru/south/5003"
+  },
+  "5005": {
+    "id": 5005,
+    "name": "福尔德的长老家",
+    "width": 40,
+    "height": 30,
+    "rel_path": "giiru/south/5005"
+  },
+  "5001": {
+    "id": 5001,
+    "name": "福尔德的杂货店",
+    "width": 40,
+    "height": 30,
+    "rel_path": "giiru/south/5001"
+  },
+  "furuudo": {
+    "id": null,
+    "name": "福尔德村",
+    "width": 90,
+    "height": 90,
+    "rel_path": "giiru/south/furuudo"
+  },
+  "8202": {
+    "id": 8202,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8202"
+  },
+  "8205": {
+    "id": 8205,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8205"
+  },
+  "8204": {
+    "id": 8204,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8204"
+  },
+  "8203": {
+    "id": 8203,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8203"
+  },
+  "8210": {
+    "id": 8210,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8210"
+  },
+  "8211": {
+    "id": 8211,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8211"
+  },
+  "8208": {
+    "id": 8208,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8208"
+  },
+  "8206": {
+    "id": 8206,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8206"
+  },
+  "8201": {
+    "id": 8201,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8201"
+  },
+  "8200": {
+    "id": 8200,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8200"
+  },
+  "8207": {
+    "id": 8207,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8207"
+  },
+  "8209": {
+    "id": 8209,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8209"
+  },
+  "8213": {
+    "id": 8213,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8213"
+  },
+  "8212": {
+    "id": 8212,
+    "name": "英雄战场",
+    "width": 220,
+    "height": 160,
+    "rel_path": "hero/8212"
+  },
+  "887": {
+    "id": 887,
+    "name": "接待中心",
+    "width": 70,
+    "height": 30,
+    "rel_path": "won/887"
+  },
+  "30695": {
+    "id": 30695,
+    "name": "天空之岛暗之界",
+    "width": 60,
+    "height": 60,
+    "rel_path": "king/30695"
+  },
+  "30692": {
+    "id": 30692,
+    "name": "天空之岛水之界",
+    "width": 80,
+    "height": 80,
+    "rel_path": "king/30692"
+  },
+  "30606": {
+    "id": 30606,
+    "name": "蛙洞通道",
+    "width": 35,
+    "height": 15,
+    "rel_path": "king/dun_3-06-06"
+  },
+  "30601": {
+    "id": 30601,
+    "name": "蛙洞地下1楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "king/dun_3-06-01"
+  },
+  "30693": {
+    "id": 30693,
+    "name": "天空之岛火之界",
+    "width": 80,
+    "height": 80,
+    "rel_path": "king/30693"
+  },
+  "30694": {
+    "id": 30694,
+    "name": "天空之岛风之界",
+    "width": 90,
+    "height": 90,
+    "rel_path": "king/30694"
+  },
+  "30600": {
+    "id": 30600,
+    "name": "库伊爷的家",
+    "width": 30,
+    "height": 30,
+    "rel_path": "king/dun_3-06-00"
+  },
+  "30607": {
+    "id": 30607,
+    "name": "蛙洞地下5楼",
+    "width": 15,
+    "height": 25,
+    "rel_path": "king/dun_3-06-07"
+  },
+  "30611": {
+    "id": 30611,
+    "name": "封印迷宫地下一楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30611"
+  },
+  "30616": {
+    "id": 30616,
+    "name": "封印迷宫地下六楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30616"
+  },
+  "30620": {
+    "id": 30620,
+    "name": "封印之间",
+    "width": 40,
+    "height": 40,
+    "rel_path": "king/30620"
+  },
+  "30618": {
+    "id": 30618,
+    "name": "封印迷宫地下八楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30618"
+  },
+  "30627": {
+    "id": 30627,
+    "name": "封印迷宫地下七楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30627"
+  },
+  "30689": {
+    "id": 30689,
+    "name": "虚空之界",
+    "width": 60,
+    "height": 60,
+    "rel_path": "king/30689"
+  },
+  "30619": {
+    "id": 30619,
+    "name": "封印之间",
+    "width": 40,
+    "height": 40,
+    "rel_path": "king/30619"
+  },
+  "30626": {
+    "id": 30626,
+    "name": "封印迷宫地下六楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30626"
+  },
+  "30621": {
+    "id": 30621,
+    "name": "封印迷宫地下一楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30621"
+  },
+  "30628": {
+    "id": 30628,
+    "name": "封印迷宫地下八楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30628"
+  },
+  "30617": {
+    "id": 30617,
+    "name": "封印迷宫地下七楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30617"
+  },
+  "30602": {
+    "id": 30602,
+    "name": "蛙洞地下2楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "king/dun_3-06-02"
+  },
+  "30605": {
+    "id": 30605,
+    "name": "蛙洞地下5楼",
+    "width": 15,
+    "height": 25,
+    "rel_path": "king/dun_3-06-05"
+  },
+  "30698": {
+    "id": 30698,
+    "name": "天空之岛火之间",
+    "width": 30,
+    "height": 30,
+    "rel_path": "king/30698"
+  },
+  "30691": {
+    "id": 30691,
+    "name": "天空之岛地之界",
+    "width": 100,
+    "height": 100,
+    "rel_path": "king/30691"
+  },
+  "30696": {
+    "id": 30696,
+    "name": "天空之岛地之间",
+    "width": 30,
+    "height": 30,
+    "rel_path": "king/30696"
+  },
+  "30604": {
+    "id": 30604,
+    "name": "蛙洞地下4楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "king/dun_3-06-04"
+  },
+  "30603": {
+    "id": 30603,
+    "name": "蛙洞地下3楼",
+    "width": 100,
+    "height": 100,
+    "rel_path": "king/dun_3-06-03"
+  },
+  "30697": {
+    "id": 30697,
+    "name": "天空之岛水之间",
+    "width": 30,
+    "height": 30,
+    "rel_path": "king/30697"
+  },
+  "30699": {
+    "id": 30699,
+    "name": "天空之岛风之间",
+    "width": 30,
+    "height": 30,
+    "rel_path": "king/30699"
+  },
+  "30670": {
+    "id": 30670,
+    "name": "天空之岛暗之间",
+    "width": 30,
+    "height": 30,
+    "rel_path": "king/30670"
+  },
+  "30615": {
+    "id": 30615,
+    "name": "封印迷宫地下五楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30615"
+  },
+  "30612": {
+    "id": 30612,
+    "name": "封印迷宫地下二楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30612"
+  },
+  "30624": {
+    "id": 30624,
+    "name": "封印迷宫地下四楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30624"
+  },
+  "30623": {
+    "id": 30623,
+    "name": "封印迷宫地下三楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30623"
+  },
+  "30622": {
+    "id": 30622,
+    "name": "封印迷宫地下二楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30622"
+  },
+  "30625": {
+    "id": 30625,
+    "name": "封印迷宫地下五楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30625"
+  },
+  "30613": {
+    "id": 30613,
+    "name": "封印迷宫地下三楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30613"
+  },
+  "30614": {
+    "id": 30614,
+    "name": "封印迷宫地下四楼",
+    "width": 50,
+    "height": 50,
+    "rel_path": "king/30614"
+  }
+}

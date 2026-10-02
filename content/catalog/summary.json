@@ -1,0 +1,17 @@
+{
+  "schema_ver": 1,
+  "generated_at": "2026-10-03 06:15:13",
+  "maps_count": 1185,
+  "warps_count": 9011,
+  "npcs_count": 3450,
+  "npc_categories": {
+    "enemy": 533,
+    "shop": 360,
+    "other": 494,
+    "exchangeman": 861,
+    "warpman": 334,
+    "signboard": 290,
+    "townpeople": 531,
+    "healer": 47
+  }
+}
