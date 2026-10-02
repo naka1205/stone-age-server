@@ -241,6 +241,25 @@ inline SA::Rules::Combatant makePlayerCombatant(const SA::Model::Player *player 
 	return c;
 }
 
+constexpr inline std::uint64_t encodeHandle(SA::Model::EntityHandle h) noexcept
+{
+	return (static_cast<std::uint64_t>(h.index) << 32) |
+	       static_cast<std::uint64_t>(h.generation);
+}
+
+inline SA::Domain::CharAppear makeEnemyAppear(std::uint64_t eid, const SA::Model::Enemy &e)
+{
+	SA::Domain::CharAppear a{};
+	a.entity_id = eid;
+	a.floor = e.floor;
+	a.x = e.x;
+	a.y = e.y;
+	a.dir = static_cast<std::uint32_t>(e.dir);
+	a.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_ENEMY);
+	a.image = e.base_image;
+	return a;
+}
+
 struct World::Impl : GoldAuditSink
 {
 	void onGoldTx(const GoldTx &tx) const override

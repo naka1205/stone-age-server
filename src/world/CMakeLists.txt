@@ -11,6 +11,7 @@ add_library(sa_world STATIC
     WorldRide.cpp
     WorldPetFeatures.cpp
     WorldLifestyle.cpp
+    WorldEncounter.cpp
     Map.cpp
     GoldLedger.cpp
     ExChangeMan.cpp
