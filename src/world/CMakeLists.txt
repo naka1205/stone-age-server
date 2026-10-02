@@ -14,6 +14,7 @@ add_library(sa_world STATIC
     WorldEncounter.cpp
     WorldBattle.cpp
     WorldMovement.cpp
+    WorldNpcDialog.cpp
     Map.cpp
     GoldLedger.cpp
     ExChangeMan.cpp

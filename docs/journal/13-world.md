@@ -1495,6 +1495,56 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - 石币安全守卫 `tools/check_gold_writes.py` 100% 通过；
   - 源码格式守卫 `tools/check_format.py` 全绿。
 
+---
+
+### 9.0.106 批次 D.7 —— NPC 对话事件、任务剧情、商店买卖与技能导师子系统解耦 (WorldNpcDialog.cpp) (2026-10-03)
+
+2026-10-03 交付。本批次完成 NPC 交互派发、对白与窗口状态机、ExChangeMan 任务剧情与前置条件、NPC 道具与宠物商店买卖、以及宠物技能导师传授子系统的实体解耦（`src/world/WorldNpcDialog.cpp`）。至此，`World.cpp` 行数大幅削减至 **2,300 行**，核心业务模块完成全景拆分解耦。
+
+#### 1. 拆分架构与工程落地
+
+1. **NPC 对话与剧情子系统 (`src/world/WorldNpcDialog.cpp`)**:
+   - **大世界事件派发入口 (`onEvent`)**:
+     - 明雷切入触发门禁（面前格计算、队长特权与队员行动限制）；
+     - 恢复员 Healer 交互与路费原子结算（经由 `GoldLedger`）；
+     - 城镇居民 TownPeople 候选文案切分与随机摇选；
+     - ExChangeMan 复合前置条件求值（`evaluateEventCondition`、`checkExChangePreconditions`）与对话分支跳转；
+     - 道具商店 ItemShop、宠物商店 PetShop、宠物技能导师 PetSkillShop 货品目录与买卖倍率装配；
+     - 告示牌 SignBoard、传送员 WarpMan、融合师、转生师、声望商城、工匠、骑乘导师对话派发；
+     - 事件响应与执行状态回执（`EventResult`）。
+   - **客户端窗口应答状态机 (`onWindowReply`)**:
+     - 活动窗口 `active_window_id` 校验与 NPC 关联匹配；
+     - ExChange 任务接取、确认交付与多步剧情跳转树推进（`pending_exchange`、`applyExChangeEffects`）；
+     - 商店购买道具入包事务与石币安全扣除；
+     - 宠物商店购买与宠物栏落池；
+     - 宠物技能导师学习传授；
+     - 传送员多目的地 SELECT 选项与单目的地 Yes/No 传送核验。
+   - **商店与技能导师业务实现**:
+     - `World::sellItemToShop`: 道具出售回购、所有权清除与石币上限安全入账（走 `GoldLedger`）；
+     - `World::buyPetFromShop`: 宠物在售购买、资质与属性生成、石币扣除与宠物槽位绑定；
+     - `World::sellPetToShop`: 宠物回购出售、随行骑乘状态自动卸载与石币安全入账；
+     - `World::learnPetSkill`: 技能等级门禁、防重学校验、技能空槽查找与学费扣除。
+   - **ExChange 任务辅助纯逻辑与实体管理**:
+     - 交付道具/宠物解析（`parseExchangeItems`、`parseExchangePets`、`resolveDelItems`、`resolveDelPets`）；
+     - 背包/宠物持有量统计与空槽位安全预检；
+     - Side-effects 执行流（石币/声望/经验/属性点/血蓝/道具进出/宠物进出/任务旗标/NPC传送）；
+     - NPC 实体加载与快速查询（`loadNpcEntities`、`npcCount`、`findNpc`、`playerHasActiveWindow`、`playerHasNowEvent`、`playerHasEndEvent`）。
+
+2. **规模与纯度指标**:
+   - `World.cpp` 行数从 4,381 行锐降至 **2,300 行**（相较最初 14,265 行累计缩减 **83.9%**，彻底摆脱单体臃肿）；
+   - `WorldNpcDialog.cpp` 2,115 行，专职负责全部 NPC 交互、剧情事件与窗口应答；
+   - 保持 `include/world/Api.h` 作为唯一公共头文件的架构硬纪律 100% 遵守；
+   - 严格遵守 `GoldLedger` 经济审计守卫；
+   - 保证编译无任何 Warning，测试全量通过。
+
+#### 2. 验证与门禁
+
+- **全量 CTest 22/22 100% 绿灯**:
+  - `world_tick`、`world_map`、`world_persistence`、`rules_battle`、`playable_content` 等 22 项测试全数通过；
+  - 静态架构检查工具 `tools/check_module_boundaries.py` 4 模块 33 源文件 0 违规；
+  - 石币安全守卫 `tools/check_gold_writes.py` 100% 通过；
+  - 源码格式守卫 `tools/check_format.py` 全绿。
+
 
 
 

@@ -71,7 +71,8 @@ P2/P3 的完成以真实客户端操作和重启后的持久化结果为准；�
 | 10-02 | **阶段 2.5 存储层 DDL 补齐与覆盖台账收拢**（§9.0.102：输出 `deploy/sql/002-world-features.sql` 覆盖名片/称号/家族/邮件/寄售市场 DDL · 刷新 `13-d8-coverage.md` 94 行主表与覆盖率（核心严格口径 15.8%→43.7%，宽口径 71.4%→92.6%） · 全量 CTest 22/22 保持全绿） | 阶段 2 庄园家族战体系与骑乘战备闭环 |
 | 10-02 | **阶段 2 庄园家族战体系与骑乘战备闭环 (Manor War & Duel Scheduling)**（§9.0.102：四大庄园据点争夺与决斗调度 · 族长门禁与10万押金原子扣除 · 无主进驻与约战排期状态机 · 决斗比分累加与交战推进 · 庄园归属过户与押金100%注资守方金库 · [RV-1] 族长门禁与已有庄园互斥拦截 · [RV-2] 资金不足零扣减与结算交割100%注资一致性 · `world_map` 150→155 例/4276→4373 断言 · RV-1/RV-2 精准通过） | 阶段 2.6 称号与名片持久化闭环贯通及 World.cpp 单体解耦重构 |
 | 10-03 | **阶段 2.7 遇敌与战斗子系统解耦重构 (Encounter & Battle Subsystem Decomposition)**（§9.0.104：大世界暗雷/明雷遇敌链提取至 `WorldEncounter.cpp` · 战斗生命周期/指令/事件推进提取至 `WorldBattle.cpp` · `World.cpp` 降至 4,994 行（累计削减 65%） · 严格保持 `include/world/Api.h` 单一公共头不变量 · 全量 CTest 22/22 保持 100% 绿灯） | 阶段 2.8 大世界移动与传送子系统深度解耦 |
-| 10-03 | **阶段 2.8 大世界移动、多楼层与传送子系统解耦 (Movement & Warp Decomposition)**（§9.0.105：移动推进 `advanceMovement` · 步进碰撞与墙角阻挡 `walkStep` · WarpPoint瞬移与队伍同步跟随 `warpPlayer` · 多楼层地图管理与传送点维护提取至 `WorldMovement.cpp` · `World.cpp` 降至 4,381 行（累计削减 69.3%） · 全量 CTest 22/22 保持 100% 绿灯） | 阶段 3.0 客户端 UI 交互深化与多系统呈现扩展 |
+| 10-03 | **阶段 2.8 大世界移动、多楼层与传送子系统解耦 (Movement & Warp Decomposition)**（§9.0.105：移动推进 `advanceMovement` · 步进碰撞与墙角阻挡 `walkStep` · WarpPoint瞬移与队伍同步跟随 `warpPlayer` · 多楼层地图管理与传送点维护提取至 `WorldMovement.cpp` · `World.cpp` 降至 4,381 行（累计削减 69.3%） · 全量 CTest 22/22 保持 100% 绿灯） | 阶段 2.9 NPC对话/剧情/商店/技能解耦 |
+| 10-03 | **阶段 2.9 NPC对话事件、任务剧情、商店买卖与技能导师子系统解耦 (NPC Dialog & Quest Decomposition)**（§9.0.106：NPC 对话事件派发 `onEvent` · 窗口交互应答 `onWindowReply` · ExChange 前置求值与副作用执行 · NPC 商店与宠物商店买卖 · 宠物技能导师传授提取至 `WorldNpcDialog.cpp` · `World.cpp` 锐降至 2,300 行（累计削减 83.9%） · 严格遵循模块边界与 `GoldLedger` 经济审计守卫 · 全量 CTest 22/22 保持 100% 绿灯） | 阶段 3.0 客户端 UI 交互深化与多系统呈现扩展 |
 
 
 
