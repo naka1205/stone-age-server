@@ -1602,3 +1602,46 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - `Battle spectating: spectator lifecycle on battle resolution`: 验证战斗决胜后观战者自动结算与清空；
   - `Battle spectating: onEvent ENTITY_PLAYER triggers spectatePlayer and clean leave`: 验证大世界协议级 `EventRequest(ENTITY_PLAYER)` 触发面向观战及随时 `ESCAPE` 指令安全脱离。
 - **全量 CTest 22/22 100% 绿灯**。
+
+---
+
+### §9.0.108 阶段 2.11 —— 战斗救援与乱入系统落地 (Battle Rescue & Join-in-Progress System)
+
+- **日期**: 2026-10-03
+- **分支**: `master`
+- **目标**: 依据《05 战斗系统架构规范》§6.3 救援与观战规范，实现服务端战斗救援（Rescue / Join-in-Progress / 乱入）核心系统，建立乱入参战门禁、槽位动态分配、出战宠自动协同带出及全场快照多播流。
+
+#### 1. 核心架构与功能落地
+
+1. **严格入场门禁体系 (`WorldBattle.cpp:rescuePlayer`)**:
+   - 自身状态防御校验：自身存活且 HP > 0，不在战斗中，不在摆摊中，不在队伍中（`partyModeOf == kNone`）；
+   - 空间门限校验：与目标处于同一地图楼层（`floor` 一致），空间切比雪夫距离 $\le 5$ 格；
+   - 目标战局门限：目标正在进行的战斗有效且未结束（`!finished`）；
+   - 战斗类型与防作弊门禁：严格禁止乱入 PVP 决斗/庄园战（`!is_pvp` 且敌方 Side 1 无玩家），仅允许 P_vs_E 野外战斗乱入；
+   - 队伍容量门禁：检查己方 Side 0（槽位 0..4），存在空闲槽位方可加入（最多 5 人满员）。
+
+2. **动态槽位分配与战斗装配**:
+   - 命中首个空闲槽位后，通过 `makePlayerCombatant` 注入参战者角色、穿戴装备修正与骑乘宠物；
+   - 调用 `joinBattle` 建立映射，同步带出角色默认出战宠至对应宠位（`slot + 5`）；
+   - 触发全场快照广播 `pushBattleSnapshot`，瞬时同步至战斗全员及所有在席观战者。
+
+3. **大世界协议级事件流接入 (`WorldNpcDialog.cpp:onEvent`)**:
+   - `World::onEvent` 新增识别 `event_type == 3`（救援请求）；
+   - 支持面前一格判定与近身点击格探测，成功执行后回执 `EventResult(ok=true)`。
+
+#### 2. 接口扩展与架构合规
+
+- `src/world/include/world/Api.h`:
+  - `bool rescuePlayer(SA::Net::SessionId rescuer, SA::Net::SessionId target_player);`
+- 架构守卫验证：
+  - `include/world/Api.h` 仍为 `world` 模块唯一公开头文件（`check_module_boundaries.py` 100% 保持）；
+  - 无任何 `GoldLedger` 绕行（`check_gold_writes.py` 100% 保持）；
+  - 全工程 `-Werror` 零告警。
+
+#### 3. 验证与门禁
+
+- **新增单元测试 (`tests/WorldTickTest.cpp`)**:
+  - `Battle rescue: rescuePlayer into PVE battle allocates slot and joins combat`: 验证乱入成功落座 Side 0 空闲槽、参战状态建立与重复拦截；
+  - `Battle rescue: gate validations and onEvent event_type=3`: 验证跨距离拦截、大世界 `EventRequest(event_type=3)` 协议级面向救援。
+- **全量 CTest 22/22 100% 绿灯**。
+

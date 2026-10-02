@@ -5947,3 +5947,72 @@ TEST_CASE("Battle spectating: onEvent ENTITY_PLAYER triggers spectatePlayer and 
 	CHECK(f.world.isSpectating(id_a) == false);
 	CHECK(f.world.spectatorCount(battle) == 0);
 }
+
+TEST_CASE("Battle rescue: rescuePlayer into PVE battle allocates slot and joins combat")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id_a = f.transport.connect();
+	const SA::Net::ConnectionId id_b = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id_a, hs.data(), hs.size());
+	f.transport.deliver(id_b, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 2);
+
+	// A 位于 (10, 10), B 位于正东 (11, 10)
+	f.world.warpPlayerForTest(id_a, 100, 10, 10);
+	f.world.warpPlayerForTest(id_b, 100, 11, 10);
+
+	const BattleId battle = f.world.startBattle(makeField());
+	REQUIRE(f.world.joinBattle(battle, id_b, 0));
+
+	// A 作为队友乱入救援 B 的 PVE 战斗
+	CHECK(f.world.rescuePlayer(id_a, id_b) == true);
+	CHECK(f.world.inBattle(id_a) == true);
+	CHECK(f.world.isSpectating(id_a) == false);
+
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	// 验证 A 成功落座于 Side 0 的空闲槽位 1
+	CHECK(fld->at(1).occupied == true);
+	CHECK(fld->at(1).kind == SA::Rules::CombatantKind::kPlayer);
+
+	// 重复救援应被拦截
+	CHECK(f.world.rescuePlayer(id_a, id_b) == false);
+}
+
+TEST_CASE("Battle rescue: gate validations and onEvent event_type=3")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id_a = f.transport.connect();
+	const SA::Net::ConnectionId id_b = f.transport.connect();
+	const SA::Net::ConnectionId id_c = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id_a, hs.data(), hs.size());
+	f.transport.deliver(id_b, hs.data(), hs.size());
+	f.transport.deliver(id_c, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 3);
+
+	// A 位于 (10, 10), B 位于 (11, 10), C 位于 (25, 25) 远距离
+	f.world.warpPlayerForTest(id_a, 100, 10, 10);
+	f.world.warpPlayerForTest(id_b, 100, 11, 10);
+	f.world.warpPlayerForTest(id_c, 100, 25, 25);
+
+	const BattleId battle = f.world.startBattle(makeField());
+	REQUIRE(f.world.joinBattle(battle, id_b, 0));
+
+	// 距离过远 (C 离 B 15格) 禁止救援
+	CHECK(f.world.rescuePlayer(id_c, id_b) == false);
+
+	// A 通过大世界 EventRequest(event_type=3) 面向东救援 B
+	SA::Domain::EventRequest req{};
+	req.x = 11;
+	req.y = 10;
+	req.dir = 2;
+	req.event_type = 3; // 救援
+	req.seqno = 99;
+	f.world.onEvent(id_a, req);
+
+	CHECK(f.world.inBattle(id_a) == true);
+}

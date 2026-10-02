@@ -2875,6 +2875,86 @@ bool World::spectatePlayer(SA::Net::SessionId spectator, SA::Net::SessionId targ
 	return spectateBattle(target_battle, spectator);
 }
 
+bool World::rescuePlayer(SA::Net::SessionId rescuer, SA::Net::SessionId target_player)
+{
+	Impl &s = *_impl;
+	if (s.inBattle(rescuer) || isPlayerVending(rescuer))
+		return false;
+
+	if (s.partyModeOf(rescuer) != PartyMode::kNone)
+		return false;
+
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(rescuer));
+	const SA::Model::Player *target_p = s.players.resolve(s.player_of_session.find(target_player));
+	if (p == nullptr || target_p == nullptr || p->hp <= 0)
+		return false;
+
+	if (p->floor != target_p->floor)
+		return false;
+
+	if (std::abs(p->x - target_p->x) > 5 || std::abs(p->y - target_p->y) > 5)
+		return false;
+
+	BattleId target_battle = 0;
+	for (const auto &kv : s.battles)
+	{
+		const auto &b = kv.second;
+		if (b.slot_of.find(target_player) != b.slot_of.end())
+		{
+			target_battle = kv.first;
+			break;
+		}
+	}
+	if (target_battle == 0)
+		return false;
+
+	auto bit = s.battles.find(target_battle);
+	if (bit == s.battles.end())
+		return false;
+	BattleInstance &b = bit->second;
+	if (b.stats.finished || b.is_pvp)
+		return false;
+
+	// 确认敌方(Side 1)无玩家（非 PVP 决斗，05 §6.3 仅允许 P_vs_E 救援）
+	for (const auto &kv : b.slot_of)
+	{
+		if (kv.second >= SA::Rules::kSideOffset)
+			return false;
+	}
+
+	// 寻找 Side 0 (0..4) 的首个空闲参战槽位
+	int free_slot = -1;
+	for (int i = 0; i < static_cast<int>(SA::Rules::kBattlePlayerMax); ++i)
+	{
+		if (!b.field.at(i).occupied)
+		{
+			free_slot = i;
+			break;
+		}
+	}
+	if (free_slot < 0)
+		return false;
+
+	// 初始化战斗单位
+	b.field.at(free_slot) = makePlayerCombatant(p, playerEquipModifiers(rescuer), s.getRidingPet(rescuer));
+
+	// 加入战斗
+	if (!joinBattle(target_battle, rescuer, static_cast<std::uint8_t>(free_slot)))
+	{
+		b.field.at(free_slot) = {};
+		return false;
+	}
+
+	s.logger.log(SA::Platform::LogLevel::kInfo,
+	             SA::Platform::LogEvent::kBattleJoined,
+	             {{"battle_id", target_battle},
+	              {"session_id", rescuer},
+	              {"slot", static_cast<std::uint64_t>(free_slot)},
+	              {"reason", std::string_view("rescue")}});
+
+	return true;
+}
+
 bool World::inBattle(SA::Net::SessionId session) const noexcept
 {
 	return _impl->inBattle(session);

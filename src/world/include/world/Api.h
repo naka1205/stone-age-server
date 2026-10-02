@@ -1542,6 +1542,12 @@ class World final : public SA::Net::TransportEvents,
 	// 寻找 target_player 正在参与的战斗，在同层同屏距离内接入观战。
 	bool spectatePlayer(SA::Net::SessionId spectator, SA::Net::SessionId target_player);
 
+	// 救援指定玩家 (05 §6.3 救援与乱入机制):
+	// 寻找 target_player 正在参与的 PVE 战斗，在同层同屏距离内作为队友乱入参战。
+	// 门禁: 自身必须存活且不在战斗/组队/摆摊中；目标必须在同层且距离 <= 5；
+	// 目标战斗必须非 PVP 且我方队伍槽位未满 (0..4 有空位)。
+	bool rescuePlayer(SA::Net::SessionId rescuer, SA::Net::SessionId target_player);
+
 	// 查询某会话是否处于战斗中 (参战中或观战中)
 	bool inBattle(SA::Net::SessionId session) const noexcept;
 
