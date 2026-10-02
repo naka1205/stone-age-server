@@ -159,6 +159,7 @@ class MySqlService final : public Service
 		std::string token;
 	};
 	Settings _settings;
+	int _schema_version = 1;
 	std::unique_ptr<sql::Connection> _db;
 	redisContext *_redis = nullptr;
 	std::map<std::uint64_t, Lease> _leases;
@@ -201,8 +202,9 @@ class MySqlService final : public Service
 		execute("SET NAMES utf8mb4 COLLATE utf8mb4_0900_ai_ci");
 		auto version = prepare("SELECT VERSION(), (SELECT MAX(version) FROM schema_migration)");
 		Rows rows(version->executeQuery());
-		if (!rows->next() || rows->getString(1).asStdString().rfind("8.4.8", 0) != 0 || rows->getInt(2) != 1)
+		if (!rows->next() || rows->getString(1).asStdString().rfind("8.4.8", 0) != 0 || rows->getInt(2) < 1 || rows->getInt(2) > 2)
 			throw std::runtime_error("wrong database/schema version");
+		_schema_version = rows->getInt(2);
 		auto ssl = prepare("SHOW SESSION STATUS LIKE 'Ssl_cipher'");
 		Rows tls(ssl->executeQuery());
 		if (!tls->next() || tls->getString(2).length() == 0)
@@ -388,6 +390,64 @@ class MySqlService final : public Service
 			value->value = recordFrom<Data>(rows->getString(4));
 		}
 	}
+	void writeTitles(std::uint64_t character, const std::vector<int> &titles)
+	{
+		auto erase = prepare("DELETE FROM character_title WHERE char_id=?");
+		erase->setUInt64(1, character);
+		(void)erase->executeUpdate();
+		for (int title_id : titles)
+		{
+			auto insert = prepare("INSERT INTO character_title(char_id, title_id) VALUES(?, ?)");
+			insert->setUInt64(1, character);
+			insert->setInt(2, title_id);
+			(void)insert->executeUpdate();
+		}
+	}
+	void readTitles(std::uint64_t character, std::vector<int> &titles)
+	{
+		titles.clear();
+		auto statement = prepare("SELECT title_id FROM character_title WHERE char_id=? ORDER BY title_id");
+		statement->setUInt64(1, character);
+		Rows rows(statement->executeQuery());
+		while (rows->next())
+		{
+			titles.push_back(rows->getInt(1));
+		}
+	}
+	void writeAddressBook(std::uint64_t character, const std::vector<AddressBookRecord> &cards)
+	{
+		auto erase = prepare("DELETE FROM address_book WHERE char_id=?");
+		erase->setUInt64(1, character);
+		(void)erase->executeUpdate();
+		for (const auto &card : cards)
+		{
+			auto insert = prepare("INSERT INTO address_book(char_id, seq, friend_char_id, friend_name, image, level) VALUES(?, ?, ?, ?, ?, ?)");
+			insert->setUInt64(1, character);
+			insert->setUInt(2, card.seq);
+			insert->setUInt64(3, card.friend_char_id);
+			insert->setString(4, card.friend_name);
+			insert->setInt(5, card.image);
+			insert->setInt(6, card.level);
+			(void)insert->executeUpdate();
+		}
+	}
+	void readAddressBook(std::uint64_t character, std::vector<AddressBookRecord> &cards)
+	{
+		cards.clear();
+		auto statement = prepare("SELECT seq, friend_char_id, friend_name, image, level FROM address_book WHERE char_id=? ORDER BY seq");
+		statement->setUInt64(1, character);
+		Rows rows(statement->executeQuery());
+		while (rows->next())
+		{
+			AddressBookRecord card{};
+			card.seq = static_cast<std::uint8_t>(rows->getUInt(1));
+			card.friend_char_id = rows->getUInt64(2);
+			card.friend_name = rows->getString(3).asStdString();
+			card.image = rows->getInt(4);
+			card.level = rows->getInt(5);
+			cards.push_back(std::move(card));
+		}
+	}
 	Completion perform(const Request &request)
 	{
 		Completion out{};
@@ -445,6 +505,11 @@ class MySqlService final : public Service
 			(void)data->executeUpdate();
 			writeAssets("character_pet", record.char_id, record.pets);
 			writeAssets("character_item", record.char_id, record.items);
+			if (_schema_version >= 2)
+			{
+				writeTitles(record.char_id, request.titles);
+				writeAddressBook(record.char_id, request.address_book);
+			}
 		}
 		else if (request.operation == Operation::kSelect)
 		{
@@ -466,6 +531,11 @@ class MySqlService final : public Service
 			record.player = recordFrom<SA::Domain::PlayerData>(rows->getString(3));
 			readAssets<SA::Domain::PetData>("character_pet", record.char_id, record.pets);
 			readAssets<SA::Domain::ItemData>("character_item", record.char_id, record.items);
+			if (_schema_version >= 2)
+			{
+				readTitles(record.char_id, out.titles);
+				readAddressBook(record.char_id, out.address_book);
+			}
 			if (!validRecord(record))
 				throw std::invalid_argument("invalid stored record");
 		}
@@ -486,6 +556,11 @@ class MySqlService final : public Service
 			}
 			writeAssets("character_pet", record.char_id, record.pets);
 			writeAssets("character_item", record.char_id, record.items);
+			if (_schema_version >= 2)
+			{
+				writeTitles(record.char_id, request.titles);
+				writeAddressBook(record.char_id, request.address_book);
+			}
 			++record.revision;
 		}
 		if (request.operation == Operation::kSelect || request.operation == Operation::kCreate)

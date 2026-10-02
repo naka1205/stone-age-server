@@ -29,6 +29,15 @@ enum class Operation
 	kRelease,
 	kLeaseLost
 };
+struct AddressBookRecord
+{
+	std::uint8_t seq = 0;
+	std::uint64_t friend_char_id = 0;
+	std::string friend_name;
+	int image = 0;
+	int level = 1;
+};
+
 struct Request
 {
 	Operation operation = Operation::kLogin;
@@ -36,6 +45,8 @@ struct Request
 	std::uint64_t correlation = 0;
 	SA::Transport::LoginRequest login{};
 	SA::Domain::CharacterRecord character{};
+	std::vector<int> titles{};
+	std::vector<AddressBookRecord> address_book{};
 	bool logout = false;
 };
 struct Completion
@@ -46,6 +57,8 @@ struct Completion
 	SA::Transport::AccountCode code = SA::Transport::AccountCode::ACCOUNT_UNAVAILABLE;
 	SA::Domain::CharacterRecord character{};
 	SA::IDL::FixedVec<SA::Transport::CharacterSummary, 2> characters{};
+	std::vector<int> titles{};
+	std::vector<AddressBookRecord> address_book{};
 	bool logout = false;
 };
 class Service

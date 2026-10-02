@@ -4,6 +4,13 @@
 
 add_library(sa_world STATIC
     World.cpp
+    WorldPartyTrade.cpp
+    WorldSocial.cpp
+    WorldFamily.cpp
+    WorldEconomy.cpp
+    WorldRide.cpp
+    WorldPetFeatures.cpp
+    WorldLifestyle.cpp
     Map.cpp
     GoldLedger.cpp
     ExChangeMan.cpp

@@ -1377,6 +1377,57 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - 篡改 `challengeManor` 中押金充足性校验 `if (false && tx.disposition == GoldDisposition::kRejected)` ⇒ 用例 5 中资金不足拦截断言立即精准报红失败；恢复后回绿。
 - **全套静态守卫**: 22 项服务端 CTest 全量通过，客户端 7 项 CTest 全量通过，代码格式校验 100% 绿灯，`check_gold_writes.py` 严格零非法直接赋值。
 
+### 9.0.103 阶段 2.6 —— 称号与名片持久化闭环贯通及 World.cpp 单体解耦重构 (World Persistence & Domain Decomposition)
+
+**日期**: 2026-10-02  
+**依据**: `deploy/sql/002-world-features.sql`、`00-architecture.md` §3.1 模块边界硬约束、`01-server-architecture.md` §3/§4 分层架构。  
+**目标**:
+1. 将 `002-world-features.sql` 的 v2 schema 正式贯通进 `session_storage` 与 `World` 角色登入登出存档生命周期（titles 与 address_book）；
+2. 彻底拆解膨胀至 14,265 行的 `World.cpp` 巨石单体，抽取私有内部上下文头文件 `src/world/WorldImpl.h` 与 7 大领域编译单元，在不破坏任何模块边界守卫与黄金账本审计前提下达成架构模块化解耦。
+
+#### 1. 核心设计与落地产出
+
+1. **称号与名片夹存储贯通 (Storage Schema v2 & World Persistence)**:
+   - **`session_storage` 演进**:
+     - 在 `SA::SessionStorage::AddressBookRecord` 增加名片持久化字段（`charname`, `title`, `level`, `image`, `online`）；
+     - 在 `SA::SessionStorage::CharacterRecord` 增加 `titles`（`std::vector<int>`）与 `address_book`（`std::vector<AddressBookRecord>`）；
+     - `MySqlService` 升级 Schema 版本判定：兼容校验 `schema_version`（版本 1 自动向前兼容，版本 2 启用全量字段读写）；在 `kCreate`、`kSelect`、`kSave` 中完整落实 `writeTitles`/`readTitles` 与 `writeAddressBook`/`readAddressBook`；
+   - **`World` 角色生命周期闭环**:
+     - 在 `saveCharacter` 中，将内存态玩家佩戴/拥有称号列表 (`player_titles`) 及名片夹列表 (`address_books`) 序列化至 `SA::Domain::CharacterRecord` 提交至持久化服务；
+     - 在 `processStorage` / `install` 中，反序列化还原玩家所拥有的全部称号元数据与名片卡片条目，无缝恢复名片在线感知与状态追踪。
+   - **单元回归与持久化测试**:
+     - `tests/WorldPersistenceTest.cpp` 新增 `titles_and_address_book_persist_across_save_reload` 验证用例，覆盖拥有多个称号、佩戴专属称号、拥有多张好友名片并在重新登录后精确还原称号加成与名片条目。测试全绿（16 用例 / 417 断言）。
+
+2. **`World.cpp` 单体解耦重构 (Monolith Decomposition)**:
+   - **内部上下文头文件 (`src/world/WorldImpl.h`)**:
+     - 严格约束于 `src/world/` 私有目录，不泄露至公共头文件 `include/world/Api.h`（保持 `tools/check_module_boundaries.py` 100% 守卫有效）；
+     - 集中承载 `kMaxPlayers`、`kMaxPets`、`PlayerPool`、`WorldWriteContext`、`ChargeState`、`MagicStatusState`、`BattleInstance` 等实体池与战场状态结构；
+     - 内联实现 `makeBattleSnapshot`、`syncPetState`、`makePlayerCombatant`、`retireBattle`、`pushBattleSnapshot` 以及 `sendTo<M>` 下发模板；
+     - 定义完备的 `struct World::Impl : GoldAuditSink`，作为所有世界领域编译单元共享的内部实现基石。
+   - **7 大领域独立编译单元**:
+     1. `WorldPartyTrade.cpp`: 组队邀请与踢出、决斗发起与切磋判定、双向确认安全交易全状态机；
+     2. `WorldSocial.cpp`: 好友名片索取与屏蔽、邮件寄送/查阅/附件提取与删除、世界/公屏/队伍/私聊分级频道；
+     3. `WorldFamily.cpp`: 家族创建/解散/成员管理、金库充提、四大庄园占领与庄园对决争夺战；
+     4. `WorldEconomy.cpp`: 原地摆摊/标价/上下架/购买、寄售拍卖市场挂牌/下架/选购与搜索；
+     5. `WorldRide.cpp`: 宠物骑乘上下马、庄园骑乘考试考核、骑宠契合度相性计算；
+     6. `WorldPetFeatures.cpp`: 宠物忠诚度、料理喂食、技能遗忘、顺服度判定、宠物融合与转生流程；
+     7. `WorldLifestyle.cpp`: 外观与头像计算、新手村出生点、称号系统、声望商城、料理烹饪与合成精炼。
+   - **构建与边界合规**:
+     - `src/world/CMakeLists.txt` 完整纳入 7 个新编译单元，严格维持 `-ffp-contract=off`；
+     - `World.cpp` 由原先臃肿的 14,265 行大幅缩减至 8,784 行（削减 5,481 行业务逻辑代码），职责纯化为世界主循环 tick、地图与地板管理、战斗生命周期推进及角色进出场生命周期调度。
+
+#### 2. 验证与指标
+
+- **双端 CTest 100% 绿灯**:
+  - 服务端 22 项 CTest 全量通过（`world_persistence` 16/16 用例、`world_map` 155/155 用例、`rules_battle` 170/170 用例全绿）；
+  - 客户端 7 项 CTest 全量通过；
+- **CI 门禁与守卫验证通过**:
+  - `tools/ci_verify.py` 全部 6 项门禁通过（编码检查、WERROR 构建、CTest 22/22、断言反向探针验证通过）；
+  - `tools/check_module_boundaries.py` 严格校验 4 模块 29 源文件依赖纯净无泄漏；
+  - `tools/check_gold_writes.py` 守卫确认所有石币改动全部由 `GoldLedger` 统一审计；
+  - `tools/check_shared_purity.py` 确认 28 个 shared 头文件纯度无污染。
+
+
 
 
 

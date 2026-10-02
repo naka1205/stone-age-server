@@ -27,7 +27,9 @@ class PendingStorage final : public SA::SessionStorage::Service
 	}
 	bool idle() const override { return pending == 0; }
 	void finish(Code code = Code::ACCOUNT_OK, SA::Domain::CharacterRecord record = {},
-	            SA::IDL::FixedVec<SA::Transport::CharacterSummary, 2> chars = {})
+	            SA::IDL::FixedVec<SA::Transport::CharacterSummary, 2> chars = {},
+	            std::vector<int> titles = {},
+	            std::vector<SA::SessionStorage::AddressBookRecord> address_book = {})
 	{
 		REQUIRE(pending > 0);
 		const auto &request = requests.back();
@@ -39,6 +41,8 @@ class PendingStorage final : public SA::SessionStorage::Service
 		out.code = code;
 		out.character = record;
 		out.characters = chars;
+		out.titles = titles.empty() ? request.titles : titles;
+		out.address_book = address_book.empty() ? request.address_book : address_book;
 		completions.push_back(out);
 		--pending;
 	}
@@ -825,4 +829,114 @@ TEST_CASE("选角流程: 多楼层大世界跨图角色恢复登入")
 	CHECK(ppos.floor == 1000);
 	CHECK(ppos.x == 25);
 	CHECK(ppos.y == 25);
+}
+
+TEST_CASE("大世界特性持久化: 称号与名片夹在保存重登后保持一致")
+{
+	Fixture f;
+	f.select();
+	REQUIRE(f.world.playerCount() == 1);
+
+	// 1. 注册并授予玩家称号 (ID 101, 102)
+	SA::World::TitleDefinition t1{};
+	t1.title_id = 101;
+	(void)t1.name.assign("萨姆吉尔勇者");
+	t1.bonus.bonus_hp = 50;
+	REQUIRE(f.world.registerTitle(t1));
+	REQUIRE(f.world.grantTitle(f.id, 101));
+
+	SA::World::TitleDefinition t2{};
+	t2.title_id = 102;
+	(void)t2.name.assign("加加守护者");
+	REQUIRE(f.world.registerTitle(t2));
+	REQUIRE(f.world.grantTitle(f.id, 102));
+
+	CHECK(f.world.hasTitle(f.id, 101));
+	CHECK(f.world.hasTitle(f.id, 102));
+
+	// 2. 模拟另一玩家连入并交换名片
+	const auto id2 = f.transport.connect();
+	SA::Transport::HandshakeRequest hello2{};
+	hello2.protocol_version = f.config.protocol_version;
+	std::vector<std::uint8_t> bytes2;
+	REQUIRE(SA::Net::encodeFramed(1, hello2, bytes2));
+	f.transport.deliver(id2, bytes2.data(), bytes2.size());
+	f.world.tick();
+
+	// 让 id2 也登入
+	SA::Transport::LoginRequest log2{};
+	(void)log2.login.assign("test2");
+	(void)log2.password.assign("long-test-password-2");
+	bytes2.clear();
+	REQUIRE(SA::Net::encodeFramed(2, log2, bytes2));
+	f.transport.deliver(id2, bytes2.data(), bytes2.size());
+	f.world.tick();
+
+	SA::Transport::CharacterSummary sum2{};
+	sum2.char_id = 1002;
+	(void)sum2.name.assign("伙伴豆豆");
+	sum2.level = 5;
+	sum2.image = 100001;
+	SA::IDL::FixedVec<SA::Transport::CharacterSummary, 2> chars2{};
+	(void)chars2.push_back(sum2);
+	f.storage.finish(Code::ACCOUNT_OK, {}, chars2);
+	f.world.tick();
+
+	SA::Transport::SelectCharacterRequest sel2{};
+	sel2.char_id = 1002;
+	bytes2.clear();
+	REQUIRE(SA::Net::encodeFramed(3, sel2, bytes2));
+	f.transport.deliver(id2, bytes2.data(), bytes2.size());
+	f.world.tick();
+
+	SA::Domain::CharacterRecord rec2 = f.saved;
+	rec2.char_id = 1002;
+	rec2.player.x = 10;
+	rec2.player.y = 11;
+	(void)rec2.player.name.assign("伙伴豆豆");
+	f.storage.finish(Code::ACCOUNT_OK, rec2);
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 2);
+
+	// f.id 与 id2 交换名片
+	REQUIRE(f.world.requestAddressCard(f.id, id2));
+	REQUIRE(f.world.acceptAddressCard(id2, f.id));
+
+	// 3. 正常登出保存：断言 Request 中包含了 titles 和 address_book
+	SA::Transport::SaveRequest save_req{};
+	save_req.logout = true;
+	f.feed(save_req, 99);
+	REQUIRE(f.storage.requests.back().logout);
+	const auto durable_req = f.storage.requests.back();
+	REQUIRE(durable_req.titles.size() == 2);
+	CHECK(durable_req.titles[0] == 101);
+	CHECK(durable_req.titles[1] == 102);
+	REQUIRE(durable_req.address_book.size() == 1);
+	CHECK(durable_req.address_book[0].friend_name == "伙伴豆豆");
+
+	auto durable_char = durable_req.character;
+	++durable_char.revision;
+	f.storage.finish(Code::ACCOUNT_OK, durable_char, {}, durable_req.titles, durable_req.address_book);
+	f.world.tick();
+	f.world.tick();
+	CHECK(f.transport.closed(f.id));
+
+	// 4. 重登选择角色：断言称号与名片夹在恢复后原样存在
+	f.id = f.transport.connect();
+	SA::Transport::HandshakeRequest hello_re{};
+	hello_re.protocol_version = f.config.protocol_version;
+	f.feed(hello_re, 1);
+	f.login();
+
+	SA::Transport::SelectCharacterRequest sel_re{};
+	sel_re.char_id = durable_char.char_id;
+	f.feed(sel_re, 2);
+	f.storage.finish(Code::ACCOUNT_OK, durable_char, {}, durable_req.titles, durable_req.address_book);
+	f.world.tick();
+
+	// 验证重登后称号与名片夹完全还原
+	CHECK(f.world.hasTitle(f.id, 101));
+	CHECK(f.world.hasTitle(f.id, 102));
+	// 验证好友名片未被拉黑 (可解析名片状态)
+	CHECK_FALSE(f.world.isAddressCardBlocked(f.id, "伙伴豆豆"));
 }
