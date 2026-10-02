@@ -2128,6 +2128,7 @@ class World final : public SA::Net::TransportEvents,
 	void saveCharacter(SA::Net::SessionId, bool logout, std::uint64_t correlation);
 	void removeSession(SA::Net::SessionId);
 	void detachBattles(SA::Net::SessionId);
+	void advanceBattles();
 	// 遇敌命中后的开战组装(批次 W.4,内部)——移植 `EN_recv`(`callfromcli.c:1249`)+
 	//   `BATTLE_CreateVsEnemy(charaindex,0,-1)` 净核(`battle.c:2528`):遇敌链选怪
 	//   (`pickEnemyGroup` → `rollEnemyList`)→ 建场 → 玩家入场(Side[0])→ 逐只敌人入场

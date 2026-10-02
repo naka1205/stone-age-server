@@ -1428,6 +1428,42 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - `tools/check_gold_writes.py` 守卫确认所有石币改动全部由 `GoldLedger` 统一审计；
   - `tools/check_shared_purity.py` 确认 28 个 shared 头文件纯度无污染。
 
+---
+
+### 9.0.104 批次 D.5 —— 遇敌与战斗子系统深度解耦 (WorldEncounter.cpp & WorldBattle.cpp) (2026-10-03)
+
+2026-10-03 交付。为彻底解决 `World.cpp` 历史遗留单体过于庞大（原 14,265 行）所带来的维护与编译瓶颈，继前序 7 大领域单元拆分后，本批次完成最后两大重度模块的深度剥离——**大世界遇敌子系统 (`WorldEncounter.cpp`)** 与 **战斗生命周期及推进子系统 (`WorldBattle.cpp`)**。
+
+#### 1. 拆分架构与工程落地
+
+1. **遇敌子系统 (`src/world/WorldEncounter.cpp`)**:
+   - **大世界暗雷遇敌链**: 完整抽离 `findEncountArea`、`findEnemyGroup`、`pickEnemyGroup`、`findEnemyEncounter`、`findEnemyTemplate`、`rollEnemyList`；
+   - **数值与属性生成**: 移植 `rollEncounterLevel`、`kEnemyBaseExpTbl`、`enemyExp`、`spawnEnemy`；
+   - **入场与生命周期挂接**: 封装 `enterEnemyToField`、`World::spawnEnemyToField`、`World::loadEncounterTables`、`World::triggerEncounter`、`World::triggerNpcEnemyBattle`；
+   - **内部接口对齐**: `encodeHandle` 与 `makeEnemyAppear` 内联至 `WorldImpl.h`，对外保持零暴露。
+
+2. **战斗子系统 (`src/world/WorldBattle.cpp`)**:
+   - **战斗生命周期与指令调度**: 统一收拢 `World::startBattle`、`World::joinBattle`、`World::battleCount`、`World::detachBattles`、`World::onBattleCommand`、`World::stats`、`World::battleEnemyAt`、`World::battleField`；
+   - **战斗推进主循环**: 将 `World::tick()` 内长达 443 行的第 4 步（战斗推进、回合就绪、行动排序、状态判定、快照广播、战损与经验交付、忠诚度结算与超时清理）完整封装为 `World::advanceBattles()` 私有方法；
+   - **战斗辅助纯函数族**: 完整转移 25 个战场内部计算与状态投影函数（`readyMask`、`sideWipedOut`、`fillEnemyCommands`、`autoFillPetCommands`、`createPetFromCapture`、`captureItemDelAll`、`deliverPlayerProfit`、`expForKill`、`settleDeaths`、`hasCaptureItems`、`projectCaptureItemGate`、`findItemHealPower`、`projectItemUsePower`、`findPetSkillEffect`、`projectPetSkill`、`projectProfSkill`、`projectChargeState`、`injectChargeCommands`、`applyChargeEffects`、`projectMagicStatus`、`tickMagicStatus`、`applyMagicStatusPetSkill`、`applyGuardianPetSkill`、`consumeUsedItem`、`applyEvents`）；
+   - **共享实体交互辅助**: `giveItemIntoPlayer`、`makeDemoField` 在 `WorldImpl.h` 声明并在此实现；`enterPetToField`、`exitPetFromField` 保持 `Api.h` 既有声明并在此落地。
+
+3. **规模与纯度指标**:
+   - `World.cpp` 行数由 7,703 行一举降至 **4,994 行**（较最初 14,265 行累计缩减 **65%**）；
+   - `WorldBattle.cpp` 2,716 行，`WorldEncounter.cpp` 1,070 行，各自职责边界极度清晰；
+   - 保持 `include/world/Api.h` 作为唯一公共头文件的架构守卫 100% 有效；
+   - 严格延续 `-ffp-contract=off` 确保浮点运算跨平台逐位一致。
+
+#### 2. 验证与门禁
+
+- **全量 CTest 22/22 100% 绿灯**:
+  - `world_tick`、`rules_battle`、`world_map`、`world_persistence` 等 22 项测试全通；
+  - `tools/check_format.py` 82 文件无缝合规；
+  - `tools/check_module_boundaries.py` 4 模块 31 源文件 0 越界；
+  - `tools/check_gold_writes.py` 确认石币写操作 100% 经由 `GoldLedger`；
+  - `tools/check_docs_index.py` 文档一致性校验全绿。
+
+
 
 
 

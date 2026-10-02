@@ -12,6 +12,7 @@ add_library(sa_world STATIC
     WorldPetFeatures.cpp
     WorldLifestyle.cpp
     WorldEncounter.cpp
+    WorldBattle.cpp
     Map.cpp
     GoldLedger.cpp
     ExChangeMan.cpp

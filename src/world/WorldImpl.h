@@ -49,6 +49,18 @@ using PetPool = SA::Model::EntityPool<SA::Model::Pet, kMaxPets>;
 using EnemyPool = SA::Model::EntityPool<SA::Model::Enemy, kMaxEnemies>;
 using ItemPool = SA::Model::EntityPool<SA::Model::Item, kMaxItems>;
 
+int giveItemIntoPlayer(SA::Model::Player &owner, const SA::Model::Item &item, ItemPool &items);
+SA::Rules::BattleField makeDemoField();
+
+inline int clampEnemyAction(std::uint32_t enemy_action)
+{
+	if (enemy_action > 100)
+		return 100;
+	if (enemy_action < 1)
+		return 1;
+	return static_cast<int>(enemy_action);
+}
+
 struct BattleInstance;
 
 struct WorldWriteContext
