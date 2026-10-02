@@ -1463,6 +1463,38 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - `tools/check_gold_writes.py` 确认石币写操作 100% 经由 `GoldLedger`；
   - `tools/check_docs_index.py` 文档一致性校验全绿。
 
+---
+
+### 9.0.105 批次 D.6 —— 大世界移动、多楼层与传送子系统解耦 (WorldMovement.cpp) (2026-10-03)
+
+2026-10-03 交付。本批次完成大世界移动、碰撞阻挡、多楼层地图管理与传送点瞬移子系统的实体解耦（`src/world/WorldMovement.cpp`），继续推进 `World.cpp` 的单体瘦身。
+
+#### 1. 拆分架构与工程落地
+
+1. **移动子系统 (`src/world/WorldMovement.cpp`)**:
+   - **大世界移动推进主循环**: 将 `World::tick()` 内第 5 步（玩家移动推进、路径串消费、明雷/NPC 实体碰撞阻挡退回、WarpPoint 踩踏瞬移、olink 格挂接转移、同屏视野广播、组队跟随贪吃蛇算法、暗雷遇敌判定与 CEP 掷骰）封装为 `World::advanceMovement()` 私有方法；
+   - **移动指令与门禁**: 转移 `World::onWalk`（含防瞬移、非本队队员禁止自主移动、交易/战斗状态拦截、(0,0) 历史调试门、目标格通行性校验、路径串入队）；
+   - **步进物理与墙角阻挡**: 移植 `walkStep`，支持 8 方向直线与斜向分量判定（防穿墙角）；
+   - **瞬移与传送门处理**: 抽离 `World::Impl::warpSinglePlayer` 与 `World::Impl::warpPlayer`（支持队长传送时全队队员同步瞬移、跨图视野重置与实体 Appear/Disappear 刷新）；
+   - **传送员 NPC 交互**: 抽离 `World::warpPlayerByNpc`（等级门禁、石币路费审计经由 `GoldLedger`、目标地点通行性校验）；
+   - **多楼层地图与传送点管理**: 转移 `World::loadFloorMap`、`World::findFloorMap`、`World::floorMapCount`、`World::loadWarpPoints`、`World::warpPointCount`、`World::warpPlayerForTest`、`World::playerPos`；
+   - **方向与步频常数共享**: `kWalkIntervalMs`、`DirDelta`、`kDirDelta`、`decodeDirChar`、`getDirFromTwoPoints` 统一内联收拢于 `WorldImpl.h`，供各子系统零依赖复用。
+
+2. **规模与纯度指标**:
+   - `World.cpp` 行数从 4,994 行进一步缩减至 **4,381 行**（相较最初 14,265 行累计缩减 **69.3%**）；
+   - `WorldMovement.cpp` 574 行，专职负责移动与楼层传送；
+   - 保持 `include/world/Api.h` 作为唯一公共头文件的架构硬纪律 100% 遵守；
+   - 严格遵守 `GoldLedger` 经济审计守卫；
+   - 浮点与平台编译选项无缝对齐。
+
+#### 2. 验证与门禁
+
+- **全量 CTest 22/22 100% 绿灯**:
+  - `world_tick`、`world_map`、`world_persistence`、`rules_battle` 等全量测试用例全数通过；
+  - 静态架构检查工具 `tools/check_module_boundaries.py` 4 模块 32 源文件全通；
+  - 石币安全守卫 `tools/check_gold_writes.py` 100% 通过；
+  - 源码格式守卫 `tools/check_format.py` 全绿。
+
 
 
 

@@ -61,6 +61,67 @@ inline int clampEnemyAction(std::uint32_t enemy_action)
 	return static_cast<int>(enemy_action);
 }
 
+// 走路间隔:原版 CHAR_walk_check(char.c:4590)判 `time_diff_us >= walksendinterval*100`,
+//   csa8.0 setup.cf `walkinterval=2500` ⇒ 2500 × 100us = 250ms 一格。
+inline constexpr SA::Platform::Millis kWalkIntervalMs = 250;
+
+// 方向 0-7 → 坐标增量。★ 照抄 CHAR_dxdy[8](char.c:2325):北起顺时针,含四斜向。
+struct DirDelta
+{
+	std::int32_t dx;
+	std::int32_t dy;
+};
+inline constexpr DirDelta kDirDelta[8] = {
+    {0, -1},
+    {1, -1},
+    {1, 0},
+    {1, 1},
+    {0, 1},
+    {-1, 1},
+    {-1, 0},
+    {-1, -1},
+};
+
+// 方向字符解码 —— 移植 CHAR_ctodirmode(char_walk.c:1398):
+//   小写 'a'-'h' ⇒ 移动(is_turn=false);其余(大写 'A'-'H')⇒ 转身;dir = tolower-'a'。
+// 返回 false = 非法字符(dir 越界),调用方跳过该字符。
+inline bool decodeDirChar(char moji, std::uint8_t &dir, bool &is_turn)
+{
+	is_turn = !(moji >= 'a' && moji <= 'h');
+	const char lower =
+	    (moji >= 'A' && moji <= 'Z') ? static_cast<char>(moji - 'A' + 'a') : moji;
+	const int d = lower - 'a';
+	if (d < 0 || d > 7)
+		return false;
+	dir = static_cast<std::uint8_t>(d);
+	return true;
+}
+
+// 两点相对方向计算 —— 移植 NPC_Util_getDirFromTwoPoint(npcutil.c:280):
+//   返回 sx, sy 到 ex, ey 的 8 方向 dir (0-7); 若坐标重合返回 -1。
+inline int getDirFromTwoPoints(std::int32_t sx, std::int32_t sy, std::int32_t ex, std::int32_t ey) noexcept
+{
+	static constexpr int dirtable[3][3] = {
+	    {7, 0, 1},
+	    {6, -1, 2},
+	    {5, 4, 3},
+	};
+	int difx = ex - sx;
+	int dify = ey - sy;
+	if (difx < 0)
+		difx = -1;
+	else if (difx > 0)
+		difx = 1;
+	if (dify < 0)
+		dify = -1;
+	else if (dify > 0)
+		dify = 1;
+	return dirtable[dify + 1][difx + 1];
+}
+
+bool walkStep(SA::Model::Player &p, const GridMap &map, const TileAttrTable &attr,
+              std::uint8_t dir, bool is_turn);
+
 struct BattleInstance;
 
 struct WorldWriteContext

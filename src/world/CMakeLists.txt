@@ -13,6 +13,7 @@ add_library(sa_world STATIC
     WorldLifestyle.cpp
     WorldEncounter.cpp
     WorldBattle.cpp
+    WorldMovement.cpp
     Map.cpp
     GoldLedger.cpp
     ExChangeMan.cpp
