@@ -1605,7 +1605,7 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 
 ---
 
-### §9.0.108 阶段 2.11 —— 战斗救援与乱入系统落地 (Battle Rescue & Join-in-Progress System)
+### 9.0.108 阶段 2.11 —— 战斗救援与乱入系统落地 (Battle Rescue & Join-in-Progress System)
 
 - **日期**: 2026-10-03
 - **分支**: `master`
