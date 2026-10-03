@@ -1671,3 +1671,41 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - 全量 CTest 22/22 保持 100% 绿灯；
   - 架构守卫工具 `check_module_boundaries.py`, `check_gold_writes.py`, `check_shared_purity.py`, `check_docs_index.py`, `check_dr_table.py` 全数绿灯。
 
+---
+
+### 9.0.110 阶段 3.2 —— 战中掉线断网保护与重连接管系统落地 (Battle Disconnect Grace & Re-attach System)
+
+- **日期**: 2026-10-03
+- **分支**: `master`
+- **目标**: 依据 Phase 3.2 网络弹性规范，建立网络异常断开保护、离线防御托管与重连接管状态机，避免弱网抖动或掉线导致的参战槽位丢失与战斗溃散。
+
+#### 1. 核心架构与功能落地
+
+1. **断线槽位保全与离线托管 (`WorldBattle.cpp`)**:
+   - `World::disconnectBattleMember(id)`: 参战玩家断开连接时，将其从活跃会话映射及广播流脱钩，但保全 `field.at(slot)` 战斗槽位与 `player_of_slot` 实体句柄，记录入 `disconnected_slots`；
+   - `advanceBattles`: 在等待玩家输入前，检查 `b.disconnected_slots` 中占位存活但无活跃会话绑定的单位，自动填入 `kDefense` 防御指令并置标志 `present[slot] = true`，使战场回合不卡顿、平滑推进。
+
+2. **重登接管与多播状态恢复 (`WorldBattle.cpp`)**:
+   - `World::reattachBattle(battle_id, old_session, new_session)`: 允许重登上线的新会话无缝接管原有角色战斗槽位，重置映射 `slot_of[new_session] = slot` 并加入 `members`；
+   - 入场三件套推送：瞬时下发 `BattleSelfInfo`、`BattleSnapshot` 与 `BattleTurnBegin`，客户端场景自动复原实时战况；
+   - 辅助查询：提供 `World::battleOfSession` 与 `World::battleOfPlayer` 支持精准战局定位。
+
+#### 2. 接口扩展与架构合规
+
+- `src/world/include/world/Api.h`:
+  - `void disconnectBattleMember(SA::Net::SessionId session);`
+  - `bool reattachBattle(BattleId battle, SA::Net::SessionId old_session, SA::Net::SessionId new_session);`
+  - `BattleId battleOfSession(SA::Net::SessionId session) const noexcept;`
+  - `BattleId battleOfPlayer(SA::Model::EntityHandle player_handle) const noexcept;`
+- 架构守卫验证：
+  - `include/world/Api.h` 仍为唯一公开头文件（`check_module_boundaries.py` 100% 保持）；
+  - 无任何 `GoldLedger` 绕行（`check_gold_writes.py` 100% 保持）；
+  - 全工程零告警。
+
+#### 3. 验证与门禁
+
+- **新增单元测试 (`tests/WorldTickTest.cpp`)**:
+  - `Battle disconnect: disconnectBattleMember preserves slot and auto-defends in tick`: 验证玩家掉线后战斗槽位保全、回合离线托管防御与 turn 自动推进；
+  - `Battle reattach: reattachBattle restores battle control to newly connected session`: 验证新会话接管战斗、发送攻击指令与战后正常推进。
+- **全量 CTest 22/22 100% 绿灯**。
+

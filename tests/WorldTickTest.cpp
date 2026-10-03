@@ -6016,3 +6016,94 @@ TEST_CASE("Battle rescue: gate validations and onEvent event_type=3")
 
 	CHECK(f.world.inBattle(id_a) == true);
 }
+
+TEST_CASE("Battle disconnect: disconnectBattleMember preserves slot and auto-defends in tick")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id_a = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id_a, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	auto field = makeField();
+	auto &p_unit = field.at(0);
+	p_unit.hp = p_unit.max_hp = 500;
+	auto &e_unit = field.at(SA::Rules::kSideOffset);
+	e_unit.occupied = true;
+	e_unit.dead = false;
+	e_unit.hp = e_unit.max_hp = 500;
+	e_unit.kind = SA::Rules::CombatantKind::kEnemy;
+
+	const BattleId battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, id_a, 0));
+	CHECK(f.world.inBattle(id_a) == true);
+	CHECK(f.world.battleOfSession(id_a) == battle);
+
+	// 模拟玩家网络断线
+	f.world.disconnectBattleMember(id_a);
+	CHECK(f.world.inBattle(id_a) == false);
+	CHECK(f.world.battleOfSession(id_a) == 0);
+
+	// 但战斗并未解散，槽位保持占据
+	const SA::Rules::BattleField *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->at(0).occupied == true);
+
+	// 推进回合：因为离线托管，会自动注入防御指令正常推进
+	f.clock.advance(1000);
+	f.world.tick();
+
+	// 回合正常推进至 turn >= 1
+	CHECK(fld->turn >= 1);
+}
+
+TEST_CASE("Battle reattach: reattachBattle restores battle control to newly connected session")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id_old = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id_old, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	auto field = makeField();
+	auto &p_unit = field.at(0);
+	p_unit.hp = p_unit.max_hp = 500;
+	auto &e_unit = field.at(SA::Rules::kSideOffset);
+	e_unit.occupied = true;
+	e_unit.dead = false;
+	e_unit.hp = e_unit.max_hp = 500;
+	e_unit.kind = SA::Rules::CombatantKind::kEnemy;
+
+	const BattleId battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, id_old, 0));
+
+	// 模拟断线
+	f.world.disconnectBattleMember(id_old);
+
+	// 新会话连接上线
+	const SA::Net::ConnectionId id_new = f.transport.connect();
+	f.transport.deliver(id_new, hs.data(), hs.size());
+	f.world.tick();
+
+	// 新会话接管战局
+	CHECK(f.world.reattachBattle(battle, id_old, id_new) == true);
+	CHECK(f.world.inBattle(id_new) == true);
+	CHECK(f.world.battleOfSession(id_new) == battle);
+
+	// 新会话发送普通攻击指令
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = f.world.battleField(battle)->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+	cmd.command.attack.target = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+	f.world.onBattleCommand(id_new, cmd);
+
+	// 推进战斗
+	f.clock.advance(1000);
+	f.world.tick();
+
+	// 战局正常结算并推进
+	CHECK(f.world.battleField(battle)->turn >= 1);
+}

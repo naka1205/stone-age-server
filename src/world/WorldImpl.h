@@ -167,6 +167,7 @@ struct BattleInstance
 	std::vector<SA::Net::SessionId> members{};
 	std::vector<SA::Net::SessionId> spectators{};
 	std::map<SA::Net::SessionId, std::uint8_t> slot_of{};
+	std::map<SA::Net::SessionId, std::uint8_t> disconnected_slots{};
 
 	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> player_of_slot{};
 	std::array<SA::Model::EntityHandle, SA::Rules::kSlotCount> enemy_of_slot{};

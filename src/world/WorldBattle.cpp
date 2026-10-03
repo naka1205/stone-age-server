@@ -1930,6 +1930,25 @@ void World::advanceBattles()
 		injectChargeCommands(b);
 		if (!b.demo)
 		{
+			// 离线托管：对战场中已断开连接的参战玩家，自动填入防御指令 (Stage 3.2 掉线保护)
+			for (const auto &pair : b.disconnected_slots)
+			{
+				const int slot = pair.second;
+				if (slot >= 0 && slot < SA::Rules::kBattlePlayerMax)
+				{
+					const auto &unit = b.field.at(slot);
+					if (unit.occupied && !unit.dead && unit.hp > 0 && !b.commands.present[slot])
+					{
+						SA::Domain::BattleCommand def_cmd{};
+						def_cmd.battle_id = b.id;
+						def_cmd.turn = b.field.turn;
+						def_cmd.command_kind = SA::Domain::BattleCommand::CommandKind::GUARD;
+						b.commands.commands[slot] = def_cmd;
+						b.commands.present[slot] = true;
+					}
+				}
+			}
+
 			std::vector<SA::Net::SessionId> waiting;
 			for (auto sid : b.members)
 			{
@@ -2971,6 +2990,129 @@ std::size_t World::spectatorCount(BattleId battle) const noexcept
 	if (it == _impl->battles.end())
 		return 0;
 	return it->second.spectators.size();
+}
+
+void World::disconnectBattleMember(SA::Net::SessionId id)
+{
+	Impl &s = *_impl;
+	for (auto &entry : s.battles)
+	{
+		auto &battle = entry.second;
+		if (battle.stats.finished)
+			continue;
+		auto sit = battle.slot_of.find(id);
+		if (sit != battle.slot_of.end())
+		{
+			// 记录断线会话及其占用的战斗槽位，供离线托管和重连接管
+			battle.disconnected_slots[id] = sit->second;
+			battle.slot_of.erase(sit);
+			battle.members.erase(std::remove(battle.members.begin(), battle.members.end(), id), battle.members.end());
+			s.pushBattleSnapshot(battle);
+		}
+		battle.spectators.erase(std::remove(battle.spectators.begin(), battle.spectators.end(), id), battle.spectators.end());
+	}
+}
+
+BattleId World::battleOfSession(SA::Net::SessionId session) const noexcept
+{
+	for (const auto &entry : _impl->battles)
+	{
+		if (entry.second.stats.finished)
+			continue;
+		if (entry.second.slot_of.find(session) != entry.second.slot_of.end())
+			return entry.first;
+	}
+	return 0;
+}
+
+BattleId World::battleOfPlayer(SA::Model::EntityHandle player_handle) const noexcept
+{
+	if (!player_handle.valid())
+		return 0;
+	for (const auto &entry : _impl->battles)
+	{
+		const auto &battle = entry.second;
+		if (battle.stats.finished)
+			continue;
+		for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+		{
+			if (battle.player_of_slot[static_cast<std::size_t>(slot)] == player_handle)
+				return battle.id;
+		}
+	}
+	return 0;
+}
+
+bool World::reattachBattle(BattleId battle_id, SA::Net::SessionId old_session, SA::Net::SessionId new_session)
+{
+	Impl &s = *_impl;
+	auto bit = s.battles.find(battle_id);
+	if (bit == s.battles.end())
+		return false;
+	auto &b = bit->second;
+	if (b.stats.finished)
+		return false;
+
+	int slot = -1;
+	auto dit = b.disconnected_slots.find(old_session);
+	if (dit != b.disconnected_slots.end())
+	{
+		slot = dit->second;
+		b.disconnected_slots.erase(dit);
+	}
+	else
+	{
+		auto sit = b.slot_of.find(old_session);
+		if (sit != b.slot_of.end())
+		{
+			slot = sit->second;
+			b.slot_of.erase(sit);
+		}
+		else
+		{
+			const auto ph = s.player_of_session.find(new_session);
+			if (ph.valid())
+			{
+				for (int i = 0; i < SA::Rules::kSlotCount; ++i)
+				{
+					if (b.player_of_slot[static_cast<std::size_t>(i)] == ph)
+					{
+						slot = i;
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	if (slot < 0 || slot >= SA::Rules::kSlotCount)
+		return false;
+
+	b.slot_of[new_session] = static_cast<std::uint8_t>(slot);
+	b.members.erase(std::remove(b.members.begin(), b.members.end(), old_session), b.members.end());
+	if (std::find(b.members.begin(), b.members.end(), new_session) == b.members.end())
+		b.members.push_back(new_session);
+
+	auto cit = s.conns.find(new_session);
+	if (cit != s.conns.end() && cit->second.session != nullptr)
+	{
+		const auto &combatant = b.field.at(slot);
+		SA::Domain::BattleSelfInfo self{};
+		self.battle_id = b.id;
+		self.slot = static_cast<std::uint8_t>(slot);
+		self.mp = combatant.mp;
+		self.cannot_act = SA::Rules::checkCanAct(combatant);
+		(void)cit->second.session->push(self, cit->second.outbound);
+
+		s.pushBattleSnapshot(b);
+
+		SA::Domain::BattleTurnBegin begin{};
+		begin.battle_id = b.id;
+		begin.turn = b.field.turn;
+		begin.ready_mask = readyMask(b);
+		(void)cit->second.session->push(begin, cit->second.outbound);
+	}
+	return true;
 }
 
 } // namespace SA::World

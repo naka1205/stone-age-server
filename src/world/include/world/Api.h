@@ -1557,6 +1557,14 @@ class World final : public SA::Net::TransportEvents,
 	// 查询某场战斗当前的观战者人数
 	std::size_t spectatorCount(BattleId battle) const noexcept;
 
+	// 战中掉线断网保护与重连接管 (Battle Disconnect & Re-attach, Stage 3.2):
+	// 当参战玩家网络断开时，将其移出网络广播列表，但保留其战斗槽位与角色实体（自动防御托管）；
+	// 允许重连后的新会话接管战斗，并同步下发战场当前快照与回合就绪状态。
+	void disconnectBattleMember(SA::Net::SessionId session);
+	bool reattachBattle(BattleId battle, SA::Net::SessionId old_session, SA::Net::SessionId new_session);
+	BattleId battleOfSession(SA::Net::SessionId session) const noexcept;
+	BattleId battleOfPlayer(SA::Model::EntityHandle player_handle) const noexcept;
+
 	// 据模板生成一只敌人,建 L2 实体并投影进某场战斗的某个槽(批次 M.4b)。
 	//
 	// ★★ **这是 `rollSpawnStats` 的第一个真实调用方** —— 欠债 25 立案的原话是
