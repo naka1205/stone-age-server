@@ -9760,3 +9760,385 @@ TEST_CASE("四大新手村全域场景室内外贯通、医院恢复与全量功
 		CHECK_EQ(pos.y, out_y);
 	}
 }
+
+TEST_CASE("四大庄园守护战决胜排期、胜负交割过户与全系骑乘特权双端端到端跑通 (Phase 4.1)")
+{
+	MoveFixture f;
+
+	// ════ 1. 萨姆吉尔庄园 (暴龙系 / 巴朵兰恩 / 形象 100175) ════
+	const auto s_lead1 = spawnHandshaked(f);
+	const auto s_mem1 = spawnHandshaked(f);
+	const auto s_lead2 = spawnHandshaked(f);
+	const auto s_mem2 = spawnHandshaked(f);
+
+	auto *p_sl1 = f.world.playerForTest(s_lead1);
+	auto *p_sm1 = f.world.playerForTest(s_mem1);
+	auto *p_sl2 = f.world.playerForTest(s_lead2);
+	auto *p_sm2 = f.world.playerForTest(s_mem2);
+
+	REQUIRE(p_sl1 != nullptr);
+	REQUIRE(p_sm1 != nullptr);
+	REQUIRE(p_sl2 != nullptr);
+	REQUIRE(p_sm2 != nullptr);
+
+	p_sl1->level = p_sm1->level = p_sl2->level = p_sm2->level = 80;
+	p_sl1->gold = p_sm1->gold = p_sl2->gold = p_sm2->gold = 500000;
+	p_sl1->floor = p_sm1->floor = p_sl2->floor = p_sm2->floor = 0;
+	p_sl1->x = 20;
+	p_sl1->y = 20;
+	p_sm1->x = 21;
+	p_sm1->y = 20;
+	p_sl2->x = 20;
+	p_sl2->y = 21;
+	p_sm2->x = 21;
+	p_sm2->y = 21;
+
+	// 创建家族 1 与 家族 2
+	REQUIRE(f.world.createFamily(s_lead1, "萨姆守卫军", "誓死守卫萨姆吉尔庄园"));
+	const auto fid_s1 = f.world.playerFamilyId(s_lead1);
+	REQUIRE(fid_s1 > 0);
+	REQUIRE(f.world.applyJoinFamily(s_mem1, fid_s1));
+	REQUIRE(f.world.acceptFamilyMember(s_lead1, fid_s1, p_sm1->name.c_str(), true));
+
+	REQUIRE(f.world.createFamily(s_lead2, "暴龙突击队", "目标占领萨姆吉尔庄园"));
+	const auto fid_s2 = f.world.playerFamilyId(s_lead2);
+	REQUIRE(fid_s2 > 0);
+	REQUIRE(f.world.applyJoinFamily(s_mem2, fid_s2));
+	REQUIRE(f.world.acceptFamilyMember(s_lead2, fid_s2, p_sm2->name.c_str(), true));
+
+	// 初始状态：家族 1 占领萨姆吉尔庄园
+	REQUIRE(f.world.occupyManor(fid_s1, FamilyManor::kSamo));
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kSamo) == fid_s1);
+	CHECK(f.world.familyManor(fid_s1) == FamilyManor::kSamo);
+
+	// 家族 2 族长缴纳 150,000 押金预约挑战
+	auto res_samo = f.world.challengeManor(s_lead2, FamilyManor::kSamo, 150000);
+	CHECK(res_samo == ManorChallengeResult::kSuccess);
+	auto war_s = f.world.getManorWarInfo(FamilyManor::kSamo);
+	CHECK(war_s.state == ManorWarState::kScheduled);
+	CHECK(war_s.defender_family_id == fid_s1);
+	CHECK(war_s.challenger_family_id == fid_s2);
+	CHECK(war_s.challenge_deposit == 150000);
+
+	// 推进开战与记录战绩比分
+	REQUIRE(f.world.startManorWar(FamilyManor::kSamo));
+	war_s = f.world.getManorWarInfo(FamilyManor::kSamo);
+	CHECK(war_s.state == ManorWarState::kInWar);
+
+	REQUIRE(f.world.recordManorDuelScore(FamilyManor::kSamo, fid_s2, 10));
+	REQUIRE(f.world.recordManorDuelScore(FamilyManor::kSamo, fid_s1, 3));
+	war_s = f.world.getManorWarInfo(FamilyManor::kSamo);
+	CHECK(war_s.challenger_score == 10);
+	CHECK(war_s.defender_score == 3);
+
+	// 决斗结算：挑战方胜出，庄园所有权过户与押金返还/声望奖励
+	const auto s2_gold_before = f.world.getFamilyInfo(fid_s2)->family_gold;
+	const auto s2_fame_before = f.world.getFamilyInfo(fid_s2)->family_fame;
+	REQUIRE(f.world.concludeManorWar(FamilyManor::kSamo, fid_s2));
+
+	CHECK(f.world.familyManor(fid_s1) == FamilyManor::kNone);
+	CHECK(f.world.familyManor(fid_s2) == FamilyManor::kSamo);
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kSamo) == fid_s2);
+	CHECK(f.world.getFamilyInfo(fid_s2)->family_gold == s2_gold_before + 150000);
+	CHECK(f.world.getFamilyInfo(fid_s2)->family_fame == s2_fame_before + 500);
+
+	// 庄园骑乘特权检验：拥有萨姆吉尔庄园的家族 2 成员，免认证骑乘暴龙系神兽
+	auto samo_pet = makeTestPet(501, 80);
+	samo_pet.name.assign("巴朵兰恩");
+	samo_pet.base_image = 100175;
+	samo_pet.hp = 800;
+	samo_pet.vital = 19250;
+	samo_pet.str = 1000;
+	samo_pet.tough = 1000;
+	samo_pet.dex = 1000;
+	const int s_slot2 = f.world.givePetToPlayer(s_mem2, samo_pet);
+	REQUIRE(s_slot2 >= 0);
+
+	CHECK(f.world.canPlayerRide(s_mem2, s_slot2));
+	CHECK(f.world.mountPet(s_mem2, s_slot2));
+	CHECK(f.world.isPlayerRiding(s_mem2));
+	CHECK(p_sm2->image == 100775); // 100000 + 100175 -> 100775
+
+	// 骑乘契合度相性共鸣
+	const auto aff_s = f.world.calculateRideAffinity(s_mem2, s_slot2);
+	REQUIRE(aff_s.has_value());
+	CHECK(aff_s->affinity_rate >= 50);
+	CHECK(aff_s->bonus_attack > 0);
+
+	// 丧失庄园特权的家族 1 成员，无法直接骑乘暴龙，必须经由骑乘考官考核认证
+	const int s_slot1 = f.world.givePetToPlayer(s_mem1, samo_pet);
+	REQUIRE(s_slot1 >= 0);
+	CHECK_FALSE(f.world.canPlayerRide(s_mem1, s_slot1));
+	CHECK_FALSE(f.world.mountPet(s_mem1, s_slot1));
+
+	// 家族 1 成员前往考官处参加萨姆吉尔庄园暴龙骑乘考核（原版 npc_riderman.c: 20000 学费的 20% 注资庄园家族金库）
+	f.world.setPlayerFame(s_mem1, 300);
+	p_sm1->gold = 50000;
+	const auto s2_treasury_before = f.world.getFamilyInfo(fid_s2)->family_gold;
+	auto exam_s = f.world.takeRideExam(s_mem1, RideCertType::kManorSamo);
+	CHECK(exam_s == RideExamResultCode::kSuccess);
+	CHECK(f.world.hasRideCert(s_mem1, RideCertType::kManorSamo));
+	// 4000 石币（20000 / 5）严格注资进拥有萨姆吉尔庄园的家族 2 金库
+	CHECK(f.world.getFamilyInfo(fid_s2)->family_gold == s2_treasury_before + 4000);
+	CHECK(f.world.canPlayerRide(s_mem1, s_slot1));
+	CHECK(f.world.mountPet(s_mem1, s_slot1));
+	CHECK(f.world.isPlayerRiding(s_mem1));
+
+	// 战斗生命分摊闭环：s_mem2 骑乘状态入战与 s_lead1 决斗切磋
+	REQUIRE(f.world.requestDuel(s_lead1, s_mem2));
+	const BattleId battle_samo = 1;
+	const auto *fld_samo = f.world.battleField(battle_samo);
+	REQUIRE(fld_samo != nullptr);
+	CHECK(fld_samo->at(10).has_ride);
+	CHECK(fld_samo->at(10).ride_hp == 800);
+
+	// s_lead1 攻击 s_mem2，验证战中生命分摊
+	SA::Domain::BattleCommand cmd_s_atk{};
+	cmd_s_atk.battle_id = battle_samo;
+	cmd_s_atk.turn = fld_samo->turn;
+	cmd_s_atk.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+	cmd_s_atk.command.attack.target = 10;
+	f.world.onBattleCommand(s_lead1, cmd_s_atk);
+
+	SA::Domain::BattleCommand cmd_s_def{};
+	cmd_s_def.battle_id = battle_samo;
+	cmd_s_def.turn = fld_samo->turn;
+	cmd_s_def.command_kind = SA::Domain::BattleCommand::CommandKind::GUARD;
+	f.world.onBattleCommand(s_mem2, cmd_s_def);
+
+	f.clock.advance(1000);
+	f.world.tick();
+
+	const auto *fld_s_after = f.world.battleField(battle_samo);
+	CHECK(fld_s_after->at(10).ride_hp < 800); // 骑宠分摊吸收伤害
+
+	// ════ 2. 玛丽娜丝庄园 (虎/绿暴系 / 格鲁西斯 / 形象 100178) ════
+	const auto m_lead1 = spawnHandshaked(f);
+	const auto m_lead2 = spawnHandshaked(f);
+	auto *p_ml1 = f.world.playerForTest(m_lead1);
+	auto *p_ml2 = f.world.playerForTest(m_lead2);
+	p_ml1->level = p_ml2->level = 80;
+	p_ml1->gold = p_ml2->gold = 500000;
+
+	REQUIRE(f.world.createFamily(m_lead1, "渔村护卫", "守护玛丽娜丝"));
+	const auto fid_m1 = f.world.playerFamilyId(m_lead1);
+	REQUIRE(f.world.createFamily(m_lead2, "深海征服者", "攻取玛丽娜丝"));
+	const auto fid_m2 = f.world.playerFamilyId(m_lead2);
+
+	REQUIRE(f.world.occupyManor(fid_m1, FamilyManor::kMarina));
+	REQUIRE(f.world.challengeManor(m_lead2, FamilyManor::kMarina, 120000) == ManorChallengeResult::kSuccess);
+	REQUIRE(f.world.startManorWar(FamilyManor::kMarina));
+	REQUIRE(f.world.concludeManorWar(FamilyManor::kMarina, fid_m2));
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kMarina) == fid_m2);
+
+	auto marina_pet = makeTestPet(502, 80);
+	marina_pet.name.assign("格鲁西斯");
+	marina_pet.base_image = 100178;
+	marina_pet.hp = 700;
+	const int m_slot = f.world.givePetToPlayer(m_lead2, marina_pet);
+	CHECK(f.world.canPlayerRide(m_lead2, m_slot));
+	CHECK(f.world.mountPet(m_lead2, m_slot));
+	CHECK(p_ml2->image == 100778);
+
+	// ════ 3. 加加庄园 (飞龙系 / 朵拉比斯 / 形象 100220) ════
+	const auto j_lead1 = spawnHandshaked(f);
+	const auto j_lead2 = spawnHandshaked(f);
+	auto *p_jl1 = f.world.playerForTest(j_lead1);
+	auto *p_jl2 = f.world.playerForTest(j_lead2);
+	p_jl1->level = p_jl2->level = 80;
+	p_jl1->gold = p_jl2->gold = 500000;
+
+	REQUIRE(f.world.createFamily(j_lead1, "树冠部落", "守护加加庄园"));
+	const auto fid_j1 = f.world.playerFamilyId(j_lead1);
+	REQUIRE(f.world.createFamily(j_lead2, "苍穹翼族", "攻取加加庄园"));
+	const auto fid_j2 = f.world.playerFamilyId(j_lead2);
+
+	REQUIRE(f.world.occupyManor(fid_j1, FamilyManor::kJaja));
+	REQUIRE(f.world.challengeManor(j_lead2, FamilyManor::kJaja, 120000) == ManorChallengeResult::kSuccess);
+	REQUIRE(f.world.startManorWar(FamilyManor::kJaja));
+	REQUIRE(f.world.concludeManorWar(FamilyManor::kJaja, fid_j2));
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kJaja) == fid_j2);
+
+	auto jaja_pet = makeTestPet(503, 80);
+	jaja_pet.name.assign("朵拉比斯");
+	jaja_pet.base_image = 100220;
+	jaja_pet.hp = 650;
+	const int j_slot = f.world.givePetToPlayer(j_lead2, jaja_pet);
+	CHECK(f.world.canPlayerRide(j_lead2, j_slot));
+	CHECK(f.world.mountPet(j_lead2, j_slot));
+	CHECK(p_jl2->image == 100720);
+
+	// ════ 4. 卡鲁它那庄园 (雷龙系 / 布拉奇多斯 / 形象 100185) ════
+	const auto k_lead1 = spawnHandshaked(f);
+	const auto k_lead2 = spawnHandshaked(f);
+	auto *p_kl1 = f.world.playerForTest(k_lead1);
+	auto *p_kl2 = f.world.playerForTest(k_lead2);
+	p_kl1->level = p_kl2->level = 80;
+	p_kl1->gold = p_kl2->gold = 500000;
+
+	REQUIRE(f.world.createFamily(k_lead1, "椰林氏族", "守护卡鲁它那"));
+	const auto fid_k1 = f.world.playerFamilyId(k_lead1);
+	REQUIRE(f.world.createFamily(k_lead2, "大地撼动者", "攻取卡鲁它那"));
+	const auto fid_k2 = f.world.playerFamilyId(k_lead2);
+
+	REQUIRE(f.world.occupyManor(fid_k1, FamilyManor::kKarutana));
+	REQUIRE(f.world.challengeManor(k_lead2, FamilyManor::kKarutana, 120000) == ManorChallengeResult::kSuccess);
+	REQUIRE(f.world.startManorWar(FamilyManor::kKarutana));
+	REQUIRE(f.world.concludeManorWar(FamilyManor::kKarutana, fid_k2));
+	CHECK(f.world.manorOwnerFamily(FamilyManor::kKarutana) == fid_k2);
+
+	auto karu_pet = makeTestPet(504, 80);
+	karu_pet.name.assign("布拉奇多斯");
+	karu_pet.base_image = 100185;
+	karu_pet.hp = 950;
+	const int k_slot = f.world.givePetToPlayer(k_lead2, karu_pet);
+	CHECK(f.world.canPlayerRide(k_lead2, k_slot));
+	CHECK(f.world.mountPet(k_lead2, k_slot));
+	CHECK(p_kl2->image == 100785);
+}
+
+TEST_CASE("大世界野外暗雷步数计算、野生宠物捕获与战果战利品入包端到端跑通 (Phase 4.1)")
+{
+	MoveFixture f;
+
+	// 配置野外暗雷遇敌链：大世界 Floor 0 全域 (64x64) 覆盖
+	EncountArea area{};
+	area.index = 1;
+	area.floor = 0;
+	area.x = 0;
+	area.y = 0;
+	area.width = 63;
+	area.height = 63;
+	area.prob_min = 60;
+	area.prob_max = 60;
+	area.enemy_max_num = 2;
+	area.zorder = 1;
+	area.group_id.fill(-1);
+	area.group_prob.fill(-1);
+	area.group_id[0] = 1;
+	area.group_prob[0] = 1;
+
+	EnemyGroup group{};
+	group.group_id = 1;
+	group.enemy_id.fill(-1);
+	group.create_prob.fill(-1);
+	group.enemy_id[0] = 9; // 乌力
+	group.create_prob[0] = 1;
+
+	EnemyEncounter enc{};
+	enc.enemy_id = 9;
+	enc.temp_no = 1;
+	enc.lv_min = 1;
+	enc.lv_max = 1;
+	enc.capturable = true;
+	enc.create_max_num = 1;
+	enc.exp = 50;
+
+	EnemyTemplate tmpl{};
+	tmpl.temp_no = 1;
+	tmpl.stats = SA::Rules::SpawnTemplate{4.50, 10, 20, 12, 15, 25};
+	tmpl.mod_ai = 150;
+	tmpl.capture_difficulty = 11;
+	tmpl.earth = 80;
+	tmpl.water = 20;
+	tmpl.image = 100250;
+	REQUIRE(tmpl.name.assign("乌力"));
+
+	f.world.loadEncounterTables({area}, {group}, {enc}, {tmpl});
+
+	const auto id = spawnHandshaked(f);
+	auto *player = f.world.playerForTest(id);
+	REQUIRE(player != nullptr);
+	player->level = 100;
+	player->charm = 200; // 满魅力与等级压制
+	player->dex = 2000;
+
+	CHECK(f.world.battleCount() == 0);
+	CHECK(f.world.playerPetSlotsUsed(id) == 0);
+	CHECK(f.world.playerCaptureCount(id) == 0);
+	CHECK(f.world.playerItemSlotsUsed(id) == 0);
+
+	// 1. 玩家在大世界野外行走，步数累加遇敌概率 cep，直至触发暗雷遇敌
+	for (int step = 0; step < 5; ++step)
+	{
+		f.sendWalk(id, "c");
+		f.clock.advance(250);
+		f.world.tick();
+		if (f.world.inBattle(id))
+			break;
+	}
+
+	REQUIRE(f.world.inBattle(id));
+	CHECK(f.world.battleCount() == 1);
+	const BattleId battle1 = 1;
+	const auto *fld1 = f.world.battleField(battle1);
+	REQUIRE(fld1 != nullptr);
+	CHECK(fld1->at(0).occupied);
+	CHECK(fld1->at(10).occupied);
+
+	// 2. 战中野生宠物捕获：残血削弱并下发 CAPTURE 命令捕获 10 号槽乌力
+	const_cast<SA::Rules::BattleField *>(fld1)->at(10).hp = 1;
+	SA::Domain::BattleCommand cap_cmd{};
+	cap_cmd.battle_id = battle1;
+	cap_cmd.turn = fld1->turn;
+	cap_cmd.command_kind = SA::Domain::BattleCommand::CommandKind::CAPTURE;
+	cap_cmd.command.capture.target = 10;
+	f.world.onBattleCommand(id, cap_cmd);
+
+	f.clock.advance(2000);
+	f.world.tick();
+
+	// 捕获成功闭环校验：宠物进池并进入玩家宠物槽位、捕获计数 +1、敌方离场
+	CHECK(f.world.playerPetSlotsUsed(id) == 1);
+	CHECK(f.world.playerCaptureCount(id) == 1);
+	const auto *captured_pet = f.world.playerPetAt(id, 0);
+	REQUIRE(captured_pet != nullptr);
+	CHECK(std::string_view(captured_pet->name.c_str()) == "乌力");
+	CHECK(captured_pet->hp > 0);
+
+	// 捕获后敌方全部离场，战斗收尾回到大世界态
+	f.world.tick();
+	CHECK_FALSE(f.world.inBattle(id));
+
+	// 3. 战胜击杀与战利品拾取链路：再遇敌一次并带有战利品掉落
+	loadEncounterFixture(f.world, 120); // 必遇敌
+	f.sendWalk(id, "c");
+	f.world.tick();
+
+	REQUIRE(f.world.inBattle(id));
+	const BattleId battle2 = 2;
+	const auto *fld2 = f.world.battleField(battle2);
+	REQUIRE(fld2 != nullptr);
+
+	auto *foe = const_cast<SA::Model::Enemy *>(f.world.battleEnemyAt(battle2, 10));
+	REQUIRE(foe != nullptr);
+	foe->drop_count = 2;
+	foe->dropped_items[0] = 1001; // 大块肉
+	foe->dropped_items[1] = 2001; // 魔石
+
+	// 强力攻击击败敌人
+	const_cast<SA::Rules::BattleField *>(fld2)->at(0).attack = 100000;
+	for (int i = 0; i < 5; ++i)
+	{
+		const auto *cur_fld = f.world.battleField(battle2);
+		if (cur_fld == nullptr || !f.world.inBattle(id))
+			break;
+		SA::Domain::BattleCommand atk_cmd{};
+		atk_cmd.battle_id = battle2;
+		atk_cmd.turn = cur_fld->turn;
+		atk_cmd.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		atk_cmd.command.attack.target = 10;
+		f.world.onBattleCommand(id, atk_cmd);
+		f.clock.advance(2000);
+		f.world.tick();
+	}
+
+	// 战斗胜利结束
+	CHECK_FALSE(f.world.inBattle(id));
+
+	// deliverPlayerProfit 战利品原子交付入包校验
+	CHECK(f.world.playerItemSlotsUsed(id) >= 1);
+	const auto *dropped_item = f.world.playerItemAt(id, SA::Model::kStartItemArray);
+	REQUIRE(dropped_item != nullptr);
+	CHECK((dropped_item->item_id == 1001 || dropped_item->item_id == 2001));
+}
