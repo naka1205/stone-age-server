@@ -186,6 +186,9 @@ bool World::requestDuel(SA::Net::SessionId requester, SA::Net::SessionId target)
 	if (requester == target)
 		return false;
 
+	if (isPlayerVending(requester) || isPlayerVending(target))
+		return false;
+
 	if (s.conns.find(requester) == s.conns.end() || s.conns.find(target) == s.conns.end())
 		return false;
 

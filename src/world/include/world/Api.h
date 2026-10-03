@@ -1695,6 +1695,9 @@ class World final : public SA::Net::TransportEvents,
 	// 供测试直接触发 warpPlayer 逻辑 (批次 D.2)
 	void warpPlayerForTest(SA::Net::SessionId session, std::int32_t floor, std::int32_t x, std::int32_t y);
 
+	// 供测试直接模拟断线/离线托管状态 (批次 §9.0.114 / Phase 4.2)
+	void setSessionDetachedForTest(SA::Net::SessionId session, bool detached);
+
 	// 向商店 NPC 出售指定背包槽位的道具 (批次 W.12, 移植 npc_itemshop.c 逻辑)
 	bool sellItemToShop(SA::Net::SessionId session, std::uint64_t npc_id, int slot);
 

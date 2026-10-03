@@ -1834,6 +1834,64 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **全仓守卫**:
   - `check_module_boundaries.py`, `check_gold_writes.py`, `check_shared_purity.py`, `check_docs_index.py`, `check_dr_table.py`, `check_format.py` 全部一次性绿灯。
 
+---
+
+### 9.0.114 批次 D.7 —— 玩家多线摆摊行商网络、拍卖行寄售全景流通与系统邮箱到账双端闭环验证 (Multi-Stall, Auction Market & Mail E2E)
+
+- **日期**: 2026-10-03
+- **分支**: `master`
+- **目标**: 依据实施计划 Phase 4.2 核心大世界行商网络与全景经济生态闭环规范，在双端落地并验证多城镇集市多玩家并发开摊设点、货架配置与招牌文案广播、移动/组队/切磋决斗/安全交易全方位状态机封锁，打通近身切比雪夫距离采购、随身石币上限溢出防爆仓与系统邮件保全（`attached_gold`）、售空自动收摊恢复行走自由；打通跨图全域拍卖行/寄售市场（Consignment Market）跨村异地寄售、关键词与品类过滤检索、5% 交易税清算、离线卖家成交净收益系统邮件送达；打通系统邮箱查阅与附件安全提取防刷状态机。
+
+#### 1. 核心架构与功能落地
+
+1. **大世界集市多摊位并发、状态机封锁与近身采购闭环 (`WorldEconomy.cpp` / `WorldMovement.cpp` / `WorldPartyTrade.cpp`)**:
+   - **摆摊货架与招牌配置**: 玩家开辟摊位（`openStall`），自由上架道具（`setStallItem`）与宠物（`setStallPet`），设置摊位招牌文案；启动摆摊（`startStallVending`）广播视野；
+   - **状态机全方位安全封锁**: 摆摊中玩家物理移动被阻断（`onWalk` 拦截并清空 `walk_seq`）、禁止发起或接受组队邀请（`joinParty` 互斥）、禁止发起或接受切磋决斗（`requestDuel` 互斥）、禁止发起或接受玩家间交易（`requestTrade` 互斥）；
+   - **近身采购门限与超距拦截**: `nearbyStalls(viewer, max_distance)` 精准检索视野内有效摊位；`buyFromStall` 实施严格切比雪夫距离门限（$\le 3$ 允许采购，$\ge 4$ 超距严格拦截阻断）；
+   - **随身石币上限溢出防爆仓与邮件保全**: 依据官方原版未转生 1,000,000 随身石币上限，当售出收益导致卖家随身金币达到上限时（`GoldDisposition::kClamped`），超额部分（`overflow`）原子生成系统邮件投递至卖家邮箱（“摆摊收入超额补发”），杜绝吞金与爆仓损耗；
+   - **买家满包防御与售空自动解封**: 买家宠物栏满时购买被阻断；当货架全部售空或摊主主动调用 `closeStall`，摊位关闭并自动解除摆摊状态，摊主恢复移动与交互自由。
+
+2. **跨地图全域拍卖行/寄售市场跨村网络流通 (`WorldEconomy.cpp`)**:
+   - **异地寄售与 100 挂牌费**: 玩家在任意地图（如萨伊那斯村庄）将高价值装备或灵兽宠物挂牌上架（`listMarketItem`, `listMarketPet`），扣除 100 石币挂牌手续费，上架骑乘宠物时自动解除骑乘；
+   - **跨图全局检索与过滤**: 异地买家通过 `searchMarket` 进行跨服/跨地图全局检索，支持关键字匹配与品类过滤（道具/宠物）；
+   - **一口价成交与 5% 交易税率清算**: 买家支付一口价石币，道具/宠物原子划拨入包；系统扣除 5% 交易税（`kMarketTaxRatePercent = 5`，通过 `GoldTx` 记账 `kMarketTaxFee` 并触发审计）；
+   - **离线卖家成交与系统邮件到账**: 当卖家处于断线/离线托管状态时（`detached = true`），扣除税费后的净收益（95%）全额以系统邮件（“拍卖行成交到账”）安全寄送至卖家邮箱。
+
+3. **系统邮箱与附件提取防刷状态机 (`WorldSocial.cpp`)**:
+   - 卖家上线后通过 `playerMails(session)` 查阅信件列表与附件状态；
+   - 提取附件石币（`takeMailAttachment`），石币原子充入随身钱包；
+   - 提取成功后信件自动标记为附件已取走（`has_attachment = false`），二次提取严格返回 false 阻断刷金。
+
+4. **客户端表现层增强与交互状态机 (`PlayerInteraction.h/.cpp` / `ClientNetTest.cpp`)**:
+   - 客户端扩展 `PlayerInteraction`：
+     - 摆摊货架管理（自身摊位标题、货架商品/宠物增删、开摊/收摊）；
+     - 他人摊位浏览与距离计算（`canBrowseStall`、`StallView`、`StallItemView`）；
+     - 拍卖行市场检索与过滤（`MarketListingView`、`filterMarketListings`）；
+     - 邮箱与附件管理（`MailView`、`unreadMailCount`、`takeMailAttachment`）。
+
+#### 2. 验证与门禁
+
+- **服务端单元与端到端测试 (`tests/WorldMapTest.cpp`)**:
+  - 新增 `大世界多线摆摊行商网络、拍卖行寄售全景流通与系统邮箱到账闭环 (Phase 4.2)`：
+    - 验证萨村集市多玩家开摊、货架上架、招牌文案呈现；
+    - 验证摆摊状态下移动、组队、决斗、交易全方位封锁；
+    - 验证切比雪夫距离 $\le 3$ 采购与超距拦截、满包拦截；
+    - 验证 1,000,000 石币上限溢出防爆仓与邮件保全（30,000 石币附件）；
+    - 验证售空自动解除封锁并恢复走动；
+    - 验证跨图拍卖行寄售、关键字检索、宠物过滤、一口价购买；
+    - 验证 5% 交易税清算与离线卖家系统邮件附件送达（475,000 石币）；
+    - 验证系统邮箱查阅、附件提取与防重复提取刷金。
+  - 全量 CTest 22/22 100% 保持全绿。
+- **客户端单元与协议测试 (`stone-age-client/tests/ClientNetTest.cpp`)**:
+  - 新增 `大世界多线摆摊、拍卖行寄售检索与系统邮箱附件提取双端协议跑通 (Phase 4.2)`：
+    - 验证摆摊货架管理、招牌广播与近身浏览距离判定；
+    - 验证全域拍卖行寄售检索、类别过滤与 5% 交易税算力核算；
+    - 验证系统离线邮件通知与附件提取防刷状态机。
+  - CI 预设 7/7 100% 绿灯。
+- **全仓守卫**:
+  - `check_module_boundaries.py`, `check_gold_writes.py`, `check_shared_purity.py`, `check_docs_index.py`, `check_dr_table.py`, `check_format.py` 全部一次性绿灯。
+
+
 
 
 

@@ -10142,3 +10142,237 @@ TEST_CASE("大世界野外暗雷步数计算、野生宠物捕获与战果战利
 	REQUIRE(dropped_item != nullptr);
 	CHECK((dropped_item->item_id == 1001 || dropped_item->item_id == 2001));
 }
+
+TEST_CASE("大世界多线摆摊行商网络、拍卖行寄售全景流通与系统邮箱到账闭环 (Phase 4.2)")
+{
+	MoveFixture f;
+
+	// 生成 3 个玩家：seller1（萨村大掌柜，(100, 100)）、seller2（加加灵兽商，(102, 100)）、buyer（行商采办，(101, 100)）
+	const auto s1_id = spawnHandshaked(f);
+	const auto s2_id = spawnHandshaked(f);
+	const auto b_id = spawnHandshaked(f);
+
+	auto *s1 = f.world.playerForTest(s1_id);
+	auto *s2 = f.world.playerForTest(s2_id);
+	auto *b = f.world.playerForTest(b_id);
+	REQUIRE(s1 != nullptr);
+	REQUIRE(s2 != nullptr);
+	REQUIRE(b != nullptr);
+
+	f.world.setPlayerName(s1_id, "萨村大掌柜");
+	f.world.setPlayerName(s2_id, "加加灵兽商");
+	f.world.setPlayerName(b_id, "行商采办");
+
+	s1->floor = 0;
+	s1->x = 30;
+	s1->y = 30;
+	s1->gold = 100000;
+
+	s2->floor = 0;
+	s2->x = 32;
+	s2->y = 30;
+	s2->gold = 100000;
+
+	b->floor = 0;
+	b->x = 31;
+	b->y = 30;
+	b->gold = 1000000; // 初始满钱包 100万
+
+	// 给 s1 配备道具与宠物
+	SA::Model::Item it_sun{};
+	it_sun.item_id = 5001;
+	REQUIRE(it_sun.name.assign("太阳首饰Lv3"));
+	it_sun.level = 3;
+	const int s1_item1 = f.world.giveItemToPlayer(s1_id, it_sun);
+	REQUIRE(s1_item1 >= 0);
+
+	SA::Model::Item it_stone{};
+	it_stone.item_id = 2001;
+	REQUIRE(it_stone.name.assign("极品魔石"));
+	it_stone.level = 10;
+	const int s1_item2 = f.world.giveItemToPlayer(s1_id, it_stone);
+	REQUIRE(s1_item2 >= 0);
+
+	SA::Model::Pet pet_red{};
+	pet_red.pet_id = 100175;
+	REQUIRE(pet_red.name.assign("红暴巴朵兰恩"));
+	pet_red.level = 120;
+	pet_red.hp = 800;
+	const int s1_pet = f.world.givePetToPlayer(s1_id, pet_red);
+	REQUIRE(s1_pet >= 0);
+
+	// 给 s2 配备一件高级装备与宠物
+	SA::Model::Item it_shield{};
+	it_shield.item_id = 6001;
+	REQUIRE(it_shield.name.assign("玄武之盾"));
+	it_shield.level = 8;
+	const int s2_item = f.world.giveItemToPlayer(s2_id, it_shield);
+	REQUIRE(s2_item >= 0);
+
+	SA::Model::Pet pet_tiger{};
+	pet_tiger.pet_id = 100178;
+	REQUIRE(pet_tiger.name.assign("白虎佩露夏"));
+	pet_tiger.level = 125;
+	pet_tiger.hp = 900;
+	const int s2_pet = f.world.givePetToPlayer(s2_id, pet_tiger);
+	REQUIRE(s2_pet >= 0);
+
+	// ══ 1. 玩家多线摆摊管理、状态机封锁与近身采购闭环 ══════════════════
+	SUBCASE("集市多摊位并发、状态机封锁与近身采购闭环")
+	{
+		// 1.1 开摊与货架配置
+		REQUIRE(f.world.openStall(s1_id, "萨村特产极品宠装行"));
+		REQUIRE(f.world.setStallItem(s1_id, s1_item1, 50000));
+		REQUIRE(f.world.setStallItem(s1_id, s1_item2, 80000));
+		REQUIRE(f.world.setStallPet(s1_id, s1_pet, 500000));
+
+		// 启动摆摊
+		REQUIRE(f.world.startStallVending(s1_id));
+		CHECK(f.world.isPlayerVending(s1_id));
+
+		// 1.2 摆摊状态机健全性：移动/组队/决斗/交易全方位封锁
+		f.sendWalk(s1_id, "c");
+		f.clock.advance(250);
+		f.world.tick();
+		CHECK(s1->x == 30);
+		CHECK(s1->y == 30); // 移动被拦截
+
+		CHECK_FALSE(f.world.joinParty(b_id, s1_id));    // 组队互斥拦截
+		CHECK_FALSE(f.world.requestDuel(b_id, s1_id));  // 决斗切磋互斥拦截
+		CHECK_FALSE(f.world.requestTrade(b_id, s1_id)); // 交易互斥拦截
+
+		// 1.3 视野内摊位检索：买家位于 (31, 30)，距离 s1 为 1
+		auto stalls = f.world.nearbyStalls(b_id, 5);
+		REQUIRE(stalls.size() == 1);
+		CHECK(stalls[0].seller == s1_id);
+		CHECK(stalls[0].title == "萨村特产极品宠装行");
+		CHECK(stalls[0].items.size() == 2);
+		CHECK(stalls[0].pets.size() == 1);
+
+		// 1.4 超距拦截变异测试：将买家拉远到 (40, 30)，距离 10 > 3
+		b->x = 40;
+		CHECK_FALSE(f.world.buyFromStall(b_id, s1_id, MarketAssetType::kItem, s1_item1));
+		b->x = 31; // 移回正常范围
+
+		// 1.5 正常购买太阳首饰（50,000 石币）
+		const auto b_gold_before = b->gold;
+		const auto s1_gold_before = s1->gold;
+		REQUIRE(f.world.buyFromStall(b_id, s1_id, MarketAssetType::kItem, s1_item1));
+
+		CHECK(b->gold == b_gold_before - 50000);
+		CHECK(s1->gold == s1_gold_before + 50000);
+		CHECK_FALSE(s1->items[static_cast<std::size_t>(s1_item1)].valid()); // 卖家槽位清空
+		CHECK(b->items[SA::Model::kStartItemArray].valid());                // 买家背包收到首饰
+
+		// 1.6 随身石币上限溢出防爆仓与系统邮件保全 (未转生上限 1,000,000)
+		s1->gold = 950000; // 距离 1,000,000 上限仅差 50,000
+		// 购买极品魔石（售价 80,000 石币）
+		REQUIRE(f.world.buyFromStall(b_id, s1_id, MarketAssetType::kItem, s1_item2));
+		CHECK(s1->gold == 1000000); // 随身石币钳位至上限
+
+		// 溢出的 30,000 石币原子生成系统邮件送达 s1 邮箱
+		auto s1_mails = f.world.playerMails(s1_id);
+		REQUIRE(s1_mails.size() >= 1);
+		const auto &overflow_mail = s1_mails.back();
+		CHECK(overflow_mail.title == "摆摊收入超额补发");
+		CHECK(overflow_mail.attached_gold == 30000);
+
+		// 1.7 买家满包防御测试：将买家宠物栏填满，尝试买宠
+		for (std::size_t i = 0; i < SA::Model::kMaxPetHave; ++i)
+		{
+			if (!b->pets[i].valid())
+			{
+				b->pets[i] = s2->pets[static_cast<std::size_t>(s2_pet)]; // 借用有效宠物句柄填满
+			}
+		}
+		// 此时买家宠物栏满，尝试购买红暴被严格阻断
+		CHECK_FALSE(f.world.buyFromStall(b_id, s1_id, MarketAssetType::kPet, s1_pet));
+
+		// 腾出一个宠物槽，成功购买红暴
+		b->clearPetSlot(0);
+		REQUIRE(f.world.buyFromStall(b_id, s1_id, MarketAssetType::kPet, s1_pet));
+		CHECK(b->pets[0].valid());
+
+		// 1.8 货架售空自动收摊解除封锁
+		CHECK_FALSE(f.world.isPlayerVending(s1_id));
+		f.sendWalk(s1_id, "c");
+		f.clock.advance(250);
+		f.world.tick();
+		CHECK(s1->x == 31); // 能够重新正常走动
+	}
+
+	// ══ 2. 跨地图全域拍卖行/寄售市场与 5% 交易税流转 ══════════════════
+	SUBCASE("跨地图全域拍卖行寄售、5%交易税结算与离线邮件到账")
+	{
+		// 2.1 初始化资金
+		b->gold = 1000000;
+
+		// s2 上架玄武之盾（一口价 200,000 石币），扣除 100 挂牌费
+		const auto s2_gold_before = s2->gold;
+		const auto lid_item = f.world.listMarketItem(s2_id, s2_item, 200000);
+		REQUIRE(lid_item > 0);
+		CHECK(s2->gold == s2_gold_before - 100);
+
+		// 模拟异地玩家 remote 上架白虎（一口价 500,000 石币）
+		const auto rem_id = spawnHandshaked(f);
+		auto *rem_p = f.world.playerForTest(rem_id);
+		REQUIRE(rem_p != nullptr);
+		f.world.setPlayerName(rem_id, "玛村大猎手");
+		rem_p->floor = 0;
+		rem_p->x = 50;
+		rem_p->y = 50;
+		rem_p->gold = 500000;
+		const int rem_pet = f.world.givePetToPlayer(rem_id, pet_tiger);
+		REQUIRE(rem_pet >= 0);
+
+		const auto lid_pet = f.world.listMarketPet(rem_id, rem_pet, 500000);
+		REQUIRE(lid_pet > 0);
+		CHECK(rem_p->gold == 500000 - 100);
+
+		// 2.2 跨图市场全局检索与过滤
+		auto all_listings = f.world.searchMarket("", std::nullopt);
+		CHECK(all_listings.size() >= 2);
+
+		auto pet_listings = f.world.searchMarket("", MarketAssetType::kPet);
+		REQUIRE(pet_listings.size() == 1);
+		CHECK(pet_listings[0].asset_name == "白虎佩露夏");
+		CHECK(pet_listings[0].price == 500000);
+
+		// 2.3 在线卖家成交与 5% 交易税清算
+		// 买家 b 购买 s2 的玄武之盾
+		// 一口价 200,000，5% 交易税 10,000，s2 净得 190,000
+		const auto b_gold1 = b->gold;
+		const auto s2_gold1 = s2->gold;
+		REQUIRE(f.world.buyMarketListing(b_id, lid_item));
+
+		CHECK(b->gold == b_gold1 - 200000);
+		CHECK(s2->gold == s2_gold1 + 190000);
+
+		// 2.4 离线卖家成交与系统邮件附件送达
+		// 模拟玛村大猎手 rem 离线（设置 detached = true）
+		f.world.setSessionDetachedForTest(rem_id, true);
+
+		// 买家 b 购买白虎（500,000 石币）
+		// 净收益 475,000 石币，25,000 交易税
+		REQUIRE(f.world.buyMarketListing(b_id, lid_pet));
+		CHECK(b->gold == b_gold1 - 200000 - 500000);
+
+		// 2.5 卖家上线查阅系统邮件与提取附件
+		// rem 重登或通过名字查询邮件
+		const auto rem_mails = f.world.playerMails(rem_id);
+		REQUIRE(rem_mails.size() >= 1);
+		const auto &sale_mail = rem_mails.back();
+		CHECK(sale_mail.title == "拍卖行成交到账");
+		CHECK(sale_mail.attached_gold == 475000);
+		CHECK(sale_mail.has_attachment);
+
+		// 提取附件：475,000 石币到账
+		const auto rem_gold_before = rem_p->gold;
+		REQUIRE(f.world.takeMailAttachment(rem_id, sale_mail.mail_id));
+		CHECK(rem_p->gold == rem_gold_before + 475000);
+		CHECK_FALSE(f.world.playerMails(rem_id).back().has_attachment);
+
+		// 防重复提取刷金
+		CHECK_FALSE(f.world.takeMailAttachment(rem_id, sale_mail.mail_id));
+	}
+}

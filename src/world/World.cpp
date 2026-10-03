@@ -876,6 +876,15 @@ FamilyInfo *World::familyForTest(std::uint32_t family_id) noexcept
 	return &it->second;
 }
 
+void World::setSessionDetachedForTest(SA::Net::SessionId session, bool detached)
+{
+	auto it = _impl->conns.find(session);
+	if (it != _impl->conns.end())
+	{
+		it->second.detached = detached;
+	}
+}
+
 std::size_t World::worldEnemyCount() const noexcept { return _impl->world_enemies.size(); }
 
 std::vector<WorldEnemyPos> World::worldEnemies() const
