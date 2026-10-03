@@ -859,3 +859,25 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 - **守卫闭环**:
   - 服务端打附注 tag `shared-v0.42.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.42.0`，消除 D2 漂移告警，保持双端 CI 100% 绿灯。
 
+---
+
+### 9.0.117 ★ 双端全量远端同步与推送窗口闭合记录(2026-10-03)
+
+> **本窗口前推范围**: 阶段 4 成果全景收拢（Phase 4.0 ~ Phase 4.4，§9.0.112–§9.0.116）。双端 43 + 30 累计 commits 及 `shared-v0.36.0`..`v0.42.0` 7 个 release tag 同步推送至 GitHub 远端仓库。
+
+#### ① 结果（逐项 `ls-remote` 取证）
+
+| 项 | 值 |
+|---|---|
+| server master | `6a4d54a`（HEAD == origin/master，双远端 100% 同步） |
+| server release tags | `shared-v0.36.0` 至 `shared-v0.42.0` 全量 7 个 tag 全部推送至远端 GitHub |
+| client master | `69ab3a4`（HEAD == origin/master，双远端 100% 同步） |
+| client 锁定 tag | `shared-v0.42.0`（`cmake/SaShared.cmake`，无漂移） |
+| watched 路径纯洁性 | `shared/` 与 `idl/generated/cpp` 自 `shared-v0.42.0` 以来 0 破坏性变更，无须 bump 新 tag |
+| 本机双端测试状态 | 服务端 CTest 22/22 100% 绿灯；客户端 d2-only 7/7 与 engine 8/8 100% 绿灯 |
+
+#### ② 守卫与闭环验证
+- 静态架构守卫脚本（`check_docs_index.py`, `check_module_boundaries.py`, `check_gold_writes.py`, `check_format.py`）全部一次性绿灯。
+- 远端分支零积压、零冲突、零分叉，阶段 4 顺利完成收官。
+
+
