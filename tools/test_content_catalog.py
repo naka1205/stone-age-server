@@ -3,7 +3,15 @@
 
 import json
 from pathlib import Path
+import sys
 import unittest
+
+# ★ Windows 控制台的 cp936 / cp1252 编不出非 ASCII 字符 (ci_verify §0 强制守卫)
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 
 class TestContentCatalog(unittest.TestCase):
