@@ -508,5 +508,32 @@ shared-v0.8.0 + 客户端 `d2-only` 复验**,两仓 × 两远端一起推 tag(§
   - 变异：将 `Battle.cpp` 中的 MP 门禁判定篡改为反向拦截；
   - 执行 `sa_rules_battle_test`，精准在 2 组测试中产生 13 处失败断言；复原后 177 组全部转绿，证明门禁断言真实有效。
 
+---
+
+### 9.0.120 ★★ 阶段 5.2 —— 客户端魔法与精灵术事件流表现层解析与展示 (2026-10-03)
+
+> **本批聚焦**: 紧接 Phase 5.1 服务端战中分发闭环，在客户端表现层（`BattlePresenter`）与网络场景测试中对接魔法与精灵术事件流解析，达成双端端到端可观测性与行为对齐。
+
+#### ① 核心真源与表现层实现
+1. **攻击类型解析增强 (`src/battle/BattlePresenter.cpp`)**:
+   - 依据 IDL `domain/battle_events.sa.h` 之 `AttackKind` 枚举，实现 `attackKindName` 辅助转换：
+     - `ATTACK_KIND_MELEE` → "近战攻击"；
+     - `ATTACK_KIND_RANGED` → "远程攻击"；
+     - `ATTACK_KIND_PROF_SKILL` → "职业技能"；
+     - `ATTACK_KIND_SPELL` → "精灵术/魔法"；
+     - `ATTACK_KIND_DEEP_POISON` → "剧毒攻击"；
+     - `ATTACK_KIND_BLOOD_DRAIN` → "嗜血攻击"；
+     - `ATTACK_KIND_MP_DAMAGE` → "气力削减"；
+   - 在 `HIT` 事件中以 `[精灵术/魔法] 攻击者 slot=%u 技能=%u 目标数=%u` 结构化呈现，彻底告别原先无语义的 `kind=4` 数字展示。
+2. **多目标效果演进覆盖**:
+   - 配合 Phase 5.1 服务端分发的 `SET_HP`（恩惠恢复）、`STATUS_CHANGE`（净化解除）与 `REVERSE`（属性反转），客户端文本流与单位槽位状态（`UnitView::hp`）实时同步刷新。
+
+#### ② 验证与工程纪律
+- 客户端 `tests/ClientNetTest.cpp` 增补 `BattlePresenter: 魔法与精灵术事件表现 (SPELL 广播/恩惠恢复/净化解除/属性反转)` 专项用例，断言施法广播、血量回写、状态净化与反转文本。
+- 客户端 7/7 CTest 全部 100% 绿灯通过。
+- 格式化守卫 `check_format.py` 100% 通过（31 个文件 0 违规）。
+- 客户端代码与服务端改动分别独立提交并推送至 GitHub 远端 master。
+
+
 
 
