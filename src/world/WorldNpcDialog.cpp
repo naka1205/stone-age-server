@@ -1058,14 +1058,14 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 					auto get_trans_cb = [](const SA::Model::Player &, void *userdata) -> std::int32_t
 					{
 						const auto *ud = static_cast<const ExChangeEvalUserData *>(userdata);
-						const auto it = ud->impl->player_extra_stats.find(ud->session);
-						return (it != ud->impl->player_extra_stats.end()) ? it->second.transmigration : 0;
+						const auto stats_it = ud->impl->player_extra_stats.find(ud->session);
+						return (stats_it != ud->impl->player_extra_stats.end()) ? stats_it->second.transmigration : 0;
 					};
 					auto get_fame_cb = [](const SA::Model::Player &, void *userdata) -> std::int32_t
 					{
 						const auto *ud = static_cast<const ExChangeEvalUserData *>(userdata);
-						const auto it = ud->impl->player_extra_stats.find(ud->session);
-						return (it != ud->impl->player_extra_stats.end()) ? it->second.fame : 0;
+						const auto stats_it = ud->impl->player_extra_stats.find(ud->session);
+						return (stats_it != ud->impl->player_extra_stats.end()) ? stats_it->second.fame : 0;
 					};
 					auto get_fm_cb = [](const SA::Model::Player &, void *userdata) -> std::uint32_t
 					{

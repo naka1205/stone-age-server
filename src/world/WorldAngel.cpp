@@ -104,8 +104,8 @@ std::uint64_t World::createAngelContract(SA::Net::SessionId angel_session,
 	rec.created_at_sec = static_cast<std::int64_t>(s.now_ms / 1000);
 	rec.limit_seconds = chosen_mission.limit_seconds;
 
-	std::strncpy(rec.angel_name, angel_player->name.c_str(), sizeof(rec.angel_name) - 1);
-	std::strncpy(rec.hero_name, hero_player->name.c_str(), sizeof(rec.hero_name) - 1);
+	std::snprintf(rec.angel_name, sizeof(rec.angel_name), "%s", angel_player->name.c_str());
+	std::snprintf(rec.hero_name, sizeof(rec.hero_name), "%s", hero_player->name.c_str());
 	std::snprintf(rec.angel_cdkey, sizeof(rec.angel_cdkey), "cdkey_%llu", static_cast<unsigned long long>(angel_session));
 	std::snprintf(rec.hero_cdkey, sizeof(rec.hero_cdkey), "cdkey_%llu", static_cast<unsigned long long>(hero_session));
 
