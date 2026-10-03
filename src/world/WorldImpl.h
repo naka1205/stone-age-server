@@ -899,7 +899,36 @@ struct World::Impl : GoldAuditSink
 				}
 			}
 		}
+		if (saac_client)
+		{
+			SA::Data::Json::Object obj;
+			obj["charname"] = SA::Data::Json::Value::str(name);
+			obj["online"] = SA::Data::Json::Value::Bool(online);
+			obj["level"] = SA::Data::Json::Value::number(p->level);
+			obj["image"] = SA::Data::Json::Value::number(p->image);
+			broadcastCrossServer(104, name, SA::Data::Json::stringify(SA::Data::Json::Value::obj(std::move(obj))));
+		}
 	}
+
+	// ── 阶段 8: 跨线路社交体系与全服家族战系统上下文 ──
+	std::shared_ptr<SA::Saac::ISaacClient> saac_client{nullptr};
+
+	struct InternalChatRoom
+	{
+		std::uint32_t room_id = 0;
+		std::string room_name{};
+		std::string creator_name{};
+		std::string password{};
+		std::uint32_t max_users = 20;
+		std::set<SA::Net::SessionId> local_members{};
+		std::set<std::string> all_member_names{};
+	};
+	std::unordered_map<std::uint32_t, InternalChatRoom> chat_rooms{};
+	std::unordered_map<SA::Net::SessionId, std::uint32_t> session_to_chat_room{};
+	std::uint32_t next_chat_room_id = 1;
+
+	void handleCrossServerMessage(const SA::Saac::WorldBroadcastMessage &msg);
+	void broadcastCrossServer(int channel, const std::string &sender, const std::string &text);
 
 	void warpSinglePlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y);
 	void warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y);

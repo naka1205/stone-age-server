@@ -485,6 +485,7 @@ bool World::occupyManor(std::uint32_t family_id, FamilyManor manor)
 	war.defender_score = 0;
 	war.challenger_score = 0;
 
+	syncManorStateToCrossServer(manor);
 	return true;
 }
 
@@ -566,6 +567,7 @@ ManorChallengeResult World::challengeManor(SA::Net::SessionId session, FamilyMan
 	war.scheduled_time_ms = s.clock.nowMs();
 	war.war_end_time_ms = 0;
 
+	syncManorWarScheduleToCrossServer(manor);
 	return ManorChallengeResult::kSuccess;
 }
 
@@ -597,11 +599,13 @@ bool World::recordManorDuelScore(FamilyManor manor, std::uint32_t winning_family
 	if (winning_family_id == it->second.defender_family_id)
 	{
 		it->second.defender_score += score_points;
+		syncManorDuelScoreToCrossServer(manor, winning_family_id, score_points);
 		return true;
 	}
 	else if (winning_family_id == it->second.challenger_family_id)
 	{
 		it->second.challenger_score += score_points;
+		syncManorDuelScoreToCrossServer(manor, winning_family_id, score_points);
 		return true;
 	}
 	return false;
@@ -659,6 +663,7 @@ bool World::concludeManorWar(FamilyManor manor, std::uint32_t victorious_family_
 	war.challenger_family_id = 0;
 	war.challenge_deposit = 0;
 	war.war_end_time_ms = s.clock.nowMs() + kManorWarCooldownMs;
+	syncManorWarConclusionToCrossServer(manor, victorious_family_id);
 	return true;
 }
 

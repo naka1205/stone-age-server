@@ -68,6 +68,8 @@ class SaacClient : public ISaacClient
 	                                    BroadcastCallback cb = nullptr) override;
 
 	void registerBroadcastListener(BroadcastListener listener) override;
+	void setBroadcastSender(BroadcastSender sender) override;
+	void feedBroadcastMessage(const WorldBroadcastMessage &msg) override;
 
 	void tick(std::int64_t now_ms) override;
 
@@ -95,6 +97,7 @@ class SaacClient : public ISaacClient
 	std::unordered_map<std::uint64_t, InFlightItem> _inFlight;
 
 	std::vector<BroadcastListener> _broadcastListeners;
+	BroadcastSender _broadcastSender{nullptr};
 };
 
 } // namespace SA::Saac

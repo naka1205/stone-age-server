@@ -104,6 +104,7 @@ struct WorldBroadcastMessage
 };
 
 using BroadcastListener = std::function<void(const WorldBroadcastMessage &msg)>;
+using BroadcastSender = std::function<void(const WorldBroadcastMessage &msg)>;
 
 // ── S22 saac 客户端抽象接口 ─────────────────────────────────────────
 class ISaacClient
@@ -152,6 +153,8 @@ class ISaacClient
 	                                            BroadcastCallback cb = nullptr) = 0;
 
 	virtual void registerBroadcastListener(BroadcastListener listener) = 0;
+	virtual void setBroadcastSender(BroadcastSender sender) = 0;
+	virtual void feedBroadcastMessage(const WorldBroadcastMessage &msg) = 0;
 
 	// 驱动推进与超时扫描
 	virtual void tick(std::int64_t now_ms) = 0;

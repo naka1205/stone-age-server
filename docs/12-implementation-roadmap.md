@@ -90,6 +90,7 @@ P2/P3 的完成以真实客户端操作和重启后的持久化结果为准；�
 | 10-03 | **阶段 6.0 S11 精灵/天使系统架构落地与双向瞬移契约管线 (Angel & Spirit System Pipeline)**（§9.0.121：L3 纯函数规则引擎 `Angel.h/cpp` · 使命注册与双向契约状态字典 · 2884 使者信物 / 2885 勇者信物 · 使者与勇者双向瞬移拉取 · 使者信物 100% 抑制大世界暗雷（1:1 复刻 `CHAR_WORKANGELMODE`） · 战中神佑守护 10% 减伤 / 15% 防御增益 · 使者与勇者双向独立领奖交付闭环 · `rules_battle` 178 例/3,408 断言 · `world_map` 153 例/2,731 断言 · RV-Angel-1/2 双变异实证验证通过 · 锁定 ref `shared-v0.45.0` 闭环） | 阶段 6.1 客户端天使契约与神佑状态表现层对接 |
 | 10-03 | **阶段 6.1 客户端天使契约与神佑状态表现层对接 (Client Angel System & Spirit Blessing Presentation)**（§9.0.122：`AngelContractView` / `AngelRoleKind` 契约数据模型与状态机 · 2884 使者信物 / 2885 勇者信物角色与阶段门禁校验 · 使者模式大世界暗雷抑制感知（`isEncounterSuppressed`） · 战中神佑守护状态（`unitSpiritBlessing`）与 `DAMAGE_FLAG_GUARDIAN` 伤害事件流结构化文本解析 · `ClientNetTest` 端到端全覆盖 · RV-Angel-Client-1 反向变异验证通过 · 客户端 7/7 CTest 全绿） | 阶段 7 核心子系统 S22 saac 通信与账号服务 |
 | 10-03 | **阶段 7 S22 saac 通信管线与账号中心服务架构落地 (Saac Protocol Pipeline & Account Service Engine)**（§9.0.123：src/saac/ (sa_saac) 独立模块落地 · 严守 check_module_boundaries.py 架构隔离 · (instance_id, generation, request_id, deadline_ms) 信封封装彻底消弭跨实例串包 (C33/C35) · AccountLockType 显式隔离普通锁与星系移民锁 (C45) · 跨线路全服广播/聊天室分发通道 (00 §7) · tick 超时扫描与在途请求清理 · tests/SaacClientTest.cpp 5 大测试用例覆盖 · RV-Saac-1 变异实证通过 · CTest 23/23 保持全绿） | 阶段 8 跨线路社交体系与全服家族战系统落地 |
+| 10-04 | **阶段 8 跨线路社交体系与全服家族战系统落地 (Cross-Server Social & Manor War)**（§9.0.124：S07 聊天室与跨服世界喊话/私聊路由 · 8.0 独有跨线路独立聊天室体系 · 跨服好友上下线感知 · 全服四大庄园跨服排期/比分汇聚/胜负交割过户 · tests/WorldCrossServerTest.cpp 6 大用例覆盖 · RV-CrossServer-1 变异实证通过 · CTest 24/24 保持全绿） | 阶段 9 客户端跨服社交表现层与全服庄园战决斗演练 |
 
 
 

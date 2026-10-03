@@ -20,6 +20,7 @@ add_library(sa_world STATIC
     GoldLedger.cpp
     ExChangeMan.cpp
     PetProgression.cpp
+    WorldCrossServer.cpp
 )
 
 target_include_directories(sa_world
@@ -32,6 +33,7 @@ target_include_directories(sa_world
 #   sa_shared    ★ L3 规则 —— D2 的落点,与客户端编译的是同一份源码
 target_link_libraries(sa_world PUBLIC sa_platform sa_net sa_shared)
 target_link_libraries(sa_world PUBLIC sa_session_storage)
+target_link_libraries(sa_world PUBLIC sa_saac)
 
 sa_apply_warnings(sa_world)
 

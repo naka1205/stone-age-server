@@ -466,6 +466,10 @@ bool World::sendChat(SA::Net::SessionId sender, ChatChannel channel,
 		{
 			s.incoming_chats[kv.first].push_back(msg);
 		}
+		if (s.saac_client)
+		{
+			s.broadcastCrossServer(100, sender_p->name.c_str(), text);
+		}
 		return true;
 	}
 	case ChatChannel::kTalkTell:
@@ -482,15 +486,33 @@ bool World::sendChat(SA::Net::SessionId sender, ChatChannel channel,
 				break;
 			}
 		}
-		if (target_sid == 0 || target_sid == sender)
+		if (target_sid == sender)
 			return false;
 
-		if (isAddressCardBlocked(target_sid, sender_p->name.c_str()))
-			return false;
+		if (target_sid != 0)
+		{
+			if (isAddressCardBlocked(target_sid, sender_p->name.c_str()))
+				return false;
 
-		s.incoming_chats[target_sid].push_back(msg);
-		s.incoming_chats[sender].push_back(msg);
-		return true;
+			s.incoming_chats[target_sid].push_back(msg);
+			s.incoming_chats[sender].push_back(msg);
+			return true;
+		}
+
+		if (s.saac_client)
+		{
+			SA::Data::Json::Object obj;
+			obj["target"] = SA::Data::Json::Value::str(target_name);
+			obj["sender"] = SA::Data::Json::Value::str(sender_p->name.c_str());
+			obj["text"] = SA::Data::Json::Value::str(text);
+			obj["color"] = SA::Data::Json::Value::number(color);
+			s.broadcastCrossServer(101, sender_p->name.c_str(), SA::Data::Json::stringify(SA::Data::Json::Value::obj(std::move(obj))));
+
+			s.incoming_chats[sender].push_back(msg);
+			return true;
+		}
+
+		return false;
 	}
 	case ChatChannel::kTalkFamily:
 	{
@@ -508,6 +530,14 @@ bool World::sendChat(SA::Net::SessionId sender, ChatChannel channel,
 			}
 		}
 		return true;
+	}
+	case ChatChannel::kTalkRoom:
+	{
+		return sendChatRoomMessage(sender, text, color);
+	}
+	case ChatChannel::kTalkSystem:
+	{
+		return broadcastSystemAnnouncement(text, color);
 	}
 	}
 	return false;
@@ -529,6 +559,11 @@ std::size_t World::pendingChatMessageCount(SA::Net::SessionId session) const
 	if (it == _impl->incoming_chats.end())
 		return 0;
 	return it->second.size();
+}
+
+void World::notifyAddressBookStatus(SA::Net::SessionId session, bool online)
+{
+	_impl->notifyAddressBookStatus(session, online);
 }
 
 } // namespace SA::World

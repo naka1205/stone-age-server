@@ -38,6 +38,7 @@
 #include "rules/PetSkill.h"
 #include "rules/Progression.h"
 #include "rules/RandomSource.h"
+#include "saac/Api.h"
 #include "session_storage/Api.h"
 
 namespace SA::World
@@ -1164,6 +1165,20 @@ enum class ChatChannel : std::uint8_t
 	kTalkShout = 2,  // 世界/大喊广播 (全地图或全服在线玩家)
 	kTalkTell = 3,   // 私聊/密聊 (指定玩家名称, 需目标在线且未拉黑)
 	kTalkFamily = 4, // 家族频道 (仅本家族成员接收, 跨图/全地图可达)
+	kTalkRoom = 5,   // 跨线路独立聊天室频道 (8.0 独有, 仅当前聊天室内成员接收)
+	kTalkSystem = 6, // 全服系统公告频道
+};
+
+// ══ 跨线路独立聊天室信息 (8.0 独有进第一批, 对应原版 506 行聊天室子系统, 00 §7) ══
+struct ChatRoomInfo
+{
+	std::uint32_t room_id = 0;
+	std::string room_name{};
+	std::string creator_name{};
+	bool has_password = false;
+	std::uint32_t max_users = 20;
+	std::uint32_t current_users = 0;
+	std::vector<std::string> member_names{};
 };
 
 // ══ 家族系统 (阶段 2: 家族管理与庄园, 对齐官方 family.c / include/family.h) ══
@@ -2045,6 +2060,7 @@ class World final : public SA::Net::TransportEvents,
 	std::vector<AddressBookEntry> playerAddressBook(SA::Net::SessionId session) const;
 	std::size_t playerAddressBookCount(SA::Net::SessionId session) const;
 	bool isAddressCardBlocked(SA::Net::SessionId session, const std::string &charname) const;
+	void notifyAddressBookStatus(SA::Net::SessionId session, bool online);
 
 	// ── 邮件与离线信件系统 (Mail System) ──────────────────────────────────
 	bool sendMail(SA::Net::SessionId sender, const std::string &receiver_name,
@@ -2062,6 +2078,28 @@ class World final : public SA::Net::TransportEvents,
 	              std::uint32_t color = 0);
 	std::vector<ChatMessage> pollChatMessages(SA::Net::SessionId session);
 	std::size_t pendingChatMessageCount(SA::Net::SessionId session) const;
+
+	// ── 阶段 8: 跨线路社交体系与全服家族战系统 (Cross-Server Social & Manor War) ──
+	void setSaacClient(std::shared_ptr<SA::Saac::ISaacClient> client);
+	std::shared_ptr<SA::Saac::ISaacClient> saacClient() const noexcept;
+
+	// 跨线路独立聊天室接口 (对齐 8.0 独有 506 行聊天室子系统, 00 §7)
+	std::uint32_t createChatRoom(SA::Net::SessionId session, const std::string &room_name,
+	                             const std::string &password = "", std::uint32_t max_users = 20);
+	bool joinChatRoom(SA::Net::SessionId session, std::uint32_t room_id, const std::string &password = "");
+	bool leaveChatRoom(SA::Net::SessionId session, std::uint32_t room_id);
+	std::uint32_t playerChatRoom(SA::Net::SessionId session) const;
+	std::vector<ChatRoomInfo> listChatRooms() const;
+	bool sendChatRoomMessage(SA::Net::SessionId session, const std::string &text, std::uint32_t color = 0);
+
+	// 全服系统广播
+	bool broadcastSystemAnnouncement(const std::string &announcement_text, std::uint32_t color = 0xFFFF00);
+
+	// 跨线路全服庄园战同步驱动
+	bool syncManorStateToCrossServer(FamilyManor manor);
+	bool syncManorWarScheduleToCrossServer(FamilyManor manor);
+	bool syncManorDuelScoreToCrossServer(FamilyManor manor, std::uint32_t winning_family_id, std::uint32_t score_points);
+	bool syncManorWarConclusionToCrossServer(FamilyManor manor, std::uint32_t victorious_family_id);
 
 	// ── 家族系统 (Family System) ──────────────────────────────────────────
 	std::uint32_t createFamily(SA::Net::SessionId leader, const std::string &family_name,

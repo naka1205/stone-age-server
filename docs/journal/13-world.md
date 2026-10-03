@@ -2133,3 +2133,54 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - `check_module_boundaries.py` 严格校验 5 个模块依赖与单一暴露头，100% 通过；
   - `check_docs_index.py`、`check_format.py`、`check_gold_writes.py` 守卫全绿。
 
+---
+
+### 9.0.124 阶段 8 —— 跨线路社交体系与全服家族战系统落地 (Cross-Server Social & Manor War)
+
+- **日期**: 2026-10-04
+- **分支**: `master`
+- **目标**: 落实 `docs/13-d8-coverage.md` 第 7 行 S07 社交-聊天室与四大庄园全服家族战系统（阶段 8）。依据 `00-architecture.md` §3/§4.3/§7（D8 核心子系统 S06/S07 跨线路聊天室 506 行 & 全服四大庄园战）架构裁定，在 `src/world/` 新增 `WorldCrossServer.cpp`，打通与 S22 `sa_saac` 广播总线的数据协同管道，严格恪守 `check_module_boundaries.py` 单一暴露头守卫（仅暴露 `src/world/include/world/Api.h`）；实现跨线路世界喊话多播 (`kTalkShout`)、跨线路私聊路由 (`kTalkTell`) 与黑名单拦截过滤、全服系统公告 (`kTalkSystem`)；实现 8.0 独有跨线路独立聊天室体系（房间创建、加入、退出、密码保护、容量门禁、房内发言多播与房间列表查询）；实现跨线路好友上下线在线状态感知 (`kCrossChannelFriendPresence`)；实现全服四大庄园跨服唯一权威所有权同步、跨服约战排期与状态锁定 (`kScheduled`)、跨服决斗比分累加汇聚与决胜过户 (`kCooldown` 与押金注资)。
+
+#### 1. 核心架构与功能落地
+
+1. **跨线路通信接口扩展与解耦设计 (`src/world/include/world/Api.h` / `src/saac/include/saac/Api.h`)**:
+   - `ChatChannel` 扩充：新增 `kTalkRoom = 5`（跨线路独立聊天室）与 `kTalkSystem = 6`（全服系统公告）；
+   - 定义 `ChatRoomInfo` 数据结构（房间 ID、名称、房主、密码保护标记、最大人数、当前在线人数）；
+   - `World` 增加跨服通信接入与聊天室管理接口：`setSaacClient`、`saacClient`、`createChatRoom`、`joinChatRoom`、`leaveChatRoom`、`playerChatRoom`、`listChatRooms`、`sendChatRoomMessage`、`broadcastSystemAnnouncement`；
+   - `World` 增加庄园跨服同步接口：`syncManorStateToCrossServer`、`syncManorWarScheduleToCrossServer`、`syncManorDuelScoreToCrossServer`、`syncManorWarConclusionToCrossServer`；
+   - `ISaacClient` 接口解耦：引入 `setBroadcastSender` 与 `feedBroadcastMessage`，彻底消弭多节点在广播 Hub 间转发时的无限递归死循环（Stack Overflow 防御）。
+2. **跨线路消息路由与聊天室生命周期 (`src/world/WorldCrossServer.cpp`)**:
+   - 划分跨服协议通道：
+     - `100` (`kCrossChannelShout`): 世界大喊跨线路广播；
+     - `101` (`kCrossChannelTell`): 跨线路私聊路由，目标节点自动匹配在线角色并施加黑名单阻断；
+     - `102` (`kCrossChannelRoomChat`): 跨服聊天室消息定向分发至本地房间成员；
+     - `103` (`kCrossChannelRoomSync`): 跨服聊天室元数据同步（创建、加入、退出全服字典同步）；
+     - `104` (`kCrossChannelFriendPresence`): 跨服好友上下线状态感知；
+     - `105` (`kCrossChannelManorSync`): 全服四大庄园状态、排期、比分与归属全量权威同步；
+     - `106` (`kCrossChannelAnnouncement`): 全服系统公告广播；
+   - 聊天室管理：支持最大 2-50 人容量限制、密码校验、多服成员列表聚合；退出时若房间为空自动销毁全服资源。
+3. **大世界社交与庄园战跨服管线贯通 (`src/world/WorldSocial.cpp` / `src/world/WorldFamily.cpp`)**:
+   - `sendChat` 中当频道为 `kTalkShout`、`kTalkTell`（本地未找到目标时尝试跨服路由）、`kTalkRoom` 时，自动装配跨服网络帧并派发；
+   - `notifyAddressBookStatus` 在角色上线/下线时向全服广播 `kCrossChannelFriendPresence`；
+   - `occupyManor`、`challengeManor`、`recordManorDuelScore`、`concludeManorWar` 在本地权威校验通过后，自动驱动跨服庄园状态同步，确保全线全服庄园所有权与比分唯一一致。
+
+#### 2. 验证与反向变异双证据
+
+- **单元与集成测试 (`tests/WorldCrossServerTest.cpp`)**:
+   - 新增 `world_cross_server` 独立测试套件（6 大 TEST_CASE / 155 个断言）：
+     1. `跨线路全服世界喊话与系统公告多播`（双节点大喊互通与系统公告多播）；
+     2. `跨线路私聊路由与黑名单过滤`（本地未命中时跨服路由，接收方黑名单精准拦截）；
+     3. `跨线路独立聊天室全生命周期`（跨服建房、入房、退房、跨服发言广播、全服房间列表查询）；
+     4. `跨线路好友上下线状态感知`（异服上线自动感知并刷新名片簿在线状态）；
+     5. `全服四大庄园跨服排期、比分汇聚与胜负交割`（跨服占领同步、跨服约战锁定 `kScheduled`、跨服比分累加汇聚、决胜过户至挑战家族并转入休战期 `kCooldown`）；
+     6. **阶段 8.6 RV-CrossServer-1 反向变异实证**：
+        - 聊天室密码保护与满员容量防御：错误密码加入被精准阻断；2/2 满员后异服新玩家加入被精准阻断；
+        - 庄园战越权交割防御：未约战未排期庄园尝试强制交割被拦截，庄园归属不受污染；
+        - 畸形网络包防御：注入未知 channel_id 跨服帧，节点安全丢弃而不崩溃。
+   - CTest 用例数增至 **24/24**，100% 保持全绿。
+- **质量与工程守卫**:
+   - `tools/ci_verify.py` 6 项守卫全部绿灯（测试注册清单 24 项完整、WERROR 清洁构建零告警、断言防线反向探针验证通过）；
+   - `check_module_boundaries.py` 模块边界严格校验 100% 通过（world 仅依赖 net, platform, saac, session_storage，单一暴露头）；
+   - `check_docs_index.py`、`check_format.py` 守卫全绿。
+
+

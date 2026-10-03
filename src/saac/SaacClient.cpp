@@ -231,6 +231,27 @@ std::uint64_t SaacClient::requestUnlock(const std::string & /*cdkey*/,
 	return req_id;
 }
 
+void SaacClient::setBroadcastSender(BroadcastSender sender)
+{
+	std::lock_guard<std::mutex> lock(_mutex);
+	_broadcastSender = std::move(sender);
+}
+
+void SaacClient::feedBroadcastMessage(const WorldBroadcastMessage &msg)
+{
+	std::vector<BroadcastListener> listeners_copy;
+	{
+		std::lock_guard<std::mutex> lock(_mutex);
+		listeners_copy = _broadcastListeners;
+	}
+
+	for (const auto &listener : listeners_copy)
+	{
+		if (listener)
+			listener(msg);
+	}
+}
+
 std::uint64_t SaacClient::broadcastWorldMessage(int channel,
                                                 const std::string &sender,
                                                 const std::string &text,
@@ -246,16 +267,19 @@ std::uint64_t SaacClient::broadcastWorldMessage(int channel,
 	                       std::chrono::steady_clock::now().time_since_epoch())
 	                       .count();
 
-	std::vector<BroadcastListener> listeners_copy;
+	BroadcastSender custom_sender;
 	{
 		std::lock_guard<std::mutex> lock(_mutex);
-		listeners_copy = _broadcastListeners;
+		custom_sender = _broadcastSender;
 	}
 
-	for (const auto &listener : listeners_copy)
+	if (custom_sender)
 	{
-		if (listener)
-			listener(msg);
+		custom_sender(msg);
+	}
+	else
+	{
+		feedBroadcastMessage(msg);
 	}
 
 	if (cb)
