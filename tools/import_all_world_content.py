@@ -60,24 +60,40 @@ def parse_all_maps(data_map_dir: Path):
             w, h = struct.unpack_from('>HH', buf, 40)
             name = buf[8:40].split(b'\0')[0].decode('gbk', errors='replace').split('|')[0].strip()
             
-            # 提取 floor ID: 优先根据文件名推导
+            # 提取 floor ID: 优先读取 LS2MAP 原生头部偏移 6 的 2 字节权威 ID
+            fid_in_head = struct.unpack_from('>H', buf, 6)[0]
             fname = p.stem
             floor_id = None
-            if fname.isdigit():
+            if fid_in_head > 0:
+                floor_id = fid_in_head
+            elif fname.isdigit():
                 floor_id = int(fname)
             else:
-                # 针对形如 dan_2-12-01 或 命名文件，尝试匹配数字
                 digits = ''.join(c for c in fname if c.isdigit())
                 if digits:
                     floor_id = int(digits[:8])
             
-            key = floor_id if floor_id is not None else fname
-            maps[str(key)] = {
+            key = str(floor_id if floor_id is not None else fname)
+            rel = str(p.relative_to(data_map_dir))
+            # 若已存在同 ID 映射，优先保留非纯数字临时命名的全路径
+            if key in maps:
+                existing_rel = maps[key]['rel_path']
+                if '/' not in existing_rel and '/' in rel:
+                    maps[key] = {
+                        'id': floor_id,
+                        'name': name,
+                        'width': w,
+                        'height': h,
+                        'rel_path': rel
+                    }
+                continue
+
+            maps[key] = {
                 'id': floor_id,
                 'name': name,
                 'width': w,
                 'height': h,
-                'rel_path': str(p.relative_to(data_map_dir))
+                'rel_path': rel
             }
         except Exception:
             continue

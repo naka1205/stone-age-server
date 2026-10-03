@@ -3519,17 +3519,17 @@ TEST_CASE("真实地图数据接入:萨伊那斯 Floor 100 传送点与 NPC 端�
 	const auto *warps_val = bundle.world.find("warp_points");
 	REQUIRE(warps_val != nullptr);
 	REQUIRE(warps_val->isArray());
-	CHECK_EQ(warps_val->asArray().size(), 311);
+	CHECK_EQ(warps_val->asArray().size(), 815);
 
 	const auto *npcs_val = bundle.world.find("npcs");
 	REQUIRE(npcs_val != nullptr);
 	REQUIRE(npcs_val->isArray());
-	CHECK_EQ(npcs_val->asArray().size(), 399);
+	CHECK_EQ(npcs_val->asArray().size(), 818);
 
 	const auto *floors_val = bundle.world.find("floors");
 	REQUIRE(floors_val != nullptr);
 	REQUIRE(floors_val->isArray());
-	CHECK_EQ(floors_val->asArray().size(), 18);
+	CHECK_EQ(floors_val->asArray().size(), 73);
 
 	// 1. 初始化世界地图
 	SA::Platform::ServerConfig config = makeMoveConfig();
@@ -3578,9 +3578,9 @@ TEST_CASE("真实地图数据接入:萨伊那斯 Floor 100 传送点与 NPC 端�
 		fl_map.obj.assign(decoded.begin(), decoded.end());
 		world.loadFloorMap(fid, std::move(fl_map));
 	}
-	CHECK_EQ(world.floorMapCount(), 18);
+	CHECK_EQ(world.floorMapCount(), 73);
 
-	// 装载 311 个传送点
+	// 装载 815 个传送点
 	std::vector<WarpPoint> warp_points;
 	for (const auto &item : warps_val->asArray())
 	{
@@ -3600,7 +3600,7 @@ TEST_CASE("真实地图数据接入:萨伊那斯 Floor 100 传送点与 NPC 端�
 		warp_points.push_back(wp);
 	}
 	world.loadWarpPoints(warp_points);
-	CHECK_EQ(world.warpPointCount(), 311);
+	CHECK_EQ(world.warpPointCount(), 815);
 
 	// 装载 254 个 NPC
 	std::vector<NpcEntity> npcs;
@@ -3707,7 +3707,7 @@ TEST_CASE("真实地图数据接入:萨伊那斯 Floor 100 传送点与 NPC 端�
 		npcs.push_back(std::move(npc));
 	}
 	world.loadNpcEntities(npcs);
-	CHECK_EQ(world.npcCount(), 399);
+	CHECK_EQ(world.npcCount(), 818);
 
 	// 2. 玩家在 (643, 459) 生成，移动至 (637, 491)，向东走一步踩上传送点 (638, 491)
 	const auto id = transport.connect();
@@ -4119,7 +4119,7 @@ TEST_CASE("加鲁卡南岛、附属村庄与深渊地下城多地图深化与双
 	// 1. 全量装载 18 张拓展地图 (加鲁卡 200, 村庄 1000/2000/3000/3100/3200/3300/3400/4000, 核心地下城 20801..20807, 21201, 21215)
 	const auto *floors_val = bundle.world.find("floors");
 	REQUIRE(floors_val != nullptr);
-	REQUIRE_EQ(floors_val->asArray().size(), 18);
+	REQUIRE_EQ(floors_val->asArray().size(), 73);
 	for (const auto &item : floors_val->asArray())
 	{
 		const auto fid = SA::Content::integer(*item.find("floor"));
@@ -4135,7 +4135,7 @@ TEST_CASE("加鲁卡南岛、附属村庄与深渊地下城多地图深化与双
 		fl_map.obj.assign(decoded.begin(), decoded.end());
 		world.loadFloorMap(fid, std::move(fl_map));
 	}
-	CHECK_EQ(world.floorMapCount(), 18);
+	CHECK_EQ(world.floorMapCount(), 73);
 
 	// 验证关键地图尺寸
 	const auto *jalga = world.findFloorMap(200);
@@ -4180,7 +4180,7 @@ TEST_CASE("加鲁卡南岛、附属村庄与深渊地下城多地图深化与双
 		warp_points.push_back(wp);
 	}
 	world.loadWarpPoints(warp_points);
-	CHECK_EQ(world.warpPointCount(), 311);
+	CHECK_EQ(world.warpPointCount(), 815);
 
 	const auto *npcs_val = bundle.world.find("npcs");
 	REQUIRE(npcs_val != nullptr);
@@ -4223,7 +4223,7 @@ TEST_CASE("加鲁卡南岛、附属村庄与深渊地下城多地图深化与双
 		npcs.push_back(std::move(npc));
 	}
 	world.loadNpcEntities(npcs);
-	CHECK_EQ(world.npcCount(), 399);
+	CHECK_EQ(world.npcCount(), 818);
 
 	// 3. 玩家连接进场并瞬移至加鲁卡南岛 Floor 200 (509, 495)
 	const auto id = transport.connect();
@@ -9424,4 +9424,198 @@ TEST_CASE("§9.0.102: [RV-2] 庄园战押金原子扣除与结算交割一致性
 	REQUIRE(f.world.concludeManorWar(FamilyManor::kSamo, fid1)); // 守方获胜
 
 	CHECK(f.world.getFamilyInfo(fid1)->family_gold == fid1_gold_prev + 100000); // 精确入账
+}
+
+TEST_CASE("四大新手村全域场景室内外贯通、医院恢复与全量功能NPC交互 (Phase 3.3)")
+{
+	std::string content_dir;
+	for (const auto &p : {"content/p2-v1", "../content/p2-v1", "../../content/p2-v1", "../../../content/p2-v1", "stone-age-server/content/p2-v1"})
+	{
+		if (std::filesystem::exists(std::string(p) + "/manifest.json"))
+		{
+			content_dir = p;
+			break;
+		}
+	}
+	if (content_dir.empty())
+		return;
+
+	const auto bundle = SA::Content::load(content_dir, false);
+	SA::Platform::ServerConfig config = makeMoveConfig();
+	SA::Platform::ManualClock clock{0};
+	SA::Platform::Logger logger{SA::Platform::LogLevel::kError};
+	SA::Platform::RandomSource random{0x13579B};
+	SA::Net::LoopbackTransport transport{};
+	World world{config, clock, logger, random, transport};
+
+	GridMap map;
+	map.width = bundle.width;
+	map.height = bundle.height;
+	map.tile.assign(bundle.walkable.size(), 1);
+	map.obj.assign(bundle.walkable.begin(), bundle.walkable.end());
+	TileAttrTable attributes;
+	attributes.walkable = {WalkKind::kBlocked, WalkKind::kFree};
+
+	SA::Domain::CharacterRecord defaults{};
+	defaults.schema_ver = 1;
+	defaults.player.level = 1;
+	defaults.player.charm = 60;
+	defaults.player.mp = defaults.player.max_mp = 100;
+	defaults.player.hp = 100;
+	defaults.player.default_pet = -1;
+	defaults.player.floor = 100;
+	defaults.player.x = 643;
+	defaults.player.y = 459;
+	defaults.player.dir = 5;
+	defaults.player.image = 100000;
+	world.configurePlayable(std::move(map), std::move(attributes), bundle.version, defaults);
+
+	// 1. 装载 73 张地图
+	const auto *floors_val = bundle.world.find("floors");
+	REQUIRE(floors_val != nullptr);
+	for (const auto &item : floors_val->asArray())
+	{
+		const auto fid = SA::Content::integer(*item.find("floor"));
+		const auto w = SA::Content::integer(*item.find("width"));
+		const auto h = SA::Content::integer(*item.find("height"));
+		const auto walk_b64 = SA::Content::text(*item.find("walkable"));
+		const auto decoded = SA::World::decodeBase64(walk_b64);
+		GridMap fl_map;
+		fl_map.width = w;
+		fl_map.height = h;
+		fl_map.tile.assign(decoded.size(), 1);
+		fl_map.obj.assign(decoded.begin(), decoded.end());
+		world.loadFloorMap(fid, std::move(fl_map));
+	}
+	CHECK_EQ(world.floorMapCount(), 73);
+
+	// 验证四大新手村主图与核心功能房均已成功装载
+	const std::vector<std::int32_t> core_village_floors = {
+	    1000, 1002, 1005, 1006, // 萨姆吉尔村、道具店、医院、村长家
+	    2000, 2002, 2005, 2006, // 玛丽娜丝渔村、道具店、医院、村长家
+	    3000, 3002, 3005, 3006, // 加加村、道具店、医院、村长家
+	    4000, 4002, 4005, 4006  // 卡鲁它那村、道具店、医院、村长家
+	};
+	for (auto fid : core_village_floors)
+	{
+		const auto *fl = world.findFloorMap(fid);
+		CHECK(fl != nullptr);
+		CHECK(fl->width > 0);
+		CHECK(fl->height > 0);
+	}
+
+	// 2. 装载 Warp 传送网络与全量 NPC
+	const auto *warps_val = bundle.world.find("warp_points");
+	REQUIRE(warps_val != nullptr);
+	std::vector<WarpPoint> warp_points;
+	for (const auto &item : warps_val->asArray())
+	{
+		WarpPoint wp;
+		if (const auto *sf = item.find("src_floor"))
+			wp.src_floor = SA::Content::integer(*sf);
+		if (const auto *sx = item.find("src_x"))
+			wp.src_x = SA::Content::integer(*sx);
+		if (const auto *sy = item.find("src_y"))
+			wp.src_y = SA::Content::integer(*sy);
+		if (const auto *df = item.find("dst_floor"))
+			wp.dst_floor = SA::Content::integer(*df);
+		if (const auto *dx = item.find("dst_x"))
+			wp.dst_x = SA::Content::integer(*dx);
+		if (const auto *dy = item.find("dst_y"))
+			wp.dst_y = SA::Content::integer(*dy);
+		warp_points.push_back(wp);
+	}
+	world.loadWarpPoints(warp_points);
+	CHECK_EQ(world.warpPointCount(), 815);
+
+	const auto *npcs_val = bundle.world.find("npcs");
+	REQUIRE(npcs_val != nullptr);
+	std::vector<NpcEntity> npcs;
+	for (const auto &item : npcs_val->asArray())
+	{
+		NpcEntity npc;
+		if (const auto *nid = item.find("id"))
+			npc.id = static_cast<std::uint64_t>(SA::Content::integer(*nid));
+		if (const auto *fl = item.find("floor"))
+			npc.floor = SA::Content::integer(*fl);
+		if (const auto *x = item.find("x"))
+			npc.x = SA::Content::integer(*x);
+		if (const auto *y = item.find("y"))
+			npc.y = SA::Content::integer(*y);
+		if (const auto *dir = item.find("dir"))
+			npc.dir = static_cast<std::uint8_t>(SA::Content::integer(*dir));
+		if (const auto *img = item.find("image"))
+			npc.image = SA::Content::integer(*img);
+		if (const auto *nm = item.find("name"))
+			npc.name = SA::Content::text(*nm);
+		if (const auto *msg = item.find("message"))
+			npc.message = SA::Content::text(*msg);
+		if (const auto *cost = item.find("cost"))
+			npc.cost = SA::Content::integer(*cost);
+		if (const auto *tp = item.find("type"); tp && tp->isString())
+		{
+			const auto &tstr = tp->asString();
+			if (tstr == "signboard")
+				npc.type = NpcType::kSignBoard;
+			else if (tstr == "shop")
+				npc.type = NpcType::kShop;
+			else if (tstr == "healer")
+				npc.type = NpcType::kHealer;
+			else if (tstr == "townpeople")
+				npc.type = NpcType::kTownPeople;
+			else if (tstr == "exchangeman")
+				npc.type = NpcType::kExChangeMan;
+			else if (tstr == "warpman")
+				npc.type = NpcType::kWarpMan;
+			else
+				npc.type = NpcType::kOther;
+		}
+		npcs.push_back(std::move(npc));
+	}
+	world.loadNpcEntities(npcs);
+	CHECK_EQ(world.npcCount(), 818);
+
+	// 3. 玩家在萨姆吉尔医院 (Floor 1005) 受到伤势并接受 Healer 治疗恢复
+	const auto id = transport.connect();
+	world.onSessionReady(id);
+	world.tick();
+
+	// 查找到 1005 医院的 Healer
+	const NpcEntity *hospital_healer = nullptr;
+	for (const auto &n : npcs)
+	{
+		if (n.floor == 1005 && n.type == NpcType::kHealer)
+		{
+			hospital_healer = &n;
+			break;
+		}
+	}
+	REQUIRE(hospital_healer != nullptr);
+
+	// 玩家站在 Healer 柜台外 (面向北方的 Healer)
+	world.warpPlayerForTest(id, 1005, hospital_healer->x, hospital_healer->y + 1);
+	auto *player = world.playerForTest(id);
+	REQUIRE(player != nullptr);
+	player->dir = 0;
+	REQUIRE(world.setPlayerStatsForTest(id, /*hp=*/10, /*mp=*/5, /*vital=*/1000, /*str=*/200, /*tough=*/200, /*dex=*/200));
+	player->gold = 1000;
+
+	// 触发 NPC 交互事件 (原版 Healer 免费满血满蓝)
+	SA::Domain::EventRequest ev_req{};
+	ev_req.dir = 0;
+	ev_req.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev_req.seqno = 9001;
+	world.onEvent(id, ev_req);
+	world.tick();
+
+	CHECK(world.playerHp(id) > 10);
+	CHECK_EQ(world.playerMp(id), 100);
+	CHECK_EQ(world.playerGold(id), 1000); // 医院服务免费，0 扣费
+
+	// 4. 验证双向传送网络连通：从萨姆吉尔村 (1000) 瞬移至玛丽娜丝渔村 (2000)
+	world.warpPlayerForTest(id, 2000, 50, 50);
+	const auto p_marina = world.playerPos(id);
+	CHECK_EQ(p_marina.floor, 2000);
+	CHECK_EQ(p_marina.x, 50);
+	CHECK_EQ(p_marina.y, 50);
 }

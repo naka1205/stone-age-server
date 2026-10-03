@@ -1709,3 +1709,39 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - `Battle reattach: reattachBattle restores battle control to newly connected session`: 验证新会话接管战斗、发送攻击指令与战后正常推进。
 - **全量 CTest 22/22 100% 绿灯**。
 
+---
+
+### 9.0.111 批次 D.4 —— 四大新手村全域场景室内外贯通、全功能NPC接入与组队合击协同机制落地 (Four Villages World & Party Combo Synergy)
+
+- **日期**: 2026-10-03
+- **分支**: `master`
+- **目标**: 依据实施计划 Phase 3.3 核心大世界与社交战斗协同规范，打通四大新手村（萨姆吉尔、玛丽娜斯、加加、卡鲁它那）全域 73 张室内外地图与 818 个功能 NPC 的运行时装载，并基于石器时代 8.0 官方源码还原组队与人宠合击（Combo）战斗协同机制。
+
+#### 1. 核心架构与功能落地
+
+1. **地图资产管线升级与四大新手村室内外全域装载 (`tools/build_playable_content.py` / `tools/import_all_world_content.py`)**:
+   - 修复 LS2MAP 原生头部偏移 6（2 字节大端 uint16）floor ID 解析，根除无数字文件名导致的村落主图 ID 丢失问题，使 1,214 张大世界地图全部具备权威编号；
+   - 扩展构建管线将四大主村（萨姆吉尔 1000、玛丽娜斯 2000、加加 3000、卡鲁它那 4000）及其所有的室内功能房（1001-1022、2001-2030、3001-3030、4001-4030，含医院、道具店、武器店、肉店、村长家、便利店、竞技场、道场等）共 73 张地图的可走阻挡图（Base64）全量装载入 `world.json`；
+   - 提取并激活四大新手村区域的 815 处 Warp 传送路由与 818 个具名实体 NPC（含 8 个医院 Healer、67 个商店 Shop、43 个传送员 WarpMan、122 个任务使者 ExChangeMan、73 个告示看板、115 个城镇向导/村民）。
+
+2. **石器时代 8.0 原版组队与战斗合击机制 (`WorldBattle.cpp`)**:
+   - 依据石器 8.0 官方源码（`battle.c:4410-4450` 及 `battle.c:8605-8648`），在战斗回合推进主循环 `advanceBattles` 中建立合击判定与结算机制：
+     - **候选门禁**: 仅针对己方（Side 0，同队玩家与出战宠物），连续行动的近战物理普攻（`CommandKind::ATTACK`），锁定同一存活目标，且非远程/投掷武器（弓、回旋镖等投掷武器严格不可合击），排除多段连击专属技能；
+     - **概率判定**: 原版基础合击率 50%（`rng.rand(1, 100) <= 50`）；
+     - **伤害结算与协同**: 命中时调用纯函数 `SA::Rules::computeComboDamage` 累积全员伤害并一次性削减防御方生命，为每个合击单位派发冲刺 `HIT` 动作事件，并对目标下发总伤害 `DAMAGE` 事件；
+     - **协同去重**: 将后续参与者标记为 `combo_acted`，本回合不再重复单独出手，目标死亡时战果归属于主力发起者。
+
+#### 2. 验证与门禁
+
+- **新增与更新单元测试**:
+  - `tests/WorldMapTest.cpp`:
+    - 更新全域地图规模断言：73 张楼层地图、815 处传送门、818 个功能 NPC；
+    - 新增 `四大新手村全域场景室内外贯通、医院恢复与全量功能NPC交互 (Phase 3.3)`：验证四大村庄与核心室内功能房全部就绪，验证玩家在萨姆吉尔医院 (1005) 接受护士 Healer 治疗恢复满血满蓝，以及跨村庄传送网络连通。
+  - `tests/WorldTickTest.cpp`:
+    - 新增 `Battle combo: consecutive melee attacks on same target trigger combo damage`：验证同队多近战单位普攻同一目标时触发合击、伤害累加及协同单位不重复出手；
+    - 新增 `Battle combo: ranged weapon does not trigger combo`：验证远程武器（弓）严格不触发合击，各自独立出手。
+- **全量回归与门禁**:
+  - 全量 CTest 22/22 100% 绿灯；
+  - 架构守卫工具 `check_module_boundaries.py`, `check_gold_writes.py`, `check_shared_purity.py`, `check_docs_index.py`, `check_dr_table.py` 全数绿灯。
+
+

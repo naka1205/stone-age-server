@@ -2042,11 +2042,116 @@ void World::advanceBattles()
 			b.events.events.clear();
 		};
 		std::uint32_t turn_events = 0;
+		bool combo_acted[SA::Rules::kSlotCount]{};
 		for (int index = 0; index < count; ++index)
 		{
 			const int actor = order[index];
 			if (!b.field.at(actor).occupied || b.field.at(actor).dead)
 				continue;
+			if (combo_acted[actor])
+				continue;
+
+			// ── 原版石器时代 8.0 合击 (Combo) 判定与结算 (battle.c:4410-4450 / 8605-8648) ──
+			const auto is_melee_attack = [&](int slot)
+			{
+				if (slot < 0 || slot >= SA::Rules::kSideOffset)
+					return false; // 组队与合击协同专属于玩家及出战宠物方 (Side 0)
+				const auto &c = b.field.at(slot);
+				if (!c.occupied || c.dead || c.hp <= 0)
+					return false;
+				if (!b.commands.present[slot] ||
+				    b.commands.commands[slot].command_kind != SA::Domain::BattleCommand::CommandKind::ATTACK)
+					return false;
+				if (c.mods.weapon == SA::Rules::WeaponClass::kBow ||
+				    c.mods.weapon == SA::Rules::WeaponClass::kThrow)
+					return false;
+				if (c.mods.attack_num_max > 1 || c.mods.attack_num_min > 1)
+					return false; // 排除多段连击等专属技能
+				return SA::Rules::checkCanAct(c) == SA::Domain::CannotActReason::CANNOT_ACT_NONE;
+			};
+
+			if (is_melee_attack(actor))
+			{
+				const int tgt_slot = static_cast<int>(b.commands.commands[actor].command.attack.target);
+				if (tgt_slot >= 0 && tgt_slot < SA::Rules::kSlotCount &&
+				    b.field.at(tgt_slot).occupied && !b.field.at(tgt_slot).dead && b.field.at(tgt_slot).hp > 0)
+				{
+					std::vector<int> combo_candidates;
+					combo_candidates.push_back(actor);
+					for (int next_i = index + 1; next_i < count; ++next_i)
+					{
+						const int next_actor = order[next_i];
+						if (is_melee_attack(next_actor) &&
+						    (next_actor / SA::Rules::kSideOffset) == (actor / SA::Rules::kSideOffset) &&
+						    static_cast<int>(b.commands.commands[next_actor].command.attack.target) == tgt_slot)
+						{
+							combo_candidates.push_back(next_actor);
+						}
+						else
+						{
+							break;
+						}
+					}
+
+					if (combo_candidates.size() >= 2)
+					{
+						// 原版基础合击率 50% (battle.c:4360)
+						const bool combo_hit = b.rng.rand(1, 100) <= 50;
+						if (combo_hit)
+						{
+							for (std::size_t ci = 1; ci < combo_candidates.size(); ++ci)
+								combo_acted[combo_candidates[ci]] = true;
+
+							std::int32_t combo_dmg = SA::Rules::computeComboDamage(
+							    b.field, combo_candidates.data(), combo_candidates.size(),
+							    b.field.at(tgt_slot), s.rules_config, b.rng);
+							if (combo_dmg <= 0)
+								combo_dmg = 1;
+
+							SA::Domain::BattleEvents combo_action{};
+							combo_action.battle_id = b.id;
+							combo_action.turn = b.field.turn;
+
+							for (int c_actor : combo_candidates)
+							{
+								SA::Domain::BattleEvent hit_ev{};
+								hit_ev.body_kind = SA::Domain::BattleEvent::BodyKind::HIT;
+								hit_ev.body.hit.attacker = static_cast<std::uint32_t>(c_actor);
+								hit_ev.body.hit.kind = SA::Domain::AttackKind::ATTACK_KIND_MELEE;
+								hit_ev.body.hit.target_count = 1;
+								(void)combo_action.events.push_back(hit_ev);
+							}
+
+							SA::Domain::BattleEvent dmg_ev{};
+							dmg_ev.body_kind = SA::Domain::BattleEvent::BodyKind::DAMAGE;
+							dmg_ev.body.damage.target = static_cast<std::uint32_t>(tgt_slot);
+							dmg_ev.body.damage.hp_delta = -combo_dmg;
+							dmg_ev.body.damage.flags =
+							    static_cast<std::uint32_t>(SA::Domain::DamageFlag::DAMAGE_FLAG_NORMAL);
+							(void)combo_action.events.push_back(dmg_ev);
+
+							b.field.at(tgt_slot).hp = std::max(0, b.field.at(tgt_slot).hp - combo_dmg);
+							if (b.field.at(tgt_slot).hp <= 0)
+							{
+								b.field.at(tgt_slot).dead = true;
+								b.field.at(tgt_slot).hp = 0;
+							}
+
+							for (const auto &event : combo_action.events)
+							{
+								if (b.events.events.size() == b.events.events.capacity())
+									flush();
+								(void)b.events.events.push_back(event);
+								++turn_events;
+							}
+
+							settleDeaths(b, actor, s.enemies);
+							continue;
+						}
+					}
+				}
+			}
+
 			// 前一步可能删掉背包物品，不能复用回合开始时的门投影。
 			projectCaptureItemGate(b, s.players, s.enemies, s.items);
 			projectItemUsePower(b, s.players, s.items, s.item_effects);

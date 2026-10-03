@@ -109,7 +109,7 @@ def extract_world_content(data, attributes, used_sources):
                     'cost': int(parts[18]) if parts[18].isdigit() else 0
                 }
 
-    # 1. 地图多层可走阻挡图全量抽取 (批次 D.2 / D.3: 加鲁卡南岛、主要附属村庄、核心地下城)
+    # 1. 地图多层可走阻挡图全量抽取 (批次 D.2 / D.3 / Phase 3.3: 四大村庄全域室内外、南岛及核心地下城)
     expansion_maps = {
         200: data / 'map/jyaruga/jalga',
         1000: data / 'map/sainasu/samugiru/samugiru',
@@ -130,6 +130,22 @@ def extract_world_content(data, attributes, used_sources):
         21201: data / 'map/jyaruga/dungeon/hekisei/dan_2-12-01',
         21215: data / 'map/jyaruga/dungeon/hekisei/dan_2-12-15',
     }
+    village_dirs = [
+        data / 'map/sainasu/samugiru',
+        data / 'map/sainasu/marinasu',
+        data / 'map/jyaruga/jaja',
+        data / 'map/jyaruga/karutana',
+    ]
+    for vdir in village_dirs:
+        for p in sorted(vdir.rglob('*')):
+            if not p.is_file() or p.name.endswith('.txt') or p.name.endswith('.screen'):
+                continue
+            head = p.read_bytes()[:8]
+            if len(head) >= 8 and head[:6] == b'LS2MAP':
+                fid = struct.unpack_from('>H', head, 6)[0]
+                if fid > 0 and fid not in expansion_maps:
+                    expansion_maps[fid] = p
+
     floors = []
     for fl_id, mpath in sorted(expansion_maps.items()):
         if not mpath.exists():

@@ -6107,3 +6107,136 @@ TEST_CASE("Battle reattach: reattachBattle restores battle control to newly conn
 	// 战局正常结算并推进
 	CHECK(f.world.battleField(battle)->turn >= 1);
 }
+
+TEST_CASE("Battle combo: consecutive melee attacks on same target trigger combo damage")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id1 = f.transport.connect();
+	const SA::Net::ConnectionId id2 = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id1, hs.data(), hs.size());
+	f.transport.deliver(id2, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 2);
+
+	auto field = makeField();
+	auto &p1 = field.at(0);
+	p1.hp = p1.max_hp = 500;
+	p1.str = 100;
+	p1.attack = 100;
+	p1.quick = 100;
+
+	auto &p2 = field.at(1);
+	p2.occupied = true;
+	p2.hp = p2.max_hp = 500;
+	p2.str = 100;
+	p2.attack = 100;
+	p2.quick = 99; // 紧随 p1 行动
+
+	auto &enemy = field.at(SA::Rules::kSideOffset);
+	enemy.occupied = true;
+	enemy.dead = false;
+	enemy.hp = enemy.max_hp = 1000;
+	enemy.kind = SA::Rules::CombatantKind::kEnemy;
+	enemy.tough = 10;
+	enemy.defense = 10;
+	enemy.quick = 10;
+
+	const BattleId battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, id1, 0));
+	REQUIRE(f.world.joinBattle(battle, id2, 1));
+
+	// 两位玩家均选择普通攻击敌方槽位 10
+	SA::Domain::BattleCommand cmd1{};
+	cmd1.battle_id = battle;
+	cmd1.turn = f.world.battleField(battle)->turn;
+	cmd1.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+	cmd1.command.attack.target = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+	f.world.onBattleCommand(id1, cmd1);
+
+	SA::Domain::BattleCommand cmd2{};
+	cmd2.battle_id = battle;
+	cmd2.turn = f.world.battleField(battle)->turn;
+	cmd2.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+	cmd2.command.attack.target = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+	f.world.onBattleCommand(id2, cmd2);
+
+	const auto initial_enemy_hp = f.world.battleField(battle)->at(SA::Rules::kSideOffset).hp;
+
+	// 推进战斗回合
+	f.clock.advance(1000);
+	f.world.tick();
+
+	// 验证回合成功推进
+	const auto *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->turn >= 1);
+
+	// 验证敌人受到了两位攻击者的合击/普攻累加总伤害
+	const auto final_enemy_hp = fld->at(SA::Rules::kSideOffset).hp;
+	CHECK(final_enemy_hp < initial_enemy_hp);
+	const auto total_damage_dealt = initial_enemy_hp - final_enemy_hp;
+	CHECK(total_damage_dealt > 50); // 显著大于单人普通攻击伤害
+}
+
+TEST_CASE("Battle combo: ranged weapon does not trigger combo")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id1 = f.transport.connect();
+	const SA::Net::ConnectionId id2 = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id1, hs.data(), hs.size());
+	f.transport.deliver(id2, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 2);
+
+	auto field = makeField();
+	auto &p1 = field.at(0);
+	p1.hp = p1.max_hp = 500;
+	p1.str = 100;
+	p1.attack = 100;
+	p1.quick = 100;
+	p1.mods.weapon = SA::Rules::WeaponClass::kBow; // 远程武器，根据石器 8.0 规则绝不触发合击
+
+	auto &p2 = field.at(1);
+	p2.occupied = true;
+	p2.hp = p2.max_hp = 500;
+	p2.str = 100;
+	p2.attack = 100;
+	p2.quick = 99;
+
+	auto &enemy = field.at(SA::Rules::kSideOffset);
+	enemy.occupied = true;
+	enemy.dead = false;
+	enemy.hp = enemy.max_hp = 1000;
+	enemy.kind = SA::Rules::CombatantKind::kEnemy;
+	enemy.tough = 10;
+	enemy.defense = 10;
+	enemy.quick = 10;
+
+	const BattleId battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, id1, 0));
+	REQUIRE(f.world.joinBattle(battle, id2, 1));
+
+	SA::Domain::BattleCommand cmd1{};
+	cmd1.battle_id = battle;
+	cmd1.turn = f.world.battleField(battle)->turn;
+	cmd1.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+	cmd1.command.attack.target = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+	f.world.onBattleCommand(id1, cmd1);
+
+	SA::Domain::BattleCommand cmd2{};
+	cmd2.battle_id = battle;
+	cmd2.turn = f.world.battleField(battle)->turn;
+	cmd2.command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+	cmd2.command.attack.target = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+	f.world.onBattleCommand(id2, cmd2);
+
+	f.clock.advance(1000);
+	f.world.tick();
+
+	const auto *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->turn >= 1);
+	CHECK(fld->at(SA::Rules::kSideOffset).hp < 1000);
+}

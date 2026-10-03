@@ -77,6 +77,7 @@ P2/P3 的完成以真实客户端操作和重启后的持久化结果为准；�
 | 10-03 | **阶段 2.11 战斗救援与乱入系统落地 (Battle Rescue & Join-in-Progress System)**（§9.0.108：入场严格门禁（存活/未参战/未摆摊/未组队/同层距离 $\le 5$/PVE限定/Side 0 容量） · 动态槽位分配与装备/骑乘/出战宠带入 · `pushBattleSnapshot` 全场快照广播 · 大世界协议级事件流 `onEvent(event_type=3)` 接入 · `world_tick` 用例与全量 CTest 22/22 保持 100% 绿灯） | 阶段 3.1 大世界全量资产批处理管线与地图/NPC/传送门编目落地 |
 | 10-03 | **阶段 3.1 大世界全量资产批处理管线与地图/NPC/传送门编目落地 (Batch Content Pipeline & World Catalogs)**（§9.0.109：`tools/import_all_world_content.py` 批处理工具链 · 1,185 张有效 LS2MAP 地图解析 · 9,011 条双轨传送网络去重合并 · 3,450 个具名功能 NPC 全量结构化分类（ExChangeMan 861/Enemy 533/TownPeople 531/Shop 360/WarpMan 334/SignBoard 290/Healer 47） · `test_content_catalog.py` 自动化测试 · 全量 CTest 22/22 保持 100% 绿灯） | 阶段 3.2 战中掉线断网保护与重连接管系统落地 |
 | 10-03 | **阶段 3.2 战中掉线断网保护与重连接管系统 (Battle Disconnect Grace & Re-attach System)**（§9.0.110：`disconnectBattleMember` 参战槽位保全 · `advanceBattles` 离线自动防御托管 · 新会话重登接管 `reattachBattle` · 战场快照与回合就绪状态恢复 · `battleOfSession` / `battleOfPlayer` 定位 · `WorldTickTest` 单元测试双向验证 · 全量 CTest 22/22 保持 100% 绿灯） | 阶段 3.3 四大新手村全域场景与社交组队合击网络 |
+| 10-03 | **阶段 3.3 四大新手村全域场景室内外贯通与组队合击协同机制 (Four Villages World & Party Combo Synergy)**（§9.0.111：LS2MAP 原生头部偏移 6 floor ID 解析修复 · 73 张地图（含四大村庄 1000/2000/3000/4000 及室内医院/道具店/村长家等）全量阻挡图装载 · 815 处 Warp 传送网络与 818 个功能 NPC 接入 · 依据官方源码 `battle.c` 还原组队近战合击 Combo 机制 · 伤害累加与 `combo_acted` 协同去重 · `WorldMapTest` 与 `WorldTickTest` 全绿 · 全量 CTest 22/22 保持 100% 绿灯） | 阶段 4.0 客户端原生石刻 UI 资产换装与全域大世界端到端可玩闭环 |
 
 
 
