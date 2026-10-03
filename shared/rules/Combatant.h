@@ -354,6 +354,23 @@ struct CombatModifiers
 
 	// 原 CHAR_WORKRENOCAST；同样受不可达的 CHAR_WORKWEAKEN 比较控制。
 	std::int32_t suit_resist_weaken = 0;
+
+	// ── 魔法与精灵术参数投影 (阶段 5.1) ───────────────────────
+	SpellKind spell_kind = SpellKind::kNone;
+	MagicElement spell_element = MagicElement::Earth;
+	int spell_power = 0;
+	int spell_magic_level = 1;            // 魔法阶级 1..10
+	int spell_cost_mp = 0;                // 施法所需 MP
+	int spell_target_type = 0;            // 目标类型 (0..19 单体, 20..27 多目标展开)
+	std::uint8_t spell_purify_status = 0; // 净化目标状态 (0为全解)
+
+	// 道具扩展: 气力恢复与道具附带精灵
+	int item_mp_power = 0; // 气力(MP)恢复力基数
+	SpellKind item_spell_kind = SpellKind::kNone;
+	MagicElement item_spell_element = MagicElement::Earth;
+	int item_spell_power = 0;
+	int item_spell_magic_level = 1;
+	int item_cost_mp = 0;
 };
 
 // ── 一个战斗单位 ──────────────────────────────────────────────

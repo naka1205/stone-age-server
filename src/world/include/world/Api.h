@@ -967,13 +967,29 @@ struct WorldEnemyPos
 //    itemset6.txt 的 `usefunc == "ITEM_useRecovery"` 行、按 `ITEM_ARGUMENT` 的 `"体"+数字`
 //    (battle_item.c:245/289)取出 `power` 后经 `loadItemEffects` 注入;当前由 fixture 注入。
 // ★ 只做 HP 恢复药:MP / 状态 / 变身 / 传送 等其余 usefunc 依赖未移植子系统,不在本表(DR-DT23)。
+// ★ 道具效果表的一行 (阶段 5.1 扩充 MP 与道具精灵)
 struct ItemEffect
 {
-	std::int32_t item_id = 0; // 道具表主键(= Item::item_id 的匹配键)
-	// 战斗内 HP 恢复力**基数** `power`;<= 0 视同非恢复药(不恢复、不摇 rng、不扣道具)。
-	// ⚠️★ **不是恢复量** —— 实际恢复量 = `RAND(power*0.9, power*1.1)`,由 L3 在结算时摇
-	//    (battle_magic.c:419)⇒ 用一次道具消耗一次 rng。见 `Combatant::mods.item_heal_power`。
-	std::int32_t heal_power = 0;
+	std::int32_t item_id = 0;                                           // 道具表主键(= Item::item_id 的匹配键)
+	std::int32_t heal_power = 0;                                        // 战斗内 HP 恢复力基数
+	std::int32_t mp_power = 0;                                          // 战斗内 MP 恢复力基数
+	SA::Rules::SpellKind item_spell_kind = SA::Rules::SpellKind::kNone; // 道具附带精灵术
+	SA::Rules::MagicElement item_spell_element = SA::Rules::MagicElement::Earth;
+	std::int32_t item_spell_power = 0;
+	std::int32_t item_spell_magic_level = 1;
+};
+
+// 魔法与精灵术效果表的一行 (阶段 5.1)
+struct SpellEffect
+{
+	std::int32_t spell_id = 0; // 魔法ID (= BattleCommand::command.spell.spell_id)
+	SA::Rules::SpellKind kind = SA::Rules::SpellKind::kAttack;
+	SA::Rules::MagicElement element = SA::Rules::MagicElement::Earth;
+	std::int32_t power = 100;
+	std::int32_t magic_level = 1;   // 魔法阶级 1..10
+	std::int32_t cost_mp = 10;      // 施法所需 MP
+	std::int32_t target_type = 0;   // 0..19 单体, 20/21 整侧, 22 全场, 23..26 前后排, 27 贯穿
+	std::uint8_t purify_status = 0; // 净化指定状态(0为全解)
 };
 
 // 宠技·直攻系效果表的一行(批次 B1)—— 按 `skill_id` 查「这一招怎么结算」。
@@ -1647,6 +1663,13 @@ class World final : public SA::Net::TransportEvents,
 	//    现有用例不注入即不受影响;宠技用例显式注入 fixture(真数据行)。
 	//    真数据由 D 线导入期解析 petskill2.txt(GBK)后经本接口灌入,本表不解析文件。
 	void loadPetSkillEffects(std::vector<PetSkillEffect> effects);
+
+	// 注入魔法与精灵术效果表 (阶段 5.1)
+	void loadSpellEffects(std::vector<SpellEffect> effects);
+
+	// 获取并累加玩家四系魔法熟练度 (阶段 5.1)
+	int getPlayerMagicLevel(SA::Net::SessionId session, int element_idx) const;
+	bool addPlayerMagicExp(SA::Net::SessionId session, int element_idx, int amount = 1);
 
 	// 往某会话玩家的背包放一个道具(批次「捕获扣道具」的**注入 seam**)。
 	//

@@ -2059,10 +2059,12 @@ static bool resolveOrdered(BattleField field,
 		//    —— 同捕获删道具 / 逃跑计数 ++ 的分工(L3 不写世界态)。
 		if (cmd.command_kind == SA::Domain::BattleCommand::CommandKind::USE_ITEM)
 		{
-			// power <= 0 ⇒ 非有效恢复药(未投影 / 非 HP 药)⇒ 什么都不发生**且不摇 rng**
-			//   (源码不匹配 arg 关键字即 return、进不到 MultiRecovery,battle_item.c:284)。
+			// power <= 0 ⇒ 非有效恢复药(未投影 / 非 HP 药)⇒ 检查 MP 药与道具精灵
 			const std::int32_t power = actor.mods.item_heal_power;
-			if (power <= 0)
+			const std::int32_t mp_power = actor.mods.item_mp_power;
+			const SpellKind item_sp_kind = actor.mods.item_spell_kind;
+
+			if (power <= 0 && mp_power <= 0 && item_sp_kind == SpellKind::kNone)
 				continue;
 
 			int use_target = static_cast<int>(cmd.command.use_item.target);
@@ -2089,35 +2091,224 @@ static bool resolveOrdered(BattleField field,
 			}
 			const Combatant &utgt = field.at(use_target);
 
-			// ★★ **恢复量要摇**:`UpPoint = RAND(power*0.9, power*1.1)`(battle_magic.c:419)
-			//    ⇒ ±10% 区间随机、**消耗一次 rng**。⚠️ 别把它当确定值 —— 那会让用道具之后
-			//    的所有 rng 消耗整体平移,而「恢复了多少」的断言抓不到(同 DR-BT23 那族)。
-			//   ★ 8.0 的 `_MAGIC_REHPAI` **开** ⇒ `#else` 段不编译 ⇒ **无** `per` 百分比缩放、
-			//     **无** `GetRecoveryRate(vital)` 修正(两者都在 `#else` 里,battle_magic.c:421-425)
-			//     ⇒ 净核就是这一摇 + clamp，不引入额外体力系数。
-			// 保留原浮点端点及尾值概率，最后赋给整型恢复量才截断（F16）。
-			const std::int32_t heal = static_cast<std::int32_t>(
-			    rng.randReal(power * 0.9, power * 1.1));
+			if (power > 0)
+			{
+				// ★★ **恢复量要摇**:`UpPoint = RAND(power*0.9, power*1.1)`(battle_magic.c:419)
+				const std::int32_t heal = static_cast<std::int32_t>(
+				    rng.randReal(power * 0.9, power * 1.1));
 
-			// clamp maxhp(源码 `BATTLE_MultiRecovery` BD_KIND_HP:workhp = oldhp + UpPoint,
-			//   > maxhp 取 maxhp,battle_magic.c:427-431)。★ 用**回合内镜像** `hp[]` 而非
-			//   `utgt.hp` —— 同回合可能已被别的行动改过,与攻击链读写同一份镜像(见上 hp[] 卷首)。
-			std::int32_t new_hp = hp[use_target] + heal;
-			if (new_hp > utgt.max_hp)
-				new_hp = utgt.max_hp;
+				std::int32_t new_hp = hp[use_target] + heal;
+				if (new_hp > utgt.max_hp)
+					new_hp = utgt.max_hp;
 
-			SA::Domain::BattleEvent *ev =
-			    sink.push(SA::Domain::BattleEvent::BodyKind::SET_HP);
-			if (ev == nullptr)
-				break;
-			ev->body.set_hp.target = static_cast<std::uint32_t>(use_target);
-			ev->body.set_hp.hp = new_hp;
+				SA::Domain::BattleEvent *ev =
+				    sink.push(SA::Domain::BattleEvent::BodyKind::SET_HP);
+				if (ev != nullptr)
+				{
+					ev->body.set_hp.target = static_cast<std::uint32_t>(use_target);
+					ev->body.set_hp.hp = new_hp;
+				}
+				field.at(use_target).hp = new_hp;
+				hp[use_target] = new_hp; // 回合内镜像同步(同攻击链),后续行动看到新值
+			}
+
+			if (mp_power > 0)
+			{
+				const std::int32_t mp_heal = static_cast<std::int32_t>(
+				    rng.randReal(mp_power * 0.9, mp_power * 1.1));
+				std::int32_t new_mp = field.at(use_target).mp + mp_heal;
+				if (new_mp > utgt.max_mp)
+					new_mp = utgt.max_mp;
+				field.at(use_target).mp = new_mp;
+				if (effects != nullptr)
+				{
+					effects->item_mp_target = use_target;
+					effects->item_mp_healed = mp_heal;
+				}
+			}
+
+			if (item_sp_kind != SpellKind::kNone)
+			{
+				if (item_sp_kind == SpellKind::kPurify)
+				{
+					if (status[use_target] > 0)
+					{
+						const auto old_st = status[use_target];
+						applyPurifyMagic(field.at(use_target), 0);
+						status[use_target] = field.at(use_target).status;
+						status_turns[use_target] = field.at(use_target).status_turns;
+						auto *sc = sink.push(SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE);
+						if (sc != nullptr)
+						{
+							sc->body.status_change.target = static_cast<std::uint32_t>(use_target);
+							sc->body.status_change.status = static_cast<SA::Domain::BattleStatus>(old_st);
+							sc->body.status_change.applied = false;
+						}
+					}
+				}
+				else if (item_sp_kind == SpellKind::kElementReverse)
+				{
+					applyElementReverse(field.at(use_target));
+					auto *rev = sink.push(SA::Domain::BattleEvent::BodyKind::REVERSE);
+					if (rev != nullptr)
+					{
+						rev->body.reverse.actor = static_cast<std::uint32_t>(use_target);
+					}
+				}
+			}
+
 			if (effects != nullptr)
 				effects->item_used = true;
-			field.at(use_target).hp = new_hp;
-			hp[use_target] = new_hp; // 回合内镜像同步(同攻击链),后续行动看到新值
 			if (sink.overflowed())
 				break;
+			continue;
+		}
+
+		// ── 魔法与精灵术指令 (阶段 5.1 / 原版 BATTLE_Magic / battle_magic.c) ──────────
+		if (cmd.command_kind == SA::Domain::BattleCommand::CommandKind::SPELL)
+		{
+			if (actor.mods.spell_kind == SpellKind::kNone)
+				continue;
+
+			// MP 门禁: 气力不足则无法施法，静默跳过 (不扣 MP)
+			if (actor.mp < actor.mods.spell_cost_mp)
+				continue;
+
+			// 扣除施法者 MP
+			field.at(actor_slot).mp = std::max(0, field.at(actor_slot).mp - actor.mods.spell_cost_mp);
+
+			// 目标展开 (单体、前后排、整侧、全场、贯穿)
+			int target_code = static_cast<int>(cmd.command.spell.target);
+			if (actor.mods.spell_target_type >= 20)
+				target_code = actor.mods.spell_target_type;
+			int out_targets[kSlotCount]{};
+			const std::size_t n_targets = expandMultiTarget(
+			    field, dead, target_code, out_targets, kSlotCount,
+			    target_code < kSlotCount ? target_code : -1);
+
+			if (n_targets == 0)
+				continue;
+
+			// 广播施法 HIT 事件
+			SA::Domain::BattleEvent *hit = sink.push(SA::Domain::BattleEvent::BodyKind::HIT);
+			if (hit != nullptr)
+			{
+				hit->body.hit.attacker = static_cast<std::uint32_t>(actor_slot);
+				hit->body.hit.kind = SA::Domain::AttackKind::ATTACK_KIND_SPELL;
+				hit->body.hit.skill_id = cmd.command.spell.spell_id;
+				hit->body.hit.target_count = static_cast<std::uint32_t>(n_targets);
+			}
+
+			// 逐目标派发效果
+			for (std::size_t i = 0; i < n_targets; ++i)
+			{
+				const int tgt_slot = out_targets[i];
+				if (tgt_slot < 0 || tgt_slot >= kSlotCount)
+					continue;
+				Combatant &tgt = field.at(tgt_slot);
+				if (!tgt.occupied || dead[tgt_slot])
+					continue;
+
+				switch (actor.mods.spell_kind)
+				{
+				case SpellKind::kAttack:
+				{
+					const bool dodged = rollMagicDodge(
+					    tgt.isPlayer(), tgt.luck,
+					    tgt.mods.status_resist[0], tgt.level, rng);
+					if (dodged)
+					{
+						auto *sc = sink.push(SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE);
+						if (sc != nullptr)
+						{
+							sc->body.status_change.target = static_cast<std::uint32_t>(tgt_slot);
+							sc->body.status_change.applied = false;
+						}
+						break;
+					}
+
+					const int att_lv = actor.mods.prof_magic_proficiency > 0
+					                       ? actor.mods.prof_magic_proficiency
+					                       : 10;
+					const std::int32_t dmg = computeMagicDamage(
+					    actor.mods.spell_element, att_lv, 0,
+					    actor.mods.spell_power, actor.mods.spell_magic_level,
+					    actor, tgt, field, rng);
+
+					const std::int32_t new_hp = std::max(0, hp[tgt_slot] - dmg);
+					hp[tgt_slot] = new_hp;
+					tgt.hp = new_hp;
+
+					auto *dmg_ev = sink.push(SA::Domain::BattleEvent::BodyKind::DAMAGE);
+					if (dmg_ev != nullptr)
+					{
+						dmg_ev->body.damage.target = static_cast<std::uint32_t>(tgt_slot);
+						dmg_ev->body.damage.hp_delta = -dmg;
+					}
+
+					if (new_hp <= 0)
+					{
+						dead[tgt_slot] = true;
+						tgt.dead = true;
+					}
+					break;
+				}
+				case SpellKind::kHeal:
+				{
+					const std::int32_t heal = computeHealMagicAmount(actor.mods.spell_power, rng);
+					const std::int32_t new_hp = std::min(tgt.max_hp, hp[tgt_slot] + heal);
+					hp[tgt_slot] = new_hp;
+					tgt.hp = new_hp;
+
+					auto *shp = sink.push(SA::Domain::BattleEvent::BodyKind::SET_HP);
+					if (shp != nullptr)
+					{
+						shp->body.set_hp.target = static_cast<std::uint32_t>(tgt_slot);
+						shp->body.set_hp.hp = new_hp;
+					}
+					break;
+				}
+				case SpellKind::kPurify:
+				{
+					if (status[tgt_slot] > 0)
+					{
+						const auto old_st = status[tgt_slot];
+						applyPurifyMagic(tgt, actor.mods.spell_purify_status);
+						status[tgt_slot] = tgt.status;
+						status_turns[tgt_slot] = tgt.status_turns;
+
+						auto *sc = sink.push(SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE);
+						if (sc != nullptr)
+						{
+							sc->body.status_change.target = static_cast<std::uint32_t>(tgt_slot);
+							sc->body.status_change.status = static_cast<SA::Domain::BattleStatus>(old_st);
+							sc->body.status_change.applied = false;
+						}
+					}
+					break;
+				}
+				case SpellKind::kElementReverse:
+				{
+					applyElementReverse(tgt);
+					auto *rev = sink.push(SA::Domain::BattleEvent::BodyKind::REVERSE);
+					if (rev != nullptr)
+					{
+						rev->body.reverse.actor = static_cast<std::uint32_t>(tgt_slot);
+					}
+					break;
+				}
+				default:
+					break;
+				}
+			}
+
+			if (effects != nullptr)
+			{
+				effects->magic_cast = true;
+				effects->magic_element = actor.mods.spell_element;
+				effects->magic_exp_gained = 1;
+				effects->mp_consumed = actor.mods.spell_cost_mp;
+			}
 			continue;
 		}
 

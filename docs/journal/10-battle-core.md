@@ -472,4 +472,41 @@ shared-v0.8.0 + 客户端 `d2-only` 复验**,两仓 × 两远端一起推 tag(§
   - 还原变异并刷新 mtime，测试立刻恢复 174 组 / 3,338 断言全绿。确证测试无假阳性。
 - D8 覆盖台账更新：S19 升级为 `✅ 已完成`，核心严格覆盖率由 43.7% 提升至 **45.6%**（宽口径达 **94.5%**）。
 
+---
+
+### 9.0.119 ★★ 阶段 5.1 —— 战中精灵术道具使用与大世界魔法熟练度成长管线贯通 (2026-10-03)
+
+> **本批聚焦**: 将 Phase 5.0 落地之 S19 规则引擎与战中动作分发链路（`resolveAction`）、战中指令（`USE_ITEM` 气力药/道具精灵、`SPELL` 魔法/精灵术）及大世界玩家四系熟练度模型（`magic_exp[4]` / `magic_level[4]`）全链路贯通。
+> 依据官方源码 `battle.c:241-269`、`battle_command.c` 及 `battle_magic.c`，实现 MP 门禁判定与扣除、多目标多效果派发、道具气力与异常净化回写，以及战中施法成功后大世界玩家四系熟练度经验原子累加与升级。
+
+#### ① 核心真源与领域规则兑现
+1. **战中 `SPELL` 指令全流程分发 (`shared/rules/Battle.cpp`)**:
+   - MP 充足性门禁检查：`actor.mp < actor.mods.spell_cost_mp` 则无法施法，静默跳过不扣 MP；
+   - 扣减施法者 MP：通过局部镜像计算并在 `ActionEffects::mp_consumed` 回写世界态；
+   - 目标多展开：结合 `actor.mods.spell_target_type` 经 `expandMultiTarget` 展开；广播 `HIT` 事件（`ATTACK_KIND_SPELL`）；
+   - 逐目标派发效果：
+     - `kAttack`：守方闪避判定（`rollMagicDodge`），未闪避则根据施法者/守方等级与属性结算 `computeMagicDamage`，产出 `DAMAGE` 事件并判断阵亡；
+     - `kHeal`：恩惠恢复量（`computeHealMagicAmount`），更新 HP 并产出 `SET_HP` 事件；
+     - `kPurify`：清除目标对应或全异常状态，产出 `STATUS_CHANGE(applied = false)` 事件；
+     - `kElementReverse`：属性反转，产出 `REVERSE` 事件；
+   - 回写 `effects.magic_cast = true` 与对应属性/经验。
+2. **战中 `USE_ITEM` 道具精灵术与气力恢复药 (`shared/rules/Battle.cpp`)**:
+   - 扩展支持 `item_mp_power > 0`（气力恢复药水，`UpPoint = RAND(power * 0.9, power * 1.1)` 回复 MP）；
+   - 扩展支持 `item_spell_kind != kNone`（道具附带净化草或反转等精灵术，非施法者自身学习亦可通过道具生效）。
+3. **大世界玩家魔法熟练度模型 (`shared/model/Player.h` / `src/world/`)**:
+   - `Model::Player` 落地 `magic_exp[4]`, `magic_level[4]`, `getMagicLevel(int)`, `addMagicExp(int, int)`；
+   - 升级算法：每级升级所需经验为 `level * 10`，达标后扣除所需经验并升级（上限 100 级）；
+   - World 层在单步行动 `resolveAction` 结算后，若 `effects.magic_cast`，原子累加经验回写玩家实体；
+   - 投影阶段 `projectSpellPower`：根据玩家当前对应系熟练度等级叠加职业被动（`prof_magic_proficiency`）注入施法参数。
+
+#### ② 验证与工程纪律
+- 服务端 `rules_battle` 用例由 174 组 / 3,338 断言扩充至 **177 组 / 3,367 断言**（新增 3 组战中精灵术黄金用例），全部测试 100% 绿灯。
+- 服务端 `world_tick` 新增端到端大世界施法扣蓝与魔法熟练度累加升级测试（153 组用例 / 2,655 断言全部绿灯）。
+- 客户端在 D2 模式下双端共编测试 7/7 项 100% 通过。
+- 服务端 `ci_verify.py` 6/6 全真项 100% 绿灯通过（含 22/22 CTest 全部通过）。
+- ★ **反向变异实证 (RV-1)**:
+  - 变异：将 `Battle.cpp` 中的 MP 门禁判定篡改为反向拦截；
+  - 执行 `sa_rules_battle_test`，精准在 2 组测试中产生 13 处失败断言；复原后 177 组全部转绿，证明门禁断言真实有效。
+
+
 

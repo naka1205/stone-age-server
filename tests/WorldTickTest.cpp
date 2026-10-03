@@ -6240,3 +6240,75 @@ TEST_CASE("Battle combo: ranged weapon does not trigger combo")
 	CHECK(fld->turn >= 1);
 	CHECK(fld->at(SA::Rules::kSideOffset).hp < 1000);
 }
+
+TEST_CASE("Phase 5.1: 世界端到端 —— 战中 SPELL 精灵术施法扣蓝与玩家魔法熟练度累加升级")
+{
+	Fixture f;
+	const SA::Net::ConnectionId id1 = f.transport.connect();
+	const std::vector<std::uint8_t> hs = handshakeBytes(f.config.protocol_version);
+	f.transport.deliver(id1, hs.data(), hs.size());
+	f.world.tick();
+	REQUIRE(f.world.playerCount() == 1);
+
+	// 初始地系魔法等级为 1
+	CHECK(f.world.getPlayerMagicLevel(id1, 0) == 1);
+
+	// 注入魔法效果表
+	std::vector<SpellEffect> sps;
+	SpellEffect sp{};
+	sp.spell_id = 3001;
+	sp.kind = SA::Rules::SpellKind::kAttack;
+	sp.element = SA::Rules::MagicElement::Earth;
+	sp.cost_mp = 15;
+	sp.power = 40;
+	sp.magic_level = 1;
+	sps.push_back(sp);
+	f.world.loadSpellEffects(std::move(sps));
+
+	auto field = makeField();
+	auto &p1 = field.at(0);
+	p1.hp = p1.max_hp = 500;
+	p1.mp = p1.max_mp = 100;
+	p1.str = 50;
+	p1.quick = 100;
+	p1.elements[0] = 100; // 纯地
+
+	auto &enemy = field.at(SA::Rules::kSideOffset);
+	enemy.occupied = true;
+	enemy.dead = false;
+	enemy.hp = enemy.max_hp = 1000;
+	enemy.kind = SA::Rules::CombatantKind::kEnemy;
+	enemy.elements[1] = 100; // 纯水
+	enemy.quick = 10;
+
+	const BattleId battle = f.world.startBattle(field);
+	REQUIRE(f.world.joinBattle(battle, id1, 0));
+
+	// 提交施法指令
+	SA::Domain::BattleCommand cmd{};
+	cmd.battle_id = battle;
+	cmd.turn = f.world.battleField(battle)->turn;
+	cmd.command_kind = SA::Domain::BattleCommand::CommandKind::SPELL;
+	cmd.command.spell.spell_id = 3001;
+	cmd.command.spell.target = static_cast<std::uint8_t>(SA::Rules::kSideOffset);
+	f.world.onBattleCommand(id1, cmd);
+
+	f.clock.advance(1000);
+	f.world.tick();
+
+	const auto *fld = f.world.battleField(battle);
+	REQUIRE(fld != nullptr);
+	CHECK(fld->turn >= 1);
+	// 施法成功: 扣除 MP
+	CHECK(fld->at(0).mp == 85);
+	// 目标受到伤害
+	CHECK(fld->at(SA::Rules::kSideOffset).hp < 1000);
+
+	// 经验原子累加测试: 验证 addPlayerMagicExp 与升级
+	// 当前等级 1，升级所需 10 经验。先加 8 经验（不升级），再加 2 经验（触发升级至等级 2）
+	CHECK(f.world.getPlayerMagicLevel(id1, 0) == 1);
+	CHECK_FALSE(f.world.addPlayerMagicExp(id1, 0, 8)); // 8 < 10, 未升级
+	CHECK(f.world.getPlayerMagicLevel(id1, 0) == 1);
+	CHECK(f.world.addPlayerMagicExp(id1, 0, 2)); // 累积满 10, 升级至等级 2
+	CHECK(f.world.getPlayerMagicLevel(id1, 0) == 2);
+}

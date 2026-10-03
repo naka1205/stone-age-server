@@ -78,6 +78,14 @@ struct ActionEffects
 	// ── 特殊宠技回写 (批次 A-δ) ──
 	bool fall_ground = false;      // 守方被击落马
 	bool earth_round_hide = false; // 遁地隐藏态 (第一回合不可被选为目标)
+
+	// ── 魔法与精灵术回写 (阶段 5.1) ──
+	bool magic_cast = false;                          // 本行动成功施放魔法/精灵术
+	MagicElement magic_element = MagicElement::Earth; // 施法元素
+	int magic_exp_gained = 0;                         // 获得熟练度经验
+	int mp_consumed = 0;                              // 施法扣减 MP
+	int item_mp_target = -1;                          // 道具 MP 恢复目标槽位
+	int item_mp_healed = 0;                           // 道具恢复 MP 量
 };
 
 // order 由宿主每回合只生成一次。本接口不再摇行动速度。

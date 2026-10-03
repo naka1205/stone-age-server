@@ -6112,3 +6112,275 @@ TEST_CASE("Phase 5.0: 精灵术体系 (恢复/净化/属性反转)")
 		CHECK(c.elements[2] == 30);
 	}
 }
+
+TEST_CASE("Phase 5.1: 战中 SPELL 攻击魔法与 MP 门禁全管线")
+{
+	RulesConfig cfg{};
+	TurnCommands cmds{};
+	ActionEffects effects{};
+	SA::Domain::BattleEvents out{};
+
+	BattleField f = makeField();
+	// 槽位 0: 玩家施法者
+	f.at(0).occupied = true;
+	f.at(0).kind = CombatantKind::kPlayer;
+	f.at(0).level = 30;
+	f.at(0).hp = 200;
+	f.at(0).max_hp = 200;
+	f.at(0).mp = 60;
+	f.at(0).max_mp = 100;
+	f.at(0).elements[0] = 50; // 地 50
+
+	// 槽位 10: 敌方目标 (纯水属性)
+	f.at(10).occupied = true;
+	f.at(10).kind = CombatantKind::kEnemy;
+	f.at(10).level = 30;
+	f.at(10).hp = 500;
+	f.at(10).max_hp = 500;
+	f.at(10).elements[1] = 100; // 水 100
+
+	SUBCASE("单体攻击魔法伤害结算与 MP 正常扣减")
+	{
+		ScriptedRandom rng({100, 0}); // 100: 闪避判定 rollMagicDodge 必定不闪避 (100 > 6)
+		f.at(0).mods.spell_kind = SpellKind::kAttack;
+		f.at(0).mods.spell_element = MagicElement::Earth;
+		f.at(0).mods.spell_power = 150;
+		f.at(0).mods.spell_magic_level = 4;
+		f.at(0).mods.spell_cost_mp = 20;
+
+		cmds.present[0] = true;
+		cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::SPELL;
+		cmds.commands[0].command.spell.spell_id = 1001;
+		cmds.commands[0].command.spell.target = 10;
+
+		REQUIRE(resolveAction(f, cmds, cfg, rng, 0, out, effects));
+
+		// 1. 验证事件流包含 HIT 与高额伤害 DAMAGE
+		bool has_hit = false;
+		bool has_damage = false;
+		for (const auto &ev : out.events)
+		{
+			if (ev.body_kind == SA::Domain::BattleEvent::BodyKind::HIT)
+			{
+				has_hit = true;
+				CHECK(ev.body.hit.attacker == 0);
+				CHECK(ev.body.hit.kind == SA::Domain::AttackKind::ATTACK_KIND_SPELL);
+				CHECK(ev.body.hit.skill_id == 1001);
+			}
+			if (ev.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+			{
+				has_damage = true;
+				CHECK(ev.body.damage.target == 10);
+				CHECK(ev.body.damage.hp_delta < 0);
+			}
+		}
+		CHECK(has_hit);
+		CHECK(has_damage);
+
+		// 2. 验证回写标记与经验获取
+		CHECK(effects.magic_cast == true);
+		CHECK(effects.magic_element == MagicElement::Earth);
+		CHECK(effects.magic_exp_gained == 1);
+	}
+
+	SUBCASE("MP 不足时施法被严格拦截 (不扣 MP 且不造成伤害)")
+	{
+		ScriptedRandom rng({100});
+		f.at(0).mp = 15; // 仅剩 15 MP
+		f.at(0).mods.spell_kind = SpellKind::kAttack;
+		f.at(0).mods.spell_cost_mp = 20; // 需 20 MP
+
+		cmds.present[0] = true;
+		cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::SPELL;
+		cmds.commands[0].command.spell.spell_id = 1001;
+		cmds.commands[0].command.spell.target = 10;
+
+		REQUIRE(resolveAction(f, cmds, cfg, rng, 0, out, effects));
+
+		// 无任何伤害事件产出，未施法
+		CHECK_FALSE(effects.magic_cast);
+		bool has_damage = false;
+		for (const auto &ev : out.events)
+		{
+			if (ev.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+				has_damage = true;
+		}
+		CHECK_FALSE(has_damage);
+	}
+}
+
+TEST_CASE("Phase 5.1: 战中 SPELL 精灵术全管线 (恢复/净化/反转)")
+{
+	RulesConfig cfg{};
+	TurnCommands cmds{};
+	ActionEffects effects{};
+	SA::Domain::BattleEvents out{};
+	ScriptedRandom rng({0});
+
+	BattleField f = makeField();
+	// 槽位 0: 施法者
+	f.at(0).occupied = true;
+	f.at(0).kind = CombatantKind::kPlayer;
+	f.at(0).hp = 50;
+	f.at(0).max_hp = 100;
+	f.at(0).mp = 50;
+
+	// 槽位 1: 队友 (残血且带石化)
+	f.at(1).occupied = true;
+	f.at(1).kind = CombatantKind::kPlayer;
+	f.at(1).hp = 30;
+	f.at(1).max_hp = 100;
+	f.at(1).status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_STONE);
+	f.at(1).status_turns = 3;
+
+	SUBCASE("恩惠精灵术恢复己方生命")
+	{
+		f.at(0).mods.spell_kind = SpellKind::kHeal;
+		f.at(0).mods.spell_power = 60;
+		f.at(0).mods.spell_cost_mp = 15;
+		f.at(0).mods.spell_target_type = kTargetSide0; // 己方全侧
+
+		cmds.present[0] = true;
+		cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::SPELL;
+		cmds.commands[0].command.spell.spell_id = 2001;
+		cmds.commands[0].command.spell.target = 20;
+
+		REQUIRE(resolveAction(f, cmds, cfg, rng, 0, out, effects));
+
+		bool has_heal_0 = false;
+		bool has_heal_1 = false;
+		for (const auto &ev : out.events)
+		{
+			if (ev.body_kind == SA::Domain::BattleEvent::BodyKind::SET_HP)
+			{
+				if (ev.body.set_hp.target == 0 && ev.body.set_hp.hp > 50)
+					has_heal_0 = true;
+				if (ev.body.set_hp.target == 1 && ev.body.set_hp.hp > 30)
+					has_heal_1 = true;
+			}
+		}
+		CHECK(has_heal_0);
+		CHECK(has_heal_1);
+		CHECK(effects.magic_cast == true);
+	}
+
+	SUBCASE("净化精灵术清除异常状态")
+	{
+		f.at(0).mods.spell_kind = SpellKind::kPurify;
+		f.at(0).mods.spell_cost_mp = 10;
+		f.at(0).mods.spell_purify_status = 0; // 全净化
+
+		cmds.present[0] = true;
+		cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::SPELL;
+		cmds.commands[0].command.spell.spell_id = 2002;
+		cmds.commands[0].command.spell.target = 1; // 针对队友 1
+
+		REQUIRE(resolveAction(f, cmds, cfg, rng, 0, out, effects));
+
+		bool has_purify = false;
+		for (const auto &ev : out.events)
+		{
+			if (ev.body_kind == SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE)
+			{
+				if (ev.body.status_change.target == 1 && !ev.body.status_change.applied)
+					has_purify = true;
+			}
+		}
+		CHECK(has_purify);
+		CHECK(effects.magic_cast == true);
+	}
+
+	SUBCASE("属性反转精灵术反转目标四系属性")
+	{
+		// 目标 10
+		f.at(10).occupied = true;
+		f.at(10).hp = 100;
+		f.at(10).max_hp = 100;
+		f.at(10).elements[0] = 80; // 地 80
+		f.at(10).elements[3] = 20; // 风 20
+
+		f.at(0).mods.spell_kind = SpellKind::kElementReverse;
+		f.at(0).mods.spell_cost_mp = 20;
+
+		cmds.present[0] = true;
+		cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::SPELL;
+		cmds.commands[0].command.spell.spell_id = 2003;
+		cmds.commands[0].command.spell.target = 10;
+
+		REQUIRE(resolveAction(f, cmds, cfg, rng, 0, out, effects));
+
+		bool has_reverse = false;
+		for (const auto &ev : out.events)
+		{
+			if (ev.body_kind == SA::Domain::BattleEvent::BodyKind::REVERSE)
+			{
+				if (ev.body.reverse.actor == 10)
+					has_reverse = true;
+			}
+		}
+		CHECK(has_reverse);
+		CHECK(effects.magic_cast == true);
+	}
+}
+
+TEST_CASE("Phase 5.1: 战中 USE_ITEM 道具精灵术与气力恢复药")
+{
+	RulesConfig cfg{};
+	TurnCommands cmds{};
+	ActionEffects effects{};
+	SA::Domain::BattleEvents out{};
+	ScriptedRandom rng({0});
+
+	BattleField f = makeField();
+	f.at(0).occupied = true;
+	f.at(0).kind = CombatantKind::kPlayer;
+	f.at(0).hp = 50;
+	f.at(0).max_hp = 100;
+	f.at(0).mp = 10;
+	f.at(0).max_mp = 100;
+
+	f.at(1).occupied = true;
+	f.at(1).kind = CombatantKind::kPlayer;
+	f.at(1).hp = 50;
+	f.at(1).max_hp = 100;
+	f.at(1).status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+	f.at(1).status_turns = 3;
+
+	SUBCASE("使用气力药水恢复目标 MP")
+	{
+		f.at(0).mods.item_mp_power = 40; // 恢复 40 MP
+
+		cmds.present[0] = true;
+		cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::USE_ITEM;
+		cmds.commands[0].command.use_item.item_slot = 15;
+		cmds.commands[0].command.use_item.target = 0;
+
+		REQUIRE(resolveAction(f, cmds, cfg, rng, 0, out, effects));
+
+		CHECK(effects.item_used == true);
+	}
+
+	SUBCASE("使用净化草清除异常状态")
+	{
+		f.at(0).mods.item_spell_kind = SpellKind::kPurify;
+
+		cmds.present[0] = true;
+		cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::USE_ITEM;
+		cmds.commands[0].command.use_item.item_slot = 16;
+		cmds.commands[0].command.use_item.target = 1;
+
+		REQUIRE(resolveAction(f, cmds, cfg, rng, 0, out, effects));
+
+		bool has_purify_item = false;
+		for (const auto &ev : out.events)
+		{
+			if (ev.body_kind == SA::Domain::BattleEvent::BodyKind::STATUS_CHANGE)
+			{
+				if (ev.body.status_change.target == 1 && !ev.body.status_change.applied)
+					has_purify_item = true;
+			}
+		}
+		CHECK(has_purify_item);
+		CHECK(effects.item_used == true);
+	}
+}

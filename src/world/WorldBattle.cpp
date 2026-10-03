@@ -823,27 +823,15 @@ void projectCaptureItemGate(BattleInstance &b, PlayerPool &players,
 	}
 }
 
-// 道具效果表按 item_id 线性查 HP 恢复力基数 power(批次 I.4)。表内无此道具 ⇒ 0(非恢复药)。
-//   ★ 线性查同 `findEnemyEncounter` —— 表小(只装恢复药),不值当上哈希。
-std::int32_t findItemHealPower(const std::vector<ItemEffect> &effects, std::int32_t item_id)
+// 道具效果表按 item_id 查找 (阶段 5.1 支持 HP/MP 与道具精灵)
+const ItemEffect *findItemEffect(const std::vector<ItemEffect> &effects, std::int32_t item_id)
 {
 	for (const ItemEffect &e : effects)
 		if (e.item_id == item_id)
-			return e.heal_power;
-	return 0;
+			return &e;
+	return nullptr;
 }
 
-// 把「本回合 USE_ITEM 指令的 HP 恢复力基数」投影到 L3 输入面(批次 I.4「使用道具」)。
-//
-// ★★ 与 `projectCaptureItemGate`(捕获门 ④)同款分工:基数要读**道具效果表 + 攻方背包**
-//    这两个世界态,L3 纯函数看不到 ⇒ World 在每次 `resolveAction` 之前按 USE_ITEM 指令
-//    查好、写进攻方 `Combatant::mods.item_heal_power`。
-//   ⚠️★★ **只投影基数,不在这里摇 rng** —— 实际恢复量 `RAND(power*0.9, power*1.1)`
-//     (battle_magic.c:419)由 L3 在结算时用**战斗 rng** 摇。若在这里摇,取数就落在
-//     resolveAction 之外 ⇒ 战斗 rng 序列错位。
-//   每次行动前重新投影，前一步删除物品后不能沿用旧基数。
-//   按本回合指令重算(先归 0)⇒ 上次投影不残留;非 USE_ITEM 指令 / 无 L2 玩家 /
-//     空槽 / 非恢复药一律保持 0 ⇒ L3 分支跳过且不摇 rng(现有用例的 rng 序列不受影响)。
 void projectItemUsePower(BattleInstance &b, PlayerPool &players, const ItemPool &items,
                          const std::vector<ItemEffect> &effects)
 {
@@ -859,8 +847,10 @@ void projectItemUsePower(BattleInstance &b, PlayerPool &players, const ItemPool 
 		if (!atk.occupied)
 			continue;
 		atk.mods.item_heal_power = 0; // 每回合重算
+		atk.mods.item_mp_power = 0;
+		atk.mods.item_spell_kind = SA::Rules::SpellKind::kNone;
 
-		// 攻方 L2 玩家 + 其指定背包槽的道具 ⇒ item_id ⇒ 查效果表得恢复力基数。
+		// 攻方 L2 玩家 + 其指定背包槽的道具 ⇒ item_id ⇒ 查效果表得参数。
 		SA::Model::Player *owner =
 		    players.resolve(b.player_of_slot[static_cast<std::size_t>(slot)]);
 		if (owner == nullptr)
@@ -872,9 +862,76 @@ void projectItemUsePower(BattleInstance &b, PlayerPool &players, const ItemPool 
 		    items.resolve(owner->items[static_cast<std::size_t>(item_slot)]);
 		if (it == nullptr || it->current_pile <= 0)
 			continue; // 空槽 / 悬空句柄 / 无堆叠 ⇒ 不能用
-		const std::int32_t power = findItemHealPower(effects, it->item_id);
-		if (power > 0)
-			atk.mods.item_heal_power = power;
+		const ItemEffect *eff = findItemEffect(effects, it->item_id);
+		if (eff != nullptr)
+		{
+			if (eff->heal_power > 0)
+				atk.mods.item_heal_power = eff->heal_power;
+			if (eff->mp_power > 0)
+				atk.mods.item_mp_power = eff->mp_power;
+			if (eff->item_spell_kind != SA::Rules::SpellKind::kNone)
+			{
+				atk.mods.item_spell_kind = eff->item_spell_kind;
+				atk.mods.item_spell_element = eff->item_spell_element;
+				atk.mods.item_spell_power = eff->item_spell_power;
+				atk.mods.item_spell_magic_level = eff->item_spell_magic_level;
+			}
+		}
+	}
+}
+
+// 魔法与精灵术效果表按 spell_id 查找 (阶段 5.1)
+const SpellEffect *findSpellEffect(const std::vector<SpellEffect> &effects, std::uint32_t spell_id)
+{
+	for (const SpellEffect &e : effects)
+		if (e.spell_id == static_cast<std::int32_t>(spell_id))
+			return &e;
+	return nullptr;
+}
+
+// 把「本回合 SPELL 指令的魔法参数」投影到 L3 输入面 (阶段 5.1)
+void projectSpellPower(BattleInstance &b, PlayerPool &players,
+                       const std::vector<SpellEffect> &effects)
+{
+	for (int slot = 0; slot < SA::Rules::kSlotCount; ++slot)
+	{
+		if (!b.commands.present[slot])
+			continue;
+		const SA::Domain::BattleCommand &cmd = b.commands.commands[slot];
+		if (cmd.command_kind != SA::Domain::BattleCommand::CommandKind::SPELL)
+			continue;
+
+		SA::Rules::Combatant &atk = b.field.at(slot);
+		if (!atk.occupied)
+			continue;
+
+		atk.mods.spell_kind = SA::Rules::SpellKind::kNone;
+		atk.mods.spell_power = 0;
+
+		const SpellEffect *sp = findSpellEffect(effects, cmd.command.spell.spell_id);
+		if (sp == nullptr)
+			continue;
+
+		atk.mods.spell_kind = sp->kind;
+		atk.mods.spell_element = sp->element;
+		atk.mods.spell_power = sp->power;
+		atk.mods.spell_magic_level = sp->magic_level;
+		atk.mods.spell_cost_mp = sp->cost_mp;
+		atk.mods.spell_target_type = sp->target_type;
+		atk.mods.spell_purify_status = sp->purify_status;
+
+		if (slot % SA::Rules::kSideOffset < SA::Rules::kBattlePlayerMax)
+		{
+			const SA::Model::Player *owner =
+			    players.resolve(b.player_of_slot[static_cast<std::size_t>(slot)]);
+			if (owner != nullptr)
+			{
+				int p_lv = owner->getMagicLevel(static_cast<int>(sp->element));
+				if (atk.mods.prof_magic_proficiency > 0)
+					p_lv += atk.mods.prof_magic_proficiency;
+				atk.mods.prof_magic_proficiency = p_lv;
+			}
+		}
 	}
 }
 
@@ -2160,6 +2217,8 @@ void World::advanceBattles()
 			projectPetSkill(b, s.pet_skill_effects);
 			// 职技参数逐行动重投影 (A-γ2): 查表投影直攻系参数
 			projectProfSkill(b, s.players);
+			// 魔法与精灵术参数逐行动重投影 (阶段 5.1)
+			projectSpellPower(b, s.players, s.spell_effects);
 			// 集气态投影(B2b)在宠技表投影**之后**:完成击要覆盖表投影的
 			// direct=false / attack_percent=0(见 projectChargeState 卷首)。
 			projectChargeState(b, actor);
@@ -2203,6 +2262,24 @@ void World::advanceBattles()
 			}
 			if (effects.item_used)
 				consumeUsedItem(b, actor, s.players, s.items);
+			if (effects.magic_cast)
+			{
+				b.field.at(actor).mp = std::max(0, b.field.at(actor).mp - effects.mp_consumed);
+				if (actor % SA::Rules::kSideOffset < SA::Rules::kBattlePlayerMax)
+				{
+					SA::Model::Player *owner =
+					    s.players.resolve(b.player_of_slot[static_cast<std::size_t>(actor)]);
+					if (owner != nullptr)
+					{
+						owner->addMagicExp(static_cast<int>(effects.magic_element), effects.magic_exp_gained);
+					}
+				}
+			}
+			if (effects.item_mp_target >= 0 && effects.item_mp_target < SA::Rules::kSlotCount)
+			{
+				auto &tgt = b.field.at(effects.item_mp_target);
+				tgt.mp = std::min(tgt.max_mp, tgt.mp + effects.item_mp_healed);
+			}
 			if (effects.command_cleared)
 			{
 				b.commands.commands[actor].command_kind = SA::Domain::BattleCommand::CommandKind::WAIT;

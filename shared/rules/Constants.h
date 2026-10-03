@@ -376,6 +376,16 @@ enum class MagicElement : std::uint8_t
 	None = 4,  // 无
 };
 
+// 魔法/精灵术类别 (阶段 5.1)
+enum class SpellKind : std::uint8_t
+{
+	kNone = 0,
+	kAttack = 1,         // 四系攻击魔法
+	kHeal = 2,           // 恢复精灵术 (滋润/恩惠/治愈)
+	kPurify = 3,         // 净化精灵术 (解除异常状态)
+	kElementReverse = 4, // 属性反转精灵术 (地风/水火互换)
+};
+
 } // namespace SA::Rules
 
 #endif // __SA_Constants_H__

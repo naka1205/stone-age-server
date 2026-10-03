@@ -125,6 +125,36 @@ struct Player
 	std::int32_t wind = 0;
 	std::int32_t image = 0;
 	std::int32_t face_image = 0;
+
+	// ── 元素魔法熟练度 (阶段 5.1) ──────────────────────────
+	// 四系魔法熟练度经验与等级 [0:地, 1:水, 2:火, 3:风]
+	// 初始等级 1, 上限 100。每施放成功一次增加 1 经验; 满级前每满 level * 10 经验升级一次。
+	std::array<std::int32_t, 4> magic_exp{};
+	std::array<std::int32_t, 4> magic_level{1, 1, 1, 1};
+
+	int getMagicLevel(int elem_idx) const noexcept
+	{
+		if (elem_idx < 0 || elem_idx >= 4)
+			return 1;
+		return magic_level[static_cast<std::size_t>(elem_idx)];
+	}
+
+	bool addMagicExp(int elem_idx, int amount = 1) noexcept
+	{
+		if (elem_idx < 0 || elem_idx >= 4 || amount <= 0)
+			return false;
+		const auto idx = static_cast<std::size_t>(elem_idx);
+		magic_exp[idx] += amount;
+		bool leveled_up = false;
+		while (magic_level[idx] < 100 && magic_exp[idx] >= magic_level[idx] * 10)
+		{
+			magic_exp[idx] -= magic_level[idx] * 10;
+			magic_level[idx] += 1;
+			leveled_up = true;
+		}
+		return leveled_up;
+	}
+
 	// ── 随身石币(原 `CHAR_GOLD`,`char_base.h:397`;批次「经济地基」接上写者)──────
 	//
 	// ★★ **全仓唯一的合法写入口是 `GoldLedger`**(`src/world/GoldLedger.cpp`,声明在 `world/Api.h` 的 GoldLedger 节):

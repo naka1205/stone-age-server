@@ -573,6 +573,7 @@ struct World::Impl : GoldAuditSink
 
 	std::vector<ItemEffect> item_effects{};
 	std::vector<PetSkillEffect> pet_skill_effects{};
+	std::vector<SpellEffect> spell_effects{};
 
 	std::vector<WarpPoint> warp_points{};
 	const WarpPoint *findWarpPoint(std::int32_t floor, std::int32_t x,

@@ -786,6 +786,25 @@ void World::loadPetSkillEffects(std::vector<PetSkillEffect> effects)
 	_impl->pet_skill_effects = std::move(effects);
 }
 
+void World::loadSpellEffects(std::vector<SpellEffect> effects)
+{
+	_impl->spell_effects = std::move(effects);
+}
+
+int World::getPlayerMagicLevel(SA::Net::SessionId session, int element_idx) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? 1 : p->getMagicLevel(element_idx);
+}
+
+bool World::addPlayerMagicExp(SA::Net::SessionId session, int element_idx, int amount)
+{
+	SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	return p == nullptr ? false : p->addMagicExp(element_idx, amount);
+}
+
 int World::giveItemToPlayer(SA::Net::SessionId session, const SA::Model::Item &item)
 {
 	Impl &s = *_impl;
