@@ -1958,3 +1958,56 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - CI 预设 7/7 100% 绿灯。
 - **全仓守卫**:
   - `check_module_boundaries.py`, `check_gold_writes.py`, `check_shared_purity.py`, `check_docs_index.py`, `check_dr_table.py`, `check_format.py` 全部一次性绿灯。
+
+---
+
+### 9.0.116 批次 D.9 —— 宠物转生与融合进阶生态、声望商城与称号加成大世界双端全流程贯通验证 (Pet Fusion/Rebirth, Titles & Fame Shop E2E)
+
+- **日期**: 2026-10-03
+- **分支**: `master`
+- **目标**: 依据实施计划 Phase 4.4 宠物进阶生态与称号/声望商城规范，在大世界端到端链路中落地并验证：
+  1. 宠物三宠与两宠融合全流程（主副宠相性与技能遗传、四维成长资质继承、出战/骑乘/摆摊/同槽多重状态互斥、全新融合宠生成）；
+  2. 100 级宠物转生全生命周期闭环（100 级等级门槛、最大 2 转上限、出战与骑乘状态互斥、辅助牺牲宠原子销毁、五次方成长算力与资质重算、等级重置为 1）；
+  3. 声望商城与荣誉称号系统全景闭环（商城 NPC 货架配置、声望不足/防重购/背包满/宠物栏满严格 0 扣减防御、原子兑换到账）；
+  4. 称号佩戴与四维属性加成即时联动（未拥有拦截、声望不足门槛拦截、佩戴称号生命/攻击/防御/敏捷即时生效与卸下归零）；
+  5. 客户端交互状态机扩展（`PlayerInteraction` 称号管理、声望商城浏览与门槛预检、转生融合候选过滤）；
+  6. 双端测试 100% 绿灯与反向变异实证（RV）。
+
+#### 1. 核心架构与功能落地
+
+1. **大世界宠物融合与状态机防御 (`WorldPetFeatures.cpp` / `WorldMapTest.cpp`)**:
+   - 验证主副宠合法性与槽位互斥（相同槽位 `kInvalidSlot`）；
+   - 摆摊出摊与交易中锁定互斥（`kPetInTradeOrStall`）；
+   - 正向三宠融合：原子释放副宠 1 与副宠 2，生成全新融合宠（`isPetFusion == true`），继承主宠属性倾向与技能；
+2. **大世界宠物转生全生命周期 (`WorldPetFeatures.cpp` / `WorldMapTest.cpp`)**:
+   - 等级门禁（`< 100` 级拦截 `kInsufficientLevel`）；
+   - 出战与骑乘状态互斥拦截（`kPetInBattleOrRide`）；
+   - 辅助牺牲宠出战互斥与同槽拦截（`kInvalidSacrifice`）；
+   - 正向 1 转：辅助宠原子销毁，目标宠等级重置为 1，四维资质重算，`petTransCount` 累加至 1；
+3. **声望商城与荣誉称号大世界全景联动 (`WorldLifestyle.cpp` / `WorldMapTest.cpp`)**:
+   - 注册「萨姆吉尔勇者」（HP+100, ATK+20, DEF+10, DEX+10）与「玛丽娜斯精灵学者」；
+   - 部署声望商城 NPC 9001，配置称号、稀有道具、珍稀骑宠条目；
+   - 初始声望不足拦截 `kInsufficientFame`（严格 0 扣减）；
+   - 正向购买称号精准扣除声望，重复购买已拥有称号拦截 `kAlreadyHaveTitle`；
+   - 背包满购买道具拦截 `kInventoryFull`（严格 0 扣减）；
+   - 称号佩戴门槛拦截（声望 `< req_fame` 拦截 `equipTitle` 失败）；
+   - 佩戴后属性加成即时生效，卸下后属性加成归零；
+4. **客户端表现层增强 (`PlayerInteraction.h/.cpp` / `ClientNetTest.cpp`)**:
+   - `TitleView` 与 `FameShopItemView` 视图结构；
+   - `setOwnedTitles`、`setActiveTitleId`、`canEquipTitle`；
+   - `canBuyFromFameShop`（声望、背包、宠物栏与已拥有称号多层预检）；
+   - `canRebirthPet` 与 `canFusePets` 状态互斥与门槛候选校验。
+
+#### 2. 验证与门禁
+
+- **服务端单元与端到端测试 (`tests/WorldMapTest.cpp`)**:
+  - 新增 `大世界宠物转生与融合进阶生态、声望商城与称号加成双端全流程贯通 (Phase 4.4)` 用例（3 大 SUBCASE）；
+  - 用例数从 160 增至 **161 组**，断言数从 4918 增至 **4983 条**（+65 条断言，100% 成功）；
+  - 执行反向变异实证（RV-1：变异转生次数期望值 1 为 2，测试精确转红）；
+  - 全量 CTest 22/22 100% 保持全绿。
+- **客户端单元与协议测试 (`stone-age-client/tests/ClientNetTest.cpp`)**:
+  - 新增 `大世界宠物转生与融合进阶生态、声望商城与称号加成双端全流程贯通 (Phase 4.4)` 用例；
+  - CI 预设 d2-only 7/7 与 engine 8/8 100% 绿灯。
+- **全仓守卫**:
+  - `check_module_boundaries.py`, `check_gold_writes.py`, `check_shared_purity.py`, `check_docs_index.py`, `check_dr_table.py`, `check_format.py` 全部一次性绿灯。
+

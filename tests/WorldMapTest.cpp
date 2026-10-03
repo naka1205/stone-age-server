@@ -10907,3 +10907,335 @@ TEST_CASE("四大新手村经典成人礼全流程与生活技能制造生态闭
 		CHECK(found_axe);
 	}
 }
+
+TEST_CASE("大世界宠物转生与融合进阶生态、声望商城与称号加成双端全流程贯通 (Phase 4.4)")
+{
+	MoveFixture f;
+	const auto id = spawnHandshaked(f);
+	auto *p = f.world.playerForTest(id);
+	REQUIRE(p != nullptr);
+	p->floor = 0;
+	p->x = 30;
+	p->y = 30;
+	p->level = 80;
+	p->gold = 100000;
+
+	SUBCASE("1. 大世界宠物融合全流程与多重状态互斥闭环")
+	{
+		// 1.1 准备 3 只宠物：主宠、副宠 1、副宠 2
+		// 主宠 (slot 0): 红暴龙 (pet_id 101, code 10, 火属性)
+		SA::Model::Pet main_pet{};
+		main_pet.uid = 10001;
+		main_pet.pet_id = 101;
+		main_pet.name.assign("巴朵兰恩");
+		main_pet.level = 80;
+		main_pet.fire = 10;
+		main_pet.growth_vital = 35;
+		main_pet.growth_str = 40;
+		main_pet.growth_tough = 30;
+		main_pet.growth_dex = 25;
+		main_pet.vital = 35;
+		main_pet.str = 40;
+		main_pet.tough = 30;
+		main_pet.dex = 25;
+		main_pet.pet_skills[0] = 1; // 一击必杀
+		const int s_main = f.world.givePetToPlayer(id, main_pet);
+		REQUIRE(s_main == 0);
+
+		// 副宠 1 (slot 1): 绿暴龙 (pet_id 102, code 20, 地属性)
+		SA::Model::Pet sub1_pet{};
+		sub1_pet.uid = 10002;
+		sub1_pet.pet_id = 102;
+		sub1_pet.name.assign("奥卡洛斯");
+		sub1_pet.level = 75;
+		sub1_pet.earth = 10;
+		sub1_pet.growth_vital = 30;
+		sub1_pet.growth_str = 35;
+		sub1_pet.growth_tough = 35;
+		sub1_pet.growth_dex = 20;
+		sub1_pet.vital = 30;
+		sub1_pet.str = 35;
+		sub1_pet.tough = 35;
+		sub1_pet.dex = 20;
+		sub1_pet.pet_skills[0] = 2; // 三段攻击
+		const int s_sub1 = f.world.givePetToPlayer(id, sub1_pet);
+		REQUIRE(s_sub1 == 1);
+
+		// 副宠 2 (slot 2): 蓝雷龙 (pet_id 103, code 30, 水属性)
+		SA::Model::Pet sub2_pet{};
+		sub2_pet.uid = 10003;
+		sub2_pet.pet_id = 103;
+		sub2_pet.name.assign("布拉奇多斯");
+		sub2_pet.level = 70;
+		sub2_pet.water = 10;
+		sub2_pet.growth_vital = 40;
+		sub2_pet.growth_str = 25;
+		sub2_pet.growth_tough = 40;
+		sub2_pet.growth_dex = 15;
+		sub2_pet.vital = 40;
+		sub2_pet.str = 25;
+		sub2_pet.tough = 40;
+		sub2_pet.dex = 15;
+		sub2_pet.pet_skills[0] = 3; // 忠犬守护
+		const int s_sub2 = f.world.givePetToPlayer(id, sub2_pet);
+		REQUIRE(s_sub2 == 2);
+
+		// 注册模板融合码
+		f.world.registerPetTemplateFusionCode(101, 10);
+		f.world.registerPetTemplateFusionCode(102, 20);
+		f.world.registerPetTemplateFusionCode(103, 30);
+
+		// 1.2 异常防御拦截
+		// 1.2.1 相同槽位防御 (main == sub1)
+		CHECK(f.world.fusePets(id, 0, 0, -1) == PetFusionResultCode::kInvalidSlot);
+		// 1.2.2 副宠 2 与副宠 1 同槽
+		CHECK(f.world.fusePets(id, 0, 1, 1) == PetFusionResultCode::kInvalidSlot);
+
+		// 1.2.3 状态互斥: 摆摊中互斥拦截
+		REQUIRE(f.world.openStall(id, "融合实验摊位"));
+		REQUIRE(f.world.setStallPet(id, 2, 1000));
+		REQUIRE(f.world.startStallVending(id));
+		CHECK(f.world.fusePets(id, 0, 1, 2) == PetFusionResultCode::kPetInTradeOrStall);
+		f.world.closeStall(id);
+
+		// 1.3 正向三宠融合执行
+		auto fuse_res = f.world.fusePets(id, 0, 1, 2);
+		REQUIRE(fuse_res == PetFusionResultCode::kSuccess);
+
+		// 1.4 验证资产与状态变动：副宠 1 与副宠 2 已被原子释放，槽位清空
+		CHECK(f.world.playerPetAt(id, 1) == nullptr);
+		CHECK(f.world.playerPetAt(id, 2) == nullptr);
+
+		// 主槽位 (slot 0) 成为全新融合宠
+		const auto *fused = f.world.playerPetAt(id, 0);
+		REQUIRE(fused != nullptr);
+		CHECK(fused->level == 1);
+		CHECK(fused->exp == 0);
+		CHECK(f.world.isPetFusion(fused->uid));
+		CHECK(fused->fire == 10); // 继承主宠火倾向
+
+		// 融合技能继承：继承了主副宠的技能
+		bool has_skill1 = false;
+		bool has_skill2 = false;
+		bool has_skill3 = false;
+		for (std::size_t i = 0; i < 7; ++i)
+		{
+			if (fused->pet_skills[i] == 1)
+				has_skill1 = true;
+			if (fused->pet_skills[i] == 2)
+				has_skill2 = true;
+			if (fused->pet_skills[i] == 3)
+				has_skill3 = true;
+		}
+		CHECK(has_skill1);
+		CHECK(has_skill2);
+		CHECK(has_skill3);
+	}
+
+	SUBCASE("2. 大世界宠物转生全流程与五次方成长飞跃闭环")
+	{
+		// 2.1 准备 100 级目标宠物与 100 级辅助宠物
+		SA::Model::Pet trans_target{};
+		trans_target.uid = 20001;
+		trans_target.pet_id = 201;
+		trans_target.name.assign("极品白虎佩露夏");
+		trans_target.level = 100;
+		trans_target.pet_rank = 1;
+		trans_target.growth_vital = 38;
+		trans_target.growth_str = 42;
+		trans_target.growth_tough = 32;
+		trans_target.growth_dex = 36;
+		trans_target.vital = 38;
+		trans_target.str = 42;
+		trans_target.tough = 32;
+		trans_target.dex = 36;
+		const int s_target = f.world.givePetToPlayer(id, trans_target);
+		REQUIRE(s_target == 0);
+
+		SA::Model::Pet sac_pet{};
+		sac_pet.uid = 20002;
+		sac_pet.pet_id = 202;
+		sac_pet.name.assign("百年神龟");
+		sac_pet.level = 100;
+		sac_pet.pet_rank = 1;
+		sac_pet.growth_vital = 45;
+		sac_pet.growth_str = 30;
+		sac_pet.growth_tough = 45;
+		sac_pet.growth_dex = 20;
+		sac_pet.vital = 45;
+		sac_pet.str = 30;
+		sac_pet.tough = 45;
+		sac_pet.dex = 20;
+		const int s_sac = f.world.givePetToPlayer(id, sac_pet);
+		REQUIRE(s_sac == 1);
+
+		// 2.2 门槛与防御拦截
+		// 2.2.1 等级不足拦截 (< 100 级)
+		auto *pt = f.world.playerPetForTest(id, 0);
+		REQUIRE(pt != nullptr);
+		pt->level = 99;
+		CHECK(f.world.reincarnatePet(id, 0, 1) == PetTransResultCode::kInsufficientLevel);
+		pt->level = 100;
+
+		// 2.2.2 出战状态互斥拦截
+		p->default_pet = 0;
+		CHECK(f.world.reincarnatePet(id, 0, 1) == PetTransResultCode::kPetInBattleOrRide);
+		p->default_pet = -1;
+
+		// 2.2.3 辅助牺牲宠出战互斥拦截
+		p->default_pet = 1;
+		CHECK(f.world.reincarnatePet(id, 0, 1) == PetTransResultCode::kPetInBattleOrRide);
+		p->default_pet = -1;
+
+		// 2.2.4 辅助宠与目标宠同槽拦截
+		CHECK(f.world.reincarnatePet(id, 0, 0) == PetTransResultCode::kInvalidSacrifice);
+
+		// 2.3 正向执行 1 转
+		CHECK(f.world.petTransCount(pt->uid) == 0);
+		auto trans_res = f.world.reincarnatePet(id, 0, 1);
+		REQUIRE(trans_res == PetTransResultCode::kSuccess);
+
+		// 2.4 验证转生结果
+		CHECK(f.world.playerPetAt(id, 1) == nullptr); // 辅助宠被原子销毁
+		auto *after_pt = f.world.playerPetAt(id, 0);
+		REQUIRE(after_pt != nullptr);
+		CHECK(after_pt->level == 1); // 等级重置为 1
+		CHECK(after_pt->exp == 0);
+		CHECK(f.world.petTransCount(after_pt->uid) == 1); // 1 转达成
+
+		// 验证成长与初始四维已重算写入
+		CHECK(after_pt->growth_vital > 0);
+		CHECK(after_pt->growth_str > 0);
+		CHECK(after_pt->growth_tough > 0);
+		CHECK(after_pt->growth_dex > 0);
+
+		// 2.5 验证再次转生门槛 (需再次达到 100 级)
+		CHECK(f.world.reincarnatePet(id, 0, -1) == PetTransResultCode::kInsufficientLevel);
+	}
+
+	SUBCASE("3. 大世界声望商城与称号系统双端联动闭环")
+	{
+		// 3.1 注册称号体系
+		TitleDefinition t1{};
+		t1.title_id = 101;
+		t1.name = "萨姆吉尔勇者";
+		t1.req_fame = 500;
+		t1.bonus.bonus_hp = 100;
+		t1.bonus.bonus_attack = 20;
+		t1.bonus.bonus_defense = 10;
+		t1.bonus.bonus_dex = 10;
+		f.world.registerTitle(t1);
+
+		TitleDefinition t2{};
+		t2.title_id = 102;
+		t2.name = "玛丽娜斯精灵学者";
+		t2.req_fame = 1000;
+		t2.bonus.bonus_hp = 200;
+		t2.bonus.bonus_attack = 30;
+		t2.bonus.bonus_defense = 20;
+		t2.bonus.bonus_dex = 20;
+		f.world.registerTitle(t2);
+
+		// 3.2 部署声望商城 NPC (kFameShop = 12)
+		NpcEntity fame_npc{};
+		fame_npc.id = 9001;
+		fame_npc.type = NpcType::kFameShop;
+		fame_npc.name = "萨伊那斯声望大师";
+		fame_npc.floor = 0;
+		fame_npc.x = 31;
+		fame_npc.y = 30;
+
+		FameShopItem item_title1{};
+		item_title1.entry_id = 1;
+		item_title1.type = FameShopItemType::kTitle;
+		item_title1.name = "萨姆吉尔勇者";
+		item_title1.fame_cost = 300;
+		item_title1.target_id = 101;
+
+		FameShopItem item_ring{};
+		item_ring.entry_id = 2;
+		item_ring.type = FameShopItemType::kItem;
+		item_ring.name = "太阳之戒";
+		item_ring.fame_cost = 150;
+		item_ring.target_id = 3001;
+
+		FameShopItem item_pet{};
+		item_pet.entry_id = 3;
+		item_pet.type = FameShopItemType::kPet;
+		item_pet.name = "珍稀雷龙幼崽";
+		item_pet.fame_cost = 400;
+		item_pet.target_id = 4001;
+
+		fame_npc.fame_shop_items = {item_title1, item_ring, item_pet};
+		f.world.loadNpcEntities({fame_npc});
+
+		// 3.3 初始声望不足拦截防御
+		f.world.setPlayerFame(id, 200); // 仅 200 声望，不足购买 300 声望的称号
+		CHECK(f.world.buyFromFameShop(id, 9001, 1) == World::FameShopResultCode::kInsufficientFame);
+		CHECK(f.world.playerFame(id) == 200); // 严格 0 扣减
+
+		// 3.4 增加声望至 600，成功购买称号 101
+		f.world.setPlayerFame(id, 600);
+		auto buy_t_res = f.world.buyFromFameShop(id, 9001, 1);
+		REQUIRE(buy_t_res == World::FameShopResultCode::kSuccess);
+		CHECK(f.world.playerFame(id) == 300); // 精准扣除 300 声望
+		CHECK(f.world.hasTitle(id, 101));     // 成功获得称号
+
+		// 3.5 防重购防御：已拥有称号不可再次购买
+		CHECK(f.world.buyFromFameShop(id, 9001, 1) == World::FameShopResultCode::kAlreadyHaveTitle);
+		CHECK(f.world.playerFame(id) == 300); // 严格 0 扣减
+
+		// 3.6 购买稀有道具，背包满拦截防御
+		f.world.setPlayerFame(id, 500);
+		// 将背包填满 (45 个槽位全填满)
+		for (std::size_t s = 0; s < 45; ++s)
+		{
+			SA::Model::Item dummy{};
+			dummy.item_id = 999;
+			dummy.name.assign("杂物");
+			(void)f.world.giveItemToPlayer(id, dummy);
+		}
+		CHECK(f.world.buyFromFameShop(id, 9001, 2) == World::FameShopResultCode::kInventoryFull);
+		CHECK(f.world.playerFame(id) == 500); // 严格 0 扣减
+
+		// 清理一个空槽并正向购买道具
+		p->clearItemSlot(SA::Model::kStartItemArray);
+		auto buy_i_res = f.world.buyFromFameShop(id, 9001, 2);
+		REQUIRE(buy_i_res == World::FameShopResultCode::kSuccess);
+		CHECK(f.world.playerFame(id) == 350); // 扣除 150 声望
+		const auto *ring = f.world.playerItemAt(id, static_cast<int>(SA::Model::kStartItemArray));
+		REQUIRE(ring != nullptr);
+		CHECK(ring->item_id == 3001);
+
+		// 3.7 称号佩戴与四维属性加成生效
+		CHECK(f.world.playerActiveTitle(id) == 0);
+		CHECK(f.world.playerActiveTitleName(id).empty());
+		auto zero_bonus = f.world.playerTitleBonus(id);
+		CHECK(zero_bonus.bonus_hp == 0);
+		CHECK(zero_bonus.bonus_attack == 0);
+
+		// 佩戴未拥有的称号 102 拦截
+		CHECK_FALSE(f.world.equipTitle(id, 102));
+
+		// 当前声望为 350 < 称号 101 的门限 500，佩戴被声望门限拦截
+		CHECK_FALSE(f.world.equipTitle(id, 101));
+
+		// 声望增加到 600 >= 500，佩戴称号 101 成功
+		f.world.setPlayerFame(id, 600);
+		REQUIRE(f.world.equipTitle(id, 101));
+		CHECK(f.world.playerActiveTitle(id) == 101);
+		CHECK(f.world.playerActiveTitleName(id) == "萨姆吉尔勇者");
+
+		// 属性加成即时生效
+		auto bonus = f.world.playerTitleBonus(id);
+		CHECK(bonus.bonus_hp == 100);
+		CHECK(bonus.bonus_attack == 20);
+		CHECK(bonus.bonus_defense == 10);
+		CHECK(bonus.bonus_dex == 10);
+
+		// 卸下称号，属性加成归零
+		REQUIRE(f.world.unequipTitle(id));
+		CHECK(f.world.playerActiveTitle(id) == 0);
+		CHECK(f.world.playerTitleBonus(id).bonus_hp == 0);
+	}
+}
