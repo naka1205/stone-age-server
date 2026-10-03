@@ -54,6 +54,12 @@ sa_apply_warnings(sa_world_persistence_test)
 sa_enable_assertions(sa_world_persistence_test)
 add_test(NAME world_persistence COMMAND sa_world_persistence_test)
 
+add_executable(sa_saac_test SaacClientTest.cpp)
+target_link_libraries(sa_saac_test PRIVATE sa_saac sa_doctest)
+sa_apply_warnings(sa_saac_test)
+sa_enable_assertions(sa_saac_test)
+add_test(NAME saac_client COMMAND sa_saac_test)
+
 if(SA_ENABLE_MYSQL_STORAGE)
     add_executable(sa_mysql_storage_test MySqlStorageTest.cpp)
     target_link_libraries(sa_mysql_storage_test PRIVATE sa_session_storage_backend sa_storage_drivers sa_doctest)

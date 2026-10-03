@@ -2095,3 +2095,37 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - 服务端 CTest 22/22 保持 100% 绿灯；
   - `check_docs_index.py`、`check_format.py` 守卫全绿。
 
+---
+
+### 9.0.123 阶段 7 —— S22 saac 客户端通信管线与账号中心服务架构落地 (Account & Central Server Protocol Pipeline)
+
+- **日期**: 2026-10-03
+- **分支**: `master`
+- **目标**: 落实 `docs/13-d8-coverage.md` 第 22 行 S22 saac 客户端 / 中心账号服务通信管线（阶段 7）。依据 `00-architecture.md` §3/§4/§7 架构裁定与 `17-saac-boundary.md` 取证成果，在服务端新增独立模块 `src/saac/`（静态库 `sa_saac`），建立带三元组信封（`instance_id`, `generation`, `request_id`, `deadline_ms`）的 RPC 在途生命周期管理与超时扫描机制，彻底消弭原版 `fdid` 归零引发跨实例串包的致命缺陷（C33/C35）；实现账号登录鉴权、角色档案加载/保存、排他锁与租约状态机（消弭原版移民锁误解缺陷 C45），并打通 8.0 独有跨线路全服广播/聊天室分发通道（00 §7）。
+
+#### 1. 核心架构与功能落地
+
+1. **统一公开接口与信封模型 (`src/saac/include/saac/Api.h`)**:
+   - 严格遵循 `check_module_boundaries.py` 守卫规范，模块仅暴露单一 `Api.h` 头；
+   - 定义 `RequestEnvelope` 与 `ResponseEnvelope` 三元组信封模型；
+   - 定义 `SaacAccountStatus` 诊断状态码与 `AccountLockType` 排他锁类型（普通锁与移民锁显式隔离）；
+   - 定义 `ISaacClient` 抽象接口与 `createSaacClient` 工厂入口。
+2. **协议帧成帧封包与解包 (`src/saac/SaacProtocol.cpp`)**:
+   - 实现长度前缀成帧打包 `encodeRequest` 与响应帧校验解析 `decodeResponse`；
+   - 覆盖核心协议类型：`kLoginReq/Resp`、`kCharLoadReq/Resp`、`kCharSaveReq/Resp`、`kLockReq/Resp`、`kBroadcastReq/Ack`。
+3. **在途生命周期与跨实例世代隔离 (`src/saac/SaacClient.cpp`)**:
+   - `SaacClient` 维护原子递增 `request_id` 与并发安全在途表 `_inFlight`；
+   - `feedResponse` 强校验回包 `instance_id` 与 `generation`：旧实例世代回包自动拦截丢弃并累计 `staleDropCount()`，杜绝跨实例会话串包；
+   - `tick(now_ms)` 扫描超时请求，自动触发超时回调并归还资源，累计 `timeoutDropCount()`；
+   - `broadcastWorldMessage` 与 `registerBroadcastListener` 实现跨线路世界广播与分发监听。
+
+#### 2. 验证与反向变异双证据
+
+- **单元与协议测试 (`tests/SaacClientTest.cpp`)**:
+  - 新增 `saac_client` 独立测试套件（5 大 TEST_CASE）；
+  - 覆盖协议帧封包解包、跨实例世代号防御丢弃、超时扫描与 In-Flight 清理、排他锁申请/释放、跨线路全服广播；
+  - **RV-Saac-1 反向变异实证**：在 `feedResponse` 中故意移除世代号比对逻辑，测试立即精确捕获 5 处断言失败（红灯），还原后一次性恢复全绿；
+  - CTest 用例数增至 **23/23**，100% 保持全绿。
+- **模块边界守卫**:
+  - `check_module_boundaries.py` 严格校验 5 个模块依赖与单一暴露头，100% 通过。
+

@@ -48,8 +48,10 @@ ALLOWED_DEPS = {
     #   ⚠️ 不依赖 platform:见 session.cpp 里 Pong.server_time_ms 那处注释。
     "net": set(),
     "session_storage": set(),  # immutable IDL requests/completions; owns MySQL and Redis
-    # world 把三层缝在一起。
-    "world": {"platform", "net", "session_storage"},
+    # saac 是 S22 中心账号服务与通信管线 (阶段 7)
+    "saac": {"platform"},
+    # world 把各层缝在一起。
+    "world": {"platform", "net", "session_storage", "saac"},
 }
 
 # 每个模块允许对外暴露的头。★ 恰好一个 —— 见 00 §3.1「只暴露接口头」。
