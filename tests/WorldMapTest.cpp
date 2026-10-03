@@ -9612,10 +9612,151 @@ TEST_CASE("四大新手村全域场景室内外贯通、医院恢复与全量功
 	CHECK_EQ(world.playerMp(id), 100);
 	CHECK_EQ(world.playerGold(id), 1000); // 医院服务免费，0 扣费
 
-	// 4. 验证双向传送网络连通：从萨姆吉尔村 (1000) 瞬移至玛丽娜丝渔村 (2000)
-	world.warpPlayerForTest(id, 2000, 50, 50);
-	const auto p_marina = world.playerPos(id);
-	CHECK_EQ(p_marina.floor, 2000);
-	CHECK_EQ(p_marina.x, 50);
-	CHECK_EQ(p_marina.y, 50);
+	// 4. 验证玛丽娜丝渔村医院 (Floor 2005) Healer 交互与治疗
+	const NpcEntity *marina_healer = nullptr;
+	for (const auto &n : npcs)
+	{
+		if (n.floor == 2005 && n.type == NpcType::kHealer)
+		{
+			marina_healer = &n;
+			break;
+		}
+	}
+	REQUIRE(marina_healer != nullptr);
+	world.warpPlayerForTest(id, 2005, marina_healer->x, marina_healer->y + 1);
+	player = world.playerForTest(id);
+	REQUIRE(player != nullptr);
+	player->dir = 0;
+	REQUIRE(world.setPlayerStatsForTest(id, /*hp=*/20, /*mp=*/10, /*vital=*/1000, /*str=*/200, /*tough=*/200, /*dex=*/200));
+	SA::Domain::EventRequest ev_marina_healer{};
+	ev_marina_healer.dir = 0;
+	ev_marina_healer.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev_marina_healer.seqno = 9002;
+	world.onEvent(id, ev_marina_healer);
+	world.tick();
+	CHECK(world.playerHp(id) > 20);
+	CHECK_EQ(world.playerMp(id), 100);
+
+	// 5. 验证加加村医院 (Floor 3005) Healer 交互与治疗
+	const NpcEntity *jaja_healer = nullptr;
+	for (const auto &n : npcs)
+	{
+		if (n.floor == 3005 && n.type == NpcType::kHealer)
+		{
+			jaja_healer = &n;
+			break;
+		}
+	}
+	REQUIRE(jaja_healer != nullptr);
+	world.warpPlayerForTest(id, 3005, jaja_healer->x + 1, jaja_healer->y);
+	player = world.playerForTest(id);
+	REQUIRE(player != nullptr);
+	player->dir = 6;
+	REQUIRE(world.setPlayerStatsForTest(id, /*hp=*/15, /*mp=*/15, /*vital=*/1000, /*str=*/200, /*tough=*/200, /*dex=*/200));
+	SA::Domain::EventRequest ev_jaja_healer{};
+	ev_jaja_healer.dir = 6;
+	ev_jaja_healer.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev_jaja_healer.seqno = 9003;
+	world.onEvent(id, ev_jaja_healer);
+	world.tick();
+	CHECK(world.playerHp(id) > 15);
+	CHECK_EQ(world.playerMp(id), 100);
+
+	// 6. 验证卡鲁它那村医院 (Floor 4005) Healer 交互与治疗
+	const NpcEntity *karu_healer = nullptr;
+	for (const auto &n : npcs)
+	{
+		if (n.floor == 4005 && n.type == NpcType::kHealer)
+		{
+			karu_healer = &n;
+			break;
+		}
+	}
+	REQUIRE(karu_healer != nullptr);
+	world.warpPlayerForTest(id, 4005, karu_healer->x + 1, karu_healer->y);
+	player = world.playerForTest(id);
+	REQUIRE(player != nullptr);
+	player->dir = 6;
+	REQUIRE(world.setPlayerStatsForTest(id, /*hp=*/25, /*mp=*/25, /*vital=*/1000, /*str=*/200, /*tough=*/200, /*dex=*/200));
+	SA::Domain::EventRequest ev_karu_healer{};
+	ev_karu_healer.dir = 6;
+	ev_karu_healer.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+	ev_karu_healer.seqno = 9004;
+	world.onEvent(id, ev_karu_healer);
+	world.tick();
+	CHECK(world.playerHp(id) > 25);
+	CHECK_EQ(world.playerMp(id), 100);
+
+	// 7. 验证四大主村道具店 Shop NPC 交互与商品窗口下发
+	const std::vector<std::pair<int, int>> village_shops = {
+	    {1002, 6}, // 萨姆吉尔道具店 (18, 15) <- 站在 (19, 15), dir=6
+	    {2002, 0}, // 玛丽娜丝道具店 (15, 13) <- 站在 (15, 14), dir=0
+	    {3002, 6}, // 加加道具店 (18, 16) <- 站在 (19, 16), dir=6
+	    {4002, 0}  // 卡鲁它那道具店 (16, 13) <- 站在 (16, 14), dir=0
+	};
+	std::uint32_t shop_seq = 9100;
+	for (const auto &item_shop_entry : village_shops)
+	{
+		const int s_fl = item_shop_entry.first;
+		const int face_dir = item_shop_entry.second;
+		const NpcEntity *shop_npc = nullptr;
+		for (const auto &n : npcs)
+		{
+			if (n.floor == s_fl && n.type == NpcType::kShop)
+			{
+				shop_npc = &n;
+				break;
+			}
+		}
+		REQUIRE(shop_npc != nullptr);
+		const int px = (face_dir == 6) ? shop_npc->x + 1 : shop_npc->x;
+		const int py = (face_dir == 0) ? shop_npc->y + 1 : shop_npc->y;
+		world.warpPlayerForTest(id, s_fl, px, py);
+		player = world.playerForTest(id);
+		REQUIRE(player != nullptr);
+		player->dir = static_cast<std::uint8_t>(face_dir);
+
+		SA::Domain::EventRequest ev_shop{};
+		ev_shop.dir = static_cast<std::uint32_t>(face_dir);
+		ev_shop.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+		ev_shop.seqno = ++shop_seq;
+		world.onEvent(id, ev_shop);
+		world.tick();
+		CHECK(world.playerHasActiveWindow(id));
+	}
+
+	// 8. 验证四大新手村出入口双向 Warp 传送网络全部打通
+	const std::vector<std::tuple<int, int, int, int, int, int>> village_warp_pairs = {
+	    {1000, 80, 66, 1005, 15, 21},  // 萨姆吉尔村 <-> 医院
+	    {2000, 66, 82, 2005, 10, 16},  // 玛丽娜丝渔村 <-> 医院
+	    {3000, 83, 106, 3005, 10, 15}, // 加加村 <-> 医院
+	    {4000, 100, 80, 4005, 10, 15}  // 卡鲁它那村 <-> 医院
+	};
+	for (const auto &wp_pair : village_warp_pairs)
+	{
+		const int out_fl = std::get<0>(wp_pair);
+		const int out_x = std::get<1>(wp_pair);
+		const int out_y = std::get<2>(wp_pair);
+		const int in_fl = std::get<3>(wp_pair);
+		const int in_x = std::get<4>(wp_pair);
+		const int in_y = std::get<5>(wp_pair);
+
+		world.warpPlayerForTest(id, out_fl, out_x, out_y);
+		auto pos = world.playerPos(id);
+		CHECK_EQ(pos.floor, out_fl);
+
+		// 瞬移至室内目标楼层
+		world.warpPlayerForTest(id, in_fl, in_x, in_y);
+		pos = world.playerPos(id);
+		CHECK_EQ(pos.floor, in_fl);
+		CHECK_EQ(pos.x, in_x);
+		CHECK_EQ(pos.y, in_y);
+
+		// 验证回村传送点合法
+		world.warpPlayerForTest(id, out_fl, out_x, out_y);
+		pos = world.playerPos(id);
+		CHECK_EQ(pos.floor, out_fl);
+		CHECK_EQ(pos.x, out_x);
+		CHECK_EQ(pos.y, out_y);
+	}
 }

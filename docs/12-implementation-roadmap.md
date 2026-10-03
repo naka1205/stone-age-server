@@ -78,6 +78,7 @@ P2/P3 的完成以真实客户端操作和重启后的持久化结果为准；�
 | 10-03 | **阶段 3.1 大世界全量资产批处理管线与地图/NPC/传送门编目落地 (Batch Content Pipeline & World Catalogs)**（§9.0.109：`tools/import_all_world_content.py` 批处理工具链 · 1,185 张有效 LS2MAP 地图解析 · 9,011 条双轨传送网络去重合并 · 3,450 个具名功能 NPC 全量结构化分类（ExChangeMan 861/Enemy 533/TownPeople 531/Shop 360/WarpMan 334/SignBoard 290/Healer 47） · `test_content_catalog.py` 自动化测试 · 全量 CTest 22/22 保持 100% 绿灯） | 阶段 3.2 战中掉线断网保护与重连接管系统落地 |
 | 10-03 | **阶段 3.2 战中掉线断网保护与重连接管系统 (Battle Disconnect Grace & Re-attach System)**（§9.0.110：`disconnectBattleMember` 参战槽位保全 · `advanceBattles` 离线自动防御托管 · 新会话重登接管 `reattachBattle` · 战场快照与回合就绪状态恢复 · `battleOfSession` / `battleOfPlayer` 定位 · `WorldTickTest` 单元测试双向验证 · 全量 CTest 22/22 保持 100% 绿灯） | 阶段 3.3 四大新手村全域场景与社交组队合击网络 |
 | 10-03 | **阶段 3.3 四大新手村全域场景室内外贯通与组队合击协同机制 (Four Villages World & Party Combo Synergy)**（§9.0.111：LS2MAP 原生头部偏移 6 floor ID 解析修复 · 73 张地图（含四大村庄 1000/2000/3000/4000 及室内医院/道具店/村长家等）全量阻挡图装载 · 815 处 Warp 传送网络与 818 个功能 NPC 接入 · 依据官方源码 `battle.c` 还原组队近战合击 Combo 机制 · 伤害累加与 `combo_acted` 协同去重 · `WorldMapTest` 与 `WorldTickTest` 全绿 · 全量 CTest 22/22 保持 100% 绿灯） | 阶段 4.0 客户端原生石刻 UI 资产换装与全域大世界端到端可玩闭环 |
+| 10-03 | **阶段 4.0 客户端原生石刻 UI 质感换装、四大新手村全域交互与双端闭环验证 (Client Stone Aesthetic UI & Four Villages E2E Verification)**（§9.0.112：客户端双层石刻框线、深褐沉降槽与古朴石板底色 · `StoneButton` 按下凹陷视差反馈 · 主界面经典石刻生命/气力槽与状态徽标 · 功能快捷坞与战斗轮盘排版优化 · 四大新手村 1000/2000/3000/4000 医院 Healer 满血满蓝、道具店 Shop 货架结账与传送员 WarpMan 跨村传送双端端到端跑通 · 双端 CTest 全绿） | 阶段 4.1 四大庄园守护战决胜排期与骑乘特权双端端到端可玩演练 |
 
 
 
