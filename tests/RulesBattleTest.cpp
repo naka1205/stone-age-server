@@ -6423,8 +6423,8 @@ TEST_CASE("Phase 6.0: S11 精灵/天使系统纯函数规则与神佑防护测�
 	SUBCASE("角色契约身份匹配")
 	{
 		AngelContractRecord contract{};
-		std::strncpy(contract.angel_name, "天使小使者", sizeof(contract.angel_name) - 1);
-		std::strncpy(contract.hero_name, "传说大勇者", sizeof(contract.hero_name) - 1);
+		std::snprintf(contract.angel_name, sizeof(contract.angel_name), "%s", "天使小使者");
+		std::snprintf(contract.hero_name, sizeof(contract.hero_name), "%s", "传说大勇者");
 
 		CHECK(getPlayerAngelRole("天使小使者", contract) == AngelRole::kAngel);
 		CHECK(getPlayerAngelRole("传说大勇者", contract) == AngelRole::kHero);
