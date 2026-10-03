@@ -1891,7 +1891,70 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **全仓守卫**:
   - `check_module_boundaries.py`, `check_gold_writes.py`, `check_shared_purity.py`, `check_docs_index.py`, `check_dr_table.py`, `check_format.py` 全部一次性绿灯。
 
+---
 
+### 9.0.115 批次 D.8 —— 四大新手村经典成人礼全流程、救父草药支线与生活技能料理/合成制造生态双端闭环验证 (Adult Ceremony, Quests & Lifestyle Crafting E2E)
 
+- **日期**: 2026-10-03
+- **分支**: `master`
+- **目标**: 依据实施计划 Phase 4.3 核心大世界剧情任务引擎与生活技能制造生态闭环规范，在双端落地并验证石器时代 8.0 标志性剧情与生活系统：
+  1. 四大新手村经典成人礼（EventNo: 4）全生命周期闭环（接取委托、差使领玉、满包防爆仓容量门前置防御、交付 15 勾玉换取成人礼首饰、NOWEV/ENDEV 旗标原子交割与永久成人见证）；
+  2. 经典救父草药支线任务（EventNo: 1）全流程闭环（村庄小姑娘委托、咍罗山医生赠药、交付草药、护身符发放、经验与声望奖励原子结算）；
+  3. 生活技能料理烹饪（Cooking）与装备精炼合成（Synthesis）全景闭环（配方注册、状态机互斥：濒死/战斗/摆摊、等级不足/金币不足/材料不足/槽位作弊/食材混杂严格 0 扣减防御、投入材料消耗与产物首空槽复用、声望奖励增加）；
+  4. 客户端表现层增强：`QuestTracker` 扩展成人礼与经典任务元数据及目标动态更新，`PlayerInteraction` 扩展生活技能配方过滤与前置制作门槛校验；
+  5. 双端全量测试 100% 绿灯与静态架构守卫验证。
 
+#### 1. 核心架构与功能落地
 
+1. **四大新手村经典成人礼全生命周期 (`ExChangeMan.cpp` / `WorldNpcDialog.cpp`)**:
+   - **审判官考验发起 (`kRequest`, EventNo 4)**: 等级 $\ge 1$ 玩家与成人礼审判官交互，弹出确认窗口，确认后原子写入 `NOWEV: 4` 进行中状态，下发寻访石像守护差使引导；进行中再次对话展示进度文案；
+   - **差使容量门与仪玉发放 (`kAccept`, NOWEV=4&ITEM!=2417)**: 玩家寻得守护使者；系统在前置容量门（`checkExChangePreconditions`）严格核算背包可用空槽，若空槽不足 15 格（如占用 31 格，仅剩 14 空槽）直接拦截并下发 `item_full_msg`（“如果想要全部的仪玉，就要空出15个空间才可”），杜绝部分发放与吞玉爆仓；背包清理后正向发放 15 枚仪玉（item 2417）；已有仪玉再次对话命中 ITEM!=2417 拦截展示兜底文案，彻底封堵重复领玉漏洞；
+   - **交付仪玉与成人礼见证 (`kAccept`, ITEM=2417*15)**: 玩家返回审判官处，系统原子扣除 15 枚仪玉并核发 1 枚成人礼首饰凭证（item 2418）；原子清除 `NOWEV: 4` 并永久写入 `ENDEV: 4`；
+   - **永久成人特权与敬畏文案 (`kMessage`, ENDEV=4)**: 成人后再次对话命中 Block 2，展示精进自我的成人见证文案。
+
+2. **加鲁卡村庄小姑娘救父草药支线任务闭环 (`WorldNpcDialog.cpp`)**:
+   - **任务接取**: 村庄小姑娘委托前往哈罗山顶取药，接取后写入 `NOWEV: 1`；
+   - **医生赠药**: 咍罗山的医生识别求药委托，赠予救命草药（item 2401）；
+   - **交付与结算**: 返回小姑娘处交付草药，扣除 2401 并赠予护身符（item 2427），原子结算 500 经验与 25 点家族/个人声望奖励，写入 `ENDEV: 1` 永久完成。
+
+3. **生活技能料理烹饪与装备精炼合成全景生态 (`WorldLifestyle.cpp`)**:
+   - **配方注册与多品类管理 (`registerCraftingRecipe`)**: 支持料理（`kCooking`）与精炼合成（`kSynthesis`）独立分类，支持多材料需求、等级要求、手续费要求、产物规格与声望奖励；
+   - **严格状态机互斥与防御拦截**:
+     - 濒死状态（`hp <= 0`）拦截 `kPlayerDead`；
+     - 摆摊状态（`isPlayerVending`）互斥拦截 `kInVending`；
+     - 等级不足拦截 `kLevelTooLow`；
+     - 制作费不足拦截 `kInsufficientGold`（严格 0 扣减）；
+     - 重复槽位防御拦截 `kInvalidSlots`（防刷漏洞防御）；
+     - 材料不足拦截 `kMissingIngredient`（严格 0 扣减）；
+     - 食材与非食材混杂防御拦截 `kTypeMismatch`（合成武器禁止混入料理食材）；
+   - **事务原子性扣减与产物生成**:
+     - 手续费精准扣减（通过 `GoldLedger` 记账 `kCraftFee` 并触发审计）；
+     - 投入材料槽位全额清空并回收，产物道具精准复用背包中释放的首个空槽；
+     - 玩家声望原子累加。
+
+4. **客户端表现层增强与交互状态机 (`QuestTracker.h/.cpp` / `PlayerInteraction.h/.cpp` / `ClientNetTest.cpp`)**:
+   - **`QuestTracker` 扩展**:
+     - 注册成人仪式（`event_no = 4`）与加鲁卡草药（`event_no = 1`）任务元数据；
+     - 支持 `getQuest(event_no)` 获取任务当前生命周期状态（`kNotStarted`、`kInProgress`、`kCompleted`）；
+     - 新增 `updateQuestObjective(event_no, text)` 动态更新进行中目标引导文案；
+   - **`PlayerInteraction` 扩展生活技能**:
+     - 新增 `CraftingIngredientView` 与 `CraftingRecipeView` 配方视图；
+     - 新增 `setAvailableRecipes` 载入配方库，`filterRecipes(type)` 按料理/合成筛选；
+     - 新增 `canCraft(recipe_id, player_level, player_gold, available_materials)` 提供完备的前置红点与条件校验。
+
+#### 2. 验证与门禁
+
+- **服务端单元与端到端测试 (`tests/WorldMapTest.cpp`)**:
+  - 新增 `四大新手村经典成人礼全流程与生活技能制造生态闭环 (Phase 4.3)`：
+    - 验证四大村庄成人礼审判官接取、差使领玉、15 空槽满包前置防御、正向领取 15 仪玉、防刷重复领取拦截、交付换取成人礼首饰、NOWEV/ENDEV 旗标原子交割与成人见证；
+    - 验证加鲁卡救父草药接取、医生赠药、交付获得护身符、500 经验与 25 声望奖励结算闭环；
+    - 验证料理烹饪与装备精炼合成配方注册、濒死/摆摊互斥、等级/金币不足拦截、材料不足 0 扣减、食材混杂拦截、手续费与材料原子扣减、产物入包与声望累加。
+  - 用例数从 159 增至 **160 组**，断言数从 4867 增至 **4918 条**（+51 条断言，100% 成功）。
+  - 全量 CTest 22/22 100% 保持全绿。
+- **客户端单元与协议测试 (`stone-age-client/tests/ClientNetTest.cpp`)**:
+  - 新增 `大世界全域剧情任务引擎与生活技能制造生态闭环 (Phase 4.3)`：
+    - 验证四大村庄成人礼元数据登记、未开始/进行中/已完成状态感知与动态目标文案刷新；
+    - 验证料理与合成配方类型过滤、制作门槛与材料充足性校验。
+  - CI 预设 7/7 100% 绿灯。
+- **全仓守卫**:
+  - `check_module_boundaries.py`, `check_gold_writes.py`, `check_shared_purity.py`, `check_docs_index.py`, `check_dr_table.py`, `check_format.py` 全部一次性绿灯。

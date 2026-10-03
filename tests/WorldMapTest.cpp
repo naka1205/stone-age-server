@@ -10376,3 +10376,534 @@ TEST_CASE("大世界多线摆摊行商网络、拍卖行寄售全景流通与系
 		CHECK_FALSE(f.world.takeMailAttachment(rem_id, sale_mail.mail_id));
 	}
 }
+
+TEST_CASE("四大新手村经典成人礼全流程与生活技能制造生态闭环 (Phase 4.3)")
+{
+	MoveFixture f;
+
+	// ══ 1. 四大村庄经典成人礼全生命周期闭环验证 ══════════════════════════
+	SUBCASE("四大新手村经典成人仪式：接取、差使领玉、满包防御、见证成人与特权闭环")
+	{
+		const auto id = spawnHandshaked(f);
+		auto *p = f.world.playerForTest(id);
+		REQUIRE(p != nullptr);
+		p->floor = 0;
+		p->x = 31;
+		p->y = 30;
+		p->level = 30;
+		p->gold = 10000;
+
+		// 1.1 实例化审判官 (id 9101, (30, 30)) 与 仪式差使 (id 9102, (35, 30))
+		NpcEntity judge_npc{};
+		judge_npc.id = 9101;
+		judge_npc.name = "仪式的审判";
+		judge_npc.floor = 0;
+		judge_npc.x = 30;
+		judge_npc.y = 30;
+		judge_npc.type = NpcType::kExChangeMan;
+
+		// Block 0: ACCEPT, ITEM=2417*15 -> GetItem: 2418, DelItem: 2417*15, EndSetFlg: 4
+		ExChangeBlock j_b0{};
+		j_b0.event_no = 4;
+		j_b0.type = ExChangeType::kAccept;
+		j_b0.condition = "ITEM=2417*15";
+		j_b0.accept_msg = "还挺厉害的嘛！走到这里\n让我来为你进阶为成人做见证";
+		j_b0.thanks_msg = "这么一来，你也是个顶天立地的成人了\n年轻小伙子，为老人尽点力量\n可是精进自我程度的捷径";
+		j_b0.item_full_msg = "啊呀！你的道具袋已经满了";
+		j_b0.get_item = "2418";
+		j_b0.del_item = "2417*15";
+		j_b0.end_set_flg = "4";
+
+		// Block 1: REQUEST, LV>0 -> RequestMsg, thanks_msg
+		ExChangeBlock j_b1{};
+		j_b1.event_no = 4;
+		j_b1.type = ExChangeType::kRequest;
+		j_b1.condition = "LV>0";
+		j_b1.request_msg = "俺可是来考验你是否通过成人\n仪式的审判官\n现在就开始举行成人礼吧！";
+		j_b1.thanks_msg = "在这条路尽头的一尊石像上\n有一块仪之玉的勾玉，请从在仪道中\n的守护使者中，取回１５个来！";
+		j_b1.nomal_window_msg = "任务正在进行中，请加油收集15枚仪玉！";
+
+		// Block 2: MESSAGE, ENDEV=4 -> NomalWindowMsg
+		ExChangeBlock j_b2{};
+		j_b2.event_no = -1;
+		j_b2.type = ExChangeType::kMessage;
+		j_b2.condition = "ENDEV=4";
+		j_b2.nomal_window_msg = "以后也要不断地求进步！才能不愧于成人的身份";
+
+		judge_npc.exchange_blocks = {j_b0, j_b1, j_b2};
+
+		NpcEntity envoy_npc{};
+		envoy_npc.id = 9102;
+		envoy_npc.name = "仪式审判的差使";
+		envoy_npc.floor = 0;
+		envoy_npc.x = 35;
+		envoy_npc.y = 30;
+		envoy_npc.type = NpcType::kExChangeMan;
+		envoy_npc.nomal_main_msg = "我是审判仪式的使者";
+
+		ExChangeBlock e_b0{};
+		e_b0.event_no = 4;
+		e_b0.type = ExChangeType::kAccept;
+		e_b0.condition = "NOWEV=4&ITEM!=2417";
+		e_b0.accept_msg = "你可是来举行仪式？";
+		e_b0.thanks_msg = "那么，给你１５个仪玉";
+		e_b0.item_full_msg = "如果想要全部的仪玉，就要空出15个空间才可";
+		e_b0.get_item = "2417*15";
+		envoy_npc.exchange_blocks = {e_b0};
+
+		f.world.loadNpcEntities({judge_npc, envoy_npc});
+
+		// 1.2 初始状态：未成年，无 NOWEV/ENDEV 旗标
+		CHECK_FALSE(f.world.playerHasNowEvent(id, 4));
+		CHECK_FALSE(f.world.playerHasEndEvent(id, 4));
+
+		// 1.3 面对审判官 (31, 30) 朝向西 (dir 6) 交互，接取成人礼
+		SA::Domain::EventRequest req_talk{};
+		req_talk.dir = 6;
+		req_talk.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+		req_talk.seqno = 101;
+		f.world.onEvent(id, req_talk);
+		f.world.tick();
+
+		REQUIRE(f.world.playerHasActiveWindow(id));
+		CHECK(f.world.playerLastWindowText(id).find("俺可是来考验你是否通过成人") != std::string::npos);
+
+		// 点击确认接取 (YES)
+		SA::Domain::WindowReply reply_yes{};
+		reply_yes.window_id = f.world.playerActiveWindowId(id);
+		reply_yes.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES);
+		f.world.onWindowReply(id, reply_yes);
+		f.world.tick();
+
+		// 验证 NOWEV 4 已经置位，且下发前往收集仪玉的引导文案
+		CHECK(f.world.playerHasNowEvent(id, 4));
+		CHECK_FALSE(f.world.playerHasEndEvent(id, 4));
+		CHECK(f.world.playerLastWindowText(id).find("在这条路尽头的一尊石像上") != std::string::npos);
+
+		// 1.4 进行中再次与审判官交互，判定已在进行中，展示进度文案
+		f.world.onEvent(id, req_talk);
+		f.world.tick();
+		REQUIRE(f.world.playerHasActiveWindow(id));
+		CHECK(f.world.playerLastWindowText(id) == "任务正在进行中，请加油收集15枚仪玉！");
+
+		// 1.5 移动至仪式差使面前 (34, 30)，面向东 (dir 2) 面对差使 (35, 30)
+		p->x = 34;
+		p->y = 30;
+
+		// 1.5.1 负向防爆仓测试：8.0 背包共有 45 个可用槽位，差使发放 15 枚仪玉需至少 15 个空槽。
+		// 先将背包填至只剩 14 个空槽（占用 31 个槽位，从 slot 9 到 slot 39）
+		for (std::size_t s = 0; s < 31; ++s)
+		{
+			SA::Model::Item dummy_item{};
+			dummy_item.item_id = static_cast<std::int32_t>(9901 + s);
+			dummy_item.name.assign("占位道具");
+			f.world.giveItemToPlayer(id, dummy_item);
+		}
+		CHECK(f.world.playerItemSlotsUsed(id) == 31);
+
+		SA::Domain::EventRequest req_envoy{};
+		req_envoy.dir = 2; // 面向东 (35, 30)
+		req_envoy.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+		req_envoy.seqno = 102;
+		f.world.onEvent(id, req_envoy);
+		f.world.tick();
+
+		// 拦截且弹窗提示不足 15 个空间，0 件发放 (前置容量门直接在 onEvent 拦截并展示 item_full_msg)
+		REQUIRE(f.world.playerHasActiveWindow(id));
+		CHECK(f.world.playerLastWindowText(id) == "如果想要全部的仪玉，就要空出15个空间才可");
+		CHECK(f.world.playerItemSlotsUsed(id) == 31);
+
+		// 1.5.2 正向发放：清理背包腾出空槽，成功领取 15 枚仪玉
+		for (std::size_t s = SA::Model::kStartItemArray; s < SA::Model::kStartItemArray + 31; ++s)
+		{
+			p->clearItemSlot(static_cast<int>(s));
+		}
+		CHECK(f.world.playerItemSlotsUsed(id) == 0);
+
+		f.world.onEvent(id, req_envoy);
+		f.world.tick();
+
+		REQUIRE(f.world.playerHasActiveWindow(id));
+		CHECK(f.world.playerLastWindowText(id).find("你可是来举行仪式？") != std::string::npos);
+
+		// 点击确认领取
+		reply_yes.window_id = f.world.playerActiveWindowId(id);
+		f.world.onWindowReply(id, reply_yes);
+		f.world.tick();
+
+		// 成功获得 15 枚仪玉 (item 2417)
+		CHECK(f.world.playerItemSlotsUsed(id) == 15);
+		CHECK(f.world.playerLastWindowText(id) == "那么，给你１５个仪玉");
+
+		// 1.5.3 防刷防重复领取：已有仪玉再次对话，ITEM!=2417 判定不满足，展示兜底文案
+		f.world.onEvent(id, req_envoy);
+		f.world.tick();
+		REQUIRE(f.world.playerHasActiveWindow(id));
+		CHECK(f.world.playerLastWindowText(id) == "我是审判仪式的使者");
+		CHECK(f.world.playerItemSlotsUsed(id) == 15);
+
+		// 1.6 返回审判官处 (31, 30)，面向西 (dir 6) 交付 15 枚仪玉
+		p->x = 31;
+		p->y = 30;
+		f.world.onEvent(id, req_talk);
+		f.world.tick();
+
+		// 此时命中 Block 0 (ITEM=2417*15)
+		REQUIRE(f.world.playerHasActiveWindow(id));
+		CHECK(f.world.playerLastWindowText(id).find("还挺厉害的嘛！走到这里") != std::string::npos);
+
+		// 点击确认完成成人礼见证
+		reply_yes.window_id = f.world.playerActiveWindowId(id);
+		f.world.onWindowReply(id, reply_yes);
+		f.world.tick();
+
+		// 15 枚仪玉全部扣除，获得 1 枚成人礼首饰凭证 (item 2418)
+		CHECK(f.world.playerItemSlotsUsed(id) == 1);
+		const auto *cert = f.world.playerItemAt(id, static_cast<int>(SA::Model::kStartItemArray));
+		REQUIRE(cert != nullptr);
+		CHECK(cert->item_id == 2418);
+
+		// 任务状态机完成交割：NOWEV 4 被清除，ENDEV 4 永久置位
+		CHECK_FALSE(f.world.playerHasNowEvent(id, 4));
+		CHECK(f.world.playerHasEndEvent(id, 4));
+		CHECK(f.world.playerLastWindowText(id).find("这么一来，你也是个顶天立地的成人了") != std::string::npos);
+
+		// 1.7 成人后再次对话：Block 0/1 跳过，命中 Block 2 (ENDEV=4)
+		f.world.onEvent(id, req_talk);
+		f.world.tick();
+		REQUIRE(f.world.playerHasActiveWindow(id));
+		CHECK(f.world.playerLastWindowText(id) == "以后也要不断地求进步！才能不愧于成人的身份");
+	}
+
+	// ══ 2. 加鲁卡村庄小姑娘救父草药任务闭环验证 ══════════════════════════
+	SUBCASE("村庄救父草药任务：接取委托、医生赠药、交付完成、经验声望奖励与旗标闭环")
+	{
+		const auto id = spawnHandshaked(f);
+		auto *p = f.world.playerForTest(id);
+		REQUIRE(p != nullptr);
+		p->floor = 0;
+		p->x = 21;
+		p->y = 20;
+		p->level = 10;
+		p->exp = 0;
+		f.world.setPlayerFame(id, 100);
+
+		// 小姑娘 NPC (id 9103, (20, 20))
+		NpcEntity girl_npc{};
+		girl_npc.id = 9103;
+		girl_npc.name = "村庄小姑娘";
+		girl_npc.floor = 0;
+		girl_npc.x = 20;
+		girl_npc.y = 20;
+		girl_npc.type = NpcType::kExChangeMan;
+
+		ExChangeBlock g_b0{};
+		g_b0.event_no = 1;
+		g_b0.type = ExChangeType::kAccept;
+		g_b0.condition = "NOWEV=1&ITEM=2401";
+		g_b0.accept_msg = "啊！这个草药，太感激你了！";
+		g_b0.thanks_msg = "真的谢谢你，请收下这个护身符！";
+		g_b0.del_item = "2401";
+		g_b0.get_item = "2427";
+		g_b0.end_set_flg = "1";
+		g_b0.add_exp = 500;
+		g_b0.add_fame = 25;
+
+		ExChangeBlock g_b1{};
+		g_b1.event_no = 1;
+		g_b1.type = ExChangeType::kRequest;
+		g_b1.condition = "LV>0";
+		g_b1.request_msg = "家父卧病在床，想请你前往哈罗山顶向医生取回草药，可否帮我？";
+		g_b1.thanks_msg = "万分拜托了！医生就在哈罗山顶。";
+
+		ExChangeBlock g_b2{};
+		g_b2.event_no = -1;
+		g_b2.type = ExChangeType::kMessage;
+		g_b2.condition = "ENDEV=1";
+		g_b2.nomal_window_msg = "你的大恩大德，我一辈子都不会忘记的。";
+
+		girl_npc.exchange_blocks = {g_b0, g_b1, g_b2};
+
+		// 医生 NPC (id 9104, (25, 20))
+		NpcEntity doc_npc{};
+		doc_npc.id = 9104;
+		doc_npc.name = "咍罗山的医生";
+		doc_npc.floor = 0;
+		doc_npc.x = 25;
+		doc_npc.y = 20;
+		doc_npc.type = NpcType::kExChangeMan;
+
+		ExChangeBlock d_b0{};
+		d_b0.event_no = -1;
+		d_b0.type = ExChangeType::kAccept;
+		d_b0.condition = "NOWEV=1&ITEM!=2401";
+		d_b0.accept_msg = "你是来拿救命草药的吗？";
+		d_b0.thanks_msg = "这药草治病特别好，请尽快送给病患！";
+		d_b0.get_item = "2401";
+
+		doc_npc.exchange_blocks = {d_b0};
+
+		f.world.loadNpcEntities({girl_npc, doc_npc});
+
+		// 2.1 面向小姑娘 (21, 20) 面向西 (dir 6) 面对 (20, 20) 接取任务
+		SA::Domain::EventRequest req_girl{};
+		req_girl.dir = 6;
+		req_girl.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+		req_girl.seqno = 201;
+		f.world.onEvent(id, req_girl);
+		f.world.tick();
+
+		REQUIRE(f.world.playerHasActiveWindow(id));
+		CHECK(f.world.playerLastWindowText(id).find("家父卧病在床") != std::string::npos);
+
+		SA::Domain::WindowReply reply_yes{};
+		reply_yes.window_id = f.world.playerActiveWindowId(id);
+		reply_yes.button = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES);
+		f.world.onWindowReply(id, reply_yes);
+		f.world.tick();
+
+		CHECK(f.world.playerHasNowEvent(id, 1));
+		CHECK_FALSE(f.world.playerHasEndEvent(id, 1));
+
+		// 2.2 前往医生处 (24, 20) 面向东 (dir 2) 面对 (25, 20)
+		p->x = 24;
+		p->y = 20;
+		SA::Domain::EventRequest req_doc{};
+		req_doc.dir = 2;
+		req_doc.event_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_NPC);
+		req_doc.seqno = 202;
+		f.world.onEvent(id, req_doc);
+		f.world.tick();
+
+		REQUIRE(f.world.playerHasActiveWindow(id));
+		CHECK(f.world.playerLastWindowText(id).find("你是来拿救命草药的吗？") != std::string::npos);
+
+		reply_yes.window_id = f.world.playerActiveWindowId(id);
+		f.world.onWindowReply(id, reply_yes);
+		f.world.tick();
+
+		// 获得草药 (2401)
+		CHECK(f.world.playerItemSlotsUsed(id) == 1);
+		const auto *herb = f.world.playerItemAt(id, static_cast<int>(SA::Model::kStartItemArray));
+		REQUIRE(herb != nullptr);
+		CHECK(herb->item_id == 2401);
+
+		// 2.3 返回小姑娘处 (21, 20) 交付草药
+		p->x = 21;
+		p->y = 20;
+		f.world.onEvent(id, req_girl);
+		f.world.tick();
+
+		REQUIRE(f.world.playerHasActiveWindow(id));
+		CHECK(f.world.playerLastWindowText(id).find("啊！这个草药，太感激你了！") != std::string::npos);
+
+		reply_yes.window_id = f.world.playerActiveWindowId(id);
+		f.world.onWindowReply(id, reply_yes);
+		f.world.tick();
+
+		// 草药扣除，获得护身符 (2427)
+		CHECK(f.world.playerItemSlotsUsed(id) == 1);
+		const auto *amulet = f.world.playerItemAt(id, static_cast<int>(SA::Model::kStartItemArray));
+		REQUIRE(amulet != nullptr);
+		CHECK(amulet->item_id == 2427);
+
+		// 任务状态机完成交割：500 经验，25 声望奖励，ENDEV 1 写入
+		CHECK(p->exp == 500);
+		CHECK(f.world.playerFame(id) == 125);
+		CHECK_FALSE(f.world.playerHasNowEvent(id, 1));
+		CHECK(f.world.playerHasEndEvent(id, 1));
+
+		// 2.4 完成后再次对话：命中 ENDEV=1
+		f.world.onEvent(id, req_girl);
+		f.world.tick();
+		REQUIRE(f.world.playerHasActiveWindow(id));
+		CHECK(f.world.playerLastWindowText(id) == "你的大恩大德，我一辈子都不会忘记的。");
+	}
+
+	// ══ 3. 生活技能制造生态全景闭环验证 ═════════════════════════════════
+	SUBCASE("生活技能料理烹饪与装备精炼合成：配方注册、状态机互斥、材料/费用事务原子性与产出闭环")
+	{
+		const auto id = spawnHandshaked(f);
+		auto *p = f.world.playerForTest(id);
+		REQUIRE(p != nullptr);
+		p->floor = 0;
+		p->x = 10;
+		p->y = 10;
+		p->level = 30;
+		p->gold = 50000;
+		f.world.setPlayerFame(id, 200);
+
+		// 3.1 配方注册
+		// 料理配方 101: 滋补烤肉排 (需要 2 大肉 item 1001, 1 特制香料 item 1002, 制作费 50 石币, 最低等级 5, 声望奖励 5)
+		CraftingRecipe r_cook{};
+		r_cook.recipe_id = 101;
+		r_cook.type = CraftingType::kCooking;
+		r_cook.name = "滋补烤肉排";
+		r_cook.min_player_level = 5;
+		r_cook.cost_gold = 50;
+		r_cook.result_item_id = 1101;
+		r_cook.result_name = "滋补烤肉排";
+		r_cook.result_count = 1;
+		r_cook.fame_reward = 5;
+		r_cook.ingredients.push_back({1001, 2, "新鲜大肉"});
+		r_cook.ingredients.push_back({1002, 1, "特制香料"});
+		REQUIRE(f.world.registerCraftingRecipe(r_cook));
+
+		// 合成配方 201: 青铜精炼战斧 (需要 3 铜矿 item 2001, 2 硬木 item 2002, 制作费 300 石币, 最低等级 20, 声望奖励 15)
+		CraftingRecipe r_synth{};
+		r_synth.recipe_id = 201;
+		r_synth.type = CraftingType::kSynthesis;
+		r_synth.name = "青铜精炼战斧";
+		r_synth.min_player_level = 20;
+		r_synth.cost_gold = 300;
+		r_synth.result_item_id = 2101;
+		r_synth.result_name = "青铜精炼战斧";
+		r_synth.result_count = 1;
+		r_synth.fame_reward = 15;
+		r_synth.ingredients.push_back({2001, 3, "青铜矿石"});
+		r_synth.ingredients.push_back({2002, 2, "百年硬木"});
+		REQUIRE(f.world.registerCraftingRecipe(r_synth));
+
+		// 3.2 异常与状态机防御拦截验证
+		// 3.2.1 濒死拦截
+		p->hp = 0;
+		CHECK(f.world.craftItem(id, 101, {static_cast<int>(SA::Model::kStartItemArray)}) == CraftingResultCode::kPlayerDead);
+		p->hp = 1000;
+
+		// 3.2.2 摆摊中互斥拦截
+		SA::Model::Item stall_it{};
+		stall_it.item_id = 9999;
+		stall_it.name.assign("测试商品");
+		const int st_slot = f.world.giveItemToPlayer(id, stall_it);
+		REQUIRE(st_slot >= 0);
+		REQUIRE(f.world.openStall(id, "工匠临时摊位"));
+		REQUIRE(f.world.setStallItem(id, st_slot, 100));
+		REQUIRE(f.world.startStallVending(id));
+		CHECK(f.world.isPlayerVending(id));
+		CHECK(f.world.craftItem(id, 101, {st_slot}) == CraftingResultCode::kInVending);
+		f.world.closeStall(id);
+		CHECK_FALSE(f.world.isPlayerVending(id));
+		p->clearItemSlot(st_slot);
+
+		// 3.2.3 等级不足拦截
+		p->level = 3;
+		CHECK(f.world.craftItem(id, 101, {static_cast<int>(SA::Model::kStartItemArray)}) == CraftingResultCode::kLevelTooLow);
+		p->level = 30;
+
+		// 3.2.4 石币不足拦截
+		p->gold = 20; // 制作费需 50
+		CHECK(f.world.craftItem(id, 101, {static_cast<int>(SA::Model::kStartItemArray)}) == CraftingResultCode::kInsufficientGold);
+		p->gold = 50000;
+
+		// 3.2.5 重复槽位防御 (防刷漏洞拦截)
+		CHECK(f.world.craftItem(id, 101, {static_cast<int>(SA::Model::kStartItemArray), static_cast<int>(SA::Model::kStartItemArray)}) == CraftingResultCode::kInvalidSlots);
+
+		// 3.3 给予玩家料理原材料：2 份大肉 (slot 9, 10)，1 份特制香料 (slot 11)
+		// 食材 type = 20
+		SA::Model::Item meat1{};
+		meat1.item_id = 1001;
+		meat1.type = 20; // ITEM_DISH / 食材
+		meat1.name.assign("新鲜大肉");
+		const int s_m1 = f.world.giveItemToPlayer(id, meat1);
+		REQUIRE(s_m1 >= 0);
+
+		SA::Model::Item meat2{};
+		meat2.item_id = 1001;
+		meat2.type = 20;
+		meat2.name.assign("新鲜大肉");
+		const int s_m2 = f.world.giveItemToPlayer(id, meat2);
+		REQUIRE(s_m2 >= 0);
+
+		SA::Model::Item spice{};
+		spice.item_id = 1002;
+		spice.type = 20;
+		spice.name.assign("特制香料");
+		const int s_sp = f.world.giveItemToPlayer(id, spice);
+		REQUIRE(s_sp >= 0);
+
+		// 3.3.1 材料不足拦截：只放入 1 份大肉和 1 份香料（缺少 1 份大肉）
+		CHECK(f.world.craftItem(id, 101, {s_m1, s_sp}) == CraftingResultCode::kMissingIngredient);
+		CHECK(p->gold == 50000); // 严格 0 扣减
+
+		// 3.3.2 正向料理制作成功：
+		const auto gold_before_cook = p->gold;
+		const auto fame_before_cook = f.world.playerFame(id);
+		auto cook_res = f.world.craftItem(id, 101, {s_m1, s_m2, s_sp});
+		REQUIRE(cook_res == CraftingResultCode::kSuccess);
+
+		// 手续费 50 石币精确扣除，声望 +5
+		CHECK(p->gold == gold_before_cook - 50);
+		CHECK(f.world.playerFame(id) == fame_before_cook + 5);
+
+		// 投入材料槽位被清空消费，产物复用首个空槽 (s_m1 = kStartItemArray)
+		REQUIRE(f.world.playerItemAt(id, s_m1) != nullptr);
+		CHECK(f.world.playerItemAt(id, s_m1)->item_id == 1101);
+		CHECK(f.world.playerItemAt(id, s_m2) == nullptr);
+		CHECK(f.world.playerItemAt(id, s_sp) == nullptr);
+
+		// 生成产物道具：滋补烤肉排 (item 1101)
+		CHECK(f.world.playerItemSlotsUsed(id) == 1);
+		const auto *dish = f.world.playerItemAt(id, static_cast<int>(SA::Model::kStartItemArray));
+		REQUIRE(dish != nullptr);
+		CHECK(dish->item_id == 1101);
+
+		// 3.4 装备精炼合成生态测试
+		// 给予 3 块铜矿石 (item 2001, type 0) 与 2 块百年硬木 (item 2002, type 0)
+		SA::Model::Item ore1{};
+		ore1.item_id = 2001;
+		ore1.type = 0;
+		ore1.name.assign("青铜矿石");
+		SA::Model::Item ore2{};
+		ore2.item_id = 2001;
+		ore2.type = 0;
+		ore2.name.assign("青铜矿石");
+		SA::Model::Item ore3{};
+		ore3.item_id = 2001;
+		ore3.type = 0;
+		ore3.name.assign("青铜矿石");
+		SA::Model::Item wood1{};
+		wood1.item_id = 2002;
+		wood1.type = 0;
+		wood1.name.assign("百年硬木");
+		SA::Model::Item wood2{};
+		wood2.item_id = 2002;
+		wood2.type = 0;
+		wood2.name.assign("百年硬木");
+
+		const int s_o1 = f.world.giveItemToPlayer(id, ore1);
+		const int s_o2 = f.world.giveItemToPlayer(id, ore2);
+		const int s_o3 = f.world.giveItemToPlayer(id, ore3);
+		const int s_w1 = f.world.giveItemToPlayer(id, wood1);
+		const int s_w2 = f.world.giveItemToPlayer(id, wood2);
+		REQUIRE(s_o1 >= 0);
+		REQUIRE(s_o2 >= 0);
+		REQUIRE(s_o3 >= 0);
+		REQUIRE(s_w1 >= 0);
+		REQUIRE(s_w2 >= 0);
+
+		// 3.4.1 食材与非食材混杂防御：合成中混入食材 (dish type 20) -> kTypeMismatch
+		const int s_dish_slot = static_cast<int>(SA::Model::kStartItemArray);
+		CHECK(f.world.craftItem(id, 201, {s_o1, s_o2, s_o3, s_w1, s_dish_slot}) == CraftingResultCode::kTypeMismatch);
+		CHECK(p->gold == gold_before_cook - 50); // 严格 0 扣减
+
+		// 3.4.2 正向合成精炼成功：投入 3 矿石 + 2 硬木，扣除 300 石币，声望 +15
+		const auto gold_before_synth = p->gold;
+		const auto fame_before_synth = f.world.playerFame(id);
+		auto synth_res = f.world.craftItem(id, 201, {s_o1, s_o2, s_o3, s_w1, s_w2});
+		REQUIRE(synth_res == CraftingResultCode::kSuccess);
+
+		CHECK(p->gold == gold_before_synth - 300);
+		CHECK(f.world.playerFame(id) == fame_before_synth + 15);
+
+		// 原材料清空，背包中拥有：烤肉排 (1101) 与 青铜精炼战斧 (2101)
+		CHECK(f.world.playerItemSlotsUsed(id) == 2);
+		bool found_axe = false;
+		for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+		{
+			const auto *it = f.world.playerItemAt(id, static_cast<int>(i));
+			if (it && it->item_id == 2101)
+				found_axe = true;
+		}
+		CHECK(found_axe);
+	}
+}
