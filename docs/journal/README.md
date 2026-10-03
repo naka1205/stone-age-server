@@ -22,9 +22,9 @@
 | [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
 | [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
 | [`18-petskill.md`](18-petskill.md) | 宠技三连发:B1 直攻系 · B2 宠技槽 + CHARGE · B3 状态系 + 铁壁 · A-δ 特殊宠技 | 4 |
-| [`90-push-windows.md`](90-push-windows.md) | 二十六次 `shared-v0.x.0` 推送窗口与远端同步的闭合核实 | 26 |
+| [`90-push-windows.md`](90-push-windows.md) | 二十七次 `shared-v0.x.0` 推送窗口与远端同步的闭合核实 | 27 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **131** |
+| **合计** | | **132** |
 
 ## 全量映射表(按编号)
 
@@ -161,6 +161,7 @@
 | §9.0.116 | 阶段 4.4 —— 宠物转生与融合进阶生态、声望商城与称号加成大世界双端全流程贯通验证 (Pet Fusion/Rebirth, Titles & Fame Shop E2E): 三宠/两宠融合全流程 · 继承主副宠技能与资质 · 摆摊/出战/同槽多重状态互斥 · 100级宠物转生与辅助宠原子销毁 · 五次方成长资质重算与转生次数累加 · 声望商城兑换称号/道具/宠物 · 声望不足/已拥有/满包/满宠严格0扣减防御 · 称号佩戴声望门限与四维攻防敏加成即时生效与卸下收口 · 双端测试全绿 · RV反向变异实证通过 | 2026-10-03 | [`13-world.md`](13-world.md) |
 | §9.0.117 | 阶段 4.5 —— 双端全量远端同步与推送窗口闭合记录 (Remote Synchronization & Push Window Closure): 服务端 master (6a4d54a) 与客户端 master (69ab3a4) 双端全量 43+30 commits 远端同步 · shared-v0.36.0..v0.42.0 全量 7 个 release tag 同步推送至 GitHub · 远端 HEAD 零积压零分叉 · watched 路径纯洁性确认无漂移 · 双端全量 CTest 保持全绿 | 2026-10-03 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.118 | 阶段 5.0 —— S19 攻击魔法与精灵术全管线 (MultiList Target & Magic Rules Engine): 多目标展开 expandMultiTarget 1:1 复刻原版 BATTLE_MultiList (单体/整侧/全体/前后排灭绝回退/贯穿穿透) · checkSameSide 升级接入多目标判断 · 四系攻击魔法通用计算 computeMagicDamage (地水火风相克倍率、属性加权、精神力抗性压制) · 魔法闪避判定 rollMagicDodge · 恩惠恢复/净化/反转精灵术 · rules_battle 174 组/3,338 断言全部绿灯 · RV-1 反向变异验证通过 | 2026-10-03 | [`10-battle-core.md`](10-battle-core.md) |
+| §9.0.118b | 阶段 5.0 —— 推送窗口执行记录 shared-v0.43.0: shared/rules/ 攻击魔法与精灵术规则引擎改动与客户端 pin 同步闭环 | 2026-10-03 | [`90-push-windows.md`](90-push-windows.md) |
 
 
 

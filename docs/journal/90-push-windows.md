@@ -880,4 +880,29 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 - 静态架构守卫脚本（`check_docs_index.py`, `check_module_boundaries.py`, `check_gold_writes.py`, `check_format.py`）全部一次性绿灯。
 - 远端分支零积压、零冲突、零分叉，阶段 4 顺利完成收官。
 
+---
+
+### 9.0.118b ★ 推送窗口执行记录 —— `shared-v0.43.0`(2026-10-03)
+
+> **本窗口前推范围**: 阶段 5.0（S19 攻击魔法与精灵术全管线，§9.0.118），涉及 watched 路径 `shared/rules/Battle.h`、`shared/rules/Battle.cpp` 与 `shared/rules/Constants.h`。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `shared-v0.43.0`（附注 tag，subject「Release shared-v0.43.0: Phase 5.0 MultiList Target & Magic Rules Engine」） |
+| client master | pin v0.42.0 → **v0.43.0**（`cmake/SaShared.cmake`，提交 `8951b90`） |
+| client 本机验证 | **8 项全过**（engine 8/8 100% 绿灯，D2 规则编译 0 漂移告警） |
+| server 本机验证 | **22 项全过**（CTest 22/22 100% 绿灯，4 大守卫全部通过，RV-1 反向验证通过） |
+| 两端用例集一致性 | D2「一份规则两端编译」完整闭环 |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/rules/Constants.h`: 新增多目标常数（`kTargetSide0` 至 `kTargetThrough`）与 `MagicElement` 元素枚举；
+  - `shared/rules/Battle.h`: 声明多目标展开 `expandMultiTarget`、魔法闪避判定 `rollMagicDodge`、通用四系伤害 `computeMagicDamage` 及恢复/净化/反转精灵术；
+  - `shared/rules/Battle.cpp`: 1:1 还原原版多目标展开算法、灭绝自动回退与贯穿同列穿透；还原四系伤害相克矩阵与精神力压制。
+- **守卫闭环**:
+  - 服务端打附注 tag `shared-v0.43.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.43.0`，保持双端 CI 100% 绿灯。
+
 
