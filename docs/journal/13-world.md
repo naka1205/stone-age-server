@@ -2011,3 +2011,50 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **全仓守卫**:
   - `check_module_boundaries.py`, `check_gold_writes.py`, `check_shared_purity.py`, `check_docs_index.py`, `check_dr_table.py`, `check_format.py` 全部一次性绿灯。
 
+---
+
+### 9.0.121 阶段 6.0 —— S11 精灵/天使系统架构落地与双向瞬移契约管线 (Angel & Spirit System Pipeline)
+
+> **本批聚焦**: 落实 `docs/13-d8-coverage.md` 第 11 行 S11 精灵/天使系统（Angel/Spirit System）核心功能。基于 `shared/rules/Angel.h/cpp` 零堆分配纯函数与 `src/world/WorldAngel.cpp` 契约管线，实现使命发布、契约签订、双向瞬移召唤、使者信物遇敌抑制（`isAngelModeActive` 1:1 对齐原版 `CHAR_WORKANGELMODE`）、神佑防御/减伤守护（15% 防御增益 / 10% 最终伤害减免）以及双向独立交付领奖闭环。
+
+#### 1. 架构设计与实现
+
+1. **L3 规则层纯函数与数据模型 (`shared/rules/Angel.h` / `Angel.cpp`)**:
+   - `AngelRole`（None, Messenger/使者, Hero/勇者）；
+   - `AngelMissionStage`（None, Summoned, Accepted, Completed）；
+   - `AngelWarpResult` 传送门禁诊断枚举；
+   - 基础常量：`kAngelTokenItemId = 2884`（使者信物）、`kHeroTokenItemId = 2885`（勇者信物）、`kAngelDamageReductionBps = 1000`（10% 减伤）、`kAngelDefenseBonusBps = 1500`（15% 防御增益）；
+   - 纯函数矩阵：
+     - `isEligibleForAngelMission`：资格与等级门限判定；
+     - `hasAngelMissionExpired`：基于绝对时间戳的使命超时判定；
+     - `canUseAngelTokenToWarp`：瞬移传唤前置条件门禁校验（等级、存活、非战斗、角色与契约阶段校验）；
+     - `calculateSpiritBlessingDamageReduction` 与 `calculateSpiritBlessingDefenseBonus`：神佑减伤与防御力增益纯函数计算；
+     - `isWildEncounterSuppressed`：遇敌抑制状态机。
+2. **战中神佑守护接入 (`shared/rules/Combatant.h` / `Battle.cpp`)**:
+   - `CombatModifiers` 扩充 `bool spirit_blessing`；
+   - `Battle.cpp` 伤害结算中注入 `calculateSpiritBlessingDamageReduction` 与防御力加成。
+3. **大世界契约管线与运行时 (`src/world/WorldAngel.cpp` / `WorldImpl.h`)**:
+   - `WorldImpl` 维护使命注册表 `angel_missions_` 与活跃契约字典 `angel_contracts_`；
+   - `registerAngelMission`：支持神使 NPC 登记天使使命，配置所需道具、目标怪物击杀数与时限；
+   - `createAngelContract` / `acceptAngelContract`：使者接取契约并指定勇者伙伴，生成唯一契约记录并向使者分发使者信物（2884）；勇者确认接取后分发勇者信物（2885）；
+   - `useAngelToken`：持有信物使用瞬移拉取伙伴，双向同步跨地图传送与视野广播；
+   - `isAngelTokenEquipped` 与 `isAngelModeActive`：使者穿戴信物（首饰槽位 4）激活天使模式；
+   - `WorldMovement.cpp`：移动步进暗雷检测中若 `isAngelModeActive` 为真，`eff_cep` 遭遇概率归零，实现 100% 暗雷遇敌抑制；
+   - `WorldBattle.cpp`：开战投影向战斗者实体注入 `s.hasSpiritBlessing(mid)`；
+   - `claimAngelReward`：使者与勇者各自独立前往神使交付领奖，支持独立 `angel_claimed` 与 `hero_claimed` 状态追踪，双方均交付后契约标记 `kCompleted`。
+
+#### 2. 验证与反向变异双证据
+
+- **单元与规则测试 (`tests/RulesBattleTest.cpp`)**:
+  - 新增 `Phase 6.0: S11 精灵/天使系统纯函数规则与神佑防护测试`；
+  - 用例数增至 **178 组**，断言数增至 **3,408 条**（全绿）；
+  - **RV-Angel-1 反向变异**：破坏神佑减伤公式（基准减伤改为 0），实证精确捕获 2 处测试断言失败。
+- **大世界集成测试 (`tests/WorldMapTest.cpp`)**:
+  - 新增 3 组集成用例：`使命注册与契约建立/信物发放`、`使者模式暗雷抑制与神佑战斗防护`、`双向瞬移传唤与独立交付领奖`；
+  - 用例数增至 **153 组**，断言数增至 **2,731 条**（全绿）；
+  - **RV-Angel-2 反向变异**：破坏瞬移坐标对齐精度，实证精确捕获坐标断言失败。
+- **纯度与质量守卫**:
+  - `check_shared_purity.py` 30/30 纯净（零堆分配、零外部依赖）；
+  - 全套 CTest 22/22 100% 绿灯通过；
+  - `check_format.py` 代码格式 100% 合规。
+

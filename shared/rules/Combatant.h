@@ -129,6 +129,9 @@ struct CombatModifiers
 	//   (`magic_status_of_slot`,宠技 id 552 施加)逐行动投影进来 —— 见 World.cpp。
 	bool super_wall = false;
 
+	// ★ 精灵/天使神佑守护开关 (S11 精灵/天使系统, 战中精灵庇佑减伤)
+	bool spirit_blessing = false;
+
 	// ── 捕获(§6.2,批次 A.2)────────────────────────────────────
 	//
 	// ⚠️★ 这四个都只在**守方为敌人**时才有意义,但字段落在通用 `CombatModifiers`

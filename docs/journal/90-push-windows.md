@@ -932,5 +932,31 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 - **守卫闭环**:
   - 服务端打附注 tag `shared-v0.44.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.44.0`，保持双端 CI 100% 绿灯。
 
+---
+
+### 9.0.121b ★ 推送窗口执行记录 —— `shared-v0.45.0`(2026-10-03)
+
+> **本窗口前推范围**: 阶段 6.0（S11 精灵/天使系统架构落地与双向瞬移契约管线，§9.0.121），涉及 watched 路径 `shared/rules/Angel.h`、`shared/rules/Angel.cpp`、`shared/rules/Combatant.h`、`shared/rules/Battle.cpp` 与 `shared/CMakeLists.txt`。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `shared-v0.45.0`（附注 tag，subject「Release shared-v0.45.0: Phase 6.0 S11 Angel System & Spirit Blessing Protection」） |
+| client master | pin v0.44.0 → **v0.45.0**（`cmake/SaShared.cmake`） |
+| client 本机验证 | **7 项全过**（d2 7/7 100% 绿灯，D2 规则编译 0 漂移告警） |
+| server 本机验证 | **22 项全过**（CTest 22/22 100% 绿灯，4 大守卫全部通过，RV-Angel-1/2 反向验证通过） |
+| 两端用例集一致性 | D2「一份规则两端编译」完整闭环（178 组黄金用例一致） |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/rules/Angel.h` / `Angel.cpp`: 落地天使使者/勇者契约、超时判定、瞬移传送门禁纯函数、神佑减伤/防御增益纯函数与遇敌抑制纯函数；
+  - `shared/rules/Combatant.h`: `CombatModifiers` 扩充 `spirit_blessing` 神佑标记；
+  - `shared/rules/Battle.cpp`: 战斗受击结算接入 `calculateSpiritBlessingDamageReduction` 与 15% 防御力增益加成；
+  - `shared/CMakeLists.txt`: 将 `rules/Angel.cpp` 注册进共享规则库 `sa_shared`。
+- **守卫闭环**:
+  - 服务端打附注 tag `shared-v0.45.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.45.0`，保持双端 CI 100% 绿灯。
+
 
 

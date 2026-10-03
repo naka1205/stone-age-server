@@ -932,7 +932,8 @@ bool World::triggerEncounter(SA::Net::SessionId session, std::int32_t area_row)
 		const auto mid = battle_party_members[idx];
 		field.at(static_cast<int>(idx)) = makePlayerCombatant(s.players.resolve(s.player_of_session.find(mid)),
 		                                                      playerEquipModifiers(mid),
-		                                                      s.getRidingPet(mid));
+		                                                      s.getRidingPet(mid),
+		                                                      s.hasSpiritBlessing(mid));
 	}
 
 	const BattleId battle = startBattle(field);
@@ -1025,7 +1026,8 @@ bool World::triggerNpcEnemyBattle(SA::Net::SessionId session, std::size_t world_
 		const auto mid = battle_party_members[idx];
 		field.at(static_cast<int>(idx)) = makePlayerCombatant(s.players.resolve(s.player_of_session.find(mid)),
 		                                                      playerEquipModifiers(mid),
-		                                                      s.getRidingPet(mid));
+		                                                      s.getRidingPet(mid),
+		                                                      s.hasSpiritBlessing(mid));
 	}
 
 	const BattleId battle = startBattle(field);

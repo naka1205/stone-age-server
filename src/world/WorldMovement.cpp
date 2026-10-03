@@ -360,6 +360,12 @@ void World::advanceMovement()
 					}
 				}
 
+				// ★ S11 精灵/天使系统: 装备使者信物或处于天使神佑模式时遇敌率完全抑制 (原 CHAR_WORKANGELMODE)
+				if (s.isAngelModeActive(kv.first))
+				{
+					eff_cep = 0;
+				}
+
 				// 掷骰(encount.c:267 `RAND(0, max_prob) < temp`,csa8.0 max_prob 写死 120):
 				//   ★ 随机源经 world_rng(00 §4.2 统一管线)。
 				//   enemy_action >100 ⇒ 乘法放大分母 ⇒ 遇敌概率成反比下降。

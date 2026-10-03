@@ -11239,3 +11239,269 @@ TEST_CASE("大世界宠物转生与融合进阶生态、声望商城与称号加
 		CHECK(f.world.playerTitleBonus(id).bonus_hp == 0);
 	}
 }
+
+// ══ 阶段 2: S11 精灵/天使系统契约闭环与大世界神佑传送 (批次 §9.0.122) ══════════════
+
+TEST_CASE("§9.0.122: S11 精灵/天使系统使命注册、契约生成与答复分发闭环")
+{
+	MoveFixture f;
+
+	// 注册使命模板
+	SA::Rules::AngelMissionDefinition mission{};
+	mission.id = 101;
+	mission.min_hero_level = 80;
+	mission.limit_seconds = 3600;
+	std::snprintf(mission.name, sizeof(mission.name), "净化深渊魔兽");
+	std::snprintf(mission.detail, sizeof(mission.detail), "前往深渊封印裂隙击退魔物首领");
+	REQUIRE(f.world.registerAngelMission(mission));
+	CHECK(f.world.findAngelMission(101) != nullptr);
+	CHECK(f.world.allAngelMissions().size() == 1);
+
+	// 创建两位角色: 使者(等级 35), 勇者(等级 85), 路人甲(等级 20)
+	const auto sid_angel = f.spawn();
+	const auto sid_hero = f.spawn();
+	const auto sid_other = f.spawn();
+
+	f.world.setPlayerName(sid_angel, "AngelPlayer");
+	f.world.setPlayerName(sid_hero, "HeroPlayer");
+	f.world.setPlayerName(sid_other, "PasserBy");
+
+	auto *angel_p = f.world.playerForTest(sid_angel);
+	auto *hero_p = f.world.playerForTest(sid_hero);
+	auto *other_p = f.world.playerForTest(sid_other);
+	REQUIRE(angel_p != nullptr);
+	REQUIRE(hero_p != nullptr);
+	REQUIRE(other_p != nullptr);
+
+	angel_p->level = 35;
+	hero_p->level = 85;
+	other_p->level = 20;
+
+	// 1. 等级资格不符拦截测试
+	// 试图让等级仅 20 的路人甲作为使者 => 失败
+	CHECK(f.world.createAngelContract(sid_other, sid_hero, 101) == 0);
+	// 试图让等级仅 35 的玩家作为勇者 => 失败
+	CHECK(f.world.createAngelContract(sid_angel, sid_other, 101) == 0);
+
+	// 2. 正向创建契约
+	const std::uint64_t cid = f.world.createAngelContract(sid_angel, sid_hero, 101);
+	REQUIRE(cid > 0);
+
+	// 角色身份判定
+	CHECK(f.world.playerAngelRole(sid_angel) == SA::Rules::AngelRole::kAngel);
+	CHECK(f.world.playerAngelRole(sid_hero) == SA::Rules::AngelRole::kHero);
+	CHECK(f.world.playerAngelRole(sid_other) == SA::Rules::AngelRole::kNone);
+
+	const auto *contract = f.world.playerAngelContract(sid_angel);
+	REQUIRE(contract != nullptr);
+	CHECK(contract->contract_id == cid);
+	CHECK(contract->mission_id == 101);
+	CHECK(contract->stage == SA::Rules::AngelMissionStage::kWaitAnswer);
+	CHECK(std::string(contract->angel_name) == "AngelPlayer");
+	CHECK(std::string(contract->hero_name) == "HeroPlayer");
+
+	// 重复创建契约被拦截 (双方已在契约中)
+	CHECK(f.world.createAngelContract(sid_angel, sid_hero, 101) == 0);
+
+	// 3. 背包空间栏位拦截测试: 至少需要 2 个空格 (原 char_angel.c:337)
+	// 将使者背包填满，仅留 1 个空格 (44 个道具)
+	for (int i = 0; i < 44; ++i)
+	{
+		f.world.giveItemToPlayer(sid_angel, makeTestItem(9999));
+	}
+	CHECK_FALSE(f.world.acceptAngelContract(sid_angel));
+
+	// 清出一个空格，使者背包腾出 >= 2 个空格
+	angel_p->clearItemSlot(static_cast<int>(SA::Model::kStartItemArray));
+
+	// 4. 使者答复接受契约
+	REQUIRE(f.world.acceptAngelContract(sid_angel));
+
+	// 验证契约迁入 kDoing 阶段
+	CHECK(contract->stage == SA::Rules::AngelMissionStage::kDoing);
+
+	// 验证使者背包中获得使者信物 (2884) 与勇者信物 (2885)
+	bool has_angel_token = false;
+	bool has_hero_token = false;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		if (const auto *item = f.world.playerItemAt(sid_angel, static_cast<int>(i)))
+		{
+			if (item->item_id == SA::Rules::kAngelTokenItemId)
+				has_angel_token = true;
+			if (item->item_id == SA::Rules::kHeroTokenItemId)
+				has_hero_token = true;
+		}
+	}
+	CHECK(has_angel_token);
+	CHECK(has_hero_token);
+}
+
+TEST_CASE("§9.0.122: S11 精灵/天使系统大世界暗雷抑制与神佑状态")
+{
+	MoveFixture f;
+
+	const auto sid = f.spawn();
+	f.world.setPlayerName(sid, "BlessedPlayer");
+	auto *p = f.world.playerForTest(sid);
+	REQUIRE(p != nullptr);
+	p->level = 50;
+
+	// 初始状态未装备使者信物
+	CHECK_FALSE(f.world.isAngelModeActive(sid));
+	CHECK_FALSE(f.world.hasSpiritBlessing(sid));
+
+	// 给玩家放入使者信物 (2884, 饰品类 type=11)
+	auto test_token = makeTestItem(SA::Rules::kAngelTokenItemId);
+	test_token.type = 11;
+	int slot = f.world.giveItemToPlayer(sid, test_token);
+	REQUIRE(slot >= static_cast<int>(SA::Model::kStartItemArray));
+
+	// 穿戴至装备栏 (自动分配到饰品槽 4)
+	REQUIRE(f.world.equipItem(sid, slot, -1));
+
+	// 验证使者模式即时激活 (原 CHAR_WORKANGELMODE)
+	CHECK(f.world.isAngelModeActive(sid));
+	CHECK(f.world.hasSpiritBlessing(sid));
+
+	// 卸下信物 (饰品槽 4)
+	REQUIRE(f.world.unequipItem(sid, 4));
+	CHECK_FALSE(f.world.isAngelModeActive(sid));
+	CHECK_FALSE(f.world.hasSpiritBlessing(sid));
+}
+
+TEST_CASE("§9.0.122: S11 精灵/天使系统信物瞬移传送、使命达成与领奖结算闭环")
+{
+	MoveFixture f;
+
+	// 注册使命
+	SA::Rules::AngelMissionDefinition mission{};
+	mission.id = 102;
+	mission.min_hero_level = 80;
+	mission.limit_seconds = 7200;
+	std::snprintf(mission.name, sizeof(mission.name), "封魔使命");
+	std::snprintf(mission.detail, sizeof(mission.detail), "前往指定禁地铲除魔兽爪牙");
+	REQUIRE(f.world.registerAngelMission(mission));
+
+	const auto sid_angel = f.spawn();
+	const auto sid_hero = f.spawn();
+	const auto sid_other = f.spawn();
+
+	f.world.setPlayerName(sid_angel, "AngelBob");
+	f.world.setPlayerName(sid_hero, "HeroAlice");
+	f.world.setPlayerName(sid_other, "Stranger");
+
+	auto *angel_p = f.world.playerForTest(sid_angel);
+	auto *hero_p = f.world.playerForTest(sid_hero);
+	auto *other_p = f.world.playerForTest(sid_other);
+	REQUIRE(angel_p != nullptr);
+	REQUIRE(hero_p != nullptr);
+	REQUIRE(other_p != nullptr);
+
+	angel_p->floor = 100;
+	angel_p->x = 15;
+	angel_p->y = 25;
+	angel_p->level = 40;
+
+	hero_p->floor = 100;
+	hero_p->x = 45;
+	hero_p->y = 55;
+	hero_p->level = 90;
+
+	other_p->floor = 100;
+	other_p->x = 5;
+	other_p->y = 5;
+	other_p->level = 90;
+
+	// 创建并答复契约
+	const auto cid = f.world.createAngelContract(sid_angel, sid_hero, 102);
+	REQUIRE(cid > 0);
+	REQUIRE(f.world.acceptAngelContract(sid_angel));
+
+	// 模拟使者把勇者信物转交给勇者
+	f.world.giveItemToPlayer(sid_hero, makeTestItem(SA::Rules::kHeroTokenItemId));
+
+	// 1. 信物状态查看
+	// 使者使用使者信物查询进度
+	auto res_angel_view = f.world.useAngelToken(sid_angel, SA::Rules::kAngelTokenItemId);
+	CHECK(res_angel_view.success);
+	CHECK_FALSE(res_angel_view.teleported);
+	CHECK(res_angel_view.message.find("HeroAlice") != std::string::npos);
+
+	// 勇者使用勇者信物查询进度
+	auto res_hero_view = f.world.useAngelToken(sid_hero, SA::Rules::kHeroTokenItemId);
+	CHECK(res_hero_view.success);
+	CHECK_FALSE(res_hero_view.teleported);
+	CHECK(res_hero_view.message.find("使命是消灭指定魔物") != std::string::npos);
+
+	// 路人甲试图使用信物 => 拦截
+	f.world.giveItemToPlayer(sid_other, makeTestItem(SA::Rules::kHeroTokenItemId));
+	auto res_other = f.world.useAngelToken(sid_other, SA::Rules::kHeroTokenItemId);
+	CHECK_FALSE(res_other.success);
+	CHECK(res_other.warp_result == SA::Rules::AngelWarpResult::kTargetNotPartner);
+
+	// 2. 双向瞬移传送
+	// 2.1 勇者持使者信物瞬移至使者身边:
+	// 给勇者一份使者信物
+	f.world.giveItemToPlayer(sid_hero, makeTestItem(SA::Rules::kAngelTokenItemId));
+
+	auto res_hero_warp = f.world.useAngelToken(sid_hero, SA::Rules::kAngelTokenItemId);
+	REQUIRE(res_hero_warp.success);
+	CHECK(res_hero_warp.teleported);
+	auto hero_pos = f.world.playerPos(sid_hero);
+	CHECK(hero_pos.floor == 100);
+	CHECK(hero_pos.x == 15);
+	CHECK(hero_pos.y == 25);
+
+	// 2.2 使者持勇者信物瞬移至勇者身边:
+	// 将勇者移动至 (100, 33, 44)
+	hero_p->x = 33;
+	hero_p->y = 44;
+
+	auto res_angel_warp = f.world.useAngelToken(sid_angel, SA::Rules::kHeroTokenItemId);
+	REQUIRE(res_angel_warp.success);
+	CHECK(res_angel_warp.teleported);
+	auto angel_pos = f.world.playerPos(sid_angel);
+	CHECK(angel_pos.floor == 100);
+	CHECK(angel_pos.x == 33);
+	CHECK(angel_pos.y == 44);
+
+	// 2.3 组队门禁拦截: 使者组队中无法使用勇者信物瞬移传送
+	const auto sid_teammate = f.spawn();
+	auto *teammate_p = f.world.playerForTest(sid_teammate);
+	REQUIRE(teammate_p != nullptr);
+	teammate_p->level = 50;
+	teammate_p->floor = 100;
+	teammate_p->x = 33;
+	teammate_p->y = 44;
+	REQUIRE(f.world.joinParty(sid_teammate, sid_angel));
+	auto res_party_blocked = f.world.useAngelToken(sid_angel, SA::Rules::kHeroTokenItemId);
+	CHECK_FALSE(res_party_blocked.success);
+	CHECK(res_party_blocked.warp_result == SA::Rules::AngelWarpResult::kInPartyBlocked);
+	f.world.leaveParty(sid_teammate);
+
+	// 3. 勇者达成使命
+	REQUIRE(f.world.completeHeroMission(sid_hero));
+	const auto *contract = f.world.playerAngelContract(sid_hero);
+	REQUIRE(contract != nullptr);
+	CHECK(contract->stage == SA::Rules::AngelMissionStage::kHeroComplete);
+
+	// 达成使命后再查询信物提示领奖
+	auto res_hero_reward_msg = f.world.useAngelToken(sid_hero, SA::Rules::kHeroTokenItemId);
+	CHECK(res_hero_reward_msg.success);
+	CHECK(res_hero_reward_msg.message.find("可以去领奖了") != std::string::npos);
+
+	// 4. 前往神使处交付信物与领奖闭环
+	const std::int32_t angel_gold_before = f.world.playerGold(sid_angel);
+	const std::int32_t hero_gold_before = f.world.playerGold(sid_hero);
+
+	REQUIRE(f.world.claimAngelRewards(sid_angel));
+	CHECK(f.world.playerGold(sid_angel) == angel_gold_before + 50000);
+
+	REQUIRE(f.world.claimAngelRewards(sid_hero));
+	CHECK(f.world.playerGold(sid_hero) == hero_gold_before + 50000);
+
+	// 契约顺利结案并重置
+	CHECK(f.world.playerAngelContract(sid_angel) == nullptr);
+	CHECK(f.world.playerAngelContract(sid_hero) == nullptr);
+}

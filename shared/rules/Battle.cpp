@@ -34,7 +34,7 @@
 //   (与 DR-BT14「被动宠技 B80 命中 0/12」一致)。
 
 #include "rules/Battle.h"
-
+#include "rules/Angel.h"
 #include "rules/PetSkill.h" // 批次 A-δ:宠技特殊指令与纯函数
 #include "rules/ProfessionSkill.h"
 #include "rules/Status.h" // 批次 L4.1:状态施加 / 每回合推进
@@ -698,6 +698,12 @@ std::int32_t computeDamage(const BattleField &field,
 		const f32 def = static_cast<f32>(
 		    (static_cast<double>(defender.other_status_nums) + rng.randMod(20)) / 100);
 		defense += defense * def;
+	}
+	// 精灵神佑守护: 获得神佑防御增益 (S11 精灵/天使系统)
+	if (defender.mods.spirit_blessing)
+	{
+		defense += static_cast<f32>(
+		    calculateSpiritBlessingDefenseBonus(static_cast<int>(defense), true));
 	}
 	// 怪物能力值修正(`_NPCENEMY_ADDPOWER`,8.0 开)。守方、攻方各一次。
 	//
@@ -2760,6 +2766,10 @@ static bool resolveOrdered(BattleField field,
 				if (!counter && damage < 1)
 					damage = rng.rand(0, 1);
 				damage = std::max(0, damage);
+				if (victim.mods.spirit_blessing && damage > 0)
+				{
+					damage = calculateSpiritBlessingDamageReduction(damage, true);
+				}
 				// ── ==0 处理(SSRC80 battle_event.c:1770-1778;批次 A-β d2 补齐守护分支)──
 				//
 				// ★ 源码:`if((*pDamage) == 0){ iRet = BATTLE_RET_MISS; 有守护者(Guardian)⇒

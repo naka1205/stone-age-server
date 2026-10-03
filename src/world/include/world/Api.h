@@ -31,6 +31,7 @@
 #include "model/Player.h" // GoldLedger(add/delGold)以 Player 为记账主体(经济地基批)
 #include "net/Api.h"
 #include "platform/Api.h"
+#include "rules/Angel.h"
 #include "rules/Battle.h"
 #include "rules/Combatant.h"
 #include "rules/Config.h"
@@ -2180,8 +2181,39 @@ class World final : public SA::Net::TransportEvents,
 	//   ① 运维侧「现在战场什么样」是排查战斗问题的第一手信息(与 stats() 同族);
 	//   ② ★ 世界写的效果有一半落在 `field` 上(HP / 骑宠 HP / 离场 / capture_bonus 清零),
 	//      而 applyEvents 是 world 内部函数 ⇒ **没有这个面,那半边世界写没有任何东西
-	//      能断言它真的发生了** —— 而"看起来做了、其实没写"正是 §9.0.16 那族静默。
-	// ⚠️ 返回 const 引用语义:调用方不得改战场。要改只能经事件(ApplyEvents 卷首那条分工)。
+	// ══ S11 精灵/天使系统 (Angel / Spirit System, 批次 §9.0.122) ═══════════════
+	// 对应官方原版 Robin 天使召唤系统 (char/char_angel.c)
+	// 包含: 天使任务注册、契约生成与答复、使者信物与勇者信物配对分发、
+	//       大世界暗雷抑制 (CHAR_WORKANGELMODE)、双向信物瞬移传送、
+	//       勇者使命达成与神使交付领奖、战中精灵守护庇佑。
+
+	struct AngelTokenUseResult
+	{
+		bool success = false;
+		bool teleported = false;
+		SA::Rules::AngelWarpResult warp_result = SA::Rules::AngelWarpResult::kSuccess;
+		std::string message{};
+	};
+
+	bool registerAngelMission(const SA::Rules::AngelMissionDefinition &mission);
+	const SA::Rules::AngelMissionDefinition *findAngelMission(int mission_id) const;
+	std::vector<SA::Rules::AngelMissionDefinition> allAngelMissions() const;
+
+	std::uint64_t createAngelContract(SA::Net::SessionId angel_session,
+	                                  SA::Net::SessionId hero_session,
+	                                  int mission_id = -1);
+	bool acceptAngelContract(SA::Net::SessionId angel_session);
+
+	SA::Rules::AngelRole playerAngelRole(SA::Net::SessionId session) const;
+	const SA::Rules::AngelContractRecord *playerAngelContract(SA::Net::SessionId session) const;
+
+	AngelTokenUseResult useAngelToken(SA::Net::SessionId session, std::int32_t token_item_id);
+	bool completeHeroMission(SA::Net::SessionId session);
+	bool claimAngelRewards(SA::Net::SessionId session, std::uint64_t npc_id = 0);
+
+	bool isAngelModeActive(SA::Net::SessionId session) const;
+	bool hasSpiritBlessing(SA::Net::SessionId session) const;
+
 	const SA::Rules::BattleField *battleField(BattleId id) const;
 
   private:

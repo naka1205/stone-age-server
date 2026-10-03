@@ -262,7 +262,8 @@ bool World::requestDuel(SA::Net::SessionId requester, SA::Net::SessionId target)
 		field.at(static_cast<int>(i)) = makePlayerCombatant(
 		    s.players.resolve(s.player_of_session.find(sid)),
 		    playerEquipModifiers(sid),
-		    s.getRidingPet(sid));
+		    s.getRidingPet(sid),
+		    s.hasSpiritBlessing(sid));
 	}
 	for (std::size_t i = 0; i < party1.size() && i < SA::Rules::kBattlePlayerMax; ++i)
 	{
@@ -270,7 +271,8 @@ bool World::requestDuel(SA::Net::SessionId requester, SA::Net::SessionId target)
 		field.at(static_cast<int>(SA::Rules::kSideOffset + i)) = makePlayerCombatant(
 		    s.players.resolve(s.player_of_session.find(sid)),
 		    playerEquipModifiers(sid),
-		    s.getRidingPet(sid));
+		    s.getRidingPet(sid),
+		    s.hasSpiritBlessing(sid));
 	}
 
 	const BattleId battle = startBattle(field);

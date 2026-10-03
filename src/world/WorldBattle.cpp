@@ -3137,7 +3137,8 @@ bool World::rescuePlayer(SA::Net::SessionId rescuer, SA::Net::SessionId target_p
 		return false;
 
 	// 初始化战斗单位
-	b.field.at(free_slot) = makePlayerCombatant(p, playerEquipModifiers(rescuer), s.getRidingPet(rescuer));
+	b.field.at(free_slot) = makePlayerCombatant(p, playerEquipModifiers(rescuer), s.getRidingPet(rescuer),
+	                                            s.hasSpiritBlessing(rescuer));
 
 	// 加入战斗
 	if (!joinBattle(target_battle, rescuer, static_cast<std::uint8_t>(free_slot)))

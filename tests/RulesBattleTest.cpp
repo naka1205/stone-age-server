@@ -26,6 +26,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
+#include "rules/Angel.h"
 #include "rules/Battle.h"
 #include "rules/PetSkill.h"
 #include "rules/ProfessionSkill.h"
@@ -6382,5 +6383,142 @@ TEST_CASE("Phase 5.1: 战中 USE_ITEM 道具精灵术与气力恢复药")
 		}
 		CHECK(has_purify_item);
 		CHECK(effects.item_used == true);
+	}
+}
+
+TEST_CASE("Phase 6.0: S11 精灵/天使系统纯函数规则与神佑防护测试")
+{
+	SUBCASE("使者与勇者候选资格筛选")
+	{
+		// 使者: 等级 >= 30 且具备前置旗标
+		CHECK(isAngelCandidateEligible(30, true));
+		CHECK(isAngelCandidateEligible(50, true));
+		CHECK_FALSE(isAngelCandidateEligible(29, true));
+		CHECK_FALSE(isAngelCandidateEligible(30, false));
+
+		// 勇者: 等级 >= 80 且具备前置旗标
+		CHECK(isHeroCandidateEligible(80, true));
+		CHECK(isHeroCandidateEligible(120, true));
+		CHECK_FALSE(isHeroCandidateEligible(79, true));
+		CHECK_FALSE(isHeroCandidateEligible(100, false));
+	}
+
+	SUBCASE("契约时限与过期判定")
+	{
+		AngelContractRecord contract{};
+		contract.created_at_sec = 1000;
+		contract.limit_seconds = 7200; // 2小时
+
+		CHECK_FALSE(isAngelContractExpired(1000, contract));
+		CHECK_FALSE(isAngelContractExpired(8199, contract));
+		CHECK(isAngelContractExpired(8200, contract));
+		CHECK(isAngelContractExpired(9000, contract));
+
+		CHECK(angelContractRemainingSeconds(1000, contract) == 7200);
+		CHECK(angelContractRemainingSeconds(7000, contract) == 1200);
+		CHECK(angelContractRemainingSeconds(8200, contract) == 0);
+		CHECK(angelContractRemainingSeconds(9000, contract) == 0);
+	}
+
+	SUBCASE("角色契约身份匹配")
+	{
+		AngelContractRecord contract{};
+		std::strncpy(contract.angel_name, "天使小使者", sizeof(contract.angel_name) - 1);
+		std::strncpy(contract.hero_name, "传说大勇者", sizeof(contract.hero_name) - 1);
+
+		CHECK(getPlayerAngelRole("天使小使者", contract) == AngelRole::kAngel);
+		CHECK(getPlayerAngelRole("传说大勇者", contract) == AngelRole::kHero);
+		CHECK(getPlayerAngelRole("路人甲", contract) == AngelRole::kNone);
+		CHECK(getPlayerAngelRole("", contract) == AngelRole::kNone);
+	}
+
+	SUBCASE("信物瞬移传送门禁规则")
+	{
+		// 正常非组队、非禁传、无掉落物
+		CHECK(checkAngelTokenWarp(AngelRole::kAngel, false, false, false) == AngelWarpResult::kSuccess);
+		CHECK(checkAngelTokenWarp(AngelRole::kHero, false, false, false) == AngelWarpResult::kSuccess);
+
+		// 路人甲拒绝
+		CHECK(checkAngelTokenWarp(AngelRole::kNone, false, false, false) == AngelWarpResult::kTargetNotPartner);
+
+		// 禁传地图拒绝
+		CHECK(checkAngelTokenWarp(AngelRole::kAngel, false, true, false) == AngelWarpResult::kUnlawFloor);
+
+		// 组队中拒绝
+		CHECK(checkAngelTokenWarp(AngelRole::kAngel, true, false, false) == AngelWarpResult::kInPartyBlocked);
+
+		// 携带登出消失物品拒绝
+		CHECK(checkAngelTokenWarp(AngelRole::kHero, false, false, true) == AngelWarpResult::kHasDropItem);
+	}
+
+	SUBCASE("精灵神佑防御增益与伤害减免算法")
+	{
+		// 基础防御 100，神佑 +15%
+		CHECK(calculateSpiritBlessingDefenseBonus(100, true) == 15);
+		CHECK(calculateSpiritBlessingDefenseBonus(100, false) == 0);
+
+		// 受到伤害 100，神佑 -10% => 90
+		CHECK(calculateSpiritBlessingDamageReduction(100, true) == 90);
+		CHECK(calculateSpiritBlessingDamageReduction(100, false) == 100);
+		// 受到 1 点伤害保底 1 点
+		CHECK(calculateSpiritBlessingDamageReduction(1, true) == 1);
+	}
+
+	SUBCASE("遇敌抑制判定")
+	{
+		CHECK(isEncounterSuppressedByAngel(true, false));
+		CHECK(isEncounterSuppressedByAngel(false, true));
+		CHECK(isEncounterSuppressedByAngel(true, true));
+		CHECK_FALSE(isEncounterSuppressedByAngel(false, false));
+	}
+
+	SUBCASE("战中结算: 神佑守护受到普攻伤害减免 10%")
+	{
+		BattleField f_normal = makeField();
+		f_normal.at(0) = makeCombatant(CombatantKind::kPlayer, 400, 100);
+		f_normal.at(0).level = 100;
+
+		f_normal.at(10) = makeCombatant(CombatantKind::kEnemy, 100, 100);
+		f_normal.at(10).level = 100;
+		f_normal.at(10).mods.spirit_blessing = false;
+
+		BattleField f_blessed = f_normal;
+		f_blessed.at(10).mods.spirit_blessing = true;
+
+		TurnCommands cmds{};
+		cmds.present[0] = true;
+		cmds.commands[0].command_kind = SA::Domain::BattleCommand::CommandKind::ATTACK;
+		cmds.commands[0].command.attack.target = 10;
+
+		RulesConfig cfg{};
+		ScriptedRandom rng1({10, 5, 2}); // 确定性随机
+		SA::Domain::BattleEvents out_normal{};
+		ActionEffects eff_normal{};
+		REQUIRE(resolveAction(f_normal, cmds, cfg, rng1, 0, out_normal, eff_normal));
+
+		ScriptedRandom rng2({10, 5, 2});
+		SA::Domain::BattleEvents out_blessed{};
+		ActionEffects eff_blessed{};
+		REQUIRE(resolveAction(f_blessed, cmds, cfg, rng2, 0, out_blessed, eff_blessed));
+
+		// 获取两次落伤
+		int dmg_normal = 0;
+		int dmg_blessed = 0;
+		for (const auto &ev : out_normal.events)
+		{
+			if (ev.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+				dmg_normal = -ev.body.damage.hp_delta;
+		}
+		for (const auto &ev : out_blessed.events)
+		{
+			if (ev.body_kind == SA::Domain::BattleEvent::BodyKind::DAMAGE)
+				dmg_blessed = -ev.body.damage.hp_delta;
+		}
+
+		REQUIRE(dmg_normal > 0);
+		REQUIRE(dmg_blessed > 0);
+		// 神佑守护受到伤害更低
+		CHECK(dmg_blessed < dmg_normal);
+		CHECK(dmg_blessed <= static_cast<int>(dmg_normal * 0.95));
 	}
 }

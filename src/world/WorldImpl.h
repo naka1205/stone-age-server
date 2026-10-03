@@ -28,6 +28,7 @@
 #include "model/Item.h"
 #include "model/Pet.h"
 #include "model/Player.h"
+#include "rules/Angel.h"
 #include "rules/Battle.h"
 #include "rules/CaptureItem.h"
 #include "rules/Combatant.h"
@@ -241,12 +242,14 @@ inline void syncPetState(BattleInstance &b, PetPool &pets)
 
 inline SA::Rules::Combatant makePlayerCombatant(const SA::Model::Player *player = nullptr,
                                                 const SA::Rules::EquipModifiers &equip = {},
-                                                const SA::Model::Pet *ride_pet = nullptr)
+                                                const SA::Model::Pet *ride_pet = nullptr,
+                                                bool spirit_blessing = false)
 {
 	SA::Rules::Combatant c{};
 	c.occupied = true;
 	c.kind = SA::Rules::CombatantKind::kPlayer;
 	c.slot = 0;
+	c.mods.spirit_blessing = spirit_blessing;
 	if (player && (player->vital > 0 || player->str > 0 || player->tough > 0 || player->dex > 0))
 	{
 		c.level = player->level;
@@ -776,6 +779,54 @@ struct World::Impl : GoldAuditSink
 	std::unordered_map<int, TitleDefinition> registered_titles{};
 	std::unordered_map<SA::Net::SessionId, PlayerTitleData> player_titles{};
 	std::unordered_map<int, CraftingRecipe> registered_recipes{};
+
+	// ── 天使任务与契约系统 (S11 精灵/天使系统) ──
+	std::unordered_map<int, SA::Rules::AngelMissionDefinition> angel_missions{};
+	std::unordered_map<std::uint64_t, SA::Rules::AngelContractRecord> angel_contracts{};
+	std::unordered_map<SA::Net::SessionId, std::uint64_t> session_to_angel_contract{};
+	std::uint64_t next_angel_contract_id = 1;
+
+	bool isAngelTokenEquipped(SA::Net::SessionId session) const
+	{
+		const auto *player = players.resolve(player_of_session.find(session));
+		if (player == nullptr)
+			return false;
+		for (std::size_t i = 0; i < SA::Model::kStartItemArray; ++i)
+		{
+			if (const auto *item = items.resolve(player->items[i]))
+			{
+				if (item->item_id == SA::Rules::kAngelTokenItemId)
+					return true;
+			}
+		}
+		return false;
+	}
+
+	bool isAngelModeActive(SA::Net::SessionId session) const
+	{
+		if (isAngelTokenEquipped(session))
+			return true;
+		const auto it = session_to_angel_contract.find(session);
+		if (it != session_to_angel_contract.end())
+		{
+			const auto cit = angel_contracts.find(it->second);
+			if (cit != angel_contracts.end())
+			{
+				if (cit->second.stage == SA::Rules::AngelMissionStage::kDoing ||
+				    cit->second.stage == SA::Rules::AngelMissionStage::kHeroComplete)
+				{
+					if (!SA::Rules::isAngelContractExpired(static_cast<std::int64_t>(now_ms / 1000), cit->second))
+						return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	bool hasSpiritBlessing(SA::Net::SessionId session) const
+	{
+		return isAngelModeActive(session);
+	}
 
 	const SA::Model::Pet *getRidingPet(SA::Net::SessionId sid) const
 	{

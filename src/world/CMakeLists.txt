@@ -4,6 +4,7 @@
 
 add_library(sa_world STATIC
     World.cpp
+    WorldAngel.cpp
     WorldPartyTrade.cpp
     WorldSocial.cpp
     WorldFamily.cpp

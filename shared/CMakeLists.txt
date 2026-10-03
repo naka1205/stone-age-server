@@ -31,6 +31,7 @@ if(NOT TARGET sa_idl)
 endif()
 
 add_library(sa_shared STATIC
+    rules/Angel.cpp
     rules/Battle.cpp
     rules/PetSkill.cpp
     rules/ProfessionSkill.cpp
