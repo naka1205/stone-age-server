@@ -905,4 +905,32 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 - **守卫闭环**:
   - 服务端打附注 tag `shared-v0.43.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.43.0`，保持双端 CI 100% 绿灯。
 
+---
+
+### 9.0.119b ★ 推送窗口执行记录 —— `shared-v0.44.0`(2026-10-03)
+
+> **本窗口前推范围**: 阶段 5.1（战中精灵术道具使用与大世界魔法熟练度成长管线贯通，§9.0.119），涉及 watched 路径 `shared/rules/Battle.h`、`shared/rules/Battle.cpp`、`shared/rules/Combatant.h`、`shared/rules/Constants.h` 与 `shared/model/Player.h`。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `shared-v0.44.0`（附注 tag，subject「Release shared-v0.44.0: Phase 5.1 Spirit Magic Items & World Magic Proficiency」） |
+| client master | pin v0.43.0 → **v0.44.0**（`cmake/SaShared.cmake`） |
+| client 本机验证 | **7 项全过**（d2 7/7 100% 绿灯，D2 规则编译 0 漂移告警） |
+| server 本机验证 | **22 项全过**（CTest 22/22 100% 绿灯，4 大守卫全部通过，RV-1 反向验证通过） |
+| 两端用例集一致性 | D2「一份规则两端编译」完整闭环（177 组黄金用例一致） |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/rules/Constants.h`: 新增 `SpellKind` 精灵术种类枚举；
+  - `shared/rules/Combatant.h`: `CombatModifiers` 扩充 `spell_*` 与 `item_mp_*` 字段；
+  - `shared/rules/Battle.h`: `ActionEffects` 扩充 `mp_consumed`, `item_mp_target`, `item_mp_healed`；
+  - `shared/rules/Battle.cpp`: SPELL 指令全流程分发与 USE_ITEM 道具精灵/气力药扩展；
+  - `shared/model/Player.h`: `Model::Player` 落地 `magic_exp[4]` 与 `magic_level[4]` 熟练度模型。
+- **守卫闭环**:
+  - 服务端打附注 tag `shared-v0.44.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.44.0`，保持双端 CI 100% 绿灯。
+
+
 

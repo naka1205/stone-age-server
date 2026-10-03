@@ -22,9 +22,9 @@
 | [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
 | [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
 | [`18-petskill.md`](18-petskill.md) | 宠技三连发:B1 直攻系 · B2 宠技槽 + CHARGE · B3 状态系 + 铁壁 · A-δ 特殊宠技 | 4 |
-| [`90-push-windows.md`](90-push-windows.md) | 二十七次 `shared-v0.x.0` 推送窗口与远端同步的闭合核实 | 27 |
+| [`90-push-windows.md`](90-push-windows.md) | 二十八次 `shared-v0.x.0` 推送窗口与远端同步的闭合核实 | 28 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **133** |
+| **合计** | | **134** |
 
 ## 全量映射表(按编号)
 
@@ -163,6 +163,7 @@
 | §9.0.118 | 阶段 5.0 —— S19 攻击魔法与精灵术全管线 (MultiList Target & Magic Rules Engine): 多目标展开 expandMultiTarget 1:1 复刻原版 BATTLE_MultiList (单体/整侧/全体/前后排灭绝回退/贯穿穿透) · checkSameSide 升级接入多目标判断 · 四系攻击魔法通用计算 computeMagicDamage (地水火风相克倍率、属性加权、精神力抗性压制) · 魔法闪避判定 rollMagicDodge · 恩惠恢复/净化/反转精灵术 · rules_battle 174 组/3,338 断言全部绿灯 · RV-1 反向变异验证通过 | 2026-10-03 | [`10-battle-core.md`](10-battle-core.md) |
 | §9.0.118b | 阶段 5.0 —— 推送窗口执行记录 shared-v0.43.0: shared/rules/ 攻击魔法与精灵术规则引擎改动与客户端 pin 同步闭环 | 2026-10-03 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.119 | 阶段 5.1 —— 战中精灵术道具使用与大世界魔法熟练度成长管线贯通: 战中 SPELL 全流程分发 · USE_ITEM 气力药与道具精灵术 · 大世界四系熟练度模型 magic_exp/magic_level 与成长升级 · rules_battle 177 组用例 · world_tick 153 组用例 · RV-1 反向变异验证通过 | 2026-10-03 | [`10-battle-core.md`](10-battle-core.md) |
+| §9.0.119b | 阶段 5.1 —— 推送窗口执行记录 shared-v0.44.0: shared/rules/ 与 shared/model/ 战中魔法与熟练度改动及客户端 pin 同步闭环 | 2026-10-03 | [`90-push-windows.md`](90-push-windows.md) |
 
 
 
