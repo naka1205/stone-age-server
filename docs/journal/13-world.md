@@ -2126,6 +2126,10 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - 覆盖协议帧封包解包、跨实例世代号防御丢弃、超时扫描与 In-Flight 清理、排他锁申请/释放、跨线路全服广播；
   - **RV-Saac-1 反向变异实证**：在 `feedResponse` 中故意移除世代号比对逻辑，测试立即精确捕获 5 处断言失败（红灯），还原后一次性恢复全绿；
   - CTest 用例数增至 **23/23**，100% 保持全绿。
-- **模块边界守卫**:
-  - `check_module_boundaries.py` 严格校验 5 个模块依赖与单一暴露头，100% 通过。
+- **全平台 CI 远端实证 (GitHub Actions Run 37135872029)**:
+  - Commit `652f582` 在 Linux GCC、macOS Apple Clang、Windows MSVC 以及 MySQL 8.4.8 + Redis 8.6.2 集成测试中 **100% SUCCESS**；
+  - `ci_verify.py` EXPECTED_TESTS 完整登记 23 项测试（含 `saac_client`），清洁构建零告警、断言防线反向探针验证通过。
+- **模块边界与格式守卫**:
+  - `check_module_boundaries.py` 严格校验 5 个模块依赖与单一暴露头，100% 通过；
+  - `check_docs_index.py`、`check_format.py`、`check_gold_writes.py` 守卫全绿。
 
