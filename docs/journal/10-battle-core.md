@@ -433,4 +433,43 @@ shared-v0.8.0 + 客户端 `d2-only` 复验**,两仓 × 两远端一起推 tag(§
   - RV-1: 篡改 `rollAbduct` 移除 `per < 50` 抬下限逻辑，拐骗用例精准红灯（49 < 30 失败）；复原回绿。
   - RV-2: 篡改 `applyDivideAttack` MP 削减公式由 `c.mp >> 1` 改为 `c.mp / 3`，分摊攻击用例 3 处断言精准转红（67 == 50 与 33 == 50 失败）；复原回绿。
 
+---
+
+### 9.0.118 ★★ 阶段 5.0 —— S19 攻击魔法与精灵术全管线 (2026-10-03)
+
+> **本批聚焦**: 终结 S19 长期处于 `⬜ 未开始` 的状态，正式落地原版核心子系统 **S19 魔法/精灵术** 与其唯一消费者 **MultiList 多目标展开体系**。
+> 依据官方源码 `battle.c:265-560`（`BATTLE_MultiList`）、`battle_magic.c:3056`（`BATTLE_getMagicAdjustInt`）与 `battle_magic.c:916`（`BATTLE_MagicDodge`），
+> 在 shared 规则层以纯函数、运行期零堆分配与确定性回放准则，落地完整多目标展开、四系攻击魔法相克矩阵与精神力抵消算力、魔法闪避门限以及恢复/净化/反转精灵术。
+
+#### ① 核心真源与领域规则兑现
+1. **多目标展开纯函数 `expandMultiTarget` (`shared/rules/Battle.h` / `Battle.cpp`)**:
+   - 对应原版 `BATTLE_MultiList`，支持单体（`0..19`）、乙方全侧（`kTargetSide0 = 20`）、甲方全侧（`kTargetSide1 = 21`）、全场（`kTargetAll = 22`）；
+   - 前后排展开与灭绝自动回退机制：甲方后排（23）、甲方前排（24）、乙方前排（25）、乙方后排（26），若指定排全灭，自动回退到同侧另一排；若同侧两排皆灭则返回 0；
+   - 贯穿穿透（`kTargetThrough = 27`）：结合单体主目标，同列前后排穿透展开；
+   - 遍历槽位天然升序排列，满足原版 `SortLoc` 要求且零堆分配零开销；目标不可用时不摇 rng 且返回 0，确保回放一致性；
+   - 升级 `checkSameSide`：当 `to_no >= 20` 时，1:1 还原 `battle_event.c:7851-7881`，展开多目标并判定是否有任一同侧单位。
+2. **四系攻击魔法与精灵术规则引擎 (`shared/rules/Battle.h` / `Battle.cpp`)**:
+   - `computeMagicDamage`: 1:1 还原 `battle_magic.c:3056` 公式：
+     - 精神力压制与抗性抵消：`Kmagic = max(0.0f, att_magic_lv * 1.4f - def_magic_resist)`，`Amagic = (Kmagic^2)/(Mmagic^2) + rand_variation(0.00..0.19)`；
+     - 威力算力：`APower = power * (1.0f + magic_level / 10.0f) * Amagic`；
+     - 魔法属性加权：以魔法阶级为基底叠加施法者自身属性百分比 `magic_attr = lv * 10 + (lv * 10 * att_elem / 50)`；
+     - 四系相克（地克水 1.5x、水克火 1.5x、火克风 1.5x、风克地 1.5x，被克 0.6x，同系 1.0x）与场地属性 `fieldPower` 修正，经过三阶段整数截断保证确定性。
+   - 提供单系便捷入口 `computeEarthMagicDamage`, `computeWaterMagicDamage`, `computeFireMagicDamage`, `computeWindMagicDamage`。
+   - `rollMagicDodge`: 1:1 还原 `battle_magic.c:916`，玩家依据幸运与抗性（`fLuck = luck * 3 + resist * 0.15`），宠物/怪物依据等级（`fLuck = min(30.0f, level * 0.2f)`）判定闪避抵消。
+3. **精灵术体系 (Spirit Magic)**:
+   - `computeHealMagicAmount`: 恩惠/滋润/治愈精灵术恢复量计算（`RAND(power * 0.9, power * 1.1)`）；
+   - `applyPurifyMagic`: 净化精灵术纯函数，支持全状态净化与指定状态净化；
+   - `applyElementReverse`: 属性反转精灵术纯函数（地<->风，水<->火）。
+
+#### ② 验证与工程纪律
+- 服务端 `rules_battle` 用例由 170 组 / 3,275 断言扩充至 **174 组 / 3,338 断言**（净增 4 组用例 / 63 条断言），全部测试 100% 绿灯。
+- 客户端在 D2 模式下同步编译并执行服务端用例，客户端引擎测试 8/8 项 100% 通过。
+- 服务端全量 CTest 22/22 项保持 100% 绿灯。
+- 全仓格式化守卫 `check_format.py` 100% 绿灯。
+- ★ **反向验证实证 (RV-1)**:
+  - 注入变异：在 `expandMultiTarget` 中注释掉 `kTargetSide0BRow` 乙方后排全灭时的前排回退循环；
+  - 重新编译执行 `sa_rules_battle_test`，精准在 `RulesBattleTest.cpp:5943` 转红报错（`REQUIRE( cnt_fallback == 2 ) is NOT correct! values: REQUIRE( 0 == 2 )`）；
+  - 还原变异并刷新 mtime，测试立刻恢复 174 组 / 3,338 断言全绿。确证测试无假阳性。
+- D8 覆盖台账更新：S19 升级为 `✅ 已完成`，核心严格覆盖率由 43.7% 提升至 **45.6%**（宽口径达 **94.5%**）。
+
 

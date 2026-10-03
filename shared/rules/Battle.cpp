@@ -226,20 +226,162 @@ int defaultAttacker(const BattleField &field, const bool *slots, int side,
 	return table[rng.rand(0, cnt - 1)];
 }
 
+std::size_t expandMultiTarget(const BattleField &field,
+                              const bool *slots,
+                              int target_code,
+                              int *out_slots,
+                              std::size_t max_out,
+                              int main_target) noexcept
+{
+	if (!out_slots || max_out == 0)
+		return 0;
+
+	std::size_t count = 0;
+	auto append_slot = [&](int s)
+	{
+		if (count < max_out && targetCheck(field, slots, s))
+		{
+			out_slots[count++] = s;
+		}
+	};
+
+	// 1. 单体 (0..19)
+	if (target_code >= 0 && target_code < kSlotCount)
+	{
+		append_slot(target_code);
+		return count;
+	}
+
+	// 2. 乙方后排 (TARGET_SIDE_0_B_ROW = 26, slots 0..4)
+	if (target_code == kTargetSide0BRow)
+	{
+		for (int i = 0; i < 5; ++i)
+			append_slot(i);
+		if (count == 0) // 后排全灭，自动回退前排 5..9 (battle.c:303)
+		{
+			for (int i = 5; i < 10; ++i)
+				append_slot(i);
+		}
+		return count;
+	}
+
+	// 3. 乙方前排 (TARGET_SIDE_0_F_ROW = 25, slots 5..9)
+	if (target_code == kTargetSide0FRow)
+	{
+		for (int i = 5; i < 10; ++i)
+			append_slot(i);
+		if (count == 0) // 前排全灭，自动回退后排 0..4 (battle.c:338)
+		{
+			for (int i = 0; i < 5; ++i)
+				append_slot(i);
+		}
+		return count;
+	}
+
+	// 4. 甲方后排 (TARGET_SIDE_1_B_ROW = 23, slots 10..14)
+	if (target_code == kTargetSide1BRow)
+	{
+		for (int i = 10; i < 15; ++i)
+			append_slot(i);
+		if (count == 0) // 后排全灭，自动回退前排 15..19 (battle.c:373)
+		{
+			for (int i = 15; i < 20; ++i)
+				append_slot(i);
+		}
+		return count;
+	}
+
+	// 5. 甲方前排 (TARGET_SIDE_1_F_ROW = 24, slots 15..19)
+	if (target_code == kTargetSide1FRow)
+	{
+		for (int i = 15; i < 20; ++i)
+			append_slot(i);
+		if (count == 0) // 前排全灭，自动回退后排 10..14 (battle.c:408)
+		{
+			for (int i = 10; i < 15; ++i)
+				append_slot(i);
+		}
+		return count;
+	}
+
+	// 6. 乙方全侧 (TARGET_SIDE_0 = 20, slots 0..9)
+	if (target_code == kTargetSide0)
+	{
+		for (int i = 0; i < 10; ++i)
+			append_slot(i);
+		return count;
+	}
+
+	// 7. 甲方全侧 (TARGET_SIDE_1 = 21, slots 10..19)
+	if (target_code == kTargetSide1)
+	{
+		for (int i = 10; i < 20; ++i)
+			append_slot(i);
+		return count;
+	}
+
+	// 8. 全场 (TARGET_ALL = 22, slots 0..19)
+	if (target_code == kTargetAll)
+	{
+		for (int i = 0; i < 20; ++i)
+			append_slot(i);
+		return count;
+	}
+
+	// 9. 贯穿攻击 (TARGER_THROUGH = 27)
+	if (target_code == kTargetThrough)
+	{
+		if (main_target >= 0 && main_target < kSlotCount)
+		{
+			int s1 = main_target;
+			int s2 = -1;
+			if (s1 < 5)
+				s2 = s1 + 5;
+			else if (s1 < 10)
+				s2 = s1 - 5;
+			else if (s1 < 15)
+				s2 = s1 + 5;
+			else if (s1 < 20)
+				s2 = s1 - 5;
+
+			int first = std::min(s1, s2);
+			int second = std::max(s1, s2);
+			append_slot(first);
+			if (second != first)
+				append_slot(second);
+		}
+		return count;
+	}
+
+	return 0;
+}
+
 int checkSameSide(const BattleField &field, int actor_slot, int to_no) noexcept
 {
 	if (actor_slot < 0 || actor_slot >= kSlotCount)
 		return 0;
 	if (!field.at(actor_slot).occupied)
 		return 0;
-	// ★ 源码 `battle_event.c:7851-7881`:返回值是 **1 / 0**(不是 bool 真值对),
-	//   且 `toNo >= 20` 走 MultiList 展开 —— 那一支本仓不适用(见 battle.h),
-	//   传入时返回 0(源码对空表同样返回 0)。
-	if (to_no < 0 || to_no >= kSlotCount)
+	if (to_no < 0)
 		return 0;
-	if (!field.at(to_no).occupied)
-		return 0;
-	return BattleField::sameSide(actor_slot, to_no) ? 1 : 0;
+
+	// 单体目标 (0..19)
+	if (to_no < kSlotCount)
+	{
+		if (!field.at(to_no).occupied)
+			return 0;
+		return BattleField::sameSide(actor_slot, to_no) ? 1 : 0;
+	}
+
+	// 多目标展开 (to_no >= 20): 若展开列表中有任一单位与自身同 side，返回 1 (battle_event.c:7851-7881)
+	int out_slots[kSlotCount];
+	const std::size_t count = expandMultiTarget(field, nullptr, to_no, out_slots, kSlotCount);
+	for (std::size_t i = 0; i < count; ++i)
+	{
+		if (field.at(out_slots[i]).occupied && BattleField::sameSide(actor_slot, out_slots[i]))
+			return 1;
+	}
+	return 0;
 }
 
 int targetAdjust(const BattleField &field, const bool *slots, int actor_slot,
@@ -2763,13 +2905,40 @@ std::int32_t computeFireKillPhysicalDamage(const BattleField &field,
 	return computeDamage(field, temp_attacker, defender, config, rng);
 }
 
-std::int32_t computeFireMagicDamage(int att_magic_lv,
-                                    int def_magic_resist,
-                                    int power,
-                                    const Combatant &attacker,
-                                    const Combatant &defender,
-                                    const BattleField &field,
-                                    Random &rng) noexcept
+// ── 攻击魔法与精灵术规则引擎 (Phase 5.0 / S19) ──────────────────────────────────
+
+bool rollMagicDodge(bool is_player,
+                    int luck,
+                    int resist,
+                    int level,
+                    Random &rng) noexcept
+{
+	float f_luck = 0.0f;
+	if (is_player)
+	{
+		f_luck = static_cast<float>(luck) * 3.0f + static_cast<float>(resist) * 0.15f;
+	}
+	else
+	{
+		f_luck = static_cast<float>(level) * 0.2f;
+		if (f_luck > 30.0f)
+			f_luck = 30.0f;
+	}
+	const int threshold = static_cast<int>(f_luck);
+	if (threshold <= 0)
+		return false;
+	return rng.rand(1, 100) <= threshold;
+}
+
+std::int32_t computeMagicDamage(MagicElement element,
+                                int att_magic_lv,
+                                int def_magic_resist,
+                                int power,
+                                int magic_level,
+                                const Combatant &attacker,
+                                const Combatant &defender,
+                                const BattleField &field,
+                                Random &rng) noexcept
 {
 	float k_magic = static_cast<float>(att_magic_lv) * 1.4f - static_cast<float>(def_magic_resist);
 	if (k_magic < 0.0f)
@@ -2779,13 +2948,136 @@ std::int32_t computeFireMagicDamage(int att_magic_lv,
 		m_magic = 1.0f;
 	float a_magic = (k_magic * k_magic) / (m_magic * m_magic);
 	a_magic += static_cast<float>(rng.rand(0, 19)) / 100.0f;
-	constexpr int kMagicLv = 4;
+
 	const int a_power = static_cast<int>(
-	    static_cast<float>(power) * (1.0f + static_cast<float>(kMagicLv) / 10.0f) * a_magic);
+	    static_cast<float>(power) * (1.0f + static_cast<float>(magic_level) / 10.0f) * a_magic);
 	if (a_power <= 0)
 		return 0;
+
+	const int elem_idx = static_cast<int>(element);
+	if (elem_idx >= 0 && elem_idx < 4)
+	{
+		const int base_magic_attr = magic_level * 10;
+		const int scaled_attr = base_magic_attr + (base_magic_attr * attacker.elements[elem_idx] / 50);
+
+		std::int32_t at_magic[kElementCount] = {0, 0, 0, 0, 0};
+		at_magic[elem_idx] = scaled_attr;
+
+		const std::int32_t df[kElementCount] = {
+		    defender.elements[0], defender.elements[1], defender.elements[2],
+		    defender.elements[3], defender.noneElement()};
+
+		const f32 at_field = fieldPower(field.field_attribute, 100, reinterpret_cast<const std::int32_t (&)[4]>(at_magic));
+		const f32 df_field = fieldPower(field.field_attribute, 100, defender.elements);
+
+		std::int32_t at_scaled[kElementCount];
+		for (int i = 0; i < kElementCount; ++i)
+			at_scaled[i] = at_magic[i] * a_power;
+
+		std::int64_t total = 0;
+		for (int a = 0; a < kElementCount; ++a)
+		{
+			double row = 0.0;
+			for (int d = 0; d < kElementCount; ++d)
+			{
+				row += static_cast<double>(at_scaled[a]) * df[d] * kElementMatrix[a][d];
+			}
+			total += static_cast<std::int32_t>(row);
+		}
+
+		std::int32_t damage = static_cast<std::int32_t>(static_cast<double>(total) / kElementDivisor);
+		damage = static_cast<std::int32_t>(static_cast<double>(damage) * (static_cast<double>(at_field) / df_field));
+		return damage > 0 ? damage : 1;
+	}
+
 	const std::int32_t damage = applyElementMatrix(field, attacker, defender, a_power);
 	return damage > 0 ? damage : 1;
+}
+
+std::int32_t computeEarthMagicDamage(int att_magic_lv,
+                                     int def_magic_resist,
+                                     int power,
+                                     const Combatant &attacker,
+                                     const Combatant &defender,
+                                     const BattleField &field,
+                                     Random &rng,
+                                     int magic_level) noexcept
+{
+	return computeMagicDamage(MagicElement::Earth, att_magic_lv, def_magic_resist,
+	                          power, magic_level, attacker, defender, field, rng);
+}
+
+std::int32_t computeWaterMagicDamage(int att_magic_lv,
+                                     int def_magic_resist,
+                                     int power,
+                                     const Combatant &attacker,
+                                     const Combatant &defender,
+                                     const BattleField &field,
+                                     Random &rng,
+                                     int magic_level) noexcept
+{
+	return computeMagicDamage(MagicElement::Water, att_magic_lv, def_magic_resist,
+	                          power, magic_level, attacker, defender, field, rng);
+}
+
+std::int32_t computeFireMagicDamage(int att_magic_lv,
+                                    int def_magic_resist,
+                                    int power,
+                                    const Combatant &attacker,
+                                    const Combatant &defender,
+                                    const BattleField &field,
+                                    Random &rng) noexcept
+{
+	constexpr int kDefaultFireMagicLevel = 4;
+	return computeMagicDamage(MagicElement::Fire, att_magic_lv, def_magic_resist,
+	                          power, kDefaultFireMagicLevel, attacker, defender, field, rng);
+}
+
+std::int32_t computeWindMagicDamage(int att_magic_lv,
+                                    int def_magic_resist,
+                                    int power,
+                                    const Combatant &attacker,
+                                    const Combatant &defender,
+                                    const BattleField &field,
+                                    Random &rng,
+                                    int magic_level) noexcept
+{
+	return computeMagicDamage(MagicElement::Wind, att_magic_lv, def_magic_resist,
+	                          power, magic_level, attacker, defender, field, rng);
+}
+
+std::int32_t computeHealMagicAmount(int power, Random &rng) noexcept
+{
+	if (power <= 0)
+		return 0;
+	const int min_val = static_cast<int>(static_cast<double>(power) * 0.9);
+	const int max_val = static_cast<int>(static_cast<double>(power) * 1.1);
+	const int heal = rng.rand(min_val, max_val);
+	return heal > 0 ? heal : 1;
+}
+
+bool applyPurifyMagic(Combatant &target, std::uint8_t status_to_clean) noexcept
+{
+	if (!target.occupied || target.dead)
+		return false;
+	if (target.status == 0)
+		return false;
+
+	if (status_to_clean == 0 || target.status == status_to_clean)
+	{
+		target.status = 0;
+		target.status_turns = 0;
+		return true;
+	}
+	return false;
+}
+
+void applyElementReverse(Combatant &target) noexcept
+{
+	if (!target.occupied)
+		return;
+	std::swap(target.elements[kEarth], target.elements[kWind]);
+	std::swap(target.elements[kWater], target.elements[kFire]);
 }
 
 bool rollAbduct(int attacker_level,

@@ -4363,9 +4363,13 @@ TEST_CASE("A-β d2★:checkSameSide 返回 1/0、不可判定返回 0(battle_eve
 	// 目标不在场 ⇒ 0。
 	CHECK(checkSameSide(f, 0, 2) == 0);
 
-	// ★ 多目标码位(>= 20)本仓不适用 ⇒ 恒 0(源码那一支对空表也返回 0)。
-	CHECK(checkSameSide(f, 0, 20) == 0);
-	CHECK(checkSameSide(f, 0, 22) == 0);
+	// ★ 多目标码位(>= 20)在 Phase 5.0 正式接入 expandMultiTarget(battle_event.c:7851-7881):
+	//   20 (Side 0 全侧): 包含 0/1 同侧单位 ⇒ 1
+	//   21 (Side 1 全侧): 仅包含 10/11 敌侧单位 ⇒ 0
+	//   22 (全场): 包含 0/1 同侧单位 ⇒ 1
+	CHECK(checkSameSide(f, 0, 20) == 1);
+	CHECK(checkSameSide(f, 0, 21) == 0);
+	CHECK(checkSameSide(f, 0, 22) == 1);
 }
 
 TEST_CASE("A-β d2★★:targetAdjust 目标可用⇒原样返回不摇;不可用⇒换对面默认攻击者")
@@ -5833,4 +5837,278 @@ TEST_CASE("A-ε宿主核对:GBreak与GBreak2对齐断言")
 		}
 	}
 	CHECK(found_gbreak2_dmg);
+}
+
+TEST_CASE("Phase 5.0: 多目标展开 expandMultiTarget 全景覆盖")
+{
+	BattleField f = makeField();
+	// 部署测试阵型:
+	// Side 0 (乙方):
+	//   后排 0..4: 槽位 0, 2 存活; 槽位 1 死亡; 槽位 3, 4 未占位
+	//   前排 5..9: 槽位 6, 7 存活; 槽位 5, 8, 9 未占位
+	// Side 1 (甲方):
+	//   后排 10..14: 槽位 11 存活; 其余未占位
+	//   前排 15..19: 槽位 16 存活; 其余未占位
+	f.at(0).occupied = true;
+	f.at(0).dead = false;
+	f.at(0).hp = 100;
+
+	f.at(1).occupied = true;
+	f.at(1).dead = true; // 死亡
+	f.at(1).hp = 0;
+
+	f.at(2).occupied = true;
+	f.at(2).dead = false;
+	f.at(2).hp = 100;
+
+	f.at(6).occupied = true;
+	f.at(6).dead = false;
+	f.at(6).hp = 100;
+
+	f.at(7).occupied = true;
+	f.at(7).dead = false;
+	f.at(7).hp = 100;
+
+	f.at(11).occupied = true;
+	f.at(11).dead = false;
+	f.at(11).hp = 100;
+
+	f.at(16).occupied = true;
+	f.at(16).dead = false;
+	f.at(16).hp = 100;
+
+	int out[kSlotCount]{};
+
+	SUBCASE("单体 0..19 展开")
+	{
+		// 存活单体
+		CHECK(expandMultiTarget(f, nullptr, 0, out, kSlotCount) == 1);
+		CHECK(out[0] == 0);
+
+		// 死亡单体返回 0
+		CHECK(expandMultiTarget(f, nullptr, 1, out, kSlotCount) == 0);
+
+		// 空槽位返回 0
+		CHECK(expandMultiTarget(f, nullptr, 3, out, kSlotCount) == 0);
+	}
+
+	SUBCASE("整侧 20/21 与全体 22 展开")
+	{
+		// 乙方整侧 (TARGET_SIDE_0 = 20): 存活为 0, 2, 6, 7 (天然升序)
+		std::size_t cnt0 = expandMultiTarget(f, nullptr, kTargetSide0, out, kSlotCount);
+		REQUIRE(cnt0 == 4);
+		CHECK(out[0] == 0);
+		CHECK(out[1] == 2);
+		CHECK(out[2] == 6);
+		CHECK(out[3] == 7);
+
+		// 甲方整侧 (TARGET_SIDE_1 = 21): 存活为 11, 16
+		std::size_t cnt1 = expandMultiTarget(f, nullptr, kTargetSide1, out, kSlotCount);
+		REQUIRE(cnt1 == 2);
+		CHECK(out[0] == 11);
+		CHECK(out[1] == 16);
+
+		// 全体 (TARGET_ALL = 22): 存活为 0, 2, 6, 7, 11, 16
+		std::size_t cnt_all = expandMultiTarget(f, nullptr, kTargetAll, out, kSlotCount);
+		REQUIRE(cnt_all == 6);
+		CHECK(out[0] == 0);
+		CHECK(out[1] == 2);
+		CHECK(out[2] == 6);
+		CHECK(out[3] == 7);
+		CHECK(out[4] == 11);
+		CHECK(out[5] == 16);
+	}
+
+	SUBCASE("前后排展开与灭绝回退机制 (23..26)")
+	{
+		// 乙方后排 (26): 存活 0, 2 (无须回退)
+		std::size_t cnt_b0 = expandMultiTarget(f, nullptr, kTargetSide0BRow, out, kSlotCount);
+		REQUIRE(cnt_b0 == 2);
+		CHECK(out[0] == 0);
+		CHECK(out[1] == 2);
+
+		// 乙方前排 (25): 存活 6, 7 (无须回退)
+		std::size_t cnt_f0 = expandMultiTarget(f, nullptr, kTargetSide0FRow, out, kSlotCount);
+		REQUIRE(cnt_f0 == 2);
+		CHECK(out[0] == 6);
+		CHECK(out[1] == 7);
+
+		// 构造后排全灭场景测试回退:
+		f.at(0).dead = true;
+		f.at(0).hp = 0;
+		f.at(2).dead = true;
+		f.at(2).hp = 0;
+		// 此时乙方后排全灭，打乙方后排应自动回退前排 (6, 7)
+		std::size_t cnt_fallback = expandMultiTarget(f, nullptr, kTargetSide0BRow, out, kSlotCount);
+		REQUIRE(cnt_fallback == 2);
+		CHECK(out[0] == 6);
+		CHECK(out[1] == 7);
+
+		// 若前排亦全灭，则返回 0
+		f.at(6).dead = true;
+		f.at(6).hp = 0;
+		f.at(7).dead = true;
+		f.at(7).hp = 0;
+		CHECK(expandMultiTarget(f, nullptr, kTargetSide0BRow, out, kSlotCount) == 0);
+		CHECK(expandMultiTarget(f, nullptr, kTargetSide0FRow, out, kSlotCount) == 0);
+	}
+
+	SUBCASE("贯穿攻击展开 (27)")
+	{
+		// 针对槽位 2 (后排)，同列前排为 7
+		// 槽位 2 与 7 均存活 => 展开为 [2, 7]
+		std::size_t cnt = expandMultiTarget(f, nullptr, kTargetThrough, out, kSlotCount, /*main_target=*/2);
+		REQUIRE(cnt == 2);
+		CHECK(out[0] == 2);
+		CHECK(out[1] == 7);
+
+		// 针对槽位 0 (后排)，同列前排为 5 (未占位) => 仅展开 [0]
+		cnt = expandMultiTarget(f, nullptr, kTargetThrough, out, kSlotCount, /*main_target=*/0);
+		REQUIRE(cnt == 1);
+		CHECK(out[0] == 0);
+
+		// 针对槽位 16 (前排)，同列后排为 11 => 展开为 [11, 16] (天然升序)
+		cnt = expandMultiTarget(f, nullptr, kTargetThrough, out, kSlotCount, /*main_target=*/16);
+		REQUIRE(cnt == 2);
+		CHECK(out[0] == 11);
+		CHECK(out[1] == 16);
+	}
+}
+
+TEST_CASE("Phase 5.0: 魔法闪避判定 rollMagicDodge")
+{
+	SUBCASE("玩家根据幸运与抗性计算闪避门限")
+	{
+		// 玩家: fLuck = luck * 3 + resist * 0.15
+		// luck = 10, resist = 40 => fLuck = 30 + 6 = 36%
+		ScriptedRandom rng1({36, 37});
+		CHECK(rollMagicDodge(/*is_player=*/true, /*luck=*/10, /*resist=*/40, /*level=*/100, rng1));
+		CHECK_FALSE(rollMagicDodge(/*is_player=*/true, /*luck=*/10, /*resist=*/40, /*level=*/100, rng1));
+	}
+
+	SUBCASE("宠物/怪物根据等级计算闪避门限且上限 30%")
+	{
+		// 等级 50 => 50 * 0.2 = 10%
+		ScriptedRandom rng_low({10, 11});
+		CHECK(rollMagicDodge(/*is_player=*/false, /*luck=*/0, /*resist=*/0, /*level=*/50, rng_low));
+		CHECK_FALSE(rollMagicDodge(/*is_player=*/false, /*luck=*/0, /*resist=*/0, /*level=*/50, rng_low));
+
+		// 等级 200 => 200 * 0.2 = 40% 超过上限，夹持到 30%
+		ScriptedRandom rng_cap({30, 31});
+		CHECK(rollMagicDodge(/*is_player=*/false, /*luck=*/0, /*resist=*/0, /*level=*/200, rng_cap));
+		CHECK_FALSE(rollMagicDodge(/*is_player=*/false, /*luck=*/0, /*resist=*/0, /*level=*/200, rng_cap));
+	}
+}
+
+TEST_CASE("Phase 5.0: 四系攻击魔法伤害与相克引擎 computeMagicDamage")
+{
+	BattleField f = makeField();
+	Combatant att{};
+	att.occupied = true;
+	att.level = 100;
+	att.elements[0] = 50; // 地 50
+	att.elements[1] = 50; // 水 50
+
+	Combatant def_water{};
+	def_water.occupied = true;
+	def_water.level = 100;
+	def_water.elements[1] = 100; // 纯水
+
+	Combatant def_fire{};
+	def_fire.occupied = true;
+	def_fire.level = 100;
+	def_fire.elements[2] = 100; // 纯火
+
+	Combatant def_wind{};
+	def_wind.occupied = true;
+	def_wind.level = 100;
+	def_wind.elements[3] = 100; // 纯风
+
+	Combatant def_earth{};
+	def_earth.occupied = true;
+	def_earth.level = 100;
+	def_earth.elements[0] = 100; // 纯地
+
+	ScriptedRandom rng({0}); // Amagic offset = 0
+
+	// 1. 地魔法打水 (克制 1.5x) vs 地魔法打风 (被克 0.6x)
+	std::int32_t earth_vs_water = computeEarthMagicDamage(50, 0, 100, att, def_water, f, rng, 4);
+	ScriptedRandom rng2({0});
+	std::int32_t earth_vs_wind = computeEarthMagicDamage(50, 0, 100, att, def_wind, f, rng2, 4);
+	CHECK(earth_vs_water > earth_vs_wind);
+	// 理论上 1.5 / 0.6 = 2.5 倍
+	CHECK(earth_vs_water >= static_cast<std::int32_t>(earth_vs_wind * 2));
+
+	// 2. 水魔法打火 (克制 1.5x) vs 水魔法打地 (被克 0.6x)
+	ScriptedRandom rng3({0});
+	std::int32_t water_vs_fire = computeWaterMagicDamage(50, 0, 100, att, def_fire, f, rng3, 4);
+	ScriptedRandom rng4({0});
+	std::int32_t water_vs_earth = computeWaterMagicDamage(50, 0, 100, att, def_earth, f, rng4, 4);
+	CHECK(water_vs_fire > water_vs_earth);
+
+	// 3. 风魔法打地 (克制 1.5x) vs 风魔法打火 (被克 0.6x)
+	ScriptedRandom rng5({0});
+	std::int32_t wind_vs_earth = computeWindMagicDamage(50, 0, 100, att, def_earth, f, rng5, 4);
+	ScriptedRandom rng6({0});
+	std::int32_t wind_vs_fire = computeWindMagicDamage(50, 0, 100, att, def_fire, f, rng6, 4);
+	CHECK(wind_vs_earth > wind_vs_fire);
+
+	// 4. 抗性抵消与精神力压制:
+	// 高抗性(def_magic_resist = 70)使 Kmagic = 50 * 1.4 - 70 = 0 => 伤害为 0
+	ScriptedRandom rng7({0});
+	std::int32_t blocked = computeEarthMagicDamage(50, 70, 100, att, def_water, f, rng7, 4);
+	CHECK(blocked == 0);
+}
+
+TEST_CASE("Phase 5.0: 精灵术体系 (恢复/净化/属性反转)")
+{
+	SUBCASE("computeHealMagicAmount: 恢复力浮动 0.9x ~ 1.1x")
+	{
+		ScriptedRandom rng_min({90});
+		CHECK(computeHealMagicAmount(100, rng_min) == 90);
+
+		ScriptedRandom rng_max({110});
+		CHECK(computeHealMagicAmount(100, rng_max) == 110);
+	}
+
+	SUBCASE("applyPurifyMagic: 净化异常状态")
+	{
+		Combatant c{};
+		c.occupied = true;
+		c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_POISON);
+		c.status_turns = 3;
+
+		// 全净化 (0)
+		CHECK(applyPurifyMagic(c, 0));
+		CHECK(c.status == 0);
+		CHECK(c.status_turns == 0);
+
+		// 针对特定状态净化:
+		c.status = static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION);
+		c.status_turns = 2;
+		// 尝试净化石化失败
+		CHECK_FALSE(applyPurifyMagic(c, static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_STONE)));
+		CHECK(c.status == static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION));
+		// 净化混乱成功
+		CHECK(applyPurifyMagic(c, static_cast<std::uint8_t>(SA::Domain::BattleStatus::BATTLE_ST_CONFUSION)));
+		CHECK(c.status == 0);
+	}
+
+	SUBCASE("applyElementReverse: 属性反转精灵术 (地<->风, 水<->火)")
+	{
+		Combatant c{};
+		c.occupied = true;
+		c.elements[0] = 70; // 地 70
+		c.elements[1] = 30; // 水 30
+		c.elements[2] = 0;  // 火 0
+		c.elements[3] = 0;  // 风 0
+
+		applyElementReverse(c);
+
+		// 地与风对调，水与火对调
+		CHECK(c.elements[0] == 0);
+		CHECK(c.elements[3] == 70);
+		CHECK(c.elements[1] == 0);
+		CHECK(c.elements[2] == 30);
+	}
 }

@@ -249,28 +249,25 @@ std::optional<int> rollInstigateRedirect(const BattleField &field,
 int guardianCheck(const BattleField &field, const bool *slots, int attack_slot,
                   int def_slot) noexcept;
 
-// ── 多目标展开:**有意不移植**,登记于此(批次 A-β d2)────────────
+// ── 多目标展开 (Phase 5.0 / 原版 BATTLE_MultiList, battle.c:265-560) ────────────
 //
-// 原 `BATTLE_MultiList`(`battle.c:265-560`)在 `_ATTACK_MAGIC` **开**时的完整分支含
-// 三族能力:① 单体(0..19)② **整侧/全体**(`TARGET_SIDE_0/1`、`TARGET_ALL`)
-// ③ **前后排**(`TARGET_SIDE_*_B_ROW/F_ROW`、`TARGER_THROUGH`),外加
-// `SortLoc` 的位次排序与"目标不可用则随机改打活人"的 `while` 重摇。
+// 1:1 还原原版多目标展开体系:
+//   ① 单体 (0..19): 目标存活返回 1 个，否则返回 0
+//   ② 整侧 (20: TARGET_SIDE_0, 21: TARGET_SIDE_1)
+//   ③ 全场 (22: TARGET_ALL)
+//   ④ 前后排 (23: 甲方后排, 24: 甲方前排, 25: 乙方前排, 26: 乙方后排)
+//      ⚠️ 灭绝自动回退: 指定排全灭时，自动回退到同侧另一排；若该排亦全灭返回 0
+//   ⑤ 贯穿攻击 (27: TARGER_THROUGH): 结合 main_target，同列前后排穿透
 //
-// ⚠️★ **本批不移植,理由是可观察面而非工作量**:多目标展开的**唯一消费者**是
-//    多目标指令与咒术(攻击魔法/职业魔法/宠技的 `全` 系),它们**全部**未移植
-//    (S19 魔法/精灵术在覆盖台账里是 `⬜`;`__ATTACK_MAGIC` 咒术管线裁定见 roadmap A-ε)。
-//    ⇒ 现在移植只有"代码在、无人调用"一种结果 —— 正是欠债 20/25 那族
-//      「地基绿而运行时不接,ctest 一样全过」的形态。
-// ★ 本仓当前对单体目标的做法是**内联**在 `resolveOrdered` 里的一行
-//   (`target_slot` 范围 + `occupied`/`dead` 检查),它**等价于** `MultiList` 在
-//   `toNo ∈ [0,19]` 时的净核(源码 `:239-263`:`ToList[0]=toNo; ToList[1]=-1; cnt=1`),
-//   即"恒产单体表"。**本批把这个等价关系显式化**为 `targetCheck` 供各处复用,
-//   并把上面那段"哪些分支没移植、为什么"记在此处。
-// ⚠️★ **目标不可用时的 `while((toNo = nLifeArea[rand()%10]) == -1);` 有意不复刻**
-//    (`battle.c:257`):它**消耗不定次数 rng**,且全死时原版 `return -1` 而调用方
-//    `BATTLE_MultiRecovery` 不检查返回值、照样遍历未初始化的 `ToList`(原版 UB)。
-//    ⇒ 本仓"目标不可用即什么都不发生、不摇 rng"(DR 已登记为已知行为差,
-//    见 11-decision-register.md 的 MultiList 条)。照抄它会让 rng 序列不可回放。
+// ★ 纯函数、运行期零分配、无副作用:
+//   不消耗 rng (原版目标不可用时的 while 重摇有意不复刻，见 DR-BT MultiList 条);
+//   遍历槽位天然升序排列 (符合原版 SortLoc)。
+std::size_t expandMultiTarget(const BattleField &field,
+                              const bool *slots,
+                              int target_code,
+                              int *out_slots,
+                              std::size_t max_out = kSlotCount,
+                              int main_target = -1) noexcept;
 
 // ── 回合结算 ──────────────────────────────────────────────────
 //
@@ -555,6 +552,54 @@ std::int32_t computeFireKillPhysicalDamage(const BattleField &field,
                                            const RulesConfig &config,
                                            Random &rng) noexcept;
 
+// ── 攻击魔法与精灵术规则引擎 (Phase 5.0 / S19) ──────────────────────────────────
+
+// 魔法闪避/抵抗判定 (原版 battle_magic.c:916 BATTLE_MagicDodge)
+// 玩家: fLuck = luck * 3 + resist * 0.15;
+// 宠物/怪物: fLuck = min(30.0f, level * 0.2f);
+// rand(1, 100) <= threshold 则闪避/抵抗成功
+bool rollMagicDodge(bool is_player,
+                    int luck,
+                    int resist,
+                    int level,
+                    Random &rng) noexcept;
+
+// 通用攻击魔法伤害纯函数 (原版 battle_magic.c:3056 BATTLE_getMagicAdjustInt & :1150-1180)
+// element: 地(0)/水(1)/火(2)/风(3)
+// att_magic_lv: 施法者对应属性魔法熟练度/等级 (1..100)
+// def_magic_resist: 目标对应属性魔法抗性 (0..100)
+// power: 魔法基础威力
+// magic_level: 魔法阶级 (1..10)
+std::int32_t computeMagicDamage(MagicElement element,
+                                int att_magic_lv,
+                                int def_magic_resist,
+                                int power,
+                                int magic_level,
+                                const Combatant &attacker,
+                                const Combatant &defender,
+                                const BattleField &field,
+                                Random &rng) noexcept;
+
+// 地魔法伤害纯函数 (便捷单系入口)
+std::int32_t computeEarthMagicDamage(int att_magic_lv,
+                                     int def_magic_resist,
+                                     int power,
+                                     const Combatant &attacker,
+                                     const Combatant &defender,
+                                     const BattleField &field,
+                                     Random &rng,
+                                     int magic_level = 4) noexcept;
+
+// 水魔法伤害纯函数 (便捷单系入口)
+std::int32_t computeWaterMagicDamage(int att_magic_lv,
+                                     int def_magic_resist,
+                                     int power,
+                                     const Combatant &attacker,
+                                     const Combatant &defender,
+                                     const BattleField &field,
+                                     Random &rng,
+                                     int magic_level = 4) noexcept;
+
 // 火魔法伤害纯函数 (原版 battle_magic.c:5183 BATTLE_MultiAttMagic_Fire)
 std::int32_t computeFireMagicDamage(int att_magic_lv,
                                     int def_magic_resist,
@@ -563,6 +608,28 @@ std::int32_t computeFireMagicDamage(int att_magic_lv,
                                     const Combatant &defender,
                                     const BattleField &field,
                                     Random &rng) noexcept;
+
+// 风魔法伤害纯函数 (便捷单系入口)
+std::int32_t computeWindMagicDamage(int att_magic_lv,
+                                    int def_magic_resist,
+                                    int power,
+                                    const Combatant &attacker,
+                                    const Combatant &defender,
+                                    const BattleField &field,
+                                    Random &rng,
+                                    int magic_level = 4) noexcept;
+
+// 恩惠/滋润/治愈精灵术生命恢复量计算纯函数 (原版 battle_magic.c:419 BATTLE_MultiRecovery)
+// 恢复量 = RAND(power * 0.9, power * 1.1)
+std::int32_t computeHealMagicAmount(int power, Random &rng) noexcept;
+
+// 净化精灵术纯函数 (解除目标异常状态)
+// status_to_clean: 0 表示净化一切可解异常状态, >0 表示指定净化状态
+// 返回是否成功净化
+bool applyPurifyMagic(Combatant &target, std::uint8_t status_to_clean = 0) noexcept;
+
+// 属性反转精灵术纯函数 (极光精灵 / 调和精灵, 地<->风, 水<->火)
+void applyElementReverse(Combatant &target) noexcept;
 
 // 拐骗判定纯函数 (原版 battle_event.c:5677 BATTLE_Abduct)
 // 守方为 BOSS 时几率恒为 0; 否则 per = max(50, (def_lv - att_lv) * 0.6 + 30)

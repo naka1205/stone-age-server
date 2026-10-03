@@ -355,6 +355,27 @@ inline constexpr int kCaptureDifficultyDefault = 30;
 // ★ 等级门(`:3834`):`myLv + 5 < targetLv` 直接失败。5 是硬编码的等级容差。
 inline constexpr int kCaptureLevelGate = 5;
 
+// ── 多目标展开与攻击魔法/精灵术常量 (Phase 5.0 / S19) ───────────────────
+// 对应原版 include/battle.h 中的目标宏定义
+inline constexpr int kTargetSide0 = 20;     // 乙方全侧 (0..9)
+inline constexpr int kTargetSide1 = 21;     // 甲方全侧 (10..19)
+inline constexpr int kTargetAll = 22;       // 全场 (0..19)
+inline constexpr int kTargetSide1BRow = 23; // 甲方后排 (10..14)
+inline constexpr int kTargetSide1FRow = 24; // 甲方前排 (15..19)
+inline constexpr int kTargetSide0FRow = 25; // 乙方前排 (5..9)
+inline constexpr int kTargetSide0BRow = 26; // 乙方后排 (0..4)
+inline constexpr int kTargetThrough = 27;   // 贯穿攻击 (前后排穿透)
+
+// 魔法属性定义 (原版 battle_magic.c 0:地, 1:水, 2:火, 3:风)
+enum class MagicElement : std::uint8_t
+{
+	Earth = 0, // 地
+	Water = 1, // 水
+	Fire = 2,  // 火
+	Wind = 3,  // 风
+	None = 4,  // 无
+};
+
 } // namespace SA::Rules
 
 #endif // __SA_Constants_H__
