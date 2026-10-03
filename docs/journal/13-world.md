@@ -2182,5 +2182,9 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
    - `tools/ci_verify.py` 6 项守卫全部绿灯（测试注册清单 24 项完整、WERROR 清洁构建零告警、断言防线反向探针验证通过）；
    - `check_module_boundaries.py` 模块边界严格校验 100% 通过（world 仅依赖 net, platform, saac, session_storage，单一暴露头）；
    - `check_docs_index.py`、`check_format.py` 守卫全绿。
+- **全平台 CI 远端实证 (GitHub Actions Run 37139697765)**:
+   - Commit `ca604f6` 在 Linux GCC、macOS Apple Clang、Windows MSVC 以及 MySQL 8.4.8 + Redis 8.6.2 集成测试中 **100% SUCCESS**；
+   - `ci_verify.py` EXPECTED_TESTS 完整登记 24 项测试（含 `world_cross_server`），清洁构建零告警、断言防线反向探针验证通过。
+
 
 
