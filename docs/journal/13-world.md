@@ -2058,3 +2058,40 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - 全套 CTest 22/22 100% 绿灯通过；
   - `check_format.py` 代码格式 100% 合规。
 
+---
+
+### 9.0.122 阶段 6.1 —— 客户端天使契约与神佑状态表现层对接 (Client Angel System & Spirit Blessing Presentation)
+
+- **日期**: 2026-10-03
+- **分支**: `master`
+- **目标**: 落实 S11 精灵/天使系统客户端表现与交互状态机对接（阶段 6.1）。实现大世界场景交互与角色状态管理（`AngelContractView` / `AngelRoleKind` / `canUseAngelToken`）、天使模式暗雷遇敌抑制状态感知（`isAngelMode` / `isEncounterSuppressed`）、神佑守护状态（`hasSpiritBlessing`），并在战斗表现层（`BattlePresenter`）对接战中神佑守护状态标识与 `DAMAGE_FLAG_GUARDIAN` 伤害事件流结构化文本解析，完成双端确定性闭环。
+
+#### 1. 核心架构与功能落地
+
+1. **客户端玩家交互与状态层 (`PlayerInteraction.h` / `PlayerInteraction.cpp`)**:
+   - 定义 `AngelRoleKind`（kNone, kAngel, kHero）；
+   - 定义 `AngelContractView` 契约视图模型（契约 ID、使命 ID、角色、阶段状态、伙伴昵称/CDKEY、使命详情、超时标记等）；
+   - 实现契约视图生命周期管理：`setAngelContract`、`clearAngelContract`、`hasAngelContract`、`angelContract()`；
+   - 实现信物使用门禁与角色权限互斥校验：`canUseAngelToken(item_id)`：
+     - 使者信物 2884：仅使者角色（`kAngel`）且契约处于执行中（`stage == 2`）且未超时可使用；
+     - 勇者信物 2885：仅勇者角色（`kHero`）且契约处于执行中（`stage == 2`）且未超时可使用；
+     - 契约未接取、已超时或非对应角色直接阻断拦截；
+   - 实现神佑守护与天使模式状态管理：`setSpiritBlessing`/`hasSpiritBlessing` 与 `setAngelMode`/`isAngelMode`，打通暗雷遇敌抑制感知（`isEncounterSuppressed()`）。
+
+2. **客户端战斗表现层 (`BattlePresenter.h` / `BattlePresenter.cpp`)**:
+   - `UnitView` 与 `SlotState` 扩充 `bool has_spirit_blessing` 神佑守护状态字段；
+   - 增加公共接口 `setUnitSpiritBlessing(slot, active)` 与 `unitSpiritBlessing(slot)`；
+   - `applyEvent` 中捕获含有 `DAMAGE_FLAG_GUARDIAN`（512）的伤害事件，自动标记受击目标槽位处于神佑加持状态；
+   - `describeEvent` 中解析伤害事件标志位，当命中 `DAMAGE_FLAG_GUARDIAN` 时增加 `"神佑守护 "` 前缀，实现战中神佑守护减伤与防护效果的精准结构化广播呈现。
+
+#### 2. 验证与门禁
+
+- **客户端单元与协议测试 (`tests/ClientNetTest.cpp`)**:
+  - 新增 `大世界天使契约与神佑守护状态表现端到端跑通 (Phase 6.1)` 测试用例（4 大 SUBCASE）；
+  - 覆盖契约视图生命周期、信物门禁互斥校验、神佑/使者模式暗雷抑制、战斗神佑呈现与事件流解析全链路；
+  - **RV-Angel-Client-1 反向变异实证**：篡改 `canUseAngelToken` 中使者信物 ID 为 9999，精确触发 2 处测试断言失败（红灯），还原后一次性恢复全绿；
+  - 客户端 CTest 7/7 100% 绿灯。
+- **服务端与文档守卫**:
+  - 服务端 CTest 22/22 保持 100% 绿灯；
+  - `check_docs_index.py`、`check_format.py` 守卫全绿。
+
