@@ -2265,6 +2265,46 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
    - 涵盖历法时间纪元推进与往返等价性、四时段状态机判定与调色板映射、EF 协议编解码、场景天气设置与强度钳位、超时到期恢复晴朗以及跨图传送环境同步闭环；
    - **RV-Weather-1 反向变异实证**：实证时段分界线防篡改、非法天气强度严格钳位至 5 级以内防止客户端粒子系统溢出崩溃。
 - **全量 CTest 25/25 100% 绿灯**，6 项守卫通过，断言防线反向验证通过。
+- **全平台 CI 远端实证 (GitHub Actions Run 37172669412)**:
+   - Commit `749a408` 在 Linux GCC、macOS Apple Clang、Windows MSVC、MySQL+Redis 集成全平台 **100% SUCCESS**。
+
+---
+
+### 9.0.127 阶段 11 —— 客户端昼夜调色板渐变渲染与全景动态天气粒子系统对接 (Client Weather Particle & Day/Night Palette Presentation)
+
+- **日期**: 2026-10-04
+- **分支**: `master`
+- **目标**: 依据 8.0 经典调色板映射与大世界天气特效协议，在客户端落地昼夜调色板渐变渲染引擎 (`PaletteManager`) 与全景动态天气粒子系统 (`WeatherEffect`)，完成双端历法与天气规则的闭环贯通。
+
+#### 1. 核心架构与功能落地
+
+1. **客户端昼夜调色板状态机 (`stone-age-client/src/scenes/PaletteManager.h` & `PaletteManager.cpp`)**:
+   - 支持经典 16 级调色板映射（`PALET_0` 室内基础、`PALET_1` 晨曦朝霞、`PALET_2` 正午亮昼、`PALET_3` 沉夜浓墨、`PALET_4` 夕阳暮霭、`PALET_5` 地底洞窟等）；
+   - 环境光 RGB 增益乘子模型与线性插值（LERP），默认 2000ms 平滑渐变过渡，消除场景突兀切换；
+   - 对接 L3 `SA::Rules::LSTime`，支持由 Unix 现实时间戳直接驱动石器时段与调色板；
+   - 室内/洞窟独立覆盖（`setOverridePalette`）与离开恢复机制（`clearOverridePalette`）。
+2. **全景动态天气粒子系统 (`stone-age-client/src/scenes/WeatherEffect.h` & `WeatherEffect.cpp`)**:
+   - 完整消费 8.0 `EF` 协议报文（`"EF <type> <level> [option]"`）；
+   - 粒子物理模拟：
+     - 雨（垂直高速降落、微风偏角）；
+     - 雪（轻盈下落、正弦摆动）；
+     - 落樱（自由翻滚旋转、随风起伏飘散）；
+     - 流星（向左下极速划过夜空、生命期快速淡入淡出）；
+   - 强度等级控制（1..5 级动态容量控制，40..200 粒子）；
+   - 淡出消散态（FadeOut）：收到停止天气命令后停止发射新粒子，现有粒子透明度按衰减曲线自然消逝；
+   - 纯函数伪随机引擎（XorShift32），保证全平台零 I/O、确定性与跨平台行为一致。
+3. **主场景与测试装配**:
+   - `GameScene` 集成 `palette_manager` 与 `weather_effect` 步进时钟；
+   - `sa_client_net_test` 链接 `sa_shared`，实现双端规则零引擎依赖验证。
+
+#### 2. 验证与反向变异双证据
+
+- **客户端单元测试 (`stone-age-client/tests/ClientNetTest.cpp`)**:
+   - 新增 `阶段 11: 昼夜调色板渐变与全景动态天气粒子系统对接 (Phase 11)` 测试用例（4 大 SUBCASE）；
+   - 覆盖调色板基准时段映射、Unix 秒数驱动、50%/100% 进度色彩线性插值、洞窟覆盖隔离与恢复；
+   - 覆盖 EF 协议解析（雨、雪、落樱、流星雨）、1..5 级容量控制、淡出与完全消散；
+   - **RV-Weather-Client-1 反向变异实证**：调色板编号越界夹紧防御（负数与超大值）、畸形 EF 报文防御、非法天气类型防御、零步长/负数步长物理步进防御；
+   - 客户端 CTest 7/7 100% 绿灯，守卫 8/8 项全部通过。
 
 
 
