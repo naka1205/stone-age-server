@@ -23,6 +23,7 @@ add_library(sa_world STATIC
     WorldCrossServer.cpp
     WorldWeather.cpp
     WorldManor.cpp
+    WorldLeaderboard.cpp
 )
 
 target_include_directories(sa_world

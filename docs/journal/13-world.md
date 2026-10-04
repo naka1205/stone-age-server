@@ -2408,6 +2408,62 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
     - 考题非法答案严格拒绝防御。
 - **CTest 27/27 100% 绿灯**，守卫工具 `ci_verify.py` 6 项全过。
 
+---
+
+### 9.0.130 阶段 14 —— 尼斯大陆全域排行榜与全服荣誉殿堂系统落地 (Landmark Radar, Prestige Leaderboards & Hall of Fame System)
+
+- **日期**: 2026-10-04
+- **分支**: `master`
+- **目标**: 依据石器时代 8.0 全域竞争与社交生态，在纯函数规则层落地 5 大全域排行榜体系 (等级榜、个人声望榜、家族威望榜、四大庄园战胜场榜、全服决斗积分榜)、多维度确定性排序与同分决胜机制、前三名全服荣誉殿堂专属称号与四维加成算法，以及全员每日膜拜第一名领赏机制；在大世界层扩展聚合管理接口、100 名额硬上限截断与每日一次膜拜门禁控制，完成 28/28 CTest 与反向变异验证闭环。
+
+#### 1. 核心架构与功能落地
+
+1. **L3 纯函数规则层 (`shared/rules/LeaderboardRank.h` & `LeaderboardRank.cpp`)**:
+   - **5 大榜单类型定义 (`LeaderboardKind`)**:
+     - `kLevel`: 个人等级榜 (Level)；
+     - `kFame`: 个人声望榜 (Personal Fame)；
+     - `kFamilyPrestige`: 家族威望榜 (Family Prestige)；
+     - `kManorWins`: 庄园战胜场榜 (Manor War Wins)；
+     - `kDuelPoints`: 全服决斗切磋积分榜 (Duel Points)；
+   - **多平台确定性严格排序与同分打破僵局 (`sortLeaderboardRecords`)**:
+     - 积分降序第一优先级；
+     - 同分时严格按 `entity_id` 升序判定打破僵局，消除多平台浮点或弱序不确定性；
+   - **前三甲全服荣誉殿堂称号与四维加成 (`computeHallOfFameBonus`)**:
+     - 冠军 (Rank 1): 尼斯之巅霸主称号，提供 +50 攻击力、+30 防御力、+20 敏捷、+200 生命上限；
+     - 亚军 (Rank 2): 传奇勇者称号，提供 +30 攻击力、+20 防御力、+10 敏捷、+120 生命上限；
+     - 季军 (Rank 3): 殿堂先驱称号，提供 +15 攻击力、+10 防御力、+5 敏捷、+60 生命上限；
+     - 第 4 名及以后无殿堂称号与属性加成；
+   - **每日膜拜第一名领赏机制 (`calculateWorshipReward`)**:
+     - 基础奖励 2,000 石币与 5,000 角色经验；
+     - 榜首分数按 1% 比例转化为石币犒赏（上限 10,000 石币，总收益上限 12,000 石币）。
+
+2. **L2 服务端大世界层扩展 (`src/world/WorldImpl.h`, `include/world/Api.h`, `WorldLeaderboard.cpp`)**:
+   - **大世界排行榜聚合与容量截断 (`updateLeaderboardEntry` & `getLeaderboard`)**:
+     - `leaderboards` 字典记录五大类别榜单集合；
+     - 支持动态更新或新增条目，每次更新后调用 `sortLeaderboardRecords` 即时对齐排位；
+     - 强力实施 100 条硬上限截断 (`kMaxRecords = 100`)，杜绝内存无序膨胀；
+   - **每日膜拜状态机与角色防刷隔离 (`worshipHallOfFame`)**:
+     - 使用角色名 (`charname`) 作为唯一凭证追踪 `last_worship_day`；
+     - 严格门禁：空榜拒绝、同日重复膜拜拒绝、跨天允许再次膜拜；
+     - 膜拜成功后原子增加角色石币（受 1,000,000 钱包上限保护）并派发经验；
+   - **在线角色殿堂加成感知 (`playerHallOfFameBonus`)**:
+     - 实时探测在线玩家在等级榜与声望榜中的最高殿堂席位，向战斗及状态系统供给额外四维修正。
+
+#### 2. 测试覆盖与反向变异实证
+
+- **单元测试 (`tests/WorldLeaderboardTest.cpp`)**:
+  - 新增 `world_leaderboard` 测试目标（CTest #28），覆盖 5 大测试子用例：
+    1. 确定性排序与同分决胜；
+    2. 前三甲荣誉殿堂专属称号与四维加成；
+    3. 大世界排行榜更新聚合与 100 条硬截断；
+    4. 每日膜拜第一名领赏与单日一次门禁防刷；
+    5. **RV-Leaderboard-1 反向变异实证**:
+       - 空榜/越界排位请求安全防御；
+       - 非法榜单枚举越界防护；
+       - 未上榜角色殿堂加成严格归零防御。
+- **CTest 28/28 100% 绿灯**，守卫工具 `ci_verify.py` 6 项全过。
+
+
 
 
 

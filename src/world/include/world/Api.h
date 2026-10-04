@@ -36,6 +36,7 @@
 #include "rules/Combatant.h"
 #include "rules/Config.h"
 #include "rules/LSTime.h"
+#include "rules/LeaderboardRank.h"
 #include "rules/ManorPrivilege.h"
 #include "rules/PetSkill.h"
 #include "rules/Progression.h"
@@ -2198,6 +2199,12 @@ class World final : public SA::Net::TransportEvents,
 	bool verifyRideExamQuiz(int question_id, int selected_option) const;
 	SA::Rules::ManorAuraBonus playerManorAura(SA::Net::SessionId session) const;
 	bool summonFamilyMembers(SA::Net::SessionId leader_session);
+
+	// ── 排行榜与荣誉殿堂体系 (Leaderboard & Hall of Fame, 阶段 14) ──
+	void updateLeaderboardEntry(SA::Rules::LeaderboardKind kind, std::uint32_t entity_id, const std::string &name, std::int64_t score, const std::string &extra = "");
+	std::vector<SA::Rules::LeaderboardRecord> getLeaderboard(SA::Rules::LeaderboardKind kind, std::size_t limit = 100) const;
+	bool worshipHallOfFame(SA::Net::SessionId session, SA::Rules::LeaderboardKind kind, int target_rank, std::uint32_t current_day = 0);
+	SA::Rules::HallOfFameBonus playerHallOfFameBonus(SA::Net::SessionId session) const;
 
 	// ── 玩家摆摊系统 (Street Stall System) ────────────────────────────────
 	bool openStall(SA::Net::SessionId seller, const std::string &title);

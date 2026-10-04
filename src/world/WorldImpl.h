@@ -746,6 +746,10 @@ struct World::Impl : GoldAuditSink
 	std::map<FamilyManor, ManorTreasuryData> manor_treasuries{};
 	std::uint32_t next_family_id = 1;
 
+	// 阶段 14: 排行榜与荣誉殿堂存储
+	std::unordered_map<SA::Rules::LeaderboardKind, std::vector<SA::Rules::LeaderboardRecord>> leaderboards{};
+	std::unordered_map<std::string, std::uint32_t> player_worship_days{}; // charname -> last_worship_day
+
 	std::unordered_map<SA::Net::SessionId, StallInfo> stalls{};
 
 	std::unordered_map<std::uint64_t, MarketListing> market_listings{};
