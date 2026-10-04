@@ -56,7 +56,7 @@ std::uint32_t calculateTradeTax(std::uint32_t trade_volume, int tax_rate_percent
 		return 0;
 	}
 	const int rate = std::clamp(tax_rate_percent, kMinTaxRatePercent, kMaxTaxRatePercent);
-	const std::uint64_t tax = (static_cast<std::uint64_t>(trade_volume) * static_cast<std::uint64_t>(rate)) / 100ULL;
+	const std::uint64_t tax = (static_cast<std::uint64_t>(trade_volume) * static_cast<std::uint64_t>(rate)) / 100;
 	return static_cast<std::uint32_t>(std::min<std::uint64_t>(tax, trade_volume));
 }
 
@@ -67,7 +67,7 @@ std::uint32_t calculateRideExamManorShare(std::uint32_t exam_fee, int share_rate
 		return 0;
 	}
 	const int rate = std::clamp(share_rate_percent, 10, 50);
-	const std::uint64_t share = (static_cast<std::uint64_t>(exam_fee) * static_cast<std::uint64_t>(rate)) / 100ULL;
+	const std::uint64_t share = (static_cast<std::uint64_t>(exam_fee) * static_cast<std::uint64_t>(rate)) / 100;
 	return static_cast<std::uint32_t>(std::min<std::uint64_t>(share, exam_fee));
 }
 
@@ -90,14 +90,14 @@ std::uint32_t calculateDividendShare(
 	{
 	case ManorMemberRole::kLeader:
 	{
-		const std::uint64_t rate = 25ULL + static_cast<std::uint64_t>(contrib_bonus); // 25% ~ 35%
-		share = (pool * rate) / 100ULL;
+		const std::uint64_t rate = static_cast<std::uint64_t>(25 + contrib_bonus); // 25% ~ 35%
+		share = (pool * rate) / 100;
 		break;
 	}
 	case ManorMemberRole::kElder:
 	{
-		const std::uint64_t rate = 15ULL + static_cast<std::uint64_t>(contrib_bonus / 2); // 15% ~ 20%
-		share = (pool * rate) / 100ULL;
+		const std::uint64_t rate = static_cast<std::uint64_t>(15 + contrib_bonus / 2); // 15% ~ 20%
+		share = (pool * rate) / 100;
 		break;
 	}
 	case ManorMemberRole::kNone:
@@ -107,9 +107,9 @@ std::uint32_t calculateDividendShare(
 	default:
 	{
 		// 剩余 50% 由普通成员平分
-		const std::uint64_t member_pool = (pool * 50ULL) / 100ULL;
+		const std::uint64_t member_pool = (pool * 50) / 100;
 		const std::uint64_t base_share = member_pool / static_cast<std::uint64_t>(std::max(1, total_members));
-		const std::uint64_t bonus_amount = (base_share * static_cast<std::uint64_t>(contrib_bonus)) / 100ULL;
+		const std::uint64_t bonus_amount = (base_share * static_cast<std::uint64_t>(contrib_bonus)) / 100;
 		share = base_share + bonus_amount;
 		break;
 	}
