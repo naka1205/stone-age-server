@@ -1512,6 +1512,290 @@ void World::onEvent(SA::Net::SessionId id, const SA::Domain::EventRequest &req)
 					                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
 					ok = true;
 				}
+				else if (npc.type == NpcType::kBankman)
+				{
+					// 钱庄职员 / 个人银行 NPC 交互 (阶段 15 NPC:Bankman)
+					const auto bank_gold = playerBankGold(id);
+					std::string msg = npc.message.empty() ? ("欢迎光临石器时代钱庄！\n当前随身石币: " + std::to_string(p->gold) + " / 1,000,000\n银行金库存款: " + std::to_string(bank_gold) + " / 100,000,000") : npc.message;
+					s.sendExChangeWindow(id, npc.id, msg,
+					                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+					ok = true;
+				}
+				else if (npc.type == NpcType::kStoryTeller)
+				{
+					// 游历吟游诗人 NPC 交互 (阶段 16 NPC:StoryTeller, 原版 npc_storyteller.c)
+					std::string msg = npc.message.empty()
+					                      ? "欢迎来到尼斯大陆！很久很久以前，四大村庄守护着四大精灵圣兽的祝福……"
+					                      : npc.message;
+					s.sendExChangeWindow(id, npc.id, msg,
+					                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+					ok = true;
+				}
+				else if (npc.type == NpcType::kTimeMan)
+				{
+					// 时间守护者 / 昼夜报时人 NPC 交互 (阶段 16 NPC:TimeMan, 原版 npc_timeman.c)
+					std::string time_str = getWorldTimeString();
+					std::string msg = npc.message.empty()
+					                      ? ("守望者为你报时：\n" + time_str + "\n愿尼斯大陆的精灵守护你的旅途！")
+					                      : (npc.message + "\n" + time_str);
+					s.sendExChangeWindow(id, npc.id, msg,
+					                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+					ok = true;
+				}
+				else if (npc.type == NpcType::kSavePoint)
+				{
+					// 记录点长老 NPC 交互 (阶段 16 NPC:SavePoint, 原版 npc_savepoint.c)
+					const auto spit = s.player_save_points.find(id);
+					const bool is_saved_here = (spit != s.player_save_points.end()) &&
+					                           (spit->second.floor == npc.floor) &&
+					                           (std::abs(spit->second.x - npc.x) <= 2 && std::abs(spit->second.y - npc.y) <= 2);
+					if (is_saved_here)
+					{
+						// 已经是当前记录点：显示星球启动时间与在线人数 (原版 npc_savepoint.c:140-160)
+						const std::int64_t uptime_sec = std::max<std::int64_t>(0, (s.clock.nowMs() - s.server_start_time_ms) / 1000);
+						const int dd = static_cast<int>(uptime_sec / 86400);
+						const int hh = static_cast<int>((uptime_sec % 86400) / 3600);
+						const int mm = static_cast<int>((uptime_sec % 3600) / 60);
+						const int ss = static_cast<int>(uptime_sec % 60);
+
+						std::string time_msg;
+						if (dd > 0)
+							time_msg = "本星球已经启动了 " + std::to_string(dd) + " 日 " + std::to_string(hh) + " 小时 " + std::to_string(mm) + " 分 " + std::to_string(ss) + " 秒。";
+						else if (hh > 0)
+							time_msg = "本星球已经启动了 " + std::to_string(hh) + " 小时 " + std::to_string(mm) + " 分 " + std::to_string(ss) + " 秒。";
+						else
+							time_msg = "本星球已经启动了 " + std::to_string(mm) + " 分 " + std::to_string(ss) + " 秒。";
+
+						std::string msg = "这里已经是你的记录点了。\n" + time_msg + "\n目前线上人数为 " + std::to_string(s.conns.size()) + " 人。";
+						s.sendExChangeWindow(id, npc.id, msg,
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+					}
+					else
+					{
+						// 尚未记录：弹窗询问是否设定记录点
+						it->second.pending_savepoint.npc_id = npc.id;
+						it->second.pending_savepoint.floor = npc.floor;
+						it->second.pending_savepoint.x = npc.x;
+						it->second.pending_savepoint.y = npc.y;
+						it->second.pending_savepoint.name = npc.savepoint_name.empty() ? npc.name : npc.savepoint_name;
+
+						std::string prompt = "要将此地设定为你的记录点（重生点）吗？\n死亡或回城时将在此处重生。";
+						if (!it->second.pending_savepoint.name.empty())
+							prompt = "要将【" + it->second.pending_savepoint.name + "】设定为你的记录点吗？\n死亡或回城时将在此处重生。";
+
+						SA::Domain::WindowOpen win{};
+						win.window_id = ++s.next_window_id;
+						win.kind = SA::Domain::WindowKind::WINDOW_KIND_MESSAGE;
+						win.buttons = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES) |
+						              static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO);
+						win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+						win.source.entity_id = static_cast<std::uint32_t>(npc.id);
+						win.body_kind = SA::Domain::WindowOpen::BodyKind::MESSAGE;
+						win.body.message.wide = false;
+
+						if (auto *slot = win.body.message.lines.push_back())
+							slot->assign(prompt.data(), std::min<std::size_t>(prompt.size(), 255));
+
+						it->second.active_window_id = win.window_id;
+						it->second.active_window_npc_id = npc.id;
+						it->second.last_window_text = prompt;
+
+						s.sendTo(id, win);
+					}
+					ok = true;
+				}
+				else if (npc.type == NpcType::kBus)
+				{
+					// 长毛象公车 NPC 交互 (阶段 16 NPC:Bus, 原版 npc_bus.c)
+					// 1. 团队检查 (原版 NPC_BUS_MSG_NOTPARTY: "PAPAON！！无法以团队加入唷！")
+					if (s.partyModeOf(id) != PartyMode::kNone)
+					{
+						s.sendExChangeWindow(id, npc.id, "PAPAON！！无法以团队加入唷！",
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+						ok = true;
+					}
+					else if (npc.bus_routes.empty())
+					{
+						s.sendExChangeWindow(id, npc.id, "PAON！当前长毛象公车正在整备中，暂无可用线路。",
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+						ok = true;
+					}
+					else
+					{
+						// 默认首条路线
+						const auto &route = npc.bus_routes[0];
+						if (p->level < route.min_level)
+						{
+							s.sendExChangeWindow(id, npc.id, "PAPAON！！你的等级还不够唷！",
+							                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+						}
+						else if (p->gold < route.ticket_cost)
+						{
+							s.sendExChangeWindow(id, npc.id, "PAPAON！！金钱不足唷！乘车需要 " + std::to_string(route.ticket_cost) + " 石币。",
+							                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+						}
+						else
+						{
+							// 弹出乘车确认窗口
+							it->second.pending_bus.npc_id = npc.id;
+							it->second.pending_bus.route_idx = 0;
+
+							std::string prompt = "PAON！长毛象公车即将发车！\n目的地: 【" + route.dest_name + "】\n车费: " +
+							                     std::to_string(route.ticket_cost) + " 石币\n是否购票登车？";
+
+							SA::Domain::WindowOpen win{};
+							win.window_id = ++s.next_window_id;
+							win.kind = SA::Domain::WindowKind::WINDOW_KIND_MESSAGE;
+							win.buttons = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES) |
+							              static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO);
+							win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+							win.source.entity_id = static_cast<std::uint32_t>(npc.id);
+							win.body_kind = SA::Domain::WindowOpen::BodyKind::MESSAGE;
+							win.body.message.wide = false;
+
+							if (auto *slot = win.body.message.lines.push_back())
+								slot->assign(prompt.data(), std::min<std::size_t>(prompt.size(), 255));
+
+							it->second.active_window_id = win.window_id;
+							it->second.active_window_npc_id = npc.id;
+							it->second.last_window_text = prompt;
+
+							s.sendTo(id, win);
+						}
+						ok = true;
+					}
+				}
+				else if (npc.type == NpcType::kCharm)
+				{
+					// 美容师 NPC 交互 (阶段 17 NPC:Charm, 原版 npc_charm.c)
+					if (p->charm >= 100)
+					{
+						s.sendExChangeWindow(id, npc.id, "【美容师】\n你的魅力真是完美，请永远保持你的魅力唷！",
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+					}
+					else
+					{
+						const int cost = calcCharmCost(id);
+						it->second.pending_charm.npc_id = npc.id;
+						it->second.pending_charm.cost = cost;
+
+						std::string prompt = "【美容师】\n欢迎光临！要将你的魅力上升 5 点的话，需要 " +
+						                     std::to_string(cost) + " 石币唷！\n即使这样也可以吗？";
+
+						SA::Domain::WindowOpen win{};
+						win.window_id = ++s.next_window_id;
+						win.kind = SA::Domain::WindowKind::WINDOW_KIND_MESSAGE;
+						win.buttons = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES) |
+						              static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO);
+						win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+						win.source.entity_id = static_cast<std::uint32_t>(npc.id);
+						win.body_kind = SA::Domain::WindowOpen::BodyKind::MESSAGE;
+						win.body.message.wide = false;
+
+						if (auto *slot = win.body.message.lines.push_back())
+							slot->assign(prompt.data(), std::min<std::size_t>(prompt.size(), 255));
+
+						it->second.active_window_id = win.window_id;
+						it->second.active_window_npc_id = npc.id;
+						it->second.last_window_text = prompt;
+
+						s.sendTo(id, win);
+					}
+					ok = true;
+				}
+				else if (npc.type == NpcType::kOldman)
+				{
+					// 称号长老 NPC 交互 (阶段 17 NPC:Oldman, 原版 npc_oldman.c)
+					(void)checkAndGrantElderTitles(id, npc.id);
+					ok = true;
+				}
+				else if (npc.type == NpcType::kFmHealer)
+				{
+					// 家族医者 NPC 交互 (阶段 17 NPC:FmHealer, 原版 npc_fmhealer.c)
+					(void)fmHealPlayer(id, npc.id);
+					ok = true;
+				}
+				else if (npc.type == NpcType::kTranserMan)
+				{
+					// 特使传送师 NPC 交互 (阶段 17 NPC:TranserMan, 原版 npc_transerman.c)
+					if (s.partyModeOf(id) != PartyMode::kNone)
+					{
+						s.sendExChangeWindow(id, npc.id, "根据传送师工会规定，不能帮组队中的人传送！",
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+						ok = true;
+					}
+					else if (npc.transer_routes.empty())
+					{
+						s.sendExChangeWindow(id, npc.id, "特使传送师暂无配置可用航线。",
+						                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+						ok = true;
+					}
+					else if (npc.transer_routes.size() == 1)
+					{
+						const auto &route = npc.transer_routes.front();
+						it->second.pending_transer.npc_id = npc.id;
+						it->second.pending_transer.route_idx = 0;
+
+						std::string prompt = "特使传送师将送你前往【" + (route.dest_name.empty() ? "目的地" : route.dest_name) +
+						                     "】。\n需要支付 " + std::to_string(route.ticket_cost) + " 石币路费，确定传送吗？";
+
+						SA::Domain::WindowOpen win{};
+						win.window_id = ++s.next_window_id;
+						win.kind = SA::Domain::WindowKind::WINDOW_KIND_MESSAGE;
+						win.buttons = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES) |
+						              static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_NO);
+						win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+						win.source.entity_id = static_cast<std::uint32_t>(npc.id);
+						win.body_kind = SA::Domain::WindowOpen::BodyKind::MESSAGE;
+						win.body.message.wide = false;
+
+						if (auto *slot = win.body.message.lines.push_back())
+							slot->assign(prompt.data(), std::min<std::size_t>(prompt.size(), 255));
+
+						it->second.active_window_id = win.window_id;
+						it->second.active_window_npc_id = npc.id;
+						it->second.last_window_text = prompt;
+
+						s.sendTo(id, win);
+						ok = true;
+					}
+					else
+					{
+						SA::Domain::WindowOpen win{};
+						win.window_id = ++s.next_window_id;
+						win.kind = SA::Domain::WindowKind::WINDOW_KIND_SELECT;
+						win.buttons = static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_CANCEL);
+						win.source.source = SA::Domain::EntitySource::ENTITY_SOURCE_ENTITY;
+						win.source.entity_id = static_cast<std::uint32_t>(npc.id);
+						win.body_kind = SA::Domain::WindowOpen::BodyKind::SELECT;
+
+						std::string prompt = "特使传送师：请选择你想前往的目的地：";
+						if (auto *slot = win.body.select.lines.push_back())
+							slot->assign(prompt.data(), std::min<std::size_t>(prompt.size(), 255));
+
+						for (std::size_t i = 0; i < npc.transer_routes.size(); ++i)
+						{
+							const auto &r = npc.transer_routes[i];
+							if (auto *choice = win.body.select.choices.push_back())
+							{
+								choice->choice_id = static_cast<std::uint32_t>(i + 1);
+								std::string item_text = (r.dest_name.empty() ? ("站点 " + std::to_string(i + 1)) : r.dest_name) +
+								                        " (" + std::to_string(r.ticket_cost) + "石币)";
+								choice->text.assign(item_text.data(), std::min<std::size_t>(item_text.size(), 255));
+								choice->enabled = (p->gold >= r.ticket_cost && p->level >= r.min_level);
+							}
+						}
+
+						it->second.active_window_id = win.window_id;
+						it->second.active_window_npc_id = npc.id;
+						it->second.last_window_text = prompt;
+						it->second.pending_transer.npc_id = npc.id;
+						it->second.pending_transer.route_idx = 0;
+
+						s.sendTo(id, win);
+						ok = true;
+					}
+				}
 			}
 		}
 	}
@@ -1862,6 +2146,83 @@ void World::onWindowReply(SA::Net::SessionId id, const SA::Domain::WindowReply &
 			}
 		}
 
+		// 检查待决记录点确认 (NPC:SavePoint)
+		if (it->second.pending_savepoint.npc_id != 0 &&
+		    (reply.source.entity_id == 0 || it->second.pending_savepoint.npc_id == reply.source.entity_id))
+		{
+			const auto pending = it->second.pending_savepoint;
+			it->second.pending_savepoint = {};
+
+			const bool is_yes = (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES)) != 0 ||
+			                    reply.button == static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+			if (is_yes)
+			{
+				setPlayerSavePoint(id, pending.floor, pending.x, pending.y, pending.name);
+				std::string ok_msg = "记录点设定完成！重生时将回到此处。";
+				if (!pending.name.empty())
+					ok_msg = "【" + pending.name + "】记录点设定完成！重生时将回到此处。";
+				s.sendExChangeWindow(id, pending.npc_id, ok_msg,
+				                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+				return;
+			}
+		}
+
+		// 检查待决长毛象公车购票乘车确认 (NPC:Bus)
+		if (it->second.pending_bus.npc_id != 0 &&
+		    (reply.source.entity_id == 0 || it->second.pending_bus.npc_id == reply.source.entity_id))
+		{
+			const auto pending = it->second.pending_bus;
+			it->second.pending_bus = {};
+
+			const bool is_yes = (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES)) != 0 ||
+			                    reply.button == static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+			if (is_yes)
+			{
+				(void)boardBus(id, pending.npc_id, pending.route_idx);
+				return;
+			}
+		}
+
+		// 检查待决美容师提升魅力确认 (NPC:Charm)
+		if (it->second.pending_charm.npc_id != 0 &&
+		    (reply.source.entity_id == 0 || it->second.pending_charm.npc_id == reply.source.entity_id))
+		{
+			const auto pending = it->second.pending_charm;
+			it->second.pending_charm = {};
+
+			const bool is_yes = (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES)) != 0 ||
+			                    reply.button == static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+			if (is_yes)
+			{
+				(void)beautifyCharm(id, pending.npc_id);
+				return;
+			}
+		}
+
+		// 检查待决传送师传送确认 (NPC:TranserMan)
+		if (it->second.pending_transer.npc_id != 0 &&
+		    (reply.source.entity_id == 0 || it->second.pending_transer.npc_id == reply.source.entity_id))
+		{
+			const auto pending = it->second.pending_transer;
+			it->second.pending_transer = {};
+
+			const bool is_yes = (reply.button & static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_YES)) != 0 ||
+			                    reply.button == static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK);
+			std::size_t chosen_route = pending.route_idx;
+			bool has_choice = false;
+			if (reply.result_kind == SA::Domain::WindowReply::ResultKind::CHOICE_ID && reply.result.choice_id >= 1)
+			{
+				chosen_route = static_cast<std::size_t>(reply.result.choice_id - 1);
+				has_choice = true;
+			}
+
+			if (is_yes || has_choice)
+			{
+				(void)warpByTranserMan(id, pending.npc_id, chosen_route);
+				return;
+			}
+		}
+
 		it->second.active_window_id = 0;
 		it->second.active_window_npc_id = 0;
 	}
@@ -2186,6 +2547,417 @@ bool World::learnPetSkill(SA::Net::SessionId id, std::uint64_t npc_id, int pet_s
 	pet->pet_skills[static_cast<std::size_t>(target_slot)] = skill_id;
 
 	s.sendExChangeWindow(id, npc->id, "宠物成功学会了新技能！",
+	                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+	return true;
+}
+
+// ── 经典长尾 NPC 交通与世界设施 (阶段 16 NPC:SavePoint, TimeMan, StoryTeller, Bus) ─────
+
+bool World::setPlayerSavePoint(SA::Net::SessionId session, std::int32_t floor, std::int32_t x, std::int32_t y, std::string_view village_name)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(session);
+	if (it == s.conns.end())
+		return false;
+	s.player_save_points[session] = {floor, x, y, std::string(village_name)};
+	return true;
+}
+
+std::optional<SavePointData> World::getPlayerSavePoint(SA::Net::SessionId session) const
+{
+	const Impl &s = *_impl;
+	const auto it = s.player_save_points.find(session);
+	if (it != s.player_save_points.end())
+		return it->second;
+
+	// 若未显式记录，保底返回玩家初始出生村庄或默认坐标
+	const auto cit = s.conns.find(session);
+	if (cit != s.conns.end())
+	{
+		const auto *p = s.players.resolve(s.player_of_session.find(session));
+		if (p != nullptr)
+		{
+			const auto htit = s.session_hometowns.find(session);
+			if (htit != s.session_hometowns.end() && htit->second >= 0 && htit->second < 4)
+			{
+				const auto &ht = s.hometown_spawns[static_cast<std::size_t>(htit->second)];
+				return SavePointData{ht.floor, ht.x, ht.y, "初生之村"};
+			}
+			return SavePointData{p->floor, p->x, p->y, "默认记录点"};
+		}
+	}
+	return std::nullopt;
+}
+
+bool World::respawnPlayer(SA::Net::SessionId session)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(session);
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (it == s.conns.end() || p == nullptr)
+		return false;
+
+	// 战斗中禁止回城重生
+	if (s.inBattle(session))
+		return false;
+
+	const auto sp = getPlayerSavePoint(session).value_or(SavePointData{1000, 98, 93, "玛丽娜斯村"});
+	if (p->hp <= 0)
+	{
+		p->hp = 1; // 原版死亡回城保底保留 1 点生命值
+		p->mp = std::max(1, p->max_mp / 10);
+	}
+
+	s.warpPlayer(session, sp.floor, sp.x, sp.y);
+	return true;
+}
+
+std::string World::getWorldTimeString() const
+{
+	const Impl &s = *_impl;
+	const std::int64_t now_sec = s.clock.nowMs() / 1000;
+	// 昼夜循环 (石器世界每 1024 周期或现实小时划分)
+	const int hour_mod = static_cast<int>((now_sec / 3600) % 24);
+	std::string phase_name;
+	std::string desc;
+
+	if (hour_mod >= 6 && hour_mod < 10)
+	{
+		phase_name = "清晨 (MORNING)";
+		desc = "晨曦破晓，林间的野兽开始苏醒。";
+	}
+	else if (hour_mod >= 10 && hour_mod < 17)
+	{
+		phase_name = "正午白昼 (ALLNOON)";
+		desc = "阳光明媚，适合出海远航与探索秘境。";
+	}
+	else if (hour_mod >= 17 && hour_mod < 20)
+	{
+		phase_name = "黄昏暮色 (EVNING)";
+		desc = "夕阳西下，天际染上一抹金红。";
+	}
+	else
+	{
+		phase_name = "寂静黑夜 (ALLNIGHT)";
+		desc = "繁星点点，尼斯大陆沉入静谧的夜色之中。";
+	}
+
+	return "【尼斯时钟】 当前为 " + phase_name + "。" + desc;
+}
+
+bool World::boardBus(SA::Net::SessionId session, std::uint64_t bus_npc_id, std::size_t route_index)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(session);
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (it == s.conns.end() || p == nullptr)
+		return false;
+
+	const NpcEntity *npc = findNpc(bus_npc_id);
+	if (npc == nullptr || npc->type != NpcType::kBus)
+		return false;
+
+	if (s.partyModeOf(session) != PartyMode::kNone)
+	{
+		s.sendExChangeWindow(session, bus_npc_id, "PAPAON！！无法以团队加入唷！",
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	if (route_index >= npc->bus_routes.size())
+		return false;
+
+	const auto &route = npc->bus_routes[route_index];
+	if (p->level < route.min_level)
+	{
+		s.sendExChangeWindow(session, bus_npc_id, "PAPAON！！你的等级还不够唷！",
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	if (p->gold < route.ticket_cost)
+	{
+		s.sendExChangeWindow(session, bus_npc_id, "PAPAON！！金钱不足唷！乘车需要 " + std::to_string(route.ticket_cost) + " 石币。",
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 扣除车费 (走 GoldLedger, kWarpFee 事由)
+	if (route.ticket_cost > 0)
+	{
+		const GoldTx tx = delGold(*p, GoldReason::kWarpFee, route.ticket_cost,
+		                          /*trans=*/0, static_cast<std::uint64_t>(session), s);
+		if (tx.disposition != GoldDisposition::kApplied)
+			return false;
+	}
+
+	// 运送至目标站点 (瞬移)
+	s.warpSinglePlayer(session, route.dest_floor, route.dest_x, route.dest_y);
+
+	std::string dest_str = route.dest_name.empty() ? "目的地" : route.dest_name;
+	s.sendExChangeWindow(session, bus_npc_id, "哇喔~(出发进行)... 哇喔~(到罗)！长毛象公车已安全送达【" + dest_str + "】！",
+	                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+	return true;
+}
+
+std::int32_t World::calcCharmCost(SA::Net::SessionId session) const
+{
+	const SA::Model::Player *p = _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return 0;
+
+	if (p->charm >= 100)
+		return -1;
+
+	// 原版 npc_charm.c:281
+	// cost = level * RATE * (charm / WARU) * (trans + 1)
+	// RATE = 10, WARU = 3, 若 charm <= 1 则按 WARU(3) 计算
+	const int waru_charm = (p->charm <= 1) ? 3 : p->charm;
+	const int trans = playerTransmigration(session);
+	const int cost = p->level * 10 * (waru_charm / 3) * (trans + 1);
+	return std::max(1, cost);
+}
+
+bool World::beautifyCharm(SA::Net::SessionId session, std::uint64_t charm_npc_id)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(session);
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (it == s.conns.end() || p == nullptr)
+		return false;
+
+	const NpcEntity *npc = findNpc(charm_npc_id);
+	if (npc == nullptr || npc->type != NpcType::kCharm)
+		return false;
+
+	if (p->charm >= 100)
+	{
+		s.sendExChangeWindow(session, charm_npc_id, "【美容师】\n你的魅力真是完美，请永远保持你的魅力唷！",
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	const int cost = calcCharmCost(session);
+	if (cost <= 0)
+		return false;
+
+	if (p->gold < cost)
+	{
+		s.sendExChangeWindow(session, charm_npc_id, "【美容师】\n哎呀！你的钱不够唷！先去存好钱下次再来吧！",
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 扣费走 GoldLedger kCharmFee
+	const GoldTx tx = delGold(*p, GoldReason::kCharmFee, cost,
+	                          /*trans=*/0, static_cast<std::uint64_t>(session), s);
+	if (tx.disposition != GoldDisposition::kApplied)
+		return false;
+
+	p->charm = std::min(100, p->charm + 5);
+
+	// 联动：主人魅力提升，在身宠物忠诚度得到滋养强化 (原版 npc_charm.c CHAR_complianceParameter)
+	for (std::size_t i = 0; i < p->pets.size(); ++i)
+	{
+		if (p->pets[i].valid())
+		{
+			if (auto *pet = s.pets.resolve(p->pets[i]))
+			{
+				int cur = s.pet_loyalty.find(pet->uid) != s.pet_loyalty.end() ? s.pet_loyalty[pet->uid] : 100;
+				s.pet_loyalty[pet->uid] = std::min(100, cur + 2);
+			}
+		}
+	}
+
+	std::string reply_msg = "【美容师】\n嗯，这样你的魅力就上升罗！变得更酷、更有吸引力了呢！";
+	s.sendExChangeWindow(session, charm_npc_id, reply_msg,
+	                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+	return true;
+}
+
+bool World::checkAndGrantElderTitles(SA::Net::SessionId session, std::uint64_t oldman_npc_id)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(session);
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (it == s.conns.end() || p == nullptr)
+		return false;
+
+	const NpcEntity *npc = findNpc(oldman_npc_id);
+	if (npc == nullptr || npc->type != NpcType::kOldman)
+		return false;
+
+	// 资格称号规则核查 (1:初出茅庐, 2:原始猎人, 3:尼斯勇士, 4:部落英雄, 5:转生宗师)
+	struct ElderTitleRule
+	{
+		int title_id;
+		int min_level;
+		int min_trans;
+		const char *title_name;
+	};
+	const ElderTitleRule rules[] = {
+	    {1, 10, 0, "初出茅庐"},
+	    {2, 30, 0, "原始猎人"},
+	    {3, 80, 0, "尼斯勇者"},
+	    {4, 120, 0, "部落英雄"},
+	    {5, 1, 1, "转生宗师"},
+	};
+
+	const int trans = playerTransmigration(session);
+	int add_cnt = 0;
+	for (const auto &rule : rules)
+	{
+		if (p->level >= rule.min_level && trans >= rule.min_trans)
+		{
+			// 若尚未注册该称号则先注册
+			if (s.registered_titles.find(rule.title_id) == s.registered_titles.end())
+			{
+				TitleDefinition td{};
+				td.title_id = rule.title_id;
+				td.name = rule.title_name;
+				td.description = "长老认定的荣誉称号";
+				registerTitle(td);
+			}
+			if (!hasTitle(session, rule.title_id))
+			{
+				if (grantTitle(session, rule.title_id))
+					++add_cnt;
+			}
+		}
+	}
+
+	const std::string p_name = std::string(p->name.data, p->name.size());
+	std::string msg;
+	if (add_cnt > 0)
+	{
+		msg = "【称号长老】\n来的好 " + p_name + "！鉴于你的英勇表现，特授予你 " +
+		      std::to_string(add_cnt) + " 个全新称号！愿先祖的荣耀与你同在。";
+	}
+	else
+	{
+		// 原版经典台词 (npc_oldman.c:104)
+		msg = "【称号长老】\n来的好 " + p_name + "，在给你称号时不是还没来吗？继续磨练你的技艺吧！";
+	}
+
+	s.sendExChangeWindow(session, oldman_npc_id, msg,
+	                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+	return true;
+}
+
+bool World::fmHealPlayer(SA::Net::SessionId session, std::uint64_t fm_healer_npc_id)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(session);
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (it == s.conns.end() || p == nullptr)
+		return false;
+
+	const NpcEntity *npc = findNpc(fm_healer_npc_id);
+	if (npc == nullptr || npc->type != NpcType::kFmHealer)
+		return false;
+
+	// 领地检查: 若 npc->fm_floor != 0 且与当前地图不匹配，可限制
+	if (npc->fm_floor != 0 && p->floor != npc->fm_floor)
+	{
+		s.sendExChangeWindow(session, fm_healer_npc_id, "【家族医者】\n抱歉！你不在本家族领地，无法为你回复。",
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	auto heal_single = [&](SA::Model::Player *target)
+	{
+		if (target == nullptr)
+			return;
+		const auto p_stats = SA::Rules::deriveBaseStats(target->vital, target->str, target->tough, target->dex);
+		target->hp = p_stats.max_hp > 0 ? p_stats.max_hp : std::max(target->hp, 100);
+		target->mp = target->max_mp;
+		for (std::size_t i = 0; i < SA::Model::kMaxPetHave; ++i)
+		{
+			if (target->pets[i].valid())
+			{
+				if (auto *pet = s.pets.resolve(target->pets[i]))
+				{
+					const auto pet_stats = SA::Rules::deriveBaseStats(pet->vital, pet->str, pet->tough, pet->dex);
+					pet->hp = pet_stats.max_hp > 0 ? pet_stats.max_hp : std::max(pet->hp, 20);
+					pet->mp = pet->max_mp;
+				}
+			}
+		}
+	};
+
+	// 判定组队状态: 原版队伍全员回复 (npc_fmhealer.c:73-89)
+	if (s.partyModeOf(session) != PartyMode::kNone)
+	{
+		const auto party_members = playerPartyMembers(session);
+		for (auto member_session : party_members)
+		{
+			if (auto *member = s.players.resolve(s.player_of_session.find(member_session)))
+				heal_single(member);
+		}
+	}
+	else
+	{
+		heal_single(p);
+	}
+
+	std::string msg = "【家族医者】\n由于你是本家族人员，请让我帮你回复吧！状态与战宠已全部回复。请小心自己的身体唷！";
+	s.sendExChangeWindow(session, fm_healer_npc_id, msg,
+	                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+	return true;
+}
+
+bool World::warpByTranserMan(SA::Net::SessionId session, std::uint64_t transer_npc_id, std::size_t route_index)
+{
+	Impl &s = *_impl;
+	const auto it = s.conns.find(session);
+	SA::Model::Player *p = s.players.resolve(s.player_of_session.find(session));
+	if (it == s.conns.end() || p == nullptr)
+		return false;
+
+	const NpcEntity *npc = findNpc(transer_npc_id);
+	if (npc == nullptr || npc->type != NpcType::kTranserMan)
+		return false;
+
+	// 组队阻断门禁 (原版 npc_transerman.c:78)
+	if (s.partyModeOf(session) != PartyMode::kNone)
+	{
+		s.sendExChangeWindow(session, transer_npc_id, "根据传送师工会规定，不能帮组队中的人传送！",
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	if (route_index >= npc->transer_routes.size())
+		return false;
+
+	const auto &route = npc->transer_routes[route_index];
+	if (p->level < route.min_level)
+	{
+		s.sendExChangeWindow(session, transer_npc_id, "特使传送师：你的等级还不够唷！",
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	if (p->gold < route.ticket_cost)
+	{
+		s.sendExChangeWindow(session, transer_npc_id, "特使传送师：金钱不足唷！传送需要 " + std::to_string(route.ticket_cost) + " 石币。",
+		                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
+		return false;
+	}
+
+	// 扣除路费 (走 GoldLedger kWarpFee)
+	if (route.ticket_cost > 0)
+	{
+		const GoldTx tx = delGold(*p, GoldReason::kWarpFee, route.ticket_cost,
+		                          /*trans=*/0, static_cast<std::uint64_t>(session), s);
+		if (tx.disposition != GoldDisposition::kApplied)
+			return false;
+	}
+
+	// 瞬移至目的地
+	s.warpSinglePlayer(session, route.dest_floor, route.dest_x, route.dest_y);
+
+	std::string dest_str = route.dest_name.empty() ? "目的地" : route.dest_name;
+	s.sendExChangeWindow(session, transer_npc_id, "特使传送术发动！已平安抵达【" + dest_str + "】！",
 	                     static_cast<std::uint32_t>(SA::Domain::ButtonFlag::BUTTON_FLAG_OK));
 	return true;
 }

@@ -2463,6 +2463,131 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
        - 未上榜角色殿堂加成严格归零防御。
 - **CTest 28/28 100% 绿灯**，守卫工具 `ci_verify.py` 6 项全过。
 
+---
+
+### 9.0.131 阶段 15 —— S06 GM 管理员指令通道、NPC:Bankman 钱庄金库系统与生产级容器编排 (GM Command Pipeline, Bank Depository & Container Orchestration)
+
+- **日期**: 2026-10-04
+- **分支**: `master`
+- **目标**: 完成重构剩余任务中工作量较小的关键收尾工作。依据 D8 覆盖台账与架构裁定，落地 S06 GM 文本指令解析调度通道（对齐 `chatmagic.c`），支持 `/warp`、`/heal`、`/gold`、`/level`、`/setfame`、`/additem`、`/delitem`、`/title`、`/announce`、`/shutdown`、`/help` 以及兼容 `[cmd ...]` 经典语法，实现聊天指令拦截防外溢；落地 NPC:Bankman 个人钱庄/银行个人金库独立载体（DR-EC1 银行独立载体，上限 1 亿石币），打通随身钱包与银行金库存取通道及 NPC 对话交互；编写生产级容器编排文件 `deploy/docker-compose.yml` 与 `deploy/Dockerfile`，实现 MySQL 8.4、Redis 8.0 与服务端的开箱即用。
+
+#### 1. 核心架构与功能落地
+
+1. **S06 GM 管理员指令通道 (`src/world/WorldGm.cpp`, `src/world/WorldSocial.cpp`, `include/world/Api.h`)**:
+   - **指令识别与智能过滤 (`isGmCommand`)**:
+     - 支持标准斜杠起始格式 `/cmd [args...]`；
+     - 兼容原版方括号经典语法 `[cmd [args...]]`，同时智能规避普通方括号聊天（如 `[招募]`、`[哈哈]`）误判；
+   - **核心指令集与执行调度 (`executeGmCommand`)**:
+     - `/warp <floor> <x> <y>`: 地图坐标瞬移与视野全量同步；
+     - `/heal`: 角色与出战宠物生命魔法全恢复；
+     - `/gold <amount>`: 随身石币调整，严格挂载 `GoldLedger::addGold / delGold` 与 `GoldReason::kGmAdjust` 审计；
+     - `/level <lv>`: 角色等级设定（1..140），自动换算属性点并更新三围；
+     - `/setfame <fame>`: 角色声望设定；
+     - `/additem <id>`: 空闲背包格动态分配生成道具；
+     - `/delitem <slot>`: 背包指定槽位安全回收与清除；
+     - `/title <id>`: 称号授予（未注册自动保底元数据生成）；
+     - `/announce <msg>`: 全服系统公告广播；
+     - `/shutdown`: 优雅停机维护标记激活 (`isShutdownRequested`)；
+     - `/help`: 完整指令使用指南；
+   - **聊天拦截与同屏防泄露 (`sendChat`)**:
+     - 在大世界聊天入口优先拦截 GM 命令，将反馈结果以 `kTalkSystem` 单独回传给发送者，杜绝命令向同屏玩家广播泄露。
+
+2. **NPC:Bankman 个人钱庄与金库独立载体 (`src/world/WorldGm.cpp`, `src/world/WorldNpcDialog.cpp`, `deploy/sql/002-world-features.sql`)**:
+   - **独立载体与额度防御 (`bank_accounts`, `kMaxBankGold = 100,000,000`)**:
+     - 符合 DR-EC1 架构设计，银行石币与随身石币隔离存储；
+     - `bankDeposit`: 随身扣除并存入银行，遵守随身余额校验与 1 亿金库上限；
+     - `bankWithdraw`: 银行扣除并提取至随身，遵守银行余额校验与随身 1,000,000 上限防爆仓；
+     - 存取款事务严格由 `GoldLedger` 记录 `kBankDeposit` 与 `kBankWithdraw` 审计；
+   - **钱庄 NPC 交互与数据库 DDL**:
+     - `NpcType::kBankman = 14` 对话触发金库信息弹窗；
+     - 在 `deploy/sql/002-world-features.sql` 中新增 `character_bank` 表结构。
+
+3. **生产化容器编排与基础设施 (`deploy/docker-compose.yml`, `deploy/Dockerfile`)**:
+   - 编排 MySQL 8.4-oracle、Redis 8.0-alpine 与 `stone_age_server`；
+   - 容器自动加载数据库初始化与大世界特性 DDL，带健康检查与持久化数据卷。
+
+#### 2. 测试覆盖与验证
+
+- **单元测试 (`tests/WorldGmTest.cpp`)**:
+  - 新增 `world_gm` 测试目标（CTest #10），包含 5 大测试场景，101 个断言全部通过：
+    1. GM 指令识别与边界判定；
+    2. GM 核心指令执行全集（瞬移、增减金、等级、声望、刷道具、删道具、称号、停机）；
+    3. sendChat 拦截通道与同屏防外溢；
+    4. 银行个人金库存取款与随身上限/金库上限防御；
+    5. 钱庄 NPC 对白事件交互。
+- **全量回归**:
+  - CTest 29/29 100% 绿灯（含 `world_gm` 新增项）；
+  - `check_module_boundaries.py`、`check_gold_writes.py`、`check_format.py`、`check_docs_index.py` 全部绿灯。
+
+---
+
+### 9.0.132 阶段 16 —— 经典长尾 NPC 交通与世界设施系统落地 (StoryTeller, TimeMan, SavePoint, Bus Transit)
+
+- **日期**: 2026-10-04
+- **范围**: D8 长尾纯 C 与消费 DSL NPC（NPC:StoryTeller 18行 · NPC:TimeMan 227行 · NPC:Bus 729行 · NPC:SavePoint 532行，合计 1,506 行）
+- **主要工作**:
+  1. **NPC:StoryTeller 游历吟游诗人 (`src/world/WorldNpcDialog.cpp`, `Api.h`)**:
+     - `NpcType::kStoryTeller = 17`，对齐原版 `npc_storyteller.c`；
+     - 面对交互下发 WindowOpen 经典传说弹窗，讲述尼斯大陆远古文明历史。
+  2. **NPC:TimeMan 昼夜与世界时钟守望者 (`src/world/WorldNpcDialog.cpp`, `Api.h`)**:
+     - `NpcType::kTimeMan = 16`，对齐原版 `npc_timeman.c`；
+     - `getWorldTimeString()` 计算游戏大世界时钟与昼夜阶段（MORNING / ALLNOON / EVNING / ALLNIGHT）；
+     - 守望者向交互玩家播报当前大陆时刻与天时吉凶。
+  3. **NPC:SavePoint 四大村庄记录点长老 (`src/world/WorldNpcDialog.cpp`, `Api.h`, `WorldImpl.h`)**:
+     - `NpcType::kSavePoint = 15`，对齐原版 `npc_savepoint.c`；
+     - 初次对话识别未记录状态，弹出 Yes/No 确认弹窗；
+     - 确认后记录 `SavePointData`（floor, x, y, village_name）；
+     - 重复访问展示星球运行总时长（日/时/分/秒）与当前服务器在线人数（1:1 复刻原版 `npc_savepoint.c:140-160` 对白）；
+     - `respawnPlayer` 接口：玩家濒死或回城时瞬移至记录点，保底恢复 1 点生命值（战斗中严格禁止）。
+  4. **NPC:Bus 长毛象公交车交通网 (`src/world/WorldNpcDialog.cpp`, `Api.h`, `WorldImpl.h`)**:
+     - `NpcType::kBus = 18`，对齐原版 `npc_bus.c`；
+     - 站点线路结构 `BusRoute`（目的地 floor, x, y, 站名, 票价, 最低等级）；
+     - 组队阻断（原版 `NPC_BUS_MSG_NOTPARTY`: "PAPAON！！无法以团队加入唷！"）；
+     - 等级与金币门禁校验（原版 `NPC_BUS_MSG_LEVEL`, `NPC_BUS_MSG_GOLD`）；
+     - 乘车扣费严格走 `GoldLedger`（`kWarpFee` 事由）；
+     - 瞬移运送至目的地站点并下发到站提示（原版 `NPC_BUS_MSG_START`, `NPC_BUS_MSG_END`）。
+- **测试与验证**:
+  - 新增 `tests/WorldTransitTest.cpp`（CTest #11: `world_transit`），包含 5 大测试用例、70 个断言全部通过；
+  - CTest 30/30 100% 绿灯；
+  - 全仓 `python3 tools/ci_verify.py` 6 大环节全部通过（含断言防线反向变异实证全绿）；
+  - D8 台账长尾落地项增至 12 项，长尾覆盖率提升至 22.0%（7,101 行），全仓有效代码覆盖突破 49.6%（53,277 行）。
+
+---
+
+### 9.0.133 阶段 17 —— 经典长尾 NPC 美容师、称号长者、家族医者与特使传送师系统落地 (Charm, Oldman, FmHealer, TranserMan)
+
+- **日期**: 2026-10-04
+- **范围**: D8 长尾纯 C NPC（NPC:Charm 286行 · NPC:Oldman 111行 · NPC:FmHealer 145行 · NPC:TranserMan 192行，合计 734 行）
+- **主要工作**:
+  1. **NPC:Charm 美容师 (`src/world/WorldNpcDialog.cpp`, `Api.h`)**:
+     - `NpcType::kCharm = 19`，对齐原版 `npc_charm.c`；
+     - 经典收费公式复刻：`cost = level * RATE * (charm / WARU) * (trans + 1)`（`RATE=10, WARU=3`，若 `charm <= 1` 则按 3 计）；
+     - `beautifyCharm` 接口：每次美容提升 5 点魅力（上限 100）；
+     - 扣费严格走 `GoldLedger`（新增 `GoldReason::kCharmFee` 事由）；
+     - 魅力提升与宠物忠诚度滋养联动（原版 `CHAR_complianceParameter`，主人魅力提升强化在身携带宠物的忠诚度）；
+     - 魅力满 100 触发原版赞美对白（“你的魅力真是完美，请永远保持你的魅力唷！”）。
+  2. **NPC:Oldman 称号长者 (`src/world/WorldNpcDialog.cpp`, `Api.h`)**:
+     - `NpcType::kOldman = 20`，对齐原版 `npc_oldman.c`；
+     - 依据玩家等级与转生门槛自动核算称号资格（初出茅庐 lv 10、原始猎人 lv 30、尼斯勇者 lv 80、部落英雄 lv 120、转生宗师 trans 1）；
+     - 达成条件时自动发放未拥有称号并提示授予数；
+     - 未达标或已领取时触发原版经典台词（“来的好%s，在给你称号时不是还没来吗？”）。
+  3. **NPC:FmHealer 家族医者 (`src/world/WorldNpcDialog.cpp`, `Api.h`)**:
+     - `NpcType::kFmHealer = 21`，对齐原版 `npc_fmhealer.c`；
+     - 领地与家族人员专享免费治疗（支持 `fm_floor` 地图校验）；
+     - 个人及身上所有战宠满血满蓝与复活恢复；
+     - 组队状态（`PartyMode`）队伍全员及全员战宠集体满血满蓝与复活。
+  4. **NPC:TranserMan 特使传送师 (`src/world/WorldNpcDialog.cpp`, `Api.h`)**:
+     - `NpcType::kTranserMan = 22`，对齐原版 `npc_transerman.c`；
+     - 路线结构 `TranserRoute`（dest_floor, dest_x, dest_y, dest_name, ticket_cost, min_level）；
+     - 组队状态拦截门禁（原版 1:1：“根据传送师工会规定，不能帮组队中的人传送！”）；
+     - 等级与石币门槛校验，扣款走 `GoldLedger kWarpFee`，安全瞬移送达目的地。
+- **测试与验证**:
+  - `tests/WorldTransitTest.cpp` 扩充 4 大测试用例，涵盖美容师经典公式/扣费/忠诚度联动、称号长者核算与台词复刻、家族医者全员全宠回复、传送师组队阻断与瞬移；
+  - 测试用例由 5 例扩充至 9 例，断言由 70 个扩充至 **154 个**，100% 绿灯通过；
+  - D8 台账长尾落地项增至 **16 项**，长尾覆盖率提升至 **24.3%**（7,835 行），全仓有效代码累计落地突破 **54,011 行**（**50.3%**，历史性突破半壁江山！）。
+
+
+
 
 
 

@@ -28,6 +28,15 @@ CREATE TABLE IF NOT EXISTS character_title (
   FOREIGN KEY (char_id) REFERENCES `character`(char_id) ON DELETE CASCADE
 ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
+-- 2.1 个人钱庄/银行个人金库独立载体 (对齐 04 §3.2 / DR-EC1 / 阶段 15 NPC:Bankman)
+CREATE TABLE IF NOT EXISTS character_bank (
+  char_id BIGINT UNSIGNED PRIMARY KEY,
+  gold BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  FOREIGN KEY (char_id) REFERENCES `character`(char_id) ON DELETE CASCADE,
+  CHECK (gold <= 100000000)
+) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+
 -- 记录 session 库迁移版本 2
 INSERT IGNORE INTO schema_migration(version) VALUES (2);
 

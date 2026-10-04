@@ -749,6 +749,46 @@ enum class NpcType : std::uint8_t
 	kFameShop = 11,
 	kCraftsman = 12,
 	kRideMaster = 13,
+	kBankman = 14,
+	kSavePoint = 15,
+	kTimeMan = 16,
+	kStoryTeller = 17,
+	kBus = 18,
+	kCharm = 19,
+	kOldman = 20,
+	kFmHealer = 21,
+	kTranserMan = 22,
+};
+
+// 记录点数据 (阶段 16 NPC:SavePoint, 原版 npc_savepoint.c)
+struct SavePointData
+{
+	std::int32_t floor = 0;
+	std::int32_t x = 0;
+	std::int32_t y = 0;
+	std::string village_name{};
+};
+
+// 公车行驶线路 (阶段 16 NPC:Bus, 原版 npc_bus.c)
+struct BusRoute
+{
+	std::int32_t dest_floor = 0;
+	std::int32_t dest_x = 0;
+	std::int32_t dest_y = 0;
+	std::string dest_name{};
+	std::int32_t ticket_cost = 50; // 车费 (石币, 扣除走 GoldLedger kWarpFee)
+	std::int32_t min_level = 1;    // 最低乘车等级
+};
+
+// 特使传送师路线 (阶段 17 NPC:TranserMan, 原版 npc_transerman.c)
+struct TranserRoute
+{
+	std::int32_t dest_floor = 0;
+	std::int32_t dest_x = 0;
+	std::int32_t dest_y = 0;
+	std::string dest_name{};
+	std::int32_t ticket_cost = 100; // 传送路费 (石币, 走 GoldLedger kWarpFee)
+	std::int32_t min_level = 1;     // 最低等级限制
 };
 
 // 制造与生活技能类型 (批次 §9.0.99)
@@ -947,6 +987,14 @@ struct NpcEntity
 	// ── 阶段 2: 声望商城 (批次 §9.0.98, Fame Shop) ──
 	std::vector<FameShopItem> fame_shop_items{};
 	std::string fame_less_msg{};
+
+	// ── 阶段 16: 经典长尾 NPC 交通与世界设施 (SavePoint, Bus) ──
+	std::string savepoint_name{};       // 记录点村落名称 (SavePoint)
+	std::vector<BusRoute> bus_routes{}; // 长毛象公车路线列表 (Bus)
+
+	// ── 阶段 17: 经典长尾 NPC 美容师、家族医者与传送师 (Charm, FmHealer, TranserMan) ──
+	std::vector<TranserRoute> transer_routes{}; // 特使传送师线路 (TranserMan)
+	std::int32_t fm_floor = 0;                  // 家族医者专属领地地图 (FmHealer, 0 为不限制)
 };
 
 // 世界态敌人的位置快照(批次 W.2 / W.3 的观察面)。
@@ -1961,6 +2009,25 @@ class World final : public SA::Net::TransportEvents,
 	int playerFame(SA::Net::SessionId session) const;
 	bool setPlayerFame(SA::Net::SessionId session, int fame);
 
+	// ── 个人钱庄/银行个人金库系统 (阶段 15 NPC:Bankman & DR-EC1 银行独立载体) ─────
+	std::int32_t playerBankGold(SA::Net::SessionId session) const;
+	bool bankDeposit(SA::Net::SessionId session, std::int32_t amount);
+	bool bankWithdraw(SA::Net::SessionId session, std::int32_t amount);
+
+	// ── 经典长尾 NPC 交通与世界设施 (阶段 16 NPC:SavePoint, TimeMan, StoryTeller, Bus) ─────
+	bool setPlayerSavePoint(SA::Net::SessionId session, std::int32_t floor, std::int32_t x, std::int32_t y, std::string_view village_name = "");
+	std::optional<SavePointData> getPlayerSavePoint(SA::Net::SessionId session) const;
+	bool respawnPlayer(SA::Net::SessionId session);
+	std::string getWorldTimeString() const;
+	bool boardBus(SA::Net::SessionId session, std::uint64_t bus_npc_id, std::size_t route_index);
+
+	// ── 经典长尾 NPC 美容师、称号长者、家族医者与传送师 (阶段 17 NPC:Charm, Oldman, FmHealer, TranserMan) ─────
+	std::int32_t calcCharmCost(SA::Net::SessionId session) const;
+	bool beautifyCharm(SA::Net::SessionId session, std::uint64_t charm_npc_id);
+	bool checkAndGrantElderTitles(SA::Net::SessionId session, std::uint64_t oldman_npc_id);
+	bool fmHealPlayer(SA::Net::SessionId session, std::uint64_t fm_healer_npc_id);
+	bool warpByTranserMan(SA::Net::SessionId session, std::uint64_t transer_npc_id, std::size_t route_index);
+
 	// ── 职业进阶与武器专精熟练度体系 (阶段 12 §9.0.127) ─────────────────────────
 	SA::Rules::ProfessionRank playerProfessionRank(SA::Net::SessionId session) const;
 	bool setPlayerProfessionRank(SA::Net::SessionId session, SA::Rules::ProfessionRank rank);
@@ -2134,6 +2201,11 @@ class World final : public SA::Net::TransportEvents,
 	              std::uint32_t color = 0);
 	std::vector<ChatMessage> pollChatMessages(SA::Net::SessionId session);
 	std::size_t pendingChatMessageCount(SA::Net::SessionId session) const;
+
+	// ── 阶段 15: S06 完整 GM 管理员指令通道 (GM Command Pipeline, 对齐 chatmagic.c) ─
+	bool isGmCommand(const std::string &text) const noexcept;
+	bool executeGmCommand(SA::Net::SessionId sender, const std::string &cmd_text, std::string &out_reply);
+	bool isShutdownRequested() const noexcept;
 
 	// ── 阶段 8: 跨线路社交体系与全服家族战系统 (Cross-Server Social & Manor War) ──
 	void setSaacClient(std::shared_ptr<SA::Saac::ISaacClient> client);
@@ -2722,6 +2794,14 @@ enum class GoldReason : std::uint8_t
 	kManorChallengeFee,
 	// 庄园战胜出奖金/押金返还 (源, 阶段 2 庄园家族战体系)
 	kManorWarReward,
+	// 个人钱庄/银行存入石币 (汇, 阶段 15 NPC:Bankman)
+	kBankDeposit,
+	// 个人钱庄/银行取出石币 (源, 阶段 15 NPC:Bankman)
+	kBankWithdraw,
+	// GM 管理员指令调整石币 (阶段 15 S06)
+	kGmAdjust,
+	// 美容师 NPC 提升魅力服务费扣除 (汇, 阶段 17 NPC:Charm)
+	kCharmFee,
 };
 
 // ── 溢出处置结果(DR-EC4:必须有名字)──────────────────────────────────
@@ -2866,6 +2946,14 @@ inline const char *goldReasonName(GoldReason r) noexcept
 		return "manor_challenge_fee";
 	case GoldReason::kManorWarReward:
 		return "manor_war_reward";
+	case GoldReason::kBankDeposit:
+		return "bank_deposit";
+	case GoldReason::kBankWithdraw:
+		return "bank_withdraw";
+	case GoldReason::kGmAdjust:
+		return "gm_adjust";
+	case GoldReason::kCharmFee:
+		return "charm_fee";
 	}
 	return "unknown";
 }

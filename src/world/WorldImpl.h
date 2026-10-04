@@ -413,13 +413,45 @@ struct World::Impl : GoldAuditSink
 			int dest_idx = -1;
 		};
 		PendingWarpMan pending_warpman{};
+
+		struct PendingSavePoint
+		{
+			std::uint64_t npc_id = 0;
+			std::int32_t floor = 0;
+			std::int32_t x = 0;
+			std::int32_t y = 0;
+			std::string name{};
+		};
+		PendingSavePoint pending_savepoint{};
+
+		struct PendingBus
+		{
+			std::uint64_t npc_id = 0;
+			std::size_t route_idx = 0;
+		};
+		PendingBus pending_bus{};
+
+		struct PendingCharm
+		{
+			std::uint64_t npc_id = 0;
+			std::int32_t cost = 0;
+		};
+		PendingCharm pending_charm{};
+
+		struct PendingTranser
+		{
+			std::uint64_t npc_id = 0;
+			std::size_t route_idx = 0;
+		};
+		PendingTranser pending_transer{};
 	};
 
 	Impl(const SA::Platform::ServerConfig &cfg, SA::Platform::Clock &clk,
 	     SA::Platform::Logger &log, SA::Platform::RandomSource &rnd,
 	     SA::Net::Transport &tp)
 	    : config(cfg), clock(clk), logger(log), random(rnd), transport(tp),
-	      world_rng(rnd.masterSeed() ^ 0x9E3779B97F4A7C15ull)
+	      world_rng(rnd.masterSeed() ^ 0x9E3779B97F4A7C15ull),
+	      server_start_time_ms(clk.nowMs())
 	{
 		olink.assign(static_cast<std::size_t>(map.width) * static_cast<std::size_t>(map.height),
 		             {});
@@ -945,6 +977,10 @@ struct World::Impl : GoldAuditSink
 	void handleCrossServerMessage(const SA::Saac::WorldBroadcastMessage &msg);
 	void broadcastCrossServer(int channel, const std::string &sender, const std::string &text);
 
+	// ── 阶段 15: 个人钱庄/银行个人金库 (NPC:Bankman & DR-EC1 银行独立载体) ─────
+	std::unordered_map<std::string, std::int32_t> bank_accounts{};
+	inline static constexpr std::int32_t kMaxBankGold = 100000000; // 1 亿石币上限
+
 	void warpSinglePlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y);
 	void warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y);
 
@@ -972,6 +1008,10 @@ struct World::Impl : GoldAuditSink
 			}
 		}
 	}
+
+	// ── 阶段 16: 经典长尾 NPC 交通与世界设施 ──
+	std::unordered_map<SA::Net::SessionId, SavePointData> player_save_points{};
+	std::int64_t server_start_time_ms = 0;
 };
 
 } // namespace SA::World

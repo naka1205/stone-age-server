@@ -90,6 +90,18 @@ sa_apply_warnings(sa_world_leaderboard_test)
 sa_enable_assertions(sa_world_leaderboard_test)
 add_test(NAME world_leaderboard COMMAND sa_world_leaderboard_test)
 
+add_executable(sa_world_gm_test WorldGmTest.cpp)
+target_link_libraries(sa_world_gm_test PRIVATE sa_world sa_shared sa_doctest)
+sa_apply_warnings(sa_world_gm_test)
+sa_enable_assertions(sa_world_gm_test)
+add_test(NAME world_gm COMMAND sa_world_gm_test)
+
+add_executable(sa_world_transit_test WorldTransitTest.cpp)
+target_link_libraries(sa_world_transit_test PRIVATE sa_world sa_shared sa_doctest)
+sa_apply_warnings(sa_world_transit_test)
+sa_enable_assertions(sa_world_transit_test)
+add_test(NAME world_transit COMMAND sa_world_transit_test)
+
 if(SA_ENABLE_MYSQL_STORAGE)
     add_executable(sa_mysql_storage_test MySqlStorageTest.cpp)
     target_link_libraries(sa_mysql_storage_test PRIVATE sa_session_storage_backend sa_storage_drivers sa_doctest)

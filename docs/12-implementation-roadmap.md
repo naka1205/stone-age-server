@@ -94,10 +94,10 @@ P2/P3 的完成以真实客户端操作和重启后的持久化结果为准；�
 | 10-04 | **阶段 9 客户端跨服社交表现层与全服庄园战决斗演练对接 (Client Cross-Server Social UI & Manor Duel Presentation)**（§9.0.125：ChatManager 跨线路独立聊天室 · PlayerInteraction 名片簿跨服好友在线感知与私聊黑名单 · 全服四大庄园约战排期/比分战报/决胜过户 · ClientNetTest 阶段 9 用例与 RV-CrossServer-Client-1 变异实证 · 双端全平台 CI 全绿） | 阶段 10 大世界昼夜交替与动态气候环境系统落地 (Day/Night & Dynamic Weather System) |
 | 10-04 | **阶段 10 大世界昼夜交替与动态气候环境系统落地 (Day/Night & Dynamic Weather System)**（§9.0.126：石器历法与昼夜四时段纯函数 LSTime/LSTimeSection · 经典调色板映射 PALET_1..PALET_4 · 地图动态气候调度器与超时恢复 WorldWeather · 8.0 原版 EF 协议成帧解析与跨图环境同步 · tests/WorldWeatherTest.cpp 25/25 CTest 全绿 · RV-Weather-1 变异实证通过） | 阶段 11 客户端昼夜调色板渐变渲染与全景动态天气粒子系统对接 (Client Weather Particle & Day/Night Palette Presentation) |
 | 10-04 | **阶段 11 客户端昼夜调色板渐变渲染与全景动态天气粒子系统对接 (Client Weather Particle & Day/Night Palette Presentation)**（§9.0.127：经典 16 级调色板与四时段映射 PaletteManager · 环境光 LERP 平滑过渡插值与洞窟覆盖 · 8.0 EF 协议解析与 1..5 级天气粒子系统 WeatherEffect · 淡出消散态与确定性 XorShift32 · tests/ClientNetTest.cpp 阶段 11 覆盖 · RV-Weather-Client-1 变异实证 · 客户端 7/7 CTest 全绿 · 锁定 ref `shared-v0.46.0` 闭环） | 阶段 12 职业进阶系统与武器精通专精熟练度体系 (Profession Advanced & Weapon Mastery) |
-
-
-
-
+| 10-04 | **阶段 12 职业进阶系统与武器专精熟练度体系 (Profession Advanced & Weapon Mastery)**（§9.0.128：职业进阶阶位与逐级门禁 · 专精等级上限矩阵与经验公式 · 武器专精属性修正与三大职业专属相性共鸣 · tests/WorldProfessionTest.cpp 26/26 CTest 全绿 · RV-Profession-1 变异实证通过） | 阶段 13 四大庄园骑乘进阶认证考核与金库税收分红 |
+| 10-04 | **阶段 13 四大庄园骑乘进阶认证考核、庄园金库税收分红与特权技能树体系 (Manor Mount Certification & Treasury Dividend)**（§9.0.129：四大庄园特权光环 computeManorAura · 交易税划拨与金库注资 · 阶梯分红算法 · 庄园召集令全员集结 · tests/WorldManorTest.cpp 27/27 CTest 全绿 · RV-Manor-1 变异实证通过 · 锁定 ref `shared-v0.48.0` 闭环） | 阶段 14 尼斯全域排行榜与荣誉殿堂 |
+| 10-04 | **阶段 14 尼斯大陆全域排行榜与全服荣誉殿堂系统 (Prestige Leaderboards & Hall of Fame)**（§9.0.130：5大排行榜确定性排序 · 荣誉殿堂霸主称号与四维加成 · 每日膜拜第一名领赏 · 100条硬截断 · tests/WorldLeaderboardTest.cpp 28/28 CTest 全绿 · RV-Leaderboard-1 变异实证通过 · 锁定 ref `shared-v0.49.0` 闭环） | 阶段 15 S06 GM 管理员指令通道、NPC:Bankman 钱庄金库系统与生产级容器编排 |
+| 10-04 | **阶段 15 S06 GM 管理员指令通道、NPC:Bankman 钱庄金库系统与生产级容器编排 (GM Command Pipeline, Bank Depository & Container Orchestration)**（§9.0.131：S06 游戏内 GM 文本指令解析调度通道 (/warp, /heal, /gold, /level, /setfame, /additem, /delitem, /title, /announce, /shutdown, /help) · sendChat 拦截同屏防泄露 · NPC:Bankman 个人钱庄/银行个人金库独立载体 (DR-EC1 银行 1 亿上限与 100 万防爆仓) · deploy/docker-compose.yml 生产级容器一键编排 · tests/WorldGmTest.cpp 29/29 CTest 全绿） | 深入推进地下城动态迷宫与大世界冒险 |
 
 **环境事实**（A1 复验结论）：09-15 10:54 的 `civ.log` 失败发生在 12:53 探测修复（`fde500d`，§9.0.59）**之前**，为历史证据非现存故障；09-16 02:19 在 `c213060`/shared-v0.30.0 上复跑 win_validate **11/11 全绿**（服务端 ctest 22/22、0 告警、OpenSSL 4.0.2 探测命中、断言防线反向验证通过）。
 

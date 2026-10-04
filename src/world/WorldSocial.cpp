@@ -420,6 +420,26 @@ bool World::sendChat(SA::Net::SessionId sender, ChatChannel channel,
 	if (sender_p == nullptr)
 		return false;
 
+	// S06 GM 管理员指令通道拦截 (对齐 chatmagic.c):
+	// 若为 GM 指令，优先由 GM 调度通道拦截并执行，反馈结果作为系统消息单独回送给发送人，绝不公开发送
+	if (isGmCommand(text))
+	{
+		std::string reply;
+		const bool ok = executeGmCommand(sender, text, reply);
+		if (!reply.empty())
+		{
+			ChatMessage reply_msg{};
+			reply_msg.channel = ChatChannel::kTalkSystem;
+			reply_msg.sender = 0;
+			reply_msg.sender_name = "GM系统";
+			reply_msg.text = reply;
+			reply_msg.color = ok ? 0xFFFF00 : 0xFF0000;
+			reply_msg.timestamp_ms = s.now_ms;
+			s.incoming_chats[sender].push_back(std::move(reply_msg));
+		}
+		return ok;
+	}
+
 	ChatMessage msg{};
 	msg.channel = channel;
 	msg.sender = sender;
