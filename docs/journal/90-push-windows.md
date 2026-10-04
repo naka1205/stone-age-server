@@ -986,6 +986,36 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
   - 立即修复为无后缀强类型整型算术，更新提交并强制同步 Tag `shared-v0.48.0`；
   - 远端 GitHub Actions CI 真实轮询全平台双端 7/7 Jobs 全部 100% 绿灯。
 
+---
+
+### 9.0.130b ★ 推送窗口执行记录 —— `shared-v0.49.0`(2026-10-04)
+
+> **本窗口前推范围**: 阶段 14（尼斯大陆全域排行榜与全服荣誉殿堂系统，§9.0.130），涉及 watched 路径 `shared/rules/LeaderboardRank.h`、`shared/rules/LeaderboardRank.cpp` 与 `shared/CMakeLists.txt`。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `2614373` · `shared-v0.49.0`（附注 tag，指向 `2614373`） |
+| client master | `65326cc`（pin v0.48.0 → **v0.49.0**，`cmake/SaShared.cmake`） |
+| server 远端 CI | [run 37178446079](https://github.com/naka1205/stone-age-server/actions/runs/37178446079)：**4/4 Jobs 全部 SUCCESS**（Linux GCC / Windows MSVC / macOS Apple Clang / MySQL-Redis） |
+| client 远端 CI | [run 37178654004](https://github.com/naka1205/stone-age-client/actions/runs/37178654004)：**3/3 Jobs 全部 SUCCESS**（Linux GCC / Windows MSVC / macOS Apple Clang） |
+| client 本机验证 | **8 项全过**（d2 7/7 100% 绿灯，D2 规则编译 0 漂移告警） |
+| server 本机验证 | **28 项全过**（CTest 28/28 100% 绿灯，ci_verify 6 项全过，RV-Leaderboard-1 反向验证通过） |
+| 两端用例集一致性 | D2「一份规则两端编译」完整闭环（178 组黄金用例一致） |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/rules/LeaderboardRank.h` / `LeaderboardRank.cpp`: 落地 5 大榜单类型 `LeaderboardKind`、条目数据 `LeaderboardRecord`、严格弱序确定性排序 `sortLeaderboardRecords`、前三甲荣誉殿堂专属称号与四维加成 `computeHallOfFameBonus`、每日膜拜奖励计算 `calculateWorshipReward`；
+  - `shared/CMakeLists.txt`: 将 `rules/LeaderboardRank.cpp` 编入共享规则库 `sa_shared`。
+- **双端全平台 CI 实证**:
+  - 服务端与客户端推送后真实轮询 GitHub Actions CI：
+    - 服务端 4/4 Jobs（Linux GCC、macOS Apple Clang、Windows MSVC、MySQL-Redis）100% SUCCESS；
+    - 客户端 3/3 Jobs（Linux GCC、macOS Apple Clang、Windows MSVC）100% SUCCESS；
+  - 双端全平台 7/7 Jobs 均一次性完美全绿闭环！
+
+
 
 
 

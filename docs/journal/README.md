@@ -22,9 +22,9 @@
 | [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
 | [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
 | [`18-petskill.md`](18-petskill.md) | 宠技三连发:B1 直攻系 · B2 宠技槽 + CHARGE · B3 状态系 + 铁壁 · A-δ 特殊宠技 | 4 |
-| [`90-push-windows.md`](90-push-windows.md) | 三十次 `shared-v0.x.0` 推送窗口与远端同步的闭合核实 | 30 |
+| [`90-push-windows.md`](90-push-windows.md) | 三十一次 `shared-v0.x.0` 推送窗口与远端同步的闭合核实 | 31 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **147** |
+| **合计** | | **148** |
 
 ## 全量映射表(按编号)
 
@@ -177,6 +177,7 @@
 | §9.0.129 | 阶段 13 —— 四大庄园骑乘进阶认证考核、庄园金库税收分红与特权技能树体系落地 (Manor Mount Certification & Treasury Dividend): 四大庄园特权光环 computeManorAura · 交易税划拨与金库注资 · 阶梯分红算法与在线/邮件派发 · 骑乘认证免试通道与题库验证 · 庄园召集令全员集结 · tests/WorldManorTest.cpp 27/27 CTest 全绿 · RV-Manor-1 变异实证通过 | 2026-10-04 | [`13-world.md`](13-world.md) |
 | §9.0.129b | 阶段 13 —— 推送窗口执行记录 shared-v0.48.0: shared/rules/ 四大庄园特权规则与客户端 pin 同步闭环 | 2026-10-04 | [`90-push-windows.md`](90-push-windows.md) |
 | §9.0.130 | 阶段 14 —— 尼斯大陆全域排行榜与全服荣誉殿堂系统落地 (Prestige Leaderboards & Hall of Fame): 5大排行榜确定性排序 · 荣誉殿堂霸主称号与四维加成 · 每日膜拜第一名领赏 · 100条硬截断 · tests/WorldLeaderboardTest.cpp 28/28 CTest 全绿 · RV-Leaderboard-1 变异实证通过 | 2026-10-04 | [`13-world.md`](13-world.md) |
+| §9.0.130b | 阶段 14 —— 推送窗口执行记录 shared-v0.49.0: shared/rules/ 全域排行榜与荣誉殿堂规则及双端全平台 CI 实证 | 2026-10-04 | [`90-push-windows.md`](90-push-windows.md) |
 
 ---
 
