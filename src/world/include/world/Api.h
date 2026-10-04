@@ -39,6 +39,7 @@
 #include "rules/PetSkill.h"
 #include "rules/Progression.h"
 #include "rules/RandomSource.h"
+#include "rules/WeaponMastery.h"
 #include "saac/Api.h"
 #include "session_storage/Api.h"
 
@@ -1957,6 +1958,20 @@ class World final : public SA::Net::TransportEvents,
 	bool setPlayerTransmigration(SA::Net::SessionId session, int trans);
 	int playerFame(SA::Net::SessionId session) const;
 	bool setPlayerFame(SA::Net::SessionId session, int fame);
+
+	// ── 职业进阶与武器专精熟练度体系 (阶段 12 §9.0.127) ─────────────────────────
+	SA::Rules::ProfessionRank playerProfessionRank(SA::Net::SessionId session) const;
+	bool setPlayerProfessionRank(SA::Net::SessionId session, SA::Rules::ProfessionRank rank);
+	SA::Rules::PromotionCheckResult promotePlayerProfession(
+	    SA::Net::SessionId session,
+	    SA::Rules::ProfessionClass target_prof,
+	    SA::Rules::ProfessionRank target_rank);
+
+	std::int32_t playerWeaponMasteryLevel(SA::Net::SessionId session, SA::Rules::WeaponClass weapon) const;
+	std::int32_t playerWeaponMasteryExp(SA::Net::SessionId session, SA::Rules::WeaponClass weapon) const;
+	bool setPlayerWeaponMasteryLevel(SA::Net::SessionId session, SA::Rules::WeaponClass weapon, std::int32_t level);
+	bool addPlayerWeaponMasteryExp(SA::Net::SessionId session, SA::Rules::WeaponClass weapon, std::int32_t gained_exp);
+	SA::Rules::WeaponMasteryBonus playerWeaponMasteryBonus(SA::Net::SessionId session, SA::Rules::WeaponClass weapon) const;
 
 	// ── 称号系统与声望商城 (批次 §9.0.98) ──────────────────────────────────
 	// 称号注册与查询

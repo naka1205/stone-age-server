@@ -2306,6 +2306,58 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
    - **RV-Weather-Client-1 反向变异实证**：调色板编号越界夹紧防御（负数与超大值）、畸形 EF 报文防御、非法天气类型防御、零步长/负数步长物理步进防御；
    - 客户端 CTest 7/7 100% 绿灯，守卫 8/8 项全部通过。
 
+---
+
+### 9.0.128 阶段 12 —— 职业进阶系统与武器专精熟练度体系落地 (Profession Advanced & Weapon Mastery System)
+
+- **日期**: 2026-10-04
+- **分支**: `master`
+- **目标**: 依据石器时代 8.0 职业进阶模型与武器精通规则，在纯函数规则层落地职业晋升阶位门禁、武器熟练度上限与升级公式、专精属性修正与相性共鸣机制，并在服务端大世界层扩展状态存储与操作 API，完成 26/26 CTest 与反向变异验证闭环。
+
+#### 1. 核心架构与功能落地
+
+1. **L3 纯函数规则层 (`shared/rules/WeaponMastery.h` & `WeaponMastery.cpp`)**:
+   - **职业进阶阶位 (`ProfessionRank`)**:
+     - `kNovice` (0: 见习/未转职)、`kFirst` (1: 一转进阶)、`kSecond` (2: 二转狂化)、`kMaster` (3: 三转宗师)；
+   - **进阶前置条件门禁检查 (`checkProfessionPromotion`)**:
+     - 严格校验跨系非法进阶（勇士/巫师/猎人跨职拦截）；
+     - 阶位递进约束（只允许单步逐级晋阶，禁止跳阶）；
+     - 等级/转生次数/声望点数硬门禁（一转 Lv30/声望50，二转 Lv100/1转/声望500，三转宗师 Lv130/5转/声望2000）；
+   - **武器熟练度等级上限矩阵 (`getWeaponMasteryCap`)**:
+     - 勇士专属（斧/枪）：一转 60，二转 80，三转宗师 100；副手爪 40/60/80；跨系法杖 Rod 仅 10；
+     - 猎人专属（弓/投掷）：一转 60，二转 80，三转宗师 100；副手爪 40/60/80；
+     - 巫师专属（法杖 Rod）：一转 60，二转 80，三转宗师 100；副手爪 40/60/80；
+     - 未转职冒险者上限统一钳位于 20；
+   - **武器专精属性修正与职业相性共鸣 (`computeWeaponMasteryBonus`)**:
+     - 基础收益：每级 +0.25% 攻击力、+0.2 命中点数、+0.5% 武器装备负面属性减免（100 级完全免除减敏/减防）；
+     - 勇士狂暴共鸣（持斧/枪）：三转宗师专精获得 +10% 狂暴物理增伤与 +15% 致命一击爆击率；
+     - 猎人追猎共鸣（持弓/投掷）：获得先攻敏捷加成（最大 +20 点）与专属 +10 绝对命中加成；
+     - 巫师元素共鸣（持法杖）：获得魔法攻击力百分比加成（最大 +15%）与气力 MP 消耗减免（最大 20% 减免）；
+   - **熟练度经验升级与夹取 (`applyMasteryExp` & `calculateMasteryExpGain`)**:
+     - 依据命中与击杀动态计算专精经验，并严格按职业阶位上限夹取，杜绝溢出。
+
+2. **L2 服务端大世界层扩展 (`src/world/WorldImpl.h`, `Api.h`, `World.cpp`)**:
+   - `PlayerExtraStats` 状态字典扩充：`profession_rank` (进阶阶位)、`weapon_mastery_level` (各武器分类专精等级)、`weapon_mastery_exp` (各武器累计经验)；
+   - 暴露世界层核心 API：
+     - `playerProfessionRank`, `setPlayerProfessionRank`, `promotePlayerProfession`；
+     - `playerWeaponMasteryLevel`, `playerWeaponMasteryExp`, `setPlayerWeaponMasteryLevel`, `addPlayerWeaponMasteryExp`；
+     - `playerWeaponMasteryBonus`（根据玩家当前职业、阶位与装备主手武器类型即时求值被动共鸣增益）。
+
+#### 2. 测试覆盖与反向变异实证
+
+- **单元测试 (`tests/WorldProfessionTest.cpp`)**:
+  - 新增 `world_profession` 测试目标，包含 5 大核心 SUBCASE；
+  - 覆盖进阶门禁前置条件逐级校验（等级、转生、声望、跨系防御）；
+  - 覆盖熟练度上限、经验升级逐级晋升与满级上限截断；
+  - 覆盖专精属性加成、负面惩罚消除与三大职业专属武器共鸣效果；
+  - 覆盖大世界玩家接口端到端联动；
+  - **RV-Profession-1 反向变异实证**：
+    - 越权跨系进阶防御；
+    - 跨职业武器上限溢出防御（勇士持法杖上限仅 10，经验注入严格被钳位于 10）；
+    - 非相性武器不触发专属共鸣（勇士持弓攻击力与爆击率无狂暴共鸣）。
+- **CTest 26/26 100% 绿灯**，守卫工具 `ci_verify.py` 6 项全过。
+
+
 
 
 

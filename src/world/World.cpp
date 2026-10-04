@@ -1513,6 +1513,119 @@ bool World::setPlayerProfession(SA::Net::SessionId session, SA::Rules::Professio
 	return true;
 }
 
+SA::Rules::ProfessionRank World::playerProfessionRank(SA::Net::SessionId session) const
+{
+	auto it = _impl->player_extra_stats.find(session);
+	return (it != _impl->player_extra_stats.end()) ? it->second.profession_rank : SA::Rules::ProfessionRank::kNovice;
+}
+
+bool World::setPlayerProfessionRank(SA::Net::SessionId session, SA::Rules::ProfessionRank rank)
+{
+	SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return false;
+	_impl->player_extra_stats[session].profession_rank = rank;
+	return true;
+}
+
+SA::Rules::PromotionCheckResult World::promotePlayerProfession(
+    SA::Net::SessionId session,
+    SA::Rules::ProfessionClass target_prof,
+    SA::Rules::ProfessionRank target_rank)
+{
+	SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return {false, "角色不存在或未登录"};
+
+	const int lvl = p->level;
+	const int trans = playerTransmigration(session);
+	const int fame = playerFame(session);
+	const auto cur_prof = p->profession_class;
+	const auto cur_rank = playerProfessionRank(session);
+
+	auto check = SA::Rules::checkProfessionPromotion(lvl, trans, fame, cur_prof, cur_rank, target_prof, target_rank);
+	if (!check.eligible)
+		return check;
+
+	p->profession_class = target_prof;
+	_impl->player_extra_stats[session].profession_rank = target_rank;
+	return check;
+}
+
+std::int32_t World::playerWeaponMasteryLevel(SA::Net::SessionId session, SA::Rules::WeaponClass weapon) const
+{
+	const std::size_t idx = static_cast<std::size_t>(weapon);
+	if (idx >= SA::Rules::kWeaponClassCount)
+		return 0;
+	auto it = _impl->player_extra_stats.find(session);
+	return (it != _impl->player_extra_stats.end()) ? it->second.weapon_mastery_level[idx] : 0;
+}
+
+std::int32_t World::playerWeaponMasteryExp(SA::Net::SessionId session, SA::Rules::WeaponClass weapon) const
+{
+	const std::size_t idx = static_cast<std::size_t>(weapon);
+	if (idx >= SA::Rules::kWeaponClassCount)
+		return 0;
+	auto it = _impl->player_extra_stats.find(session);
+	return (it != _impl->player_extra_stats.end()) ? it->second.weapon_mastery_exp[idx] : 0;
+}
+
+bool World::setPlayerWeaponMasteryLevel(SA::Net::SessionId session, SA::Rules::WeaponClass weapon, std::int32_t level)
+{
+	const std::size_t idx = static_cast<std::size_t>(weapon);
+	if (idx >= SA::Rules::kWeaponClassCount)
+		return false;
+	SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return false;
+
+	const auto prof = p->profession_class;
+	const auto rank = playerProfessionRank(session);
+	const auto cap = SA::Rules::getWeaponMasteryCap(prof, rank, weapon);
+
+	_impl->player_extra_stats[session].weapon_mastery_level[idx] = std::max(0, std::min(cap, level));
+	_impl->player_extra_stats[session].weapon_mastery_exp[idx] = 0;
+	return true;
+}
+
+bool World::addPlayerWeaponMasteryExp(SA::Net::SessionId session, SA::Rules::WeaponClass weapon, std::int32_t gained_exp)
+{
+	const std::size_t idx = static_cast<std::size_t>(weapon);
+	if (idx >= SA::Rules::kWeaponClassCount || gained_exp <= 0)
+		return false;
+	SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return false;
+
+	const auto prof = p->profession_class;
+	const auto rank = playerProfessionRank(session);
+	const auto cap = SA::Rules::getWeaponMasteryCap(prof, rank, weapon);
+
+	auto &stats = _impl->player_extra_stats[session];
+	auto res = SA::Rules::applyMasteryExp(stats.weapon_mastery_level[idx], stats.weapon_mastery_exp[idx], gained_exp, cap);
+	stats.weapon_mastery_level[idx] = res.first;
+	stats.weapon_mastery_exp[idx] = res.second;
+	return true;
+}
+
+SA::Rules::WeaponMasteryBonus World::playerWeaponMasteryBonus(SA::Net::SessionId session, SA::Rules::WeaponClass weapon) const
+{
+	const SA::Model::Player *p =
+	    _impl->players.resolve(_impl->player_of_session.find(session));
+	if (p == nullptr)
+		return {};
+
+	const auto prof = p->profession_class;
+	const auto rank = playerProfessionRank(session);
+	const int lvl = playerWeaponMasteryLevel(session, weapon);
+
+	return SA::Rules::computeWeaponMasteryBonus(prof, rank, weapon, lvl);
+}
+
 int World::playerEncounterRateFix(SA::Net::SessionId session) const
 {
 	const SA::Model::Player *p =

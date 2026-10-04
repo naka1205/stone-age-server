@@ -770,6 +770,9 @@ struct World::Impl : GoldAuditSink
 	{
 		std::int32_t transmigration = 0;
 		std::int32_t fame = 0;
+		SA::Rules::ProfessionRank profession_rank = SA::Rules::ProfessionRank::kNovice;
+		std::array<std::int32_t, SA::Rules::kWeaponClassCount> weapon_mastery_level{};
+		std::array<std::int32_t, SA::Rules::kWeaponClassCount> weapon_mastery_exp{};
 	};
 	std::unordered_map<SA::Net::SessionId, PlayerExtraStats> player_extra_stats{};
 
