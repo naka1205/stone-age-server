@@ -2186,5 +2186,44 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
    - Commit `ca604f6` 在 Linux GCC、macOS Apple Clang、Windows MSVC 以及 MySQL 8.4.8 + Redis 8.6.2 集成测试中 **100% SUCCESS**；
    - `ci_verify.py` EXPECTED_TESTS 完整登记 24 项测试（含 `world_cross_server`），清洁构建零告警、断言防线反向探针验证通过。
 
+---
+
+### 9.0.125 阶段 9 —— 客户端跨服社交表现层与全服庄园战决斗演练对接 (Client Cross-Server Social UI & Manor Duel Presentation)
+
+- **日期**: 2026-10-04
+- **分支**: `master`
+- **目标**: 落实 S07 跨线路聊天室与全服家族庄园战在客户端的表现层状态机对接（阶段 9）。依据 `docs/09-social-ui.md` §1/§5/§6 规格裁定，在客户端 `ChatManager` 与 `PlayerInteraction` 实现跨线路独立聊天室生命周期管理（创建/加退/密码验证/满员容量/房内发言多播/列表过滤）、名片簿跨服好友在线状态感知（`updateFriendPresence`）与私聊黑名单阻断门禁（`canSendTell`），以及全服四大庄园守护战约战排期告示、决斗实时比分战况看板与决胜过户休战保护呈现（`ManorWarView` / `ManorWarState`）；完善确定性单元测试与反向变异实证。
+
+#### 1. 核心架构与功能落地
+
+1. **跨线路独立聊天室模型与生命周期 (`src/scenes/ChatManager.h` / `ChatManager.cpp`)**:
+   - `ChatChannelType` 扩充：增加 `kTalkRoom = 6`（跨线路独立聊天室）以及标签 `"[聊天室]"`；
+   - `ChatFilter` 扩充：增加 `kRoom = 5` 专属过滤器；
+   - 增加 `ChatRoomView` 视图模型（房间 ID、名称、房主、是否加密、密码、最大人数、当前人数、成员列表）；
+   - 实现房间创建门禁 `canCreateRoom`（2..50 人容量限制、名称非空）；
+   - 实现房间加入门禁 `canJoinRoom`（密码匹配校验、满员安全阻断）；
+   - 实现房间列表检索过滤 `filterAvailableRooms`、房主判定 `isRoomOwner`、成员增删 `addRoomMember`/`removeRoomMember`；
+   - 实现房间消息格式化呈现 `addRoomMessage`。
+2. **名片簿跨服好友在线感知与私聊黑名单 (`src/scenes/PlayerInteraction.h` / `PlayerInteraction.cpp`)**:
+   - 定义 `AddressCardView` 数据结构（卡片 ID、角色名、等级、形象、是否在线、是否拉黑、跨服标识）；
+   - 实现跨服上下线广播动态感知刷新 `updateFriendPresence`；
+   - 实现私聊黑名单阻断拦截门禁 `canSendTell`。
+3. **全服四大庄园约战排期与决斗看板 (`src/scenes/PlayerInteraction.h` / `PlayerInteraction.cpp`)**:
+   - 定义 `ManorWarState`（kPeace, kScheduled, kInProgress, kCooldown）与 `ManorWarView` 视图模型；
+   - 实现守护战排期告示描述 `describeManorSchedule`；
+   - 实现决斗实时比分汇聚与战况看板 `updateManorDuelScore` / `describeManorDuelScore`；
+   - 实现决胜过户与全服休战保护期呈现 `concludeManorWar` / `describeManorConclusion`。
+
+#### 2. 验证与反向变异双证据
+
+- **客户端单元测试 (`tests/ClientNetTest.cpp`)**:
+   - 新增 `阶段 9: 客户端跨服社交表现层与全服庄园战决斗演练 (Phase 9)` 测试套件（4 大 SUBCASE）；
+   - 覆盖聊天室创建门禁/加退/密码验证/多播过滤、名片簿跨服感知/私聊黑名单、庄园约战排期/比分战报/决胜过户全景链路；
+   - **RV-CrossServer-Client-1 反向变异实证**：错误密码阻断、满员加入阻断、拉黑用户私聊阻断、非法容量创建阻断，断言精准转红并安全还原；
+   - 客户端 7/7 CTest 全绿，8/8 守卫 100% 通过。
+- **全平台 CI 远端实证 (GitHub Actions Run 37170889271)**:
+   - Commit `424ac58` 在 Linux GCC、macOS Apple Clang、Windows MSVC 全平台 **100% SUCCESS**。
+
+
 
 
