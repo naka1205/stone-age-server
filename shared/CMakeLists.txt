@@ -39,6 +39,7 @@ add_library(sa_shared STATIC
     rules/Progression.cpp
     rules/Status.cpp
     rules/WeaponMastery.cpp
+    rules/ManorPrivilege.cpp
 )
 
 target_include_directories(sa_shared PUBLIC "${CMAKE_CURRENT_LIST_DIR}")

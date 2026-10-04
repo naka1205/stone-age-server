@@ -403,6 +403,13 @@ RideExamResultCode World::takeRideExam(SA::Net::SessionId session, RideCertType 
 	if (hasRideCert(session, cert_type))
 		return RideExamResultCode::kAlreadyCertified;
 
+	// 占领庄园家族成员免除学费与等级声望限制，直接免试核发证书
+	if (canBypassRideExam(session, cert_type))
+	{
+		grantRideCert(session, cert_type);
+		return RideExamResultCode::kSuccess;
+	}
+
 	const auto req = getRideExamRequirement(cert_type);
 	if (p->level < req.required_level)
 		return RideExamResultCode::kInsufficientLevel;
@@ -419,13 +426,14 @@ RideExamResultCode World::takeRideExam(SA::Net::SessionId session, RideCertType 
 	// 对齐原版 npc_riderman.c:234,311,388,464: w.takegold / 5 (20%) 注资到对应庄园家族金库
 	if (req.associated_manor != FamilyManor::kNone)
 	{
+		const std::uint32_t share = static_cast<std::uint32_t>(std::max(0, tx.applied / 5));
+		depositManorTreasury(req.associated_manor, share);
 		const auto fid = manorOwnerFamily(req.associated_manor);
 		if (fid != 0)
 		{
 			auto fit = s.families.find(fid);
 			if (fit != s.families.end())
 			{
-				const std::int32_t share = tx.applied / 5;
 				fit->second.family_gold = static_cast<std::int32_t>(
 				    std::min<std::uint64_t>(kMaxFamilyGold, static_cast<std::uint64_t>(fit->second.family_gold) + static_cast<std::uint64_t>(share)));
 			}

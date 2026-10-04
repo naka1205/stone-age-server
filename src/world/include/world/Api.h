@@ -36,6 +36,7 @@
 #include "rules/Combatant.h"
 #include "rules/Config.h"
 #include "rules/LSTime.h"
+#include "rules/ManorPrivilege.h"
 #include "rules/PetSkill.h"
 #include "rules/Progression.h"
 #include "rules/RandomSource.h"
@@ -2185,6 +2186,18 @@ class World final : public SA::Net::TransportEvents,
 	bool recordManorDuelScore(FamilyManor manor, std::uint32_t winning_family_id, std::uint32_t score_points = 1);
 	bool concludeManorWar(FamilyManor manor, std::uint32_t victorious_family_id);
 	ManorWarInfo getManorWarInfo(FamilyManor manor) const;
+
+	// ── 庄园特权、金库税收分红与认证体系 (Manor Privilege & Treasury System, 阶段 13) ──
+	std::uint32_t manorTreasury(FamilyManor manor) const;
+	bool depositManorTreasury(FamilyManor manor, std::uint32_t amount);
+	bool withdrawManorTreasury(FamilyManor manor, std::uint32_t amount);
+	int manorTaxRate(FamilyManor manor) const;
+	bool setManorTaxRate(FamilyManor manor, int rate_percent);
+	std::uint32_t distributeManorDividends(FamilyManor manor);
+	bool canBypassRideExam(SA::Net::SessionId session, RideCertType cert_type) const;
+	bool verifyRideExamQuiz(int question_id, int selected_option) const;
+	SA::Rules::ManorAuraBonus playerManorAura(SA::Net::SessionId session) const;
+	bool summonFamilyMembers(SA::Net::SessionId leader_session);
 
 	// ── 玩家摆摊系统 (Street Stall System) ────────────────────────────────
 	bool openStall(SA::Net::SessionId seller, const std::string &title);

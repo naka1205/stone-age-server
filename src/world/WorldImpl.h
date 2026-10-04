@@ -738,6 +738,12 @@ struct World::Impl : GoldAuditSink
 	std::unordered_map<std::string, std::uint32_t> player_to_family_name{};
 	std::map<FamilyManor, std::uint32_t> manor_owners{};
 	std::map<FamilyManor, ManorWarInfo> manor_wars{};
+	struct ManorTreasuryData
+	{
+		std::uint32_t treasury_gold = 0;
+		int tax_rate_percent = SA::Rules::kDefaultTaxRatePercent;
+	};
+	std::map<FamilyManor, ManorTreasuryData> manor_treasuries{};
 	std::uint32_t next_family_id = 1;
 
 	std::unordered_map<SA::Net::SessionId, StallInfo> stalls{};

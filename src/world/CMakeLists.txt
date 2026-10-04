@@ -22,6 +22,7 @@ add_library(sa_world STATIC
     PetProgression.cpp
     WorldCrossServer.cpp
     WorldWeather.cpp
+    WorldManor.cpp
 )
 
 target_include_directories(sa_world
