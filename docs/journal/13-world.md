@@ -2224,6 +2224,48 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
 - **全平台 CI 远端实证 (GitHub Actions Run 37170889271)**:
    - Commit `424ac58` 在 Linux GCC、macOS Apple Clang、Windows MSVC 全平台 **100% SUCCESS**。
 
+---
+
+### 9.0.126 阶段 10 —— 大世界昼夜交替与动态气候环境系统落地 (Day/Night & Dynamic Weather System)
+
+- **日期**: 2026-10-04
+- **分支**: `master`
+- **目标**: 依据石器时代 8.0 原版历法规则与地图特效规范，落地大世界时间流动引擎、昼夜四时段状态机、调色板映射以及动态气候调度与 EF 协议管线。
+
+#### 1. 核心架构与功能落地
+
+1. **L3 石器历法与昼夜时段流动纯函数 (`shared/rules/LSTime.h` & `LSTime.cpp`)**:
+   - 严守 01 §4 / 05 §1.5 纯函数约束，禁止包含 `<chrono>` / `<ctime>`，时间戳以入参形式注入，保证全平台 100% 确定性与可回放；
+   - 石器时代历法常量（1:1 复刻原版 `handletime.c`）：
+     - `kEraSeconds = 912766409 + 5400`（纪元起点）
+     - `kSecondsPerLSDay = 5400`（现实 5400 秒 = 90 分钟 = 1.5 小时为 1 石器天）
+     - `kHoursPerLSDay = 1024`（1 石器天划分为 1024 个刻度，0..1023）
+     - `kDaysPerLSYear = 100`（1 石器年 = 100 石器天）
+   - 四时段状态机 `LSTimeSection`（1:1 对齐 `LSTIME_SECTION`）：
+     - `kNight = 0`（黑夜）：`300 < hour <= 700`，对应经典夜景调色板 `PALET_3`
+     - `kMorning = 1`（清晨）：`700 < hour <= 930`，对应晨曦微光调色板 `PALET_1`
+     - `kNoon = 2`（正午/白天）：`930 < hour <= 1023 || 0 <= hour <= 200`，对应明朗白昼调色板 `PALET_2`
+     - `kEvening = 3`（黄昏/傍晚）：`200 < hour <= 300`，对应夕阳暮霭调色板 `PALET_4`
+   - 实现时间正逆向高精度转换函数：`computeLSTime` 与 `computeRealTime`。
+
+2. **L2 大世界动态气候环境调度器 (`src/world/WorldWeather.h` & `WorldWeather.cpp`)**:
+   - 天气类型掩码 `WeatherKind`：`kNone` (0), `kRain` (1), `kSnow` (2), `kCherryBlossom` (4), `kStarFall` (8)；
+   - 单地图气候状态机 `MapWeather`：包含地图 floor_id、天气类型、强度 level [1..5]、到期时间戳与附加参数；
+   - 天气生命周期管理：支持设置场景天气 `setWeather`、清除 `clearWeather`、超时检测 `tick` 与恢复默认晴朗回调；
+   - 原版 8.0 `EF` 协议成帧与解析：`formatWeatherPacket` / `parseWeatherPacket` 编解码。
+
+3. **大世界世界循环集成与跨图同步 (`src/world/World.cpp` / `WorldMovement.cpp` / `WorldImpl.h`)**:
+   - `World::tick` 定时业务阶段驱动气候时钟，到期自动多播重置特效；
+   - 玩家跨图传送（`warpSinglePlayer`）及上线登录时自动拉取并下发当前楼层最新天气环境；
+   - 暴露公共观察面：`setMapWeather`、`clearMapWeather`、`mapWeather`、`isMapWeatherClear`、`currentLSTime`、`currentLSTimeSection`、`pollWeatherEvents`、`playerWeather`。
+
+#### 2. 验证与反向变异双证据
+
+- **新增测试目标 (`tests/WorldWeatherTest.cpp` / `world_weather`)**:
+   - 涵盖历法时间纪元推进与往返等价性、四时段状态机判定与调色板映射、EF 协议编解码、场景天气设置与强度钳位、超时到期恢复晴朗以及跨图传送环境同步闭环；
+   - **RV-Weather-1 反向变异实证**：实证时段分界线防篡改、非法天气强度严格钳位至 5 级以内防止客户端粒子系统溢出崩溃。
+- **全量 CTest 25/25 100% 绿灯**，6 项守卫通过，断言防线反向验证通过。
+
 
 
 

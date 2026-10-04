@@ -92,6 +92,7 @@ P2/P3 的完成以真实客户端操作和重启后的持久化结果为准；�
 | 10-03 | **阶段 7 S22 saac 通信管线与账号中心服务架构落地 (Saac Protocol Pipeline & Account Service Engine)**（§9.0.123：src/saac/ (sa_saac) 独立模块落地 · 严守 check_module_boundaries.py 架构隔离 · (instance_id, generation, request_id, deadline_ms) 信封封装彻底消弭跨实例串包 (C33/C35) · AccountLockType 显式隔离普通锁与星系移民锁 (C45) · 跨线路全服广播/聊天室分发通道 (00 §7) · tick 超时扫描与在途请求清理 · tests/SaacClientTest.cpp 5 大测试用例覆盖 · RV-Saac-1 变异实证通过 · CTest 23/23 保持全绿） | 阶段 8 跨线路社交体系与全服家族战系统落地 |
 | 10-04 | **阶段 8 跨线路社交体系与全服家族战系统落地 (Cross-Server Social & Manor War)**（§9.0.124：S07 聊天室与跨服世界喊话/私聊路由 · 8.0 独有跨线路独立聊天室体系 · 跨服好友上下线感知 · 全服四大庄园跨服排期/比分汇聚/胜负交割过户 · tests/WorldCrossServerTest.cpp 6 大用例覆盖 · RV-CrossServer-1 变异实证通过 · CTest 24/24 保持全绿） | 阶段 9 客户端跨服社交表现层与全服庄园战决斗演练 |
 | 10-04 | **阶段 9 客户端跨服社交表现层与全服庄园战决斗演练对接 (Client Cross-Server Social UI & Manor Duel Presentation)**（§9.0.125：ChatManager 跨线路独立聊天室 · PlayerInteraction 名片簿跨服好友在线感知与私聊黑名单 · 全服四大庄园约战排期/比分战报/决胜过户 · ClientNetTest 阶段 9 用例与 RV-CrossServer-Client-1 变异实证 · 双端全平台 CI 全绿） | 阶段 10 大世界昼夜交替与动态气候环境系统落地 (Day/Night & Dynamic Weather System) |
+| 10-04 | **阶段 10 大世界昼夜交替与动态气候环境系统落地 (Day/Night & Dynamic Weather System)**（§9.0.126：石器历法与昼夜四时段纯函数 LSTime/LSTimeSection · 经典调色板映射 PALET_1..PALET_4 · 地图动态气候调度器与超时恢复 WorldWeather · 8.0 原版 EF 协议成帧解析与跨图环境同步 · tests/WorldWeatherTest.cpp 25/25 CTest 全绿 · RV-Weather-1 变异实证通过） | 阶段 11 客户端昼夜调色板渐变渲染与全景动态天气粒子系统对接 (Client Weather Particle & Day/Night Palette Presentation) |
 
 
 

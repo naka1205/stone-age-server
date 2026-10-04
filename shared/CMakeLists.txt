@@ -33,6 +33,7 @@ endif()
 add_library(sa_shared STATIC
     rules/Angel.cpp
     rules/Battle.cpp
+    rules/LSTime.cpp
     rules/PetSkill.cpp
     rules/ProfessionSkill.cpp
     rules/Progression.cpp

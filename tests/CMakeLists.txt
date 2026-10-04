@@ -66,6 +66,12 @@ sa_apply_warnings(sa_world_cross_server_test)
 sa_enable_assertions(sa_world_cross_server_test)
 add_test(NAME world_cross_server COMMAND sa_world_cross_server_test)
 
+add_executable(sa_world_weather_test WorldWeatherTest.cpp)
+target_link_libraries(sa_world_weather_test PRIVATE sa_world sa_shared sa_doctest)
+sa_apply_warnings(sa_world_weather_test)
+sa_enable_assertions(sa_world_weather_test)
+add_test(NAME world_weather COMMAND sa_world_weather_test)
+
 if(SA_ENABLE_MYSQL_STORAGE)
     add_executable(sa_mysql_storage_test MySqlStorageTest.cpp)
     target_link_libraries(sa_mysql_storage_test PRIVATE sa_session_storage_backend sa_storage_drivers sa_doctest)

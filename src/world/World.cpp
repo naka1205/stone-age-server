@@ -698,7 +698,10 @@ void World::tick()
 	//   ★ 条数制摊还:每 tick 最多游荡 tempo.enemy_move_num 只世界 NPC,游标续跑(wanderNpcs)。
 	s.wanderNpcs(s.config.tempo.enemy_move_num);
 
-	// ── 6. 定时业务 ──   ⬜ 阶段 2
+	// ── 6. 定时业务：天气时钟推进与到期广播 ──
+	s.weather.tick(s.now_ms, [this](std::uint32_t floor_id, const MapWeather &w)
+	               { _impl->broadcastWeatherToFloor(floor_id, w); });
+
 	// ── 7. 出站聚合 ──   ⬜ 阶段 2(CA/CD 视野聚合;1.5 无视野)
 	//
 	// ⚠️ 但**出站字节仍要发出去** —— 上面第 4 步往 outbound 里写了东西。
@@ -1849,6 +1852,7 @@ bool World::Impl::install(SA::Net::SessionId id, const SA::Domain::CharacterReco
 	broadcastSpawn(id, *player);
 	refreshEnemyView(id, *player, -1000, -1000);
 	refreshNpcView(id, *player, -1000, -1000);
+	syncWeatherToSession(id, static_cast<std::uint32_t>(player->floor));
 	return true;
 }
 
@@ -2323,6 +2327,62 @@ bool World::setPlayerName(SA::Net::SessionId session, const std::string &name)
 		}
 	}
 	return true;
+}
+
+// ── 阶段 10: 大世界昼夜交替与动态气候环境系统 ────────────────────────
+void World::setMapWeather(std::uint32_t floor_id, WeatherKind kind, std::int32_t level,
+                          std::int64_t duration_ms, std::string_view option)
+{
+	_impl->weather.setWeather(floor_id, kind, level, _impl->now_ms, duration_ms, option);
+	_impl->broadcastWeatherToFloor(floor_id, _impl->weather.getWeather(floor_id));
+}
+
+void World::clearMapWeather(std::uint32_t floor_id)
+{
+	_impl->weather.clearWeather(floor_id);
+	_impl->broadcastWeatherToFloor(floor_id, _impl->weather.getWeather(floor_id));
+}
+
+MapWeather World::mapWeather(std::uint32_t floor_id) const
+{
+	return _impl->weather.getWeather(floor_id);
+}
+
+bool World::isMapWeatherClear(std::uint32_t floor_id) const
+{
+	return _impl->weather.isClear(floor_id);
+}
+
+SA::Rules::LSTime World::currentLSTime(std::int64_t real_seconds) const noexcept
+{
+	return SA::Rules::computeLSTime(real_seconds);
+}
+
+SA::Rules::LSTimeSection World::currentLSTimeSection(std::int64_t real_seconds) const noexcept
+{
+	return SA::Rules::getLSTimeSection(SA::Rules::computeLSTime(real_seconds));
+}
+
+std::vector<MapWeather> World::pollWeatherEvents(SA::Net::SessionId session)
+{
+	auto it = _impl->session_weather_events.find(session);
+	if (it == _impl->session_weather_events.end())
+	{
+		return {};
+	}
+	std::vector<MapWeather> result = std::move(it->second);
+	_impl->session_weather_events.erase(it);
+	return result;
+}
+
+MapWeather World::playerWeather(SA::Net::SessionId session) const
+{
+	auto it = _impl->session_current_weather.find(session);
+	if (it != _impl->session_current_weather.end())
+	{
+		return it->second;
+	}
+	return MapWeather{};
 }
 
 } // namespace SA::World

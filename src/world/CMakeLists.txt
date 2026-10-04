@@ -21,6 +21,7 @@ add_library(sa_world STATIC
     ExChangeMan.cpp
     PetProgression.cpp
     WorldCrossServer.cpp
+    WorldWeather.cpp
 )
 
 target_include_directories(sa_world

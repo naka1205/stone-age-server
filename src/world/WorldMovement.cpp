@@ -124,6 +124,12 @@ void World::Impl::warpSinglePlayer(SA::Net::SessionId id, std::int32_t dst_floor
 	self_mv.dir = static_cast<std::uint32_t>(p->dir);
 	self_mv.entity_type = static_cast<std::uint32_t>(SA::Domain::EntityType::ENTITY_PLAYER);
 	sendTo(id, self_mv);
+
+	// 7. 跨图时同步目标楼层当前天气环境 (EF 指令)
+	if (ofloor != dst_floor)
+	{
+		syncWeatherToSession(id, static_cast<std::uint32_t>(dst_floor));
+	}
 }
 
 void World::Impl::warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y)

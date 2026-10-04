@@ -21,6 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "WorldWeather.h"
 #include "data/Json.h"
 #include "model/Enemy.h"
 #include "model/EntityIndex.h"
@@ -32,6 +33,7 @@
 #include "rules/Battle.h"
 #include "rules/CaptureItem.h"
 #include "rules/Combatant.h"
+#include "rules/LSTime.h"
 #include "rules/PetSkill.h"
 #include "rules/ProfessionSkill.h"
 #include "rules/Progression.h"
@@ -932,6 +934,31 @@ struct World::Impl : GoldAuditSink
 
 	void warpSinglePlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y);
 	void warpPlayer(SA::Net::SessionId id, std::int32_t dst_floor, std::int32_t dst_x, std::int32_t dst_y);
+
+	// ── 阶段 10: 大世界昼夜交替与动态气候环境系统 ──
+	WorldWeather weather{};
+	std::unordered_map<SA::Net::SessionId, std::vector<MapWeather>> session_weather_events{};
+	std::unordered_map<SA::Net::SessionId, MapWeather> session_current_weather{};
+
+	void syncWeatherToSession(SA::Net::SessionId id, std::uint32_t floor_id)
+	{
+		const MapWeather w = weather.getWeather(floor_id);
+		session_current_weather[id] = w;
+		session_weather_events[id].push_back(w);
+	}
+
+	void broadcastWeatherToFloor(std::uint32_t floor_id, const MapWeather &w)
+	{
+		(void)w;
+		for (const auto &entry : conns)
+		{
+			const auto *p = players.resolve(player_of_session.find(entry.first));
+			if (p != nullptr && p->floor == static_cast<std::int32_t>(floor_id))
+			{
+				syncWeatherToSession(entry.first, floor_id);
+			}
+		}
+	}
 };
 
 } // namespace SA::World

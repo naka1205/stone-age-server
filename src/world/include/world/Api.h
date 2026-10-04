@@ -35,6 +35,7 @@
 #include "rules/Battle.h"
 #include "rules/Combatant.h"
 #include "rules/Config.h"
+#include "rules/LSTime.h"
 #include "rules/PetSkill.h"
 #include "rules/Progression.h"
 #include "rules/RandomSource.h"
@@ -1532,6 +1533,44 @@ int calculatePetTransAns(int total1, int total2, int pet_level, int pet_rank, in
 
 PetGrowth calculatePetTransStats(PetGrowth base, PetGrowth work, int pet_level, int pet_rank, int current_trans = 0) noexcept;
 
+// ── 阶段 10: 大世界昼夜交替与动态气候环境系统 ────────────────────────
+enum class WeatherKind : std::uint32_t
+{
+	kNone = 0,          // 晴朗（清除所有天气效果）
+	kRain = 1,          // 雨天（bit 0: MAP_EFFECT_TYPE_RAIN）
+	kSnow = 2,          // 雪天（bit 1: MAP_EFFECT_TYPE_SNOW）
+	kCherryBlossom = 4, // 樱花/纸吹雪（bit 2: MAP_EFFECT_TYPE_KAMIFUBUKI）
+	kStarFall = 8,      // 流星/星夜（bit 3: MAP_EFFECT_TYPE_STAR）
+};
+
+struct MapWeather
+{
+	std::uint32_t floor_id = 0;
+	WeatherKind kind = WeatherKind::kNone;
+	std::int32_t level = 0;         // 强度等级 1..5 (0 = 无)
+	std::int64_t start_time_ms = 0; // 生效起始毫秒时间戳
+	std::int64_t duration_ms = 0;   // 持续时长毫秒（0 表示常驻）
+	std::string option;             // 附加选项
+
+	[[nodiscard]] bool isExpired(std::int64_t now_ms) const noexcept
+	{
+		if (duration_ms <= 0)
+		{
+			return false;
+		}
+		return (now_ms - start_time_ms) >= duration_ms;
+	}
+};
+
+// 格式化 8.0 EF 协议包（对齐原版 lssproto_EF_send）
+// 格式："EF <effect_mask> <level> [option]"
+std::string formatWeatherPacket(WeatherKind kind, std::int32_t level,
+                                std::string_view option = "");
+
+// 解码/校验 EF 协议包
+bool parseWeatherPacket(std::string_view packet, WeatherKind &out_kind,
+                        std::int32_t &out_level, std::string &out_option);
+
 class World final : public SA::Net::TransportEvents,
 
                     public SA::Net::SessionHost
@@ -2253,6 +2292,17 @@ class World final : public SA::Net::TransportEvents,
 	bool hasSpiritBlessing(SA::Net::SessionId session) const;
 
 	const SA::Rules::BattleField *battleField(BattleId id) const;
+
+	// ── 阶段 10: 大世界昼夜交替与动态气候环境系统 ──
+	void setMapWeather(std::uint32_t floor_id, WeatherKind kind, std::int32_t level,
+	                   std::int64_t duration_ms = 0, std::string_view option = "");
+	void clearMapWeather(std::uint32_t floor_id);
+	MapWeather mapWeather(std::uint32_t floor_id) const;
+	bool isMapWeatherClear(std::uint32_t floor_id) const;
+	SA::Rules::LSTime currentLSTime(std::int64_t real_seconds) const noexcept;
+	SA::Rules::LSTimeSection currentLSTimeSection(std::int64_t real_seconds) const noexcept;
+	std::vector<MapWeather> pollWeatherEvents(SA::Net::SessionId session);
+	MapWeather playerWeather(SA::Net::SessionId session) const;
 
   private:
 	void processStorage();
