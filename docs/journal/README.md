@@ -22,9 +22,9 @@
 | [16-counterattack.md](16-counterattack.md) | 基础反击、连锁时序与战果归属 | 1 |
 | [17-economy.md](17-economy.md) | 经济域:GoldLedger 单入口 · 战斗产币 · OpenSSL 根探测 | 2 |
 | [`18-petskill.md`](18-petskill.md) | 宠技三连发:B1 直攻系 · B2 宠技槽 + CHARGE · B3 状态系 + 铁壁 · A-δ 特殊宠技 | 4 |
-| [`90-push-windows.md`](90-push-windows.md) | 二十九次 `shared-v0.x.0` 推送窗口与远端同步的闭合核实 | 29 |
+| [`90-push-windows.md`](90-push-windows.md) | 三十次 `shared-v0.x.0` 推送窗口与远端同步的闭合核实 | 30 |
 | [`99-changelog.md`](99-changelog.md) | 变更记录:原 `00` §12(62 条)+ `11` §15(25 条) | — |
-| **合计** | | **145** |
+| **合计** | | **146** |
 
 ## 全量映射表(按编号)
 
@@ -175,6 +175,7 @@
 | §9.0.127 | 阶段 11 —— 客户端昼夜调色板渐变渲染与全景动态天气粒子系统对接 (Client Weather Particle & Day/Night Palette Presentation): 经典 16 级调色板与四时段映射 (PaletteManager) · 环境光 LERP 平滑过渡插值与洞窟覆盖 · 8.0 EF 协议解析与 1..5 级天气粒子系统 (WeatherEffect) · 淡出消散态与确定性 XorShift32 · tests/ClientNetTest.cpp 阶段 11 覆盖 · RV-Weather-Client-1 变异实证 · 客户端 7/7 CTest 全绿 | 2026-10-04 | [`13-world.md`](13-world.md) |
 | §9.0.128 | 阶段 12 —— 职业进阶系统与武器专精熟练度体系落地 (Profession Advanced & Weapon Mastery): 职业进阶阶位与逐级门禁 · 专精等级上限矩阵与经验公式 · 武器专精属性修正与三大职业专属相性共鸣 · PlayerExtraStats 大世界扩展与查询修改 API · tests/WorldProfessionTest.cpp 26/26 CTest 全绿 · RV-Profession-1 变异实证通过 | 2026-10-04 | [`13-world.md`](13-world.md) |
 | §9.0.129 | 阶段 13 —— 四大庄园骑乘进阶认证考核、庄园金库税收分红与特权技能树体系落地 (Manor Mount Certification & Treasury Dividend): 四大庄园特权光环 computeManorAura · 交易税划拨与金库注资 · 阶梯分红算法与在线/邮件派发 · 骑乘认证免试通道与题库验证 · 庄园召集令全员集结 · tests/WorldManorTest.cpp 27/27 CTest 全绿 · RV-Manor-1 变异实证通过 | 2026-10-04 | [`13-world.md`](13-world.md) |
+| §9.0.129b | 阶段 13 —— 推送窗口执行记录 shared-v0.48.0: shared/rules/ 四大庄园特权规则与客户端 pin 同步闭环 | 2026-10-04 | [`90-push-windows.md`](90-push-windows.md) |
 
 ---
 

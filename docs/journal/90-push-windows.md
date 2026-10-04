@@ -958,5 +958,34 @@ server `6e57229` ahead 一并清零,**两仓 vs 两远端 `0/0`**。
 - **守卫闭环**:
   - 服务端打附注 tag `shared-v0.45.0`，客户端更新 `SA_SHARED_GIT_TAG` pin 至 `shared-v0.45.0`，保持双端 CI 100% 绿灯。
 
+---
+
+### 9.0.129b ★ 推送窗口执行记录 —— `shared-v0.48.0`(2026-10-04)
+
+> **本窗口前推范围**: 阶段 13（四大庄园骑乘进阶认证考核、庄园金库税收分红与特权技能树体系，§9.0.129），涉及 watched 路径 `shared/rules/ManorPrivilege.h`、`shared/rules/ManorPrivilege.cpp` 与 `shared/CMakeLists.txt`。
+
+#### ① 结果
+
+| 项 | 值 |
+|---|---|
+| server master / tag | `ca5efa3` · `shared-v0.48.0`（附注 tag，指向 `ca5efa3`） |
+| client master | `d39fa67`（pin v0.47.0 → **v0.48.0**，`cmake/SaShared.cmake`） |
+| server 远端 CI | [run 37177323813](https://github.com/naka1205/stone-age-server/actions/runs/37177323813)：**4/4 Jobs 全部 SUCCESS**（Linux GCC / Windows MSVC / macOS Apple Clang / MySQL-Redis） |
+| client 远端 CI | [run 37177340346](https://github.com/naka1205/stone-age-client/actions/runs/37177340346)：**3/3 Jobs 全部 SUCCESS**（Linux GCC / Windows MSVC / macOS Apple Clang） |
+| client 本机验证 | **8 项全过**（d2 7/7 100% 绿灯，D2 规则编译 0 漂移告警） |
+| server 本机验证 | **27 项全过**（CTest 27/27 100% 绿灯，ci_verify 6 项全过，RV-Manor-1 反向验证通过） |
+| 两端用例集一致性 | D2「一份规则两端编译」完整闭环（178 组黄金用例一致） |
+
+#### ② 本窗口前推原因与守卫验证
+
+- **watched 路径改动**:
+  - `shared/rules/ManorPrivilege.h` / `ManorPrivilege.cpp`: 落地四大庄园专属特权光环 `computeManorAura`、交易税划拨 `calculateTradeTax`、骑乘考核 20% 金库注资 `calculateRideExamManorShare`、阶梯分红 `calculateDividendShare`、骑乘考题理论问答验证 `verifyRideExamAnswer`；
+  - `shared/CMakeLists.txt`: 将 `rules/ManorPrivilege.cpp` 注册进共享规则库 `sa_shared`。
+- **跨平台编译与修复实证**:
+  - 首次推送远端 CI 暴露 Linux GCC 下 `std::uint64_t` 与 `ULL` 整数后缀在 `-Wconversion -Wsign-conversion` 下类型隐式转换告警；
+  - 立即修复为无后缀强类型整型算术，更新提交并强制同步 Tag `shared-v0.48.0`；
+  - 远端 GitHub Actions CI 真实轮询全平台双端 7/7 Jobs 全部 100% 绿灯。
+
+
 
 
