@@ -451,6 +451,7 @@ struct World::Impl : GoldAuditSink
 	     SA::Net::Transport &tp)
 	    : config(cfg), clock(clk), logger(log), random(rnd), transport(tp),
 	      world_rng(rnd.masterSeed() ^ 0x9E3779B97F4A7C15ull),
+	      now_ms(clk.nowMs()),
 	      server_start_time_ms(clk.nowMs())
 	{
 		olink.assign(static_cast<std::size_t>(map.width) * static_cast<std::size_t>(map.height),
@@ -1012,6 +1013,96 @@ struct World::Impl : GoldAuditSink
 	// ── 阶段 16: 经典长尾 NPC 交通与世界设施 ──
 	std::unordered_map<SA::Net::SessionId, SavePointData> player_save_points{};
 	std::int64_t server_start_time_ms = 0;
+
+	// ── 阶段 18: 地下城多层迷宫与漆黑洞窟探险系统 (S20 地图运行时扩展) ──
+	std::unordered_map<std::uint32_t, DungeonDefinition> dungeons{};
+	std::unordered_map<std::int32_t, std::uint32_t> floor_to_dungeon{};
+	std::unordered_map<SA::Net::SessionId, PlayerTorchState> player_torches{};
+	std::unordered_map<SA::Net::SessionId, std::uint32_t> player_active_dungeon{};
+
+	const DungeonFloorConfig *findDungeonFloor(std::int32_t floor_id) const
+	{
+		auto it = floor_to_dungeon.find(floor_id);
+		if (it == floor_to_dungeon.end())
+			return nullptr;
+		auto dit = dungeons.find(it->second);
+		if (dit == dungeons.end())
+			return nullptr;
+		for (const auto &f : dit->second.floors)
+		{
+			if (f.floor_id == floor_id)
+				return &f;
+		}
+		return nullptr;
+	}
+
+	bool isPlayerInDarkCave(SA::Net::SessionId session) const
+	{
+		const auto *p = players.resolve(player_of_session.find(session));
+		if (p == nullptr)
+			return false;
+		const auto *df = findDungeonFloor(p->floor);
+		return df != nullptr && df->is_dark;
+	}
+
+	std::int32_t playerEffectiveVisionRadius(SA::Net::SessionId session) const
+	{
+		const auto *p = players.resolve(player_of_session.find(session));
+		if (p == nullptr)
+			return 10;
+		const auto *df = findDungeonFloor(p->floor);
+		if (df == nullptr || !df->is_dark)
+			return 10; // 非黑暗环境，标准视野 10 格
+
+		// 黑暗洞窟：检查玩家火把状态
+		auto tit = player_torches.find(session);
+		const auto current_ms = std::max(now_ms, clock.nowMs());
+		if (tit != player_torches.end() && tit->second.has_torch && current_ms < tit->second.expire_time_ms)
+		{
+			return tit->second.light_radius; // 火把照明拓展视野
+		}
+		return df->default_vision_radius; // 默认黑暗视野（2 格）
+	}
+
+	double playerEncounterRateMultiplier(SA::Net::SessionId session) const
+	{
+		const auto *p = players.resolve(player_of_session.find(session));
+		if (p == nullptr)
+			return 1.0;
+		const auto *df = findDungeonFloor(p->floor);
+		if (df == nullptr || !df->is_dark)
+			return 1.0;
+
+		auto tit = player_torches.find(session);
+		const auto current_ms = std::max(now_ms, clock.nowMs());
+		if (tit != player_torches.end() && tit->second.has_torch && current_ms < tit->second.expire_time_ms)
+		{
+			return 1.0; // 有火把照明消除惊吓倍率
+		}
+		return df->dark_encounter_multiplier; // 黑暗中受限遇敌倍率
+	}
+
+	bool triggerDungeonStair(SA::Net::SessionId session)
+	{
+		auto *p = players.resolve(player_of_session.find(session));
+		if (p == nullptr)
+			return false;
+		const auto *df = findDungeonFloor(p->floor);
+		if (df == nullptr)
+			return false;
+
+		for (const auto &stair : df->stairs)
+		{
+			if (stair.trigger_x == p->x && stair.trigger_y == p->y)
+			{
+				if (p->level < stair.min_level)
+					return false;
+				warpPlayer(session, stair.target_floor, stair.target_x, stair.target_y);
+				return true;
+			}
+		}
+		return false;
+	}
 };
 
 } // namespace SA::World

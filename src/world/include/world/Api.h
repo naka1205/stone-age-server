@@ -791,6 +791,63 @@ struct TranserRoute
 	std::int32_t min_level = 1;     // 最低等级限制
 };
 
+// ── 地下城与多层迷宫探险系统 (阶段 18 §9.0.134, 原版 map/ 运行时扩展) ─────────
+
+// 迷宫楼梯传送方向
+enum class DungeonStairType : std::uint8_t
+{
+	kUp = 0,   // 上楼 / 返回上一层
+	kDown = 1, // 下楼 / 前往更深层
+};
+
+// 迷宫楼梯定义
+struct DungeonStair
+{
+	DungeonStairType type = DungeonStairType::kDown;
+	std::int32_t trigger_x = 0; // 踩中此格触发
+	std::int32_t trigger_y = 0;
+	std::int32_t target_floor = 0; // 目标层 Floor ID
+	std::int32_t target_x = 0;     // 目标到达坐标
+	std::int32_t target_y = 0;
+	std::int32_t min_level = 1; // 楼梯通行门禁等级
+};
+
+// 地下城单层配置
+struct DungeonFloorConfig
+{
+	std::int32_t floor_id = 0;
+	std::int32_t depth = 1;                 // 楼层深度 (1 层, 2 层...)
+	std::string floor_name{};               // 楼层显示名
+	bool is_dark = false;                   // 是否为漆黑洞窟 (黑暗视野遮蔽)
+	std::int32_t default_vision_radius = 2; // 黑暗状态下默认视野半径 (格)
+	std::int32_t min_level = 1;             // 本层最低等级门槛
+	std::vector<DungeonStair> stairs{};     // 本层上下楼梯列表
+	double dark_encounter_multiplier = 1.3; // 黑暗中由于视线受限导致的遇敌率放大倍数
+};
+
+// 地下城全域定义
+struct DungeonDefinition
+{
+	std::uint32_t dungeon_id = 0;
+	std::string name{};                       // 地下城全名 (如 "漆黑的洞窟")
+	std::int32_t min_entry_level = 1;         // 进入地下城基础等级门槛
+	std::int32_t entry_floor = 0;             // 入口层 Floor ID
+	std::int32_t entry_x = 0;                 // 入口初始坐标 X
+	std::int32_t entry_y = 0;                 // 入口初始坐标 Y
+	std::int32_t exit_floor = 0;              // 撤出/离开时送达地面地图 ID
+	std::int32_t exit_x = 0;                  // 离开到达坐标 X
+	std::int32_t exit_y = 0;                  // 离开到达坐标 Y
+	std::vector<DungeonFloorConfig> floors{}; // 包含的各层配置
+};
+
+// 玩家火把/光照状态
+struct PlayerTorchState
+{
+	bool has_torch = false;
+	std::int32_t light_radius = 8;   // 火把照明半径
+	std::int64_t expire_time_ms = 0; // 失效时间戳
+};
+
 // 制造与生活技能类型 (批次 §9.0.99)
 enum class CraftingType : std::uint8_t
 {
@@ -2027,6 +2084,19 @@ class World final : public SA::Net::TransportEvents,
 	bool checkAndGrantElderTitles(SA::Net::SessionId session, std::uint64_t oldman_npc_id);
 	bool fmHealPlayer(SA::Net::SessionId session, std::uint64_t fm_healer_npc_id);
 	bool warpByTranserMan(SA::Net::SessionId session, std::uint64_t transer_npc_id, std::size_t route_index);
+
+	// ── 地下城多层迷宫与漆黑洞窟视野探险系统 (阶段 18 §9.0.134, S20 地图运行时扩展) ─────
+	bool registerDungeon(const DungeonDefinition &dungeon);
+	std::optional<DungeonDefinition> findDungeon(std::uint32_t dungeon_id) const;
+	bool enterDungeon(SA::Net::SessionId session, std::uint32_t dungeon_id);
+	bool leaveDungeon(SA::Net::SessionId session);
+	bool isPlayerInDungeon(SA::Net::SessionId session) const;
+	std::optional<std::uint32_t> playerCurrentDungeonId(SA::Net::SessionId session) const;
+	bool isPlayerInDarkCave(SA::Net::SessionId session) const;
+	std::int32_t playerEffectiveVisionRadius(SA::Net::SessionId session) const;
+	bool useTorch(SA::Net::SessionId session, std::uint32_t duration_ms = 300000, std::int32_t radius = 8);
+	bool triggerDungeonStair(SA::Net::SessionId session);
+	double playerEncounterRateMultiplier(SA::Net::SessionId session) const;
 
 	// ── 职业进阶与武器专精熟练度体系 (阶段 12 §9.0.127) ─────────────────────────
 	SA::Rules::ProfessionRank playerProfessionRank(SA::Net::SessionId session) const;

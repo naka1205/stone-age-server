@@ -2586,6 +2586,45 @@ W.1 视野对称(`olink` 挂会话)。敌人无会话 ⇒ `entity_type` 区分�
   - 测试用例由 5 例扩充至 9 例，断言由 70 个扩充至 **154 个**，100% 绿灯通过；
   - D8 台账长尾落地项增至 **16 项**，长尾覆盖率提升至 **24.3%**（7,835 行），全仓有效代码累计落地突破 **54,011 行**（**50.3%**，历史性突破半壁江山！）。
 
+---
+
+### 9.0.134 阶段 18 —— S20 地下城多层迷宫与漆黑洞窟视野探险系统落地 (Dungeon & Dark Cave Lighting)
+
+- **日期**: 2026-10-16
+- **范围**: 核心 29 之 **S20 地图运行时**（原版 `map.c` 2,476 行中迷宫、上下楼梯与黑暗迷雾视野探险系统）
+- **主要工作**:
+  1. **地下城与多层迷宫拓扑抽象 (`src/world/include/world/Api.h`, `WorldDungeon.cpp`, `WorldImpl.h`)**:
+     - `DungeonStairType`: `kUp`（上楼）、`kDown`（下楼）、`kExit`（脱离迷宫回到大世界）；
+     - `DungeonStair`: 包含来源点位 `(x, y)`、楼梯类型、目标层与目标落地点 `(target_floor, target_x, target_y)`；
+     - `DungeonFloorConfig`: 定义各楼层 floor_id、楼层序号 floor_index、上下楼梯点位列表 `stairs`、黑暗迷雾环境开关 `is_dark`、默认受限视野半径 `default_vision_radius`（默认 2 格）、黑雾惊吓遇敌率倍率 `dark_encounter_multiplier`（默认 1.3 倍）；
+     - `DungeonDefinition`: 包含地下城 dungeon_id、名称 name、入场地底层 entry_floor、各楼层配置列表 floors；
+     - `registerDungeon` / `getDungeon` / `enterDungeon` / `exitDungeon` / `playerCurrentDungeon`: 支持多迷宫注册与玩家所在迷宫实时索引映射。
+  2. **楼梯交互与多层穿梭机制 (`WorldDungeon.cpp`, `WorldMovement.cpp`)**:
+     - `triggerDungeonStair`: 自动检测玩家当前所在层及踩踏坐标，若命中楼梯点位，自动瞬移穿梭至目标楼层目标点位；
+     - 自动同步或清除 `player_active_dungeon` 映射；
+     - 在玩家移动管线（`WorldMovement.cpp`）中自动挂接楼梯检测，实现走到楼梯点位时即刻顺畅上下楼或出洞回大世界。
+  3. **漆黑洞窟黑雾受限视野与火把光照拓展 (`WorldDungeon.cpp`, `WorldImpl.h`)**:
+     - `isPlayerInDarkCave`: 判定玩家当前所在楼层是否处于漆黑洞窟（`is_dark = true`）；
+     - `playerEffectiveVisionRadius`: 在普通地图中为标准视野（10 格）；在漆黑洞窟中，视线受黑雾阻隔，默认视野压制至 2 格；
+     - `PlayerTorchState`: 记录玩家火把状态（光照半径 `light_radius`、到期绝对毫秒时间戳 `expire_time_ms`）；
+     - `useTorch(session, duration_ms, radius)`: 点燃火把道具，在指定持续时间（如 60 秒）内将视野拓展至指定半径（如 8 格）；
+     - 时钟基准一致性：基于 `std::max(now_ms, clock.nowMs())` 精确核算过期时间，超时后火把光照自然衰减熄灭，视野无缝回落至黑雾默认 2 格。
+  4. **黑暗惊吓遇敌倍率 (`WorldMovement.cpp`, `WorldImpl.h`)**:
+     - `playerEncounterRateMultiplier`: 黑暗环境中玩家受惊，暗雷遇敌率放大 1.3 倍；火把点燃照明时驱散恐慌，遇敌倍率恢复基准 1.0 倍；
+     - 在大世界移动遇敌步进核算中深度整合该倍率系数。
+- **测试与验证**:
+  - 新增 `tests/WorldDungeonTest.cpp`（CTest #12: `world_dungeon`），注册 6 大测试用例、46 个严密断言全部通过：
+    1. 地下城配置注册、层级拓扑与出入迷宫全流程
+    2. 上下楼梯交互与跨楼层定向瞬移
+    3. 迷宫终点脱离与重返大世界
+    4. 漆黑洞窟 (Dark Cave) 迷雾受限视野判定 (2 格 vs 10 格)
+    5. 火把照明道具 (useTorch) 视野拓展与超时衰减恢复
+    6. 黑暗洞窟惊吓遇敌倍率 (1.3x) 与火把光照消除
+  - 服务端 CTest 全部 31 项测试（31/31）100% 绿灯；
+  - CI 6 大守卫检查全部通过（含断言反向变异实证全绿）；
+  - **S20 地图运行时**（原版 `map.c` 2,476 行）核心缺口全部补齐，状态从 `🔄 进行中` 升级为 `✅ 已完成`。
+
+
 
 
 

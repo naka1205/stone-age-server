@@ -25,6 +25,7 @@ add_library(sa_world STATIC
     WorldManor.cpp
     WorldLeaderboard.cpp
     WorldGm.cpp
+    WorldDungeon.cpp
 )
 
 target_include_directories(sa_world

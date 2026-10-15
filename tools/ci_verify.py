@@ -105,6 +105,8 @@ EXPECTED_TESTS = {
     "world_gm",           # ★ 阶段 15 GM指令解析调度/防泄露/NPC:Bankman个人金库存取
     # ── 阶段 16(2026-10-04,经典长尾 NPC 交通与世界设施系统)──────────────
     "world_transit",      # ★ 阶段 16 NPC:StoryTeller/TimeMan/SavePoint/Bus长毛象公车
+    # ── 阶段 18(2026-10-15,地下城多层迷宫与漆黑洞窟视野探险系统)──────────
+    "world_dungeon",      # ★ 阶段 18 地下城多层迷宫/上下楼梯穿梭/漆黑洞窟视野与火把
 }
 
 

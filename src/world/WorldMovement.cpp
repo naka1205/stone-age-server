@@ -249,6 +249,12 @@ void World::advanceMovement()
 					s.warpPlayer(kv.first, wp->dst_floor, wp->dst_x, wp->dst_y);
 				}
 			}
+
+			// 检查迷宫楼梯传送点 (阶段 18 S20 地下城迷宫系统)
+			if (!warped && s.triggerDungeonStair(kv.first))
+			{
+				warped = true;
+			}
 		}
 
 		// 里程碑②:位置变了且未传送 ⇒ 更新 olink(旧格摘、新格挂)+ 视野广播(扫格 diff)。
@@ -370,6 +376,15 @@ void World::advanceMovement()
 				if (s.isAngelModeActive(kv.first))
 				{
 					eff_cep = 0;
+				}
+				else
+				{
+					// S20 漆黑洞窟环境遇敌率倍率加成 (黑暗中由于惊吓与视线受限提升)
+					const double mult = s.playerEncounterRateMultiplier(kv.first);
+					if (mult > 1.0)
+					{
+						eff_cep = static_cast<std::int32_t>(eff_cep * mult);
+					}
 				}
 
 				// 掷骰(encount.c:267 `RAND(0, max_prob) < temp`,csa8.0 max_prob 写死 120):
