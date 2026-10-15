@@ -498,6 +498,7 @@ int main(int argc, char **argv)
 	}
 
 	SA::World::World world(cfg.config, clock, logger, random, transport, storage.get());
+	world.loadPresetDungeons();
 	if (content)
 	{
 		try
