@@ -103,6 +103,7 @@ P2/P3 的完成以真实客户端操作和重启后的持久化结果为准；�
 | 10-16 | **阶段 18 S20 地下城多层迷宫与漆黑洞窟视野探险系统落地 (Dungeon & Dark Cave Lighting)**（§9.0.134：地下城层级拓扑与出入索引 · triggerDungeonStair 踩踏楼梯上下楼与重返大世界 · 漆黑洞窟黑雾受限视野 (2格 vs 10格) · useTorch 火把道具光照拓展与绝对时钟超时自然衰减恢复 · 黑暗惊吓遇敌倍率 (1.3x) 与火把光照消除 · tests/WorldDungeonTest.cpp 31/31 CTest 全绿） | 阶段 19 客户端地下城迷雾光圈渲染与火把道具动效表现层对接 |
 | 10-16 | **阶段 19 客户端地下城迷雾光圈渲染与火把道具动效表现层对接 (Client Fog Lighting & Torch Flicker Presentation)**（DungeonLightingView 视锥黑雾遮罩 · Hermite smoothstep 径向平滑光圈 · 多谐波火光摇曳 Flicker · 火把倒计时超时熄灭与视野平滑回归 · 视口晕影 Vignette · tests/ClientNetTest.cpp 178用例/3408断言 100%全绿 · RV变异实证通过） | 阶段 20 真实地下城多层地图装载与经典剧情任务闭环 (五兄弟的山寨) |
 | 10-16 | **阶段 20 真实地下城多层地图装载与经典剧情任务闭环 (五兄弟的山寨 / 考验任务全流程)**（§9.0.135：五兄弟山寨 Floor 31701..31706 与吉鲁岛 300 贯通 · 楼梯踩踏与门禁任务旗标 28 拦截 · 6 楼智慧水晶 2517 誓约与空包空宠防御 · 五兄弟信物首饰 (2518..2526) 与战宠守护神兽 (54..57, 481) 原子交割 · 终身完成旗标 EndSetFlg 31 登记 · 6 楼神圣石板 kExit 脱离大世界 · tests/WorldDungeonTest.cpp 31/31 CTest 全绿） | 阶段 21 大世界多层洞窟与经典剧情场景客户端表现层全景实装 |
+| 10-16 | **阶段 21 大世界多层洞窟与经典剧情场景客户端表现层全景实装 (Client Multi-Floor Dungeon Scene & Transition System)**（DungeonSceneView 多层地下城元数据与层级 HUD · DungeonStairTransition 上下楼平滑转场/黑屏淡入淡出与钻入下潜视差 · HolyPlateView 终极圣殿神圣石板脉冲光柱与激活升华光效 · FiveBrothersQuestView 五兄弟守护者信物与战宠 1:1 预览及原版对白诊断 · tests/ClientNetTest.cpp 43用例/2,729断言 100%全绿 · RV-Dungeon-Client-1 变异实证通过） | 阶段 22 双端真实联调地下城与五兄弟考验剧情全链路实战验收 |
 
 **环境事实**（A1 复验结论）：09-15 10:54 的 `civ.log` 失败发生在 12:53 探测修复（`fde500d`，§9.0.59）**之前**，为历史证据非现存故障；09-16 02:19 在 `c213060`/shared-v0.30.0 上复跑 win_validate **11/11 全绿**（服务端 ctest 22/22、0 告警、OpenSSL 4.0.2 探测命中、断言防线反向验证通过）。
 
