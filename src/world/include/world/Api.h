@@ -798,6 +798,7 @@ enum class DungeonStairType : std::uint8_t
 {
 	kUp = 0,   // 上楼 / 返回上一层
 	kDown = 1, // 下楼 / 前往更深层
+	kExit = 2, // 终点脱离 / 踏上石板返回大世界出口
 };
 
 // 迷宫楼梯定义
@@ -809,7 +810,21 @@ struct DungeonStair
 	std::int32_t target_floor = 0; // 目标层 Floor ID
 	std::int32_t target_x = 0;     // 目标到达坐标
 	std::int32_t target_y = 0;
-	std::int32_t min_level = 1; // 楼梯通行门禁等级
+	std::int32_t min_level = 1;            // 楼梯通行门禁等级
+	std::uint32_t required_event_flag = 0; // 通行所需任务旗标 (0 表示无条件放行)
+	std::string gate_block_message{};      // 关卡门禁未达成提示
+};
+
+// 预设地下城标识常量 (阶段 20)
+inline constexpr std::uint32_t kDungeonFiveBrothers = 31700; // 五兄弟的山寨 (Floor 31701..31706)
+
+// 经典地下城任务奖励产出 (阶段 20)
+struct DungeonQuestReward
+{
+	bool success = false;
+	std::int32_t item_id = 0; // 获得的任务首饰道具 ID
+	std::int32_t pet_id = 0;  // 获得的分身战宠 ID
+	std::string message{};    // 守关者认可或提示信息
 };
 
 // 地下城单层配置
@@ -1875,6 +1890,9 @@ class World final : public SA::Net::TransportEvents,
 	// 获取某会话背后的 Pet 实体指针 (批次 §9.0.96 测试注入 seam)
 	SA::Model::Pet *playerPetForTest(SA::Net::SessionId session, int pet_slot) noexcept;
 
+	// 获取某会话背后的 Item 实体指针 (测试注入 seam)
+	SA::Model::Item *playerItemForTest(SA::Net::SessionId session, int item_slot) noexcept;
+
 	// 获取家族实体指针供测试验证 (阶段 2 家族系统测试注入 seam)
 	FamilyInfo *familyForTest(std::uint32_t family_id) noexcept;
 
@@ -2097,6 +2115,10 @@ class World final : public SA::Net::TransportEvents,
 	bool useTorch(SA::Net::SessionId session, std::uint32_t duration_ms = 300000, std::int32_t radius = 8);
 	bool triggerDungeonStair(SA::Net::SessionId session);
 	double playerEncounterRateMultiplier(SA::Net::SessionId session) const;
+
+	// ── 阶段 20: 真实地下城多层地图装载与经典剧情任务闭环 (五兄弟的山寨 / 考验任务全流程) ─────
+	bool loadPresetDungeons();
+	DungeonQuestReward concludeFiveBrothersQuest(SA::Net::SessionId session, std::uint64_t guardian_npc_id, int brother_index);
 
 	// ── 职业进阶与武器专精熟练度体系 (阶段 12 §9.0.127) ─────────────────────────
 	SA::Rules::ProfessionRank playerProfessionRank(SA::Net::SessionId session) const;

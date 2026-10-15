@@ -890,6 +890,16 @@ SA::Model::Pet *World::playerPetForTest(SA::Net::SessionId session, int pet_slot
 	return _impl->pets.resolve(player->pets[static_cast<std::size_t>(pet_slot)]);
 }
 
+SA::Model::Item *World::playerItemForTest(SA::Net::SessionId session, int item_slot) noexcept
+{
+	if (item_slot < 0 || static_cast<std::size_t>(item_slot) >= SA::Model::kMaxItemHave)
+		return nullptr;
+	auto *player = _impl->players.resolve(_impl->player_of_session.find(session));
+	if (player == nullptr)
+		return nullptr;
+	return _impl->items.resolve(player->items[static_cast<std::size_t>(item_slot)]);
+}
+
 FamilyInfo *World::familyForTest(std::uint32_t family_id) noexcept
 {
 	auto it = _impl->families.find(family_id);

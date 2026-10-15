@@ -360,3 +360,341 @@ TEST_CASE("黑暗洞窟惊吓遇敌倍率 (1.3x) 与火把光照消除")
 	REQUIRE(f.world.leaveDungeon(sid));
 	CHECK(f.world.playerEncounterRateMultiplier(sid) == doctest::Approx(1.0));
 }
+
+// ── 阶段 20: 真实地下城多层地图装载与经典剧情任务闭环 (五兄弟的山寨) ──────────
+
+static SA::Model::Item makeItem(std::int32_t item_id, const char *name = "测试道具")
+{
+	SA::Model::Item it{};
+	it.item_id = item_id;
+	(void)it.name.assign(name);
+	return it;
+}
+
+static SA::Model::Pet makePet(std::int32_t pet_id, const char *name = "测试战宠")
+{
+	SA::Model::Pet pet{};
+	pet.pet_id = pet_id;
+	(void)pet.name.assign(name);
+	pet.level = 1;
+	pet.hp = 100;
+	pet.mp = 50;
+	pet.vital = 20;
+	pet.str = 20;
+	pet.tough = 20;
+	pet.dex = 20;
+	return pet;
+}
+
+TEST_CASE("五兄弟山寨 (Floor 31701..31706) 预设地下城装配与层级拓扑核验 (阶段 20)")
+{
+	TestFixture f;
+	REQUIRE(f.world.loadPresetDungeons());
+
+	const auto d = f.world.findDungeon(kDungeonFiveBrothers);
+	REQUIRE(d.has_value());
+	CHECK(d->name == "五兄弟的山寨");
+	CHECK(d->entry_floor == 31701);
+	CHECK(d->entry_x == 29);
+	CHECK(d->entry_y == 49);
+	CHECK(d->exit_floor == 300);
+	CHECK(d->exit_x == 343);
+	CHECK(d->exit_y == 191);
+	CHECK(d->min_entry_level == 25);
+	REQUIRE(d->floors.size() == 6);
+
+	// 1F ~ 5F 黑暗洞窟受限视野 (2 格)
+	for (std::size_t i = 0; i < 5; ++i)
+	{
+		CHECK(d->floors[i].is_dark);
+		CHECK(d->floors[i].default_vision_radius == 2);
+		CHECK(f.world.findFloorMap(d->floors[i].floor_id) != nullptr);
+	}
+
+	// 6F 圣殿明亮神殿 (10 格大视野)
+	CHECK_FALSE(d->floors[5].is_dark);
+	CHECK(d->floors[5].default_vision_radius == 10);
+	CHECK(f.world.findFloorMap(d->floors[5].floor_id) != nullptr);
+	CHECK(f.world.findFloorMap(300) != nullptr);
+}
+
+TEST_CASE("五兄弟山寨逐层攀爬与任务门禁旗标拦截 (阶段 20)")
+{
+	TestFixture f;
+	REQUIRE(f.world.loadPresetDungeons());
+
+	const auto sid = f.spawnPlayer("Hero", 300, 343, 191, /*level=*/35);
+
+	// 1. 进入五兄弟地下城 -> 传送至 1F (31701, 29, 49)
+	REQUIRE(f.world.enterDungeon(sid, kDungeonFiveBrothers));
+	CHECK(f.world.playerPos(sid).floor == 31701);
+	CHECK(f.world.playerPos(sid).x == 29);
+	CHECK(f.world.playerPos(sid).y == 49);
+	CHECK(f.world.isPlayerInDarkCave(sid));
+	CHECK(f.world.playerEffectiveVisionRadius(sid) == 2);
+
+	auto *p = f.world.playerForTest(sid);
+	REQUIRE(p != nullptr);
+
+	// 2. 1F 走向下楼楼梯 (11, 4) -> 到达 2F (31702, 20, 2)
+	p->x = 11;
+	p->y = 4;
+	REQUIRE(f.world.triggerDungeonStair(sid));
+	CHECK(f.world.playerPos(sid).floor == 31702);
+	CHECK(f.world.playerPos(sid).x == 20);
+	CHECK(f.world.playerPos(sid).y == 2);
+
+	// 3. 2F 走向上楼楼梯 (20, 2) -> 返回 1F (31701, 11, 4)
+	p->x = 20;
+	p->y = 2;
+	REQUIRE(f.world.triggerDungeonStair(sid));
+	CHECK(f.world.playerPos(sid).floor == 31701);
+	CHECK(f.world.playerPos(sid).x == 11);
+	CHECK(f.world.playerPos(sid).y == 4);
+
+	// 4. 重回 2F 并一路攀爬到 5F (31705)
+	p->x = 11;
+	p->y = 4;
+	REQUIRE(f.world.triggerDungeonStair(sid)); // 1F -> 2F
+	p->x = 37;
+	p->y = 41;
+	REQUIRE(f.world.triggerDungeonStair(sid)); // 2F -> 3F (31703, 45, 41)
+	CHECK(f.world.playerPos(sid).floor == 31703);
+	CHECK(f.world.playerPos(sid).x == 45);
+	CHECK(f.world.playerPos(sid).y == 41);
+
+	p->x = 10;
+	p->y = 4;
+	REQUIRE(f.world.triggerDungeonStair(sid)); // 3F -> 4F (31704, 5, 5)
+	CHECK(f.world.playerPos(sid).floor == 31704);
+	CHECK(f.world.playerPos(sid).x == 5);
+	CHECK(f.world.playerPos(sid).y == 5);
+
+	p->x = 25;
+	p->y = 25;
+	REQUIRE(f.world.triggerDungeonStair(sid)); // 4F -> 5F (31705, 10, 10)
+	CHECK(f.world.playerPos(sid).floor == 31705);
+	CHECK(f.world.playerPos(sid).x == 10);
+	CHECK(f.world.playerPos(sid).y == 10);
+	CHECK(f.world.isPlayerInDarkCave(sid));
+
+	// 5. 5F 到 6F 的楼梯位于 (45, 65)，门禁要求前置任务旗标 28！
+	p->x = 45;
+	p->y = 65;
+	// 尚未完成前置任务，踩在楼梯上被拒放行！
+	CHECK_FALSE(f.world.triggerDungeonStair(sid));
+	CHECK(f.world.playerPos(sid).floor == 31705);
+	CHECK(f.world.playerPos(sid).x == 45);
+	CHECK(f.world.playerPos(sid).y == 65);
+
+	// 6. 达成前置任务旗标 28 (NowEvent 或 EndEvent)
+	p->setNowEvent(28);
+	REQUIRE(f.world.triggerDungeonStair(sid));
+
+	// 成功进入 6F 明亮圣殿 (31706, 25, 75)
+	CHECK(f.world.playerPos(sid).floor == 31706);
+	CHECK(f.world.playerPos(sid).x == 25);
+	CHECK(f.world.playerPos(sid).y == 75);
+	CHECK_FALSE(f.world.isPlayerInDarkCave(sid));
+	CHECK(f.world.playerEffectiveVisionRadius(sid) == 10);
+}
+
+TEST_CASE("6 楼五兄弟誓约与守护神兽奖励全流程事务闭环 (阶段 20)")
+{
+	TestFixture f;
+	REQUIRE(f.world.loadPresetDungeons());
+
+	const auto sid = f.spawnPlayer("Brave", 31706, 20, 20, /*level=*/50);
+	auto *p = f.world.playerForTest(sid);
+	REQUIRE(p != nullptr);
+
+	// ── 异常分支 1: 背包无“智慧水晶” (Item ID: 2517) ──
+	auto r1 = f.world.concludeFiveBrothersQuest(sid, 1, 0);
+	CHECK_FALSE(r1.success);
+	CHECK(r1.message.find("智慧的挡晶") != std::string::npos);
+
+	// ── 异常分支 2: 携带智慧水晶，但随身宠物栏满 (5 槽全满) ──
+	const int crystal_slot = f.world.giveItemToPlayer(sid, makeItem(2517, "智慧水晶"));
+	REQUIRE(crystal_slot >= 0);
+
+	for (int i = 0; i < 5; ++i)
+	{
+		REQUIRE(f.world.givePetToPlayer(sid, makePet(100 + i, "已有战宠")) >= 0);
+	}
+	CHECK(p->findFreePetSlot() == -1);
+
+	auto r2 = f.world.concludeFiveBrothersQuest(sid, 1, 0);
+	CHECK_FALSE(r2.success);
+	CHECK(r2.message.find("宠物栏空下来") != std::string::npos);
+	// 验证智慧水晶未被误扣！
+	CHECK(f.world.playerItemForTest(sid, crystal_slot) != nullptr);
+	CHECK(f.world.playerItemForTest(sid, crystal_slot)->item_id == 2517);
+
+	// ── 异常分支 3: 宠物栏有空位，但背包除水晶外无空槽 ──
+	REQUIRE(p->clearPetSlot(4)); // 释放 1 个宠槽
+	CHECK(p->findFreePetSlot() >= 0);
+
+	// 填满背包其余 14 个道具槽
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		if (static_cast<int>(i) != crystal_slot && !p->items[i].valid())
+		{
+			REQUIRE(f.world.giveItemToPlayer(sid, makeItem(9000, "杂物")) >= 0);
+		}
+	}
+
+	auto r3 = f.world.concludeFiveBrothersQuest(sid, 1, 0);
+	CHECK_FALSE(r3.success);
+	CHECK(r3.message.find("预留一个道具栏空位") != std::string::npos);
+	// 水晶仍然完好
+	CHECK(f.world.playerItemForTest(sid, crystal_slot) != nullptr);
+
+	// ── 正常分支: 腾出背包空位，正式与大地守护者【利诺恩】誓约 (index = 0) ──
+	const int dummy_slot = (crystal_slot == static_cast<int>(SA::Model::kStartItemArray))
+	                           ? static_cast<int>(SA::Model::kStartItemArray) + 1
+	                           : static_cast<int>(SA::Model::kStartItemArray);
+	REQUIRE(p->clearItemSlot(dummy_slot)); // 腾出 1 个杂物背包位 (保留智慧水晶)
+
+	auto r_earth = f.world.concludeFiveBrothersQuest(sid, 1, 0);
+	CHECK(r_earth.success);
+	CHECK(r_earth.item_id == 2518); // 地之首饰
+	CHECK(r_earth.pet_id == 54);    // 战宠利诺恩
+	CHECK(r_earth.message.find("地之首饰") != std::string::npos);
+
+	// 水晶已被原子扣减消耗，新发放的首饰放入了空出的槽位
+	bool found_crystal = false;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		if (const auto *it = f.world.playerItemForTest(sid, static_cast<int>(i)))
+		{
+			if (it->item_id == 2517)
+				found_crystal = true;
+		}
+	}
+	CHECK_FALSE(found_crystal);
+
+	// 确认获得首饰与宠物
+	bool found_necklace = false;
+	for (std::size_t i = SA::Model::kStartItemArray; i < SA::Model::kMaxItemHave; ++i)
+	{
+		if (const auto *it = f.world.playerItemForTest(sid, static_cast<int>(i)))
+		{
+			if (it->item_id == 2518)
+				found_necklace = true;
+		}
+	}
+	CHECK(found_necklace);
+
+	// 宠物栏中存在利诺恩 (pet_id = 54)
+	bool found_pet = false;
+	for (std::size_t i = 0; i < SA::Model::kMaxPetHave; ++i)
+	{
+		if (const auto *pet = f.world.playerPetForTest(sid, static_cast<int>(i)))
+		{
+			if (pet->pet_id == 54)
+				found_pet = true;
+		}
+	}
+	CHECK(found_pet);
+
+	// 登记终生任务完成旗标 (EndSetFlg 31)
+	CHECK(p->hasEndEvent(31));
+}
+
+TEST_CASE("五兄弟其余四位守护者奖励映射准确性 (奇洛斯/浦洛斯/吉诺/浦鲁德)")
+{
+	TestFixture f;
+	REQUIRE(f.world.loadPresetDungeons());
+
+	// index 1: 奇洛斯 (水火) -> 2520 水之戒指, Pet 55
+	{
+		const auto sid = f.spawnPlayer("P1", 31706, 20, 20);
+		f.world.giveItemToPlayer(sid, makeItem(2517, "智慧水晶"));
+		auto r = f.world.concludeFiveBrothersQuest(sid, 2, 1);
+		CHECK(r.success);
+		CHECK(r.item_id == 2520);
+		CHECK(r.pet_id == 55);
+		CHECK(r.message.find("水之戒指") != std::string::npos);
+	}
+
+	// index 2: 浦洛斯 (火) -> 2526 火之笛, Pet 56
+	{
+		const auto sid = f.spawnPlayer("P2", 31706, 20, 20);
+		f.world.giveItemToPlayer(sid, makeItem(2517, "智慧水晶"));
+		auto r = f.world.concludeFiveBrothersQuest(sid, 3, 2);
+		CHECK(r.success);
+		CHECK(r.item_id == 2526);
+		CHECK(r.pet_id == 56);
+		CHECK(r.message.find("火之笛") != std::string::npos);
+	}
+
+	// index 3: 吉诺 (火风) -> 2519 风之手环, Pet 57
+	{
+		const auto sid = f.spawnPlayer("P3", 31706, 20, 20);
+		f.world.giveItemToPlayer(sid, makeItem(2517, "智慧水晶"));
+		auto r = f.world.concludeFiveBrothersQuest(sid, 4, 3);
+		CHECK(r.success);
+		CHECK(r.item_id == 2519);
+		CHECK(r.pet_id == 57);
+		CHECK(r.message.find("风之手环") != std::string::npos);
+	}
+
+	// index 4: 浦鲁德 (风火) -> 2525 风火竖琴, Pet 481
+	{
+		const auto sid = f.spawnPlayer("P4", 31706, 20, 20);
+		f.world.giveItemToPlayer(sid, makeItem(2517, "智慧水晶"));
+		auto r = f.world.concludeFiveBrothersQuest(sid, 5, 4);
+		CHECK(r.success);
+		CHECK(r.item_id == 2525);
+		CHECK(r.pet_id == 481);
+		CHECK(r.message.find("风火竖琴") != std::string::npos);
+	}
+}
+
+TEST_CASE("6 楼神圣石板 (kExit) 终点脱离直返吉鲁大世界地面")
+{
+	TestFixture f;
+	REQUIRE(f.world.loadPresetDungeons());
+
+	const auto sid = f.spawnPlayer("Pilgrim", 300, 343, 191, /*level=*/35);
+	REQUIRE(f.world.enterDungeon(sid, kDungeonFiveBrothers));
+
+	auto *p = f.world.playerForTest(sid);
+	p->floor = 31706; // 直接置于 6 楼圣殿
+	p->x = 39;
+	p->y = 6; // 踏上神圣石板坐标
+
+	// 触发神圣石板脱离
+	REQUIRE(f.world.triggerDungeonStair(sid));
+
+	// 检查瞬间重返吉鲁大世界地面 Floor 300 (343, 191)
+	CHECK(f.world.playerPos(sid).floor == 300);
+	CHECK(f.world.playerPos(sid).x == 343);
+	CHECK(f.world.playerPos(sid).y == 191);
+	CHECK_FALSE(f.world.isPlayerInDarkCave(sid));
+}
+
+TEST_CASE("五兄弟地下城反向变异与异常边界防御")
+{
+	TestFixture f;
+	REQUIRE(f.world.loadPresetDungeons());
+
+	const auto sid = f.spawnPlayer("BoundaryTester", 31706, 20, 20);
+	f.world.giveItemToPlayer(sid, makeItem(2517, "智慧水晶"));
+
+	// 1. 非法 brother_index (< 0 或 > 4)
+	auto r_neg = f.world.concludeFiveBrothersQuest(sid, 1, -1);
+	CHECK_FALSE(r_neg.success);
+	CHECK(r_neg.message == "未知的守护者。");
+
+	auto r_overflow = f.world.concludeFiveBrothersQuest(sid, 1, 5);
+	CHECK_FALSE(r_overflow.success);
+	CHECK(r_overflow.message == "未知的守护者。");
+
+	// 2. 玩家处于阵亡或重伤倒地状态 (hp = 0)
+	auto *p = f.world.playerForTest(sid);
+	p->hp = 0;
+	auto r_dead = f.world.concludeFiveBrothersQuest(sid, 1, 0);
+	CHECK_FALSE(r_dead.success);
+	CHECK(r_dead.message == "当前状态无法进行誓约。");
+}

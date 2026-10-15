@@ -1097,6 +1097,16 @@ struct World::Impl : GoldAuditSink
 			{
 				if (p->level < stair.min_level)
 					return false;
+				if (stair.required_event_flag > 0)
+				{
+					const auto flag = static_cast<int>(stair.required_event_flag);
+					if (!p->hasEndEvent(flag) && !p->hasNowEvent(flag))
+						return false;
+				}
+				if (stair.type == DungeonStairType::kExit)
+				{
+					player_active_dungeon.erase(session);
+				}
 				warpPlayer(session, stair.target_floor, stair.target_x, stair.target_y);
 				return true;
 			}
