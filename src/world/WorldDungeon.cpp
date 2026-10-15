@@ -334,8 +334,135 @@ bool World::loadPresetDungeons()
 	{
 		loadFloorMap(300, makeFixtureMap(400, 400));
 	}
+	(void)registerDungeon(five_brothers);
 
-	return registerDungeon(five_brothers);
+	// 2. 装配并注册阿布的洞窟 (kDungeonAbu = 20900, Floor 20901..20904)
+	DungeonDefinition abu{};
+	abu.dungeon_id = kDungeonAbu;
+	abu.name = "阿布的洞窟";
+	abu.min_entry_level = 15;
+	abu.entry_floor = 20901;
+	abu.entry_x = 20;
+	abu.entry_y = 20;
+	abu.exit_floor = 200; // 重返加鲁卡大世界地面
+	abu.exit_x = 24;
+	abu.exit_y = 40;
+	for (int d = 1; d <= 4; ++d)
+	{
+		DungeonFloorConfig f{};
+		f.floor_id = 20900 + d;
+		f.depth = d;
+		f.floor_name = "阿布的洞窟地下" + std::to_string(d) + "楼";
+		f.is_dark = (d >= 2);
+		f.default_vision_radius = (d >= 2) ? 2 : 8;
+		f.min_level = 15;
+		if (d == 1)
+		{
+			DungeonStair s_exit{};
+			s_exit.type = DungeonStairType::kExit;
+			s_exit.trigger_x = 20;
+			s_exit.trigger_y = 20;
+			s_exit.target_floor = 200;
+			s_exit.target_x = 24;
+			s_exit.target_y = 40;
+			f.stairs.push_back(s_exit);
+		}
+		else
+		{
+			DungeonStair s_up{};
+			s_up.type = DungeonStairType::kUp;
+			s_up.trigger_x = 10;
+			s_up.trigger_y = 10;
+			s_up.target_floor = 20900 + d - 1;
+			s_up.target_x = 30;
+			s_up.target_y = 30;
+			f.stairs.push_back(s_up);
+		}
+		if (d < 4)
+		{
+			DungeonStair s_down{};
+			s_down.type = DungeonStairType::kDown;
+			s_down.trigger_x = 30;
+			s_down.trigger_y = 30;
+			s_down.target_floor = 20900 + d + 1;
+			s_down.target_x = 10;
+			s_down.target_y = 10;
+			f.stairs.push_back(s_down);
+		}
+		abu.floors.push_back(f);
+		if (findFloorMap(f.floor_id) == nullptr)
+		{
+			loadFloorMap(f.floor_id, makeFixtureMap(60, 60));
+		}
+	}
+	if (findFloorMap(200) == nullptr)
+	{
+		loadFloorMap(200, makeFixtureMap(400, 400));
+	}
+	(void)registerDungeon(abu);
+
+	// 3. 装配并注册奇努伊海底洞窟 (kDungeonChinue = 20700, Floor 20701..20704)
+	DungeonDefinition chinue{};
+	chinue.dungeon_id = kDungeonChinue;
+	chinue.name = "奇努伊海底洞窟";
+	chinue.min_entry_level = 20;
+	chinue.entry_floor = 20701;
+	chinue.entry_x = 15;
+	chinue.entry_y = 15;
+	chinue.exit_floor = 300;
+	chinue.exit_x = 45;
+	chinue.exit_y = 32;
+	for (int d = 1; d <= 4; ++d)
+	{
+		DungeonFloorConfig f{};
+		f.floor_id = 20700 + d;
+		f.depth = d;
+		f.floor_name = "奇努伊海底通路" + std::to_string(d) + "楼";
+		f.is_dark = true;
+		f.default_vision_radius = 3;
+		f.min_level = 20;
+		if (d == 1)
+		{
+			DungeonStair s_exit{};
+			s_exit.type = DungeonStairType::kExit;
+			s_exit.trigger_x = 15;
+			s_exit.trigger_y = 15;
+			s_exit.target_floor = 300;
+			s_exit.target_x = 45;
+			s_exit.target_y = 32;
+			f.stairs.push_back(s_exit);
+		}
+		else
+		{
+			DungeonStair s_up{};
+			s_up.type = DungeonStairType::kUp;
+			s_up.trigger_x = 12;
+			s_up.trigger_y = 12;
+			s_up.target_floor = 20700 + d - 1;
+			s_up.target_x = 35;
+			s_up.target_y = 35;
+			f.stairs.push_back(s_up);
+		}
+		if (d < 4)
+		{
+			DungeonStair s_down{};
+			s_down.type = DungeonStairType::kDown;
+			s_down.trigger_x = 35;
+			s_down.trigger_y = 35;
+			s_down.target_floor = 20700 + d + 1;
+			s_down.target_x = 12;
+			s_down.target_y = 12;
+			f.stairs.push_back(s_down);
+		}
+		chinue.floors.push_back(f);
+		if (findFloorMap(f.floor_id) == nullptr)
+		{
+			loadFloorMap(f.floor_id, makeFixtureMap(70, 70));
+		}
+	}
+	(void)registerDungeon(chinue);
+
+	return true;
 }
 
 DungeonQuestReward World::concludeFiveBrothersQuest(SA::Net::SessionId session, std::uint64_t guardian_npc_id, int brother_index)

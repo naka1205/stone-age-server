@@ -45,6 +45,31 @@ int giveItemIntoPlayer(SA::Model::Player &owner, const SA::Model::Item &item, It
 	return slot;
 }
 
+// 依据原版 BP_FLG_* 计算客户端菜单标志 (欠债 18 闭环)
+inline std::uint32_t computeMenuFlags(const BattleInstance &b, std::uint8_t slot, SA::Domain::CannotActReason cannot_act)
+{
+	if (slot >= SA::Rules::kSlotCount)
+	{
+		return static_cast<std::uint32_t>(SA::Domain::MenuFlag::MENU_FLAG_JOIN) |
+		       static_cast<std::uint32_t>(SA::Domain::MenuFlag::MENU_FLAG_PLAYER_MENU_OFF) |
+		       static_cast<std::uint32_t>(SA::Domain::MenuFlag::MENU_FLAG_PET_MENU_OFF);
+	}
+	std::uint32_t flags = static_cast<std::uint32_t>(SA::Domain::MenuFlag::MENU_FLAG_NONE);
+	if (cannot_act != SA::Domain::CannotActReason::CANNOT_ACT_NONE)
+	{
+		flags |= static_cast<std::uint32_t>(SA::Domain::MenuFlag::MENU_FLAG_PLAYER_MENU_OFF);
+	}
+	if (slot % SA::Rules::kSideOffset < SA::Rules::kBattlePlayerMax)
+	{
+		const std::size_t pet_slot = static_cast<std::size_t>(slot + SA::Rules::kBattlePlayerMax);
+		if (pet_slot >= SA::Rules::kSlotCount || b.field.at(static_cast<int>(pet_slot)).dead || b.pet_of_slot[pet_slot] == SA::Model::kNullHandle)
+		{
+			flags |= static_cast<std::uint32_t>(SA::Domain::MenuFlag::MENU_FLAG_PET_MENU_OFF);
+		}
+	}
+	return flags;
+}
+
 // ── 战场态宠物入场 / 离场(批次 M.2)──────────────────────────────
 //
 // 详注见 world/Api.h 的声明处:纯投影 + 站位判定,三道门照 `BATTLE_PetDefaultEntry`
@@ -2387,6 +2412,7 @@ void World::advanceBattles()
 				info.slot = b.slot_of.at(sid);
 				info.mp = b.field.at(static_cast<int>(info.slot)).mp;
 				info.cannot_act = SA::Rules::checkCanAct(b.field.at(static_cast<int>(info.slot)));
+				info.menu_flags = computeMenuFlags(b, static_cast<std::uint8_t>(info.slot), info.cannot_act);
 				(void)it->second.session->push(info, it->second.outbound);
 				(void)it->second.session->push(begin, it->second.outbound);
 			}
@@ -2399,8 +2425,8 @@ void World::advanceBattles()
 				info.battle_id = b.id;
 				info.slot = SA::Rules::kSlotCount;
 				info.mp = 0;
-				info.menu_flags = 0;
 				info.cannot_act = SA::Domain::CannotActReason::CANNOT_ACT_NONE;
+				info.menu_flags = computeMenuFlags(b, static_cast<std::uint8_t>(info.slot), info.cannot_act);
 				(void)it->second.session->push(info, it->second.outbound);
 				(void)it->second.session->push(begin, it->second.outbound);
 			}
@@ -2697,12 +2723,8 @@ bool World::joinBattle(BattleId battle, SA::Net::SessionId session,
 	self.battle_id = b.id;
 	self.slot = slot;
 	self.mp = b.field.at(slot).mp;
-	// ⚠️ menu_flags 留 0:菜单构成(观战加入 / 先制 / 宠物菜单开关)属阶段 2 的
-	//    UI 契约,此处**不猜** —— 与批次 0.5 对暴击/反击的处置同一条纪律。
-	self.menu_flags = 0;
-	// ★ 但 cannot_act **不留 0**:DR-BT5 把「能否行动」定为 Rules::CheckCanAct
-	//   这一个真源,而它已经在 L3 里 ⇒ 照真源填,不是硬编码一个"可以行动"。
 	self.cannot_act = SA::Rules::checkCanAct(b.field.at(slot));
+	self.menu_flags = computeMenuFlags(b, static_cast<std::uint8_t>(slot), self.cannot_act);
 	(void)cit->second.session->push(self, cit->second.outbound);
 	s.pushBattleSnapshot(b);
 
@@ -3001,8 +3023,8 @@ bool World::spectateBattle(BattleId battle, SA::Net::SessionId session)
 	self.battle_id = b.id;
 	self.slot = SA::Rules::kSlotCount;
 	self.mp = 0;
-	self.menu_flags = 0;
 	self.cannot_act = SA::Domain::CannotActReason::CANNOT_ACT_NONE;
+	self.menu_flags = computeMenuFlags(b, static_cast<std::uint8_t>(self.slot), self.cannot_act);
 	(void)cit->second.session->push(self, cit->second.outbound);
 
 	s.pushBattleSnapshot(b);

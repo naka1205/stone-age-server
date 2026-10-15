@@ -815,8 +815,10 @@ struct DungeonStair
 	std::string gate_block_message{};      // 关卡门禁未达成提示
 };
 
-// 预设地下城标识常量 (阶段 20)
+// 预设地下城标识常量 (阶段 20, 23)
 inline constexpr std::uint32_t kDungeonFiveBrothers = 31700; // 五兄弟的山寨 (Floor 31701..31706)
+inline constexpr std::uint32_t kDungeonAbu = 20900;          // 阿布的洞窟 (Floor 20901..20904)
+inline constexpr std::uint32_t kDungeonChinue = 20700;       // 奇努伊海底洞窟 (Floor 20701..20704)
 
 // 经典地下城任务奖励产出 (阶段 20)
 struct DungeonQuestReward

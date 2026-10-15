@@ -698,3 +698,32 @@ TEST_CASE("五兄弟地下城反向变异与异常边界防御")
 	CHECK_FALSE(r_dead.success);
 	CHECK(r_dead.message == "当前状态无法进行誓约。");
 }
+
+TEST_CASE("阶段 23 尼斯大陆经典洞窟拓扑扩充与地下城生态贯通 (阿布洞窟与奇努伊海底通路)")
+{
+	TestFixture f;
+	REQUIRE(f.world.loadPresetDungeons());
+
+	// 1. 验证阿布洞窟注册与楼层拓扑 (20901..20904)
+	auto abu_opt = f.world.findDungeon(kDungeonAbu);
+	REQUIRE(abu_opt.has_value());
+	CHECK(abu_opt->name == "阿布的洞窟");
+	CHECK(abu_opt->floors.size() == 4);
+	CHECK(abu_opt->min_entry_level == 15);
+
+	const auto sid_abu = f.spawnPlayer("AbuExplorer", 200, 24, 40, /*level=*/16);
+	REQUIRE(f.world.enterDungeon(sid_abu, kDungeonAbu));
+	CHECK(f.world.playerPos(sid_abu).floor == 20901);
+
+	// 2. 验证奇努伊海底洞窟注册与楼层拓扑 (20701..20704)
+	auto chinue_opt = f.world.findDungeon(kDungeonChinue);
+	REQUIRE(chinue_opt.has_value());
+	CHECK(chinue_opt->name == "奇努伊海底洞窟");
+	CHECK(chinue_opt->floors.size() == 4);
+	CHECK(chinue_opt->min_entry_level == 20);
+
+	const auto sid_chinue = f.spawnPlayer("ChinueDiver", 300, 45, 32, /*level=*/22);
+	REQUIRE(f.world.enterDungeon(sid_chinue, kDungeonChinue));
+	CHECK(f.world.playerPos(sid_chinue).floor == 20701);
+	CHECK(f.world.isPlayerInDarkCave(sid_chinue));
+}
